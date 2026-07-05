@@ -14,6 +14,27 @@ pub struct ColumnNote {
     pub note: Note,
 }
 
+/// キャプチャ中ノートの更新（他者のリアクション/投票/削除）。値のみ更新し、
+/// カラムからの出入りはしない（NQL§6 の方針）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnNoteUpdated {
+    pub column_id: String,
+    pub note_id: String,
+    pub update: NoteUpdate,
+    /// 更新を起こしたユーザ（自分の操作は楽観的更新済みなのでフロントで無視するため）
+    pub actor_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum NoteUpdate {
+    Reacted { reaction: String },
+    Unreacted { reaction: String },
+    PollVoted { choice: u32 },
+    Deleted,
+}
+
 /// カラムの接続状態（UI 表示用）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 #[serde(rename_all = "camelCase")]

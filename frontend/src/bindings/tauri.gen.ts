@@ -29,6 +29,13 @@ export const commands = {
 	fetchBackfill: (accountId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { accountId, untilId })),
 	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
+	/**
+	 *  表示中ノートをキャプチャ購読する（他者のリアクション等を追う）。
+	 *  初期ページ（REST 取得分）はフロントがこれで登録する。Streaming 受信分は Rust が自動登録。
+	 */
+	captureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("capture_notes", { columnId, noteIds })),
+	/**  キャプチャ解除（表示領域外に出たノート）。 */
+	uncaptureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("uncapture_notes", { columnId, noteIds })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -47,6 +54,7 @@ export const commands = {
 export const events = {
 	columnConnectionState: makeEvent<ColumnConnectionState>("column-connection-state"),
 	columnNote: makeEvent<ColumnNote>("column-note"),
+	columnNoteUpdated: makeEvent<ColumnNoteUpdated>("column-note-updated"),
 };
 
 /* Types */
@@ -92,6 +100,18 @@ export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global"
 export type ColumnNote = {
 	columnId: string,
 	note: Note,
+};
+
+/**
+ *  キャプチャ中ノートの更新（他者のリアクション/投票/削除）。値のみ更新し、
+ *  カラムからの出入りはしない（NQL§6 の方針）。
+ */
+export type ColumnNoteUpdated = {
+	columnId: string,
+	noteId: string,
+	update: NoteUpdate,
+	/**  更新を起こしたユーザ（自分の操作は楽観的更新済みなのでフロントで無視するため） */
+	actorId: string | null,
 };
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";
@@ -215,6 +235,8 @@ export type NoteDraft_Serialize = {
 	renoteId?: string | null,
 	localOnly: boolean,
 };
+
+export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };
 
 /**  カラムを開いた結果。フロントは column_id を購読キーにする。 */
 export type OpenedColumn = {

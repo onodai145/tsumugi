@@ -105,6 +105,31 @@ pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Resu
     Ok(())
 }
 
+/// 表示中ノートをキャプチャ購読する（他者のリアクション等を追う）。
+/// 初期ページ（REST 取得分）はフロントがこれで登録する。Streaming 受信分は Rust が自動登録。
+#[tauri::command]
+#[specta::specta]
+pub async fn capture_notes(
+    state: State<'_, AppState>,
+    column_id: String,
+    note_ids: Vec<String>,
+) -> Result<()> {
+    state.connections.capture(&column_id, note_ids);
+    Ok(())
+}
+
+/// キャプチャ解除（表示領域外に出たノート）。
+#[tauri::command]
+#[specta::specta]
+pub async fn uncapture_notes(
+    state: State<'_, AppState>,
+    column_id: String,
+    note_ids: Vec<String>,
+) -> Result<()> {
+    state.connections.uncapture(&column_id, note_ids);
+    Ok(())
+}
+
 async fn fetch_initial(state: &AppState, account_id: &str) -> Result<Vec<Note>> {
     let client = state.client_for(account_id)?;
     home_timeline(&client, INITIAL_LIMIT, None).await
