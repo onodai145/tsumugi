@@ -27,6 +27,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::open_home_column,
             commands::column::fetch_backfill,
             commands::column::close_column,
+            commands::note::post_note,
+            commands::note::renote,
+            commands::note::delete_note_cmd,
+            commands::note::react,
+            commands::note::unreact,
+            commands::note::list_custom_emojis,
         ])
         .events(collect_events![
             events::ColumnNote,

@@ -31,7 +31,7 @@
 
   <div class="notes" onscroll={onScroll}>
     {#each column.notes as note (note.id)}
-      <NoteCard {note} />
+      <NoteCard {note} accountId={column.accountId} />
     {/each}
     {#if column.loadingMore}
       <div class="loading">読み込み中…</div>
