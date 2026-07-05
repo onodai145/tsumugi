@@ -51,6 +51,7 @@ pub async fn complete_miauth(state: State<'_, AppState>, session_id: String) -> 
     let account = build_account(&host, &raw_user);
     // token は keyring のみに保存（Account/戻り値には含めない）
     state.secrets.set(&account.id, &token)?;
+    state.settings.upsert_account(&account)?; // 再起動で復元できるよう永続化
     state.accounts.lock().unwrap().upsert(account.clone());
     state.pending.lock().unwrap().remove(&session_id);
     Ok(account)
@@ -74,8 +75,13 @@ pub async fn switch_account(state: State<'_, AppState>, account_id: String) -> R
 #[tauri::command]
 #[specta::specta]
 pub async fn remove_account(state: State<'_, AppState>, account_id: String) -> Result<()> {
+    // 関連カラムのストリームを止める
+    for col in state.settings.load_columns()?.into_iter().filter(|c| c.account_id == account_id) {
+        state.connections.close(&col.id);
+    }
     state.accounts.lock().unwrap().remove(&account_id)?;
     state.secrets.delete(&account_id)?;
+    state.settings.delete_account(&account_id)?; // アカウント＋カラムを永続層から削除
     Ok(())
 }
 

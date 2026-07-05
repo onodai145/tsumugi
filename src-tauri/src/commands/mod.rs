@@ -11,6 +11,8 @@ pub use account::{
     MiAuthSession,
 };
 #[allow(unused_imports)]
-pub use column::{close_column, fetch_backfill, open_home_column, OpenedColumn};
+pub use column::{
+    close_column, fetch_backfill, list_columns, open_home_column, resume_column, OpenedColumn,
+};
 #[allow(unused_imports)]
 pub use note::{delete_note_cmd, list_custom_emojis, post_note, react, renote, unreact};

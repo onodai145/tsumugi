@@ -8,6 +8,7 @@ import type {
   EmojiDef,
   NoteDraft_Deserialize as NoteDraft,
   VisibilityInput,
+  OpenedColumn,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -44,11 +45,33 @@ class AppStore {
     try {
       this.accounts = await unwrap(commands.listAccounts());
       await this.#subscribe();
+      // 永続化済みカラムを復元（Streaming を張り直し初期ページを取得）
+      const persisted = await unwrap(commands.listColumns());
+      for (const col of persisted) {
+        try {
+          const opened = await unwrap(commands.resumeColumn(col.id));
+          this.columns = [...this.columns, this.#toView(opened)];
+        } catch (e) {
+          this.error = String(e);
+        }
+      }
     } catch (e) {
       this.error = String(e);
     } finally {
       this.booting = false;
     }
+  }
+
+  #toView(opened: OpenedColumn): ColumnView {
+    const acc = this.accounts.find((a) => a.id === opened.column.accountId);
+    return {
+      id: opened.column.id,
+      accountId: opened.column.accountId,
+      title: acc ? `Home @${acc.username}` : "Home",
+      notes: opened.notes,
+      state: "connecting",
+      loadingMore: false,
+    };
   }
 
   async #subscribe() {
@@ -98,19 +121,8 @@ class AppStore {
   }
 
   async addHomeColumn(accountId: string) {
-    const acc = this.accounts.find((a) => a.id === accountId);
     const opened = await unwrap(commands.openHomeColumn(accountId));
-    this.columns = [
-      ...this.columns,
-      {
-        id: opened.columnId,
-        accountId,
-        title: acc ? `Home @${acc.username}` : "Home",
-        notes: opened.notes,
-        state: "connecting",
-        loadingMore: false,
-      },
-    ];
+    this.columns = [...this.columns, this.#toView(opened)];
   }
 
   async loadMore(columnId: string) {

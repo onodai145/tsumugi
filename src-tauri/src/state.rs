@@ -2,6 +2,7 @@
 
 use crate::domain::EmojiDef;
 use crate::session::{AccountManager, SecretStore};
+use crate::store::SettingsStore;
 use crate::stream::ConnectionManager;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -19,21 +20,34 @@ pub struct AppState {
     pub connections: ConnectionManager,
     /// host -> カスタム絵文字一覧（インスタンス単位でキャッシュ）
     pub emoji_cache: Mutex<HashMap<String, Vec<EmojiDef>>>,
+    pub settings: SettingsStore,
 }
 
 impl AppState {
-    pub fn new(secrets: Box<dyn SecretStore>) -> Self {
+    /// 永続化済みアカウントを読み込んで初期化する。
+    pub fn new(secrets: Box<dyn SecretStore>, settings: SettingsStore) -> Self {
+        let accounts = settings.load_accounts().unwrap_or_else(|e| {
+            log::error!("failed to load accounts: {e}");
+            Vec::new()
+        });
         Self {
             http: reqwest::Client::builder()
                 .user_agent(concat!("tsumugi/", env!("CARGO_PKG_VERSION")))
                 .build()
                 .expect("failed to build reqwest client"),
-            accounts: Mutex::new(AccountManager::default()),
+            accounts: Mutex::new(AccountManager::with_accounts(accounts)),
             secrets,
             pending: Mutex::new(HashMap::new()),
             connections: ConnectionManager::default(),
             emoji_cache: Mutex::new(HashMap::new()),
+            settings,
         }
+    }
+
+    #[cfg(test)]
+    /// テスト用: keyring を使わずインメモリ DB で構築する。
+    fn new_for_test(settings: SettingsStore) -> Self {
+        Self::new(Box::new(crate::session::MemoryStore::default()), settings)
     }
 
     /// account_id から (host, token) を引く。未登録なら Invalid、token 欠落なら Unauthorized。
@@ -61,5 +75,33 @@ impl AppState {
             host,
             Some(token),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::Account;
+    use crate::store::db::open_in_memory;
+
+    #[test]
+    fn restores_persisted_accounts_on_construction() {
+        let settings = SettingsStore::new(open_in_memory().unwrap());
+        settings
+            .upsert_account(&Account {
+                id: "acc1".into(),
+                host: "misskey.io".into(),
+                username: "me".into(),
+                user_id: "u1".into(),
+                display_name: "Me".into(),
+                avatar_url: None,
+            })
+            .unwrap();
+
+        // 「再起動」相当: 既存 DB から AppState を作り直す
+        let state = AppState::new_for_test(settings);
+        let mgr = state.accounts.lock().unwrap();
+        assert_eq!(mgr.list().len(), 1);
+        assert_eq!(mgr.active_id(), Some("acc1")); // 先頭が active
     }
 }

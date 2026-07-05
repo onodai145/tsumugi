@@ -1,0 +1,216 @@
+//! 設定データ（Account / Column）の永続化。token は含めない（keyring 管轄）。
+
+use crate::domain::{Account, Column, ColumnKind, FilterQuery};
+use crate::error::Result;
+use rusqlite::{params, Connection};
+use std::sync::Mutex;
+
+pub struct SettingsStore {
+    conn: Mutex<Connection>,
+}
+
+impl SettingsStore {
+    pub fn new(conn: Connection) -> Self {
+        Self {
+            conn: Mutex::new(conn),
+        }
+    }
+
+    // ---- Account ----
+
+    pub fn load_accounts(&self) -> Result<Vec<Account>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, host, username, user_id, display_name, avatar_url FROM account ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Account {
+                id: r.get(0)?,
+                host: r.get(1)?,
+                username: r.get(2)?,
+                user_id: r.get(3)?,
+                display_name: r.get(4)?,
+                avatar_url: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn upsert_account(&self, a: &Account) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO account (id, host, username, user_id, display_name, avatar_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+               host=excluded.host, username=excluded.username, user_id=excluded.user_id,
+               display_name=excluded.display_name, avatar_url=excluded.avatar_url",
+            params![a.id, a.host, a.username, a.user_id, a.display_name, a.avatar_url],
+        )?;
+        Ok(())
+    }
+
+    /// アカウント削除。紐づくカラムも消す。
+    pub fn delete_account(&self, account_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM column_def WHERE account_id = ?1", params![account_id])?;
+        conn.execute("DELETE FROM account WHERE id = ?1", params![account_id])?;
+        Ok(())
+    }
+
+    // ---- Column ----
+
+    pub fn load_columns(&self) -> Result<Vec<Column>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, kind, ord, width, filter, notify_sound, notify_desktop
+             FROM column_def ORDER BY ord, rowid",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let kind_json: String = r.get(2)?;
+            let filter_json: String = r.get(5)?;
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                kind_json,
+                r.get::<_, i32>(3)?,
+                r.get::<_, i32>(4)?,
+                filter_json,
+                r.get::<_, i64>(6)? != 0,
+                r.get::<_, i64>(7)? != 0,
+            ))
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, account_id, kind_json, ord, width, filter_json, notify_sound, notify_desktop) =
+                row?;
+            let kind: ColumnKind = serde_json::from_str(&kind_json)?;
+            let filter: FilterQuery = serde_json::from_str(&filter_json)?;
+            out.push(Column {
+                id,
+                account_id,
+                kind,
+                order: ord,
+                width,
+                filter,
+                notify_sound,
+                notify_desktop,
+            });
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_column(&self, c: &Column) -> Result<()> {
+        let kind_json = serde_json::to_string(&c.kind)?;
+        let filter_json = serde_json::to_string(&c.filter)?;
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO column_def (id, account_id, kind, ord, width, filter, notify_sound, notify_desktop)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               account_id=excluded.account_id, kind=excluded.kind, ord=excluded.ord,
+               width=excluded.width, filter=excluded.filter,
+               notify_sound=excluded.notify_sound, notify_desktop=excluded.notify_desktop",
+            params![
+                c.id,
+                c.account_id,
+                kind_json,
+                c.order,
+                c.width,
+                filter_json,
+                c.notify_sound as i64,
+                c.notify_desktop as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_column(&self, column_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM column_def WHERE id = ?1", params![column_id])?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::db::open_in_memory;
+
+    fn store() -> SettingsStore {
+        SettingsStore::new(open_in_memory().unwrap())
+    }
+
+    fn account(id: &str) -> Account {
+        Account {
+            id: id.into(),
+            host: "misskey.io".into(),
+            username: "me".into(),
+            user_id: "u1".into(),
+            display_name: "Me".into(),
+            avatar_url: Some("http://x/a.png".into()),
+        }
+    }
+
+    fn column(id: &str, account_id: &str, ord: i32) -> Column {
+        Column {
+            id: id.into(),
+            account_id: account_id.into(),
+            kind: ColumnKind::Home,
+            order: ord,
+            width: 360,
+            filter: FilterQuery::Keywords(vec!["rust".into()]),
+            notify_sound: false,
+            notify_desktop: true,
+        }
+    }
+
+    #[test]
+    fn account_roundtrip_and_upsert() {
+        let s = store();
+        assert!(s.load_accounts().unwrap().is_empty());
+        s.upsert_account(&account("a1")).unwrap();
+        let mut a = account("a1");
+        a.display_name = "Renamed".into();
+        s.upsert_account(&a).unwrap(); // 上書き（増えない）
+        let loaded = s.load_accounts().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].display_name, "Renamed");
+    }
+
+    #[test]
+    fn column_roundtrip_preserves_kind_and_filter() {
+        let s = store();
+        s.upsert_account(&account("a1")).unwrap();
+        s.upsert_column(&column("c1", "a1", 0)).unwrap();
+        s.upsert_column(&column("c2", "a1", 1)).unwrap();
+        let cols = s.load_columns().unwrap();
+        assert_eq!(cols.len(), 2);
+        assert_eq!(cols[0].id, "c1");
+        assert!(matches!(cols[0].kind, ColumnKind::Home));
+        assert_eq!(cols[0].filter, FilterQuery::Keywords(vec!["rust".into()]));
+        assert!(cols[0].notify_desktop);
+    }
+
+    #[test]
+    fn delete_account_cascades_columns() {
+        let s = store();
+        s.upsert_account(&account("a1")).unwrap();
+        s.upsert_column(&column("c1", "a1", 0)).unwrap();
+        s.delete_account("a1").unwrap();
+        assert!(s.load_accounts().unwrap().is_empty());
+        assert!(s.load_columns().unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_column_removes_only_target() {
+        let s = store();
+        s.upsert_account(&account("a1")).unwrap();
+        s.upsert_column(&column("c1", "a1", 0)).unwrap();
+        s.upsert_column(&column("c2", "a1", 1)).unwrap();
+        s.delete_column("c1").unwrap();
+        let cols = s.load_columns().unwrap();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].id, "c2");
+    }
+}
