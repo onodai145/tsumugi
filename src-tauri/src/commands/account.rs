@@ -2,7 +2,6 @@
 //! token は一切戻り値に含めない。
 
 use crate::api::normalize::RawUser;
-use crate::api::MisskeyClient;
 use crate::domain::{Account, User};
 use crate::error::{Error, Result};
 use crate::session::miauth::{build_miauth_url, check_miauth};
@@ -91,19 +90,7 @@ pub async fn logout(state: State<'_, AppState>, account_id: String) -> Result<()
 #[tauri::command]
 #[specta::specta]
 pub async fn whoami(state: State<'_, AppState>, account_id: String) -> Result<User> {
-    let host = {
-        let accounts = state.accounts.lock().unwrap();
-        accounts
-            .get(&account_id)
-            .map(|a| a.host.clone())
-            .ok_or_else(|| Error::Invalid(format!("unknown account: {account_id}")))?
-    };
-    let token = state
-        .secrets
-        .get(&account_id)?
-        .ok_or_else(|| Error::Unauthorized(format!("no token for account: {account_id}")))?;
-
-    let client = MisskeyClient::new(state.http.clone(), host, Some(token));
+    let client = state.client_for(&account_id)?;
     let raw: RawUser = client.post("i", &serde_json::json!({})).await?;
     Ok(raw.into())
 }
