@@ -9,7 +9,8 @@ use std::collections::HashMap;
 pub struct Note {
     /// aid/aidx。数値比較しない
     pub id: String,
-    /// epoch秒。時間比較はこれ
+    /// epoch秒。時間比較はこれ。TS へは number で出す（2^53 に収まり精度損失なし）
+    #[specta(type = specta_typescript::Number)]
     pub created_at: i64,
     /// MFM原文。純Renoteは None
     pub text: Option<String>,
@@ -69,6 +70,7 @@ pub struct DriveFile {
 pub struct Poll {
     pub choices: Vec<PollChoice>,
     pub multiple: bool,
+    #[specta(type = Option<specta_typescript::Number>)]
     pub expires_at: Option<i64>,
 }
 

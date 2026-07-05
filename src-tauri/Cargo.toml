@@ -23,7 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.1", features = ["specta"] }
 tauri-plugin-log = "2"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 thiserror = "2.0.18"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
@@ -34,6 +34,10 @@ keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sy
 specta = { version = "=2.0.0-rc.25", features = ["derive", "uuid", "url"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3.32", default-features = false, features = ["sink", "std"] }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "alloc"] }
+tauri-plugin-opener = "2.5.4"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
