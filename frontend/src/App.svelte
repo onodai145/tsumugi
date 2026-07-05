@@ -3,6 +3,7 @@
   import { app } from "./lib/store.svelte";
   import Column from "./ui/Column.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
+  import Compose from "./ui/Compose.svelte";
 
   let showAdd = $state(false);
 
@@ -24,6 +25,7 @@
           {/if}
           <span class="acc-name" title={`@${acc.username}@${acc.host}`}>@{acc.username}</span>
           <button class="add-col" title="ホームカラムを追加" onclick={() => app.addHomeColumn(acc.id)}>+Home</button>
+          <button class="add-col" title="投稿" onclick={() => app.openCompose(acc.id)}>✎</button>
         </div>
       {/each}
     </div>
@@ -50,6 +52,10 @@
       </div>
     {/if}
   </main>
+
+  {#if app.compose}
+    <Compose />
+  {/if}
 </div>
 
 <style>

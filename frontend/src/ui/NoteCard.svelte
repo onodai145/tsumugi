@@ -3,10 +3,24 @@
   import Mfm from "../render/Mfm.svelte";
   import MediaGrid from "../render/MediaGrid.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
+  import ReactionPicker from "../input/ReactionPicker.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
+  import { app } from "../lib/store.svelte";
 
-  let { note, quoted = false }: { note: Note; quoted?: boolean } = $props();
+  // accountId があれば操作ボタンを出す（引用ネスト時は undefined = 表示のみ）
+  let { note, quoted = false, accountId }: { note: Note; quoted?: boolean; accountId?: string } =
+    $props();
+
+  let showPicker = $state(false);
+
+  function react(reaction: string) {
+    showPicker = false;
+    if (accountId) app.toggleReaction(accountId, inner.id, reaction);
+  }
+  function doRenote() {
+    if (accountId) app.renote(accountId, inner.id);
+  }
 
   // 純粋Renote（本文なし＋renote先あり）は「誰が」を出して中身を委譲
   const isPureRenote = $derived(!note.text && !!note.renote);
@@ -77,23 +91,44 @@
       {#if reactionList.length > 0}
         <div class="reactions">
           {#each reactionList as [key, count]}
-            <span class="reaction" class:mine={inner.myReaction === key}>
+            <button
+              class="reaction"
+              class:mine={inner.myReaction === key}
+              disabled={!accountId}
+              onclick={() => react(key)}
+            >
               {#if key.startsWith(":")}
                 <CustomEmoji name={key.replace(/^:|:$/g, "")} />
               {:else}
                 {key}
               {/if}
               <span class="rcount">{count}</span>
-            </span>
+            </button>
           {/each}
         </div>
       {/if}
 
-      {#if !quoted}
-        <footer class="stats">
-          <span title="返信">💬 {inner.replyCount}</span>
-          <span title="Renote">🔁 {inner.renoteCount}</span>
-          <span title="リアクション">➕ {inner.reactionCount}</span>
+      {#if !quoted && accountId}
+        <footer class="actions">
+          <button title="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
+            💬 {inner.replyCount || ""}
+          </button>
+          <button title="Renote" onclick={doRenote}>🔁 {inner.renoteCount || ""}</button>
+          <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>❝</button>
+          <div class="react-wrap">
+            <button
+              title="リアクション"
+              class:on={showPicker}
+              onclick={() => (showPicker = !showPicker)}
+            >
+              ➕ {inner.reactionCount || ""}
+            </button>
+            {#if showPicker}
+              <div class="picker-pop">
+                <ReactionPicker {accountId} onpick={react} />
+              </div>
+            {/if}
+          </div>
         </footer>
       {/if}
     </div>
@@ -211,6 +246,11 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     font-size: 0.85rem;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .reaction:disabled {
+    cursor: default;
   }
   .reaction.mine {
     border-color: var(--accent);
@@ -219,11 +259,36 @@
   .rcount {
     color: var(--text-dim);
   }
-  .stats {
+  .actions {
     display: flex;
-    gap: 16px;
+    gap: 14px;
+    align-items: center;
     margin-top: 8px;
     color: var(--text-dim);
     font-size: 0.8rem;
+  }
+  .actions button {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.82rem;
+    padding: 2px 4px;
+    border-radius: 6px;
+  }
+  .actions button:hover,
+  .actions button.on {
+    color: var(--accent);
+    background: var(--surface-2);
+  }
+  .react-wrap {
+    position: relative;
+  }
+  .picker-pop {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    z-index: 20;
+    margin-bottom: 6px;
   }
 </style>

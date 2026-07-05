@@ -1,5 +1,6 @@
 //! Tauri が管理するアプリ状態（command から `State<AppState>` で参照）。
 
+use crate::domain::EmojiDef;
 use crate::session::{AccountManager, SecretStore};
 use crate::stream::ConnectionManager;
 use std::collections::HashMap;
@@ -16,6 +17,8 @@ pub struct AppState {
     pub secrets: Box<dyn SecretStore>,
     pub pending: Mutex<HashMap<String, PendingMiAuth>>,
     pub connections: ConnectionManager,
+    /// host -> カスタム絵文字一覧（インスタンス単位でキャッシュ）
+    pub emoji_cache: Mutex<HashMap<String, Vec<EmojiDef>>>,
 }
 
 impl AppState {
@@ -29,6 +32,7 @@ impl AppState {
             secrets,
             pending: Mutex::new(HashMap::new()),
             connections: ConnectionManager::default(),
+            emoji_cache: Mutex::new(HashMap::new()),
         }
     }
 

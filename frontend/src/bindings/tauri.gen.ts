@@ -25,6 +25,18 @@ export const commands = {
 	fetchBackfill: (accountId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { accountId, untilId })),
 	/**  カラムを閉じる（Streaming 購読解除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
+	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
+	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
+	/**  純粋 Renote。 */
+	renote: (accountId: string, noteId: string, visibility: VisibilityInput) => typedError<Note, Error>(__TAURI_INVOKE("renote", { accountId, noteId, visibility })),
+	/**  ノート削除。 */
+	deleteNoteCmd: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("delete_note_cmd", { accountId, noteId })),
+	/**  リアクション付与（カスタム絵文字は `:name:` / `:name@host:`、Unicode は生文字）。 */
+	react: (accountId: string, noteId: string, reaction: string) => typedError<null, Error>(__TAURI_INVOKE("react", { accountId, noteId, reaction })),
+	/**  リアクション解除。 */
+	unreact: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unreact", { accountId, noteId })),
+	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
+	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
 };
 
 /** Events */
@@ -72,6 +84,21 @@ export type DriveFile = {
 	isSensitive: boolean,
 	url: string,
 	thumbnailUrl: string | null,
+};
+
+/**
+ *  リアクションピッカー用の絵文字定義（インスタンス単位でキャッシュ）。
+ *  注意: `Note.reactions` は「絵文字キー→集計数」であり、誰がリアクションしたかは
+ *  Misskey は返さない（docs/filter-dsl-design.md §3.4）。
+ */
+export type EmojiDef = {
+	/**  "blobcat"（: なし） */
+	name: string,
+	/**  None=ローカル */
+	host: string | null,
+	url: string,
+	category: string | null,
+	aliases: string[],
 };
 
 export type Error = 
@@ -134,6 +161,33 @@ export type Note = {
 	isPinned: boolean,
 };
 
+/**  `notes/create` 等の入力。フロントの NoteDraft をそのまま受ける想定。 */
+export type NoteDraft = NoteDraft_Serialize | NoteDraft_Deserialize;
+
+/**  `notes/create` 等の入力。フロントの NoteDraft をそのまま受ける想定。 */
+export type NoteDraft_Deserialize = {
+	text: string | null,
+	cw: string | null,
+	visibility: VisibilityInput,
+	fileIds: string[],
+	poll: PollInput_Deserialize | null,
+	replyId: string | null,
+	renoteId: string | null,
+	localOnly?: boolean,
+};
+
+/**  `notes/create` 等の入力。フロントの NoteDraft をそのまま受ける想定。 */
+export type NoteDraft_Serialize = {
+	text?: string | null,
+	cw?: string | null,
+	visibility: VisibilityInput,
+	fileIds?: string[],
+	poll?: PollInput_Serialize | null,
+	replyId?: string | null,
+	renoteId?: string | null,
+	localOnly: boolean,
+};
+
 /**  `open_home_column` の戻り値。フロントは column_id を購読キーにする。 */
 export type OpenedColumn = {
 	columnId: string,
@@ -151,6 +205,20 @@ export type PollChoice = {
 	text: string,
 	votes: number,
 	isVoted: boolean,
+};
+
+export type PollInput = PollInput_Serialize | PollInput_Deserialize;
+
+export type PollInput_Deserialize = {
+	choices: string[],
+	multiple?: boolean,
+	expiresAt: number | null,
+};
+
+export type PollInput_Serialize = {
+	choices: string[],
+	multiple: boolean,
+	expiresAt?: number | null,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
@@ -172,6 +240,10 @@ export type User = {
 
 /**  Specified = direct */
 export type Visibility = "public" | "home" | "followers" | "specified";
+
+export type VisibilityInput = "public" | "home" | "followers" | 
+/**  direct（Misskey では specified） */
+"specified";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
