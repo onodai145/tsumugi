@@ -31,6 +31,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::list_columns,
             commands::column::fetch_backfill,
             commands::column::close_column,
+            commands::column::capture_notes,
+            commands::column::uncapture_notes,
             commands::note::post_note,
             commands::note::renote,
             commands::note::delete_note_cmd,
@@ -40,6 +42,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             events::ColumnNote,
+            events::ColumnNoteUpdated,
             events::ColumnConnectionState,
         ])
 }

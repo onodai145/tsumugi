@@ -9,6 +9,7 @@ import type {
   NoteDraft_Deserialize as NoteDraft,
   VisibilityInput,
   OpenedColumn,
+  NoteUpdate,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -51,6 +52,7 @@ class AppStore {
         try {
           const opened = await unwrap(commands.resumeColumn(col.id));
           this.columns = [...this.columns, this.#toView(opened)];
+          this.#captureInitial(opened.column.id, opened.notes);
         } catch (e) {
           this.error = String(e);
         }
@@ -94,6 +96,70 @@ class AppStore {
         if (col) col.state = e.payload.state;
       }),
     );
+    this.#unlisten.push(
+      await events.columnNoteUpdated.listen((e) => this.#applyNoteUpdate(e.payload)),
+    );
+  }
+
+  /// 他者のリアクション/投票/削除を該当ノートへ反映（自分の操作は楽観的更新済みなので無視）。
+  #applyNoteUpdate(p: {
+    columnId: string;
+    noteId: string;
+    update: NoteUpdate;
+    actorId: string | null;
+  }) {
+    const col = this.columns.find((c) => c.id === p.columnId);
+    if (!col) return;
+
+    if (p.update.type === "deleted") {
+      col.notes = col.notes.filter((n) => n.id !== p.noteId);
+      return;
+    }
+
+    // 対象ノート（renote 先も）を集める
+    const targets: Note[] = [];
+    for (const n of col.notes) {
+      if (n.id === p.noteId) targets.push(n);
+      if (n.renote && n.renote.id === p.noteId) targets.push(n.renote);
+    }
+    if (targets.length === 0) return;
+
+    const mine = this.#myUserIds();
+    const isMine = p.actorId != null && mine.has(p.actorId);
+
+    for (const n of targets) {
+      switch (p.update.type) {
+        case "reacted":
+          if (isMine) break; // 楽観的更新済み
+          n.reactions[p.update.reaction] = (n.reactions[p.update.reaction] ?? 0) + 1;
+          n.reactionCount += 1;
+          break;
+        case "unreacted": {
+          if (isMine) break;
+          const key = p.update.reaction;
+          const next = (n.reactions[key] ?? 1) - 1;
+          if (next <= 0) delete n.reactions[key];
+          else n.reactions[key] = next;
+          n.reactionCount = Math.max(0, n.reactionCount - 1);
+          break;
+        }
+        case "pollVoted":
+          if (n.poll && n.poll.choices[p.update.choice]) {
+            n.poll.choices[p.update.choice].votes += 1;
+          }
+          break;
+      }
+    }
+  }
+
+  #myUserIds(): Set<string> {
+    return new Set(this.accounts.map((a) => a.userId));
+  }
+
+  /// カラム表示中ノートをキャプチャ購読する（初期ページ分。Streaming 受信分は Rust が自動登録）。
+  #captureInitial(columnId: string, notes: Note[]) {
+    const ids = notes.map((n) => n.id);
+    if (ids.length > 0) void commands.captureNotes(columnId, ids);
   }
 
   async addAccount(host: string): Promise<string> {
@@ -123,6 +189,7 @@ class AppStore {
   async addHomeColumn(accountId: string) {
     const opened = await unwrap(commands.openHomeColumn(accountId));
     this.columns = [...this.columns, this.#toView(opened)];
+    this.#captureInitial(opened.column.id, opened.notes);
   }
 
   async loadMore(columnId: string) {
