@@ -19,11 +19,15 @@ export const commands = {
 	logout: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("logout", { accountId })),
 	/**  指定アカウントで `/i` を叩き、自分の User を返す。 */
 	whoami: (accountId: string) => typedError<User, Error>(__TAURI_INVOKE("whoami", { accountId })),
-	/**  home カラムを開く: 初期ページを取得し、homeTimeline の Streaming を開始する。 */
+	/**  home カラムを新規作成する: 定義を永続化し、初期ページ取得＋Streaming 開始。 */
 	openHomeColumn: (accountId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("open_home_column", { accountId })),
+	/**  永続化済みカラムを再開する（起動時の復元）。Streaming を張り直し初期ページを返す。 */
+	resumeColumn: (columnId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("resume_column", { columnId })),
+	/**  永続化済みカラム定義の一覧（起動時に取得 → resume_column で復元）。 */
+	listColumns: () => typedError<Column[], Error>(__TAURI_INVOKE("list_columns")),
 	/**  過去ページ（上スクロール）を取得する。`until_id` より古いノートを返す。 */
 	fetchBackfill: (accountId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { accountId, untilId })),
-	/**  カラムを閉じる（Streaming 購読解除）。 */
+	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
@@ -63,11 +67,26 @@ export type Account = {
 	avatarUrl: string | null,
 };
 
+/**  カラム = 受信ソース + フィルタ。設計書§5 / phase0-scaffold §2.6。 */
+export type Column = {
+	id: string,
+	accountId: string,
+	kind: ColumnKind,
+	order: number,
+	width: number,
+	filter: FilterQuery,
+	notifySound: boolean,
+	notifyDesktop: boolean,
+};
+
 /**  カラムの接続状態（UI 表示用）。 */
 export type ColumnConnectionState = {
 	columnId: string,
 	state: ConnectionState,
 };
+
+/**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（NQL §2）。 */
+export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; list_id: string } | { type: "search"; query: string };
 
 /**  カラムに新規ノートを追加する（フィルタ通過済み）。 */
 export type ColumnNote = {
@@ -116,8 +135,17 @@ export type Error =
 { kind: "api"; message: string } | 
 /**  keyring 等シークレットストアの失敗 */
 { kind: "secret"; message: string } | 
+/**  ローカル DB（SQLite）の失敗 */
+{ kind: "db"; message: string } | 
 /**  入力・状態の不整合（未知の session_id、未登録アカウント等） */
 { kind: "invalid"; message: string };
+
+/**  MVP=Keywords のみ。Phase 4 で Nql を有効化（filter/ast.rs の Query を保持）。 */
+export type FilterQuery = 
+/**  部分一致キーワード（OR）。空 Vec = 素通し。 */
+{ kind: "keywords"; value: string[] } | 
+/**  Phase 4: NQL クエリ文字列（保存形）。 */
+{ kind: "nql"; value: string };
 
 /**  `start_miauth` の戻り値。フロントは `url` をブラウザで開く。 */
 export type MiAuthSession = {
@@ -188,9 +216,9 @@ export type NoteDraft_Serialize = {
 	localOnly: boolean,
 };
 
-/**  `open_home_column` の戻り値。フロントは column_id を購読キーにする。 */
+/**  カラムを開いた結果。フロントは column_id を購読キーにする。 */
 export type OpenedColumn = {
-	columnId: string,
+	column: Column,
 	/**  初期表示用の直近ノート（新しい順） */
 	notes: Note[],
 };

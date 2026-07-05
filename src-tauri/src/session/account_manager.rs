@@ -11,6 +11,12 @@ pub struct AccountManager {
 }
 
 impl AccountManager {
+    /// 永続化済みアカウントで初期化する（先頭を active にする）。
+    pub fn with_accounts(accounts: Vec<Account>) -> Self {
+        let active = accounts.first().map(|a| a.id.clone());
+        Self { accounts, active }
+    }
+
     pub fn list(&self) -> Vec<Account> {
         self.accounts.clone()
     }

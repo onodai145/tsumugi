@@ -37,6 +37,10 @@ pub enum Error {
     #[error("secret store error: {0}")]
     Secret(String),
 
+    /// ローカル DB（SQLite）の失敗
+    #[error("db error: {0}")]
+    Db(String),
+
     /// 入力・状態の不整合（未知の session_id、未登録アカウント等）
     #[error("invalid: {0}")]
     Invalid(String),
@@ -57,5 +61,11 @@ impl From<reqwest::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::Api(format!("json: {e}"))
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(e: rusqlite::Error) -> Self {
+        Error::Db(e.to_string())
     }
 }

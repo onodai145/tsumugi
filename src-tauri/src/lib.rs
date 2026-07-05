@@ -5,10 +5,12 @@ mod error;
 mod events;
 mod session;
 mod state;
+mod store;
 mod stream;
 
 use session::KeyringStore;
 use state::AppState;
+use store::{db, SettingsStore};
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
 
@@ -25,6 +27,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::account::logout,
             commands::account::whoami,
             commands::column::open_home_column,
+            commands::column::resume_column,
+            commands::column::list_columns,
             commands::column::fetch_backfill,
             commands::column::close_column,
             commands::note::post_note,
@@ -61,7 +65,16 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
-            app.manage(AppState::new(Box::new(KeyringStore)));
+
+            // 設定 DB を app data dir に開く（無ければ作成）
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("no app data dir");
+            std::fs::create_dir_all(&data_dir).expect("failed to create app data dir");
+            let conn = db::open(&data_dir.join("tsumugi.db")).expect("failed to open settings db");
+            let settings = SettingsStore::new(conn);
+            app.manage(AppState::new(Box::new(KeyringStore), settings));
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
