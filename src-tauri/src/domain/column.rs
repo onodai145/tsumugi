@@ -28,6 +28,31 @@ pub enum ColumnKind {
     Search { query: String },
 }
 
+impl ColumnKind {
+    /// Misskey Streaming のチャンネル名（未対応ソースは None）。
+    pub fn stream_channel(&self) -> Option<&'static str> {
+        Some(match self {
+            ColumnKind::Home => "homeTimeline",
+            ColumnKind::Local => "localTimeline",
+            ColumnKind::Global => "globalTimeline",
+            ColumnKind::Hybrid => "hybridTimeline",
+            // List/Search/Notifications は追加パラメータや別扱いが要るため後続で対応
+            _ => return None,
+        })
+    }
+
+    /// 初期ページ取得の REST エンドポイント（未対応ソースは None）。
+    pub fn rest_endpoint(&self) -> Option<&'static str> {
+        Some(match self {
+            ColumnKind::Home => "notes/timeline",
+            ColumnKind::Local => "notes/local-timeline",
+            ColumnKind::Global => "notes/global-timeline",
+            ColumnKind::Hybrid => "notes/hybrid-timeline",
+            _ => return None,
+        })
+    }
+}
+
 /// MVP=Keywords のみ。Phase 4 で Tql を有効化（filter/ast.rs の Query を保持）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]

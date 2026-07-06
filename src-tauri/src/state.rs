@@ -67,6 +67,23 @@ impl AppState {
         Ok((host, token))
     }
 
+    /// フィルタ評価に使う文脈（全ログインアカウントの userId）を構築する。
+    pub fn eval_context(&self) -> crate::filter::eval::EvalContext {
+        let my_user_ids = self
+            .accounts
+            .lock()
+            .unwrap()
+            .list()
+            .iter()
+            .map(|a| a.user_id.clone())
+            .collect();
+        crate::filter::eval::EvalContext {
+            my_user_ids,
+            following_ids: None,
+            local_host: None,
+        }
+    }
+
     /// account_id から host + token を引き、REST クライアントを構築する。
     pub fn client_for(&self, account_id: &str) -> crate::error::Result<crate::api::MisskeyClient> {
         let (host, token) = self.host_token(account_id)?;

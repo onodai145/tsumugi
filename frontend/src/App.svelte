@@ -3,9 +3,11 @@
   import { app } from "./lib/store.svelte";
   import Column from "./ui/Column.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
+  import AddColumnModal from "./ui/AddColumnModal.svelte";
   import Compose from "./ui/Compose.svelte";
 
   let showAdd = $state(false);
+  let showAddColumn = $state(false);
 
   onMount(() => {
     app.boot();
@@ -24,11 +26,13 @@
             <div class="acc-avatar placeholder"></div>
           {/if}
           <span class="acc-name" title={`@${acc.username}@${acc.host}`}>@{acc.username}</span>
-          <button class="add-col" title="ホームカラムを追加" onclick={() => app.addHomeColumn(acc.id)}>+Home</button>
           <button class="add-col" title="投稿" onclick={() => app.openCompose(acc.id)}>✎</button>
         </div>
       {/each}
     </div>
+    {#if app.accounts.length > 0}
+      <button class="add-account-btn" onclick={() => (showAddColumn = true)}>＋ カラム</button>
+    {/if}
     <button class="add-account-btn" onclick={() => (showAdd = !showAdd)}>
       {showAdd ? "閉じる" : "＋ アカウント"}
     </button>
@@ -42,7 +46,7 @@
       <AddAccount />
     {:else if app.columns.length === 0}
       <div class="center-msg">
-        左のアカウントの「+Home」でホームタイムラインを開いてください。
+        左の「＋ カラム」からソースとフィルタを選んでカラムを追加してください。
       </div>
     {:else}
       <div class="columns">
@@ -55,6 +59,9 @@
 
   {#if app.compose}
     <Compose />
+  {/if}
+  {#if showAddColumn}
+    <AddColumnModal onclose={() => (showAddColumn = false)} />
   {/if}
 </div>
 

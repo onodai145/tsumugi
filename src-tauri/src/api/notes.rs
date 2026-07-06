@@ -17,10 +17,10 @@ struct TimelineArgs {
     since_id: Option<String>,
 }
 
-/// homeTimeline を取得する。`until_id` を渡すとそれより古いノート（上スクロールの過去ページ）。
-/// 返りは Misskey 準拠で新しい順。
-pub async fn home_timeline(
+/// 指定エンドポイントのタイムラインを取得する。`until_id` で過去ページ。返りは新しい順。
+pub async fn fetch_timeline(
     client: &MisskeyClient,
+    endpoint: &str,
     limit: u32,
     until_id: Option<String>,
 ) -> Result<Vec<Note>> {
@@ -29,9 +29,10 @@ pub async fn home_timeline(
         until_id,
         since_id: None,
     };
-    let raw: Vec<RawNote> = client.post("notes/timeline", &args).await?;
+    let raw: Vec<RawNote> = client.post(endpoint, &args).await?;
     Ok(raw.into_iter().map(Into::into).collect())
 }
+
 
 /// `notes/create` 等の入力。フロントの NoteDraft をそのまま受ける想定。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]

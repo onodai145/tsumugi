@@ -29,6 +29,17 @@ pub fn parse(input: &str) -> Result<Query, String> {
     Ok(q)
 }
 
+/// where 節の述語式だけをパースする（カラムのフィルタ入力用。`from` は付けない）。
+pub fn parse_predicate(input: &str) -> Result<Expr, String> {
+    let tokens = tokenize(input)?;
+    let mut p = Parser { tokens, pos: 0 };
+    let e = p.parse_expr()?;
+    if p.pos != p.tokens.len() {
+        return Err(format!("unexpected trailing tokens at {}", p.pos));
+    }
+    Ok(e)
+}
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,

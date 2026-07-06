@@ -27,13 +27,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::account::remove_account,
             commands::account::logout,
             commands::account::whoami,
-            commands::column::open_home_column,
+            commands::column::add_column,
             commands::column::resume_column,
             commands::column::list_columns,
             commands::column::fetch_backfill,
             commands::column::close_column,
             commands::column::capture_notes,
             commands::column::uncapture_notes,
+            commands::column::validate_filter,
             commands::note::post_note,
             commands::note::renote,
             commands::note::delete_note_cmd,
@@ -123,7 +124,7 @@ mod specta_export {
         // token を戻り値に含めていないこと（型に token フィールドが無い）
         assert!(!ts.contains("token:"), "bindings unexpectedly expose a token field:\n{ts}");
         // Phase 2: command と event が生成されていること
-        assert!(ts.contains("openHomeColumn"), "missing openHomeColumn command");
+        assert!(ts.contains("addColumn"), "missing addColumn command");
         assert!(ts.contains("ColumnNote"), "missing ColumnNote event type");
         assert!(ts.contains("createdAt"), "Note.created_at should be camelCase");
         // i64(created_at) が number として出ていること（BigInt ではない）

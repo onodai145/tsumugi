@@ -19,23 +19,22 @@ export const commands = {
 	logout: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("logout", { accountId })),
 	/**  指定アカウントで `/i` を叩き、自分の User を返す。 */
 	whoami: (accountId: string) => typedError<User, Error>(__TAURI_INVOKE("whoami", { accountId })),
-	/**  home カラムを新規作成する: 定義を永続化し、初期ページ取得＋Streaming 開始。 */
-	openHomeColumn: (accountId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("open_home_column", { accountId })),
-	/**  永続化済みカラムを再開する（起動時の復元）。Streaming を張り直し初期ページを返す。 */
+	/**  カラムを新規作成する。ソース種別＋フィルタを受け、購読を開始する。 */
+	addColumn: (accountId: string, kind: ColumnKind, filter: FilterQuery) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("add_column", { accountId, kind, filter })),
+	/**  永続化済みカラムを再開する（起動時の復元）。キャッシュ優先で即時表示し購読を張り直す。 */
 	resumeColumn: (columnId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("resume_column", { columnId })),
 	/**  永続化済みカラム定義の一覧（起動時に取得 → resume_column で復元）。 */
 	listColumns: () => typedError<Column[], Error>(__TAURI_INVOKE("list_columns")),
-	/**  過去ページ（上スクロール）を取得する。`until_id` より古いノートを返し、キャッシュにも保存する。 */
-	fetchBackfill: (accountId: string, columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { accountId, columnId, untilId })),
+	/**  過去ページ（上スクロール）。カラムのソースから取得し、フィルタ適用＆キャッシュする。 */
+	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
 	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
-	/**
-	 *  表示中ノートをキャプチャ購読する（他者のリアクション等を追う）。
-	 *  初期ページ（REST 取得分）はフロントがこれで登録する。Streaming 受信分は Rust が自動登録。
-	 */
+	/**  表示中ノートをキャプチャ購読する（他者のリアクション等を追う。初期ページ分をフロントが登録）。 */
 	captureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("capture_notes", { columnId, noteIds })),
 	/**  キャプチャ解除（表示領域外に出たノート）。 */
 	uncaptureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("uncapture_notes", { columnId, noteIds })),
+	/**  フィルタ（TQL/キーワード）の妥当性を検証する（UI の入力チェック用）。 */
+	validateFilter: (filter: FilterQuery) => typedError<null, Error>(__TAURI_INVOKE("validate_filter", { filter })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -240,10 +239,10 @@ export type NoteDraft_Serialize = {
 
 export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };
 
-/**  カラムを開いた結果。フロントは column_id を購読キーにする。 */
+/**  カラムを開いた結果。 */
 export type OpenedColumn = {
 	column: Column,
-	/**  初期表示用の直近ノート（新しい順） */
+	/**  初期表示用の直近ノート（フィルタ通過済み・新しい順） */
 	notes: Note[],
 };
 
