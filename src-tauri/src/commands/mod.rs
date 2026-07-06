@@ -16,4 +16,6 @@ pub use column::{
     uncapture_notes, OpenedColumn,
 };
 #[allow(unused_imports)]
-pub use note::{delete_note_cmd, list_custom_emojis, post_note, react, renote, unreact};
+pub use note::{
+    delete_note_cmd, list_custom_emojis, post_note, react, renote, unreact, upload_file,
+};

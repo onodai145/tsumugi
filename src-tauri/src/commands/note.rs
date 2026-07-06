@@ -1,11 +1,12 @@
 //! 投稿・リアクション系 command（Phase 3）。
 
+use crate::api::drive::upload_file as api_upload_file;
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
     create_note, create_reaction, delete_note, delete_reaction, renote as api_renote, NoteDraft,
     VisibilityInput,
 };
-use crate::domain::{EmojiDef, Note};
+use crate::domain::{DriveFile, EmojiDef, Note};
 use crate::error::Result;
 use crate::state::AppState;
 use tauri::State;
@@ -70,6 +71,18 @@ pub async fn unreact(
 ) -> Result<()> {
     let client = state.client_for(&account_id)?;
     delete_reaction(&client, &note_id).await
+}
+
+/// ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。
+#[tauri::command]
+#[specta::specta]
+pub async fn upload_file(
+    state: State<'_, AppState>,
+    account_id: String,
+    path: String,
+) -> Result<DriveFile> {
+    let (host, token) = state.host_token(&account_id)?;
+    api_upload_file(&state.http, &host, &token, &path).await
 }
 
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。

@@ -23,8 +23,8 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.1", features = ["specta"] }
 tauri-plugin-log = "2"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "time"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 thiserror = "2.0.18"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 url = "2.5.8"
@@ -39,6 +39,7 @@ futures-util = { version = "0.3.32", default-features = false, features = ["sink
 chrono = { version = "0.4.45", default-features = false, features = ["std", "alloc"] }
 tauri-plugin-opener = "2.5.4"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+tauri-plugin-dialog = "2.7.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

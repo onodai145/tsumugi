@@ -39,6 +39,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::react,
             commands::note::unreact,
             commands::note::list_custom_emojis,
+            commands::note::upload_file,
         ])
         .events(collect_events![
             events::ColumnNote,
@@ -65,6 +66,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

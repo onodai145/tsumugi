@@ -48,6 +48,8 @@ export const commands = {
 	unreact: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unreact", { accountId, noteId })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
 	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
+	/**  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。 */
+	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
 };
 
 /** Events */
