@@ -21,6 +21,12 @@ cargo tauri dev
 
 これ一発で vite dev サーバ（`127.0.0.1:5173`）とアプリの両方が起動する。
 
+> **Linux/Wayland（Hyprland 等）:** WebKitGTK の DMABUF レンダラが wlroots 系
+> コンポジタと衝突し `Gdk Error 71 (protocol error)` で描画が落ちることがある。
+> 本アプリは Linux では `WEBKIT_DISABLE_DMABUF_RENDERER=1` を既定でセットして回避する
+> （`src-tauri/src/main.rs`）。なお効かない場合は X11 フォールバックを試す:
+> `GDK_BACKEND=x11 cargo tauri dev`
+
 > **注意:** `./target/debug/tsumugi` や `cargo run` を**単体で直接起動しないこと**。
 > Tauri の debug ビルドはフロントを dev サーバ（`devUrl` = `127.0.0.1:5173`）から読み込むため、
 > vite が動いていないと `Could not connect to 127.0.0.1:5173: Connection refused` になる。
