@@ -1,6 +1,11 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
-  import type { NoteDraft_Deserialize as NoteDraft, VisibilityInput } from "../bindings/tauri.gen";
+  import { commands, unwrap } from "../lib/ipc";
+  import type {
+    NoteDraft_Deserialize as NoteDraft,
+    VisibilityInput,
+    DriveFile,
+  } from "../bindings/tauri.gen";
 
   // compose は非 null 前提（呼び出し側で存在確認）
   const c = $derived(app.compose!);
@@ -13,8 +18,36 @@
   let usePoll = $state(false);
   let pollChoices = $state<string[]>(["", ""]);
   let pollMultiple = $state(false);
+  let attached = $state<DriveFile[]>([]);
+  let uploading = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
+
+  async function pickFiles() {
+    err = null;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const picked = await open({
+      multiple: true,
+      filters: [{ name: "画像/動画", extensions: ["png", "jpg", "jpeg", "gif", "webp", "mp4", "webm"] }],
+    });
+    if (!picked) return;
+    const paths = Array.isArray(picked) ? picked : [picked];
+    uploading = true;
+    try {
+      for (const p of paths) {
+        const file = await unwrap(commands.uploadFile(c.accountId, p));
+        attached = [...attached, file];
+      }
+    } catch (e) {
+      err = String(e);
+    } finally {
+      uploading = false;
+    }
+  }
+
+  function removeAttached(id: string) {
+    attached = attached.filter((f) => f.id !== id);
+  }
 
   const visibilities: { v: VisibilityInput; label: string }[] = [
     { v: "public", label: "公開" },
@@ -26,15 +59,15 @@
   async function submit() {
     err = null;
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
-    if (!text.trim() && !c.quoteOf && choices.length === 0) {
-      err = "本文を入力してください";
+    if (!text.trim() && !c.quoteOf && choices.length === 0 && attached.length === 0) {
+      err = "本文か添付を入力してください";
       return;
     }
     const draft: NoteDraft = {
       text: text.trim() || null,
       cw: useCw && cw.trim() ? cw.trim() : null,
       visibility,
-      fileIds: [],
+      fileIds: attached.map((f) => f.id),
       poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt: null } : null,
       replyId: c.replyTo?.id ?? null,
       renoteId: c.quoteOf?.id ?? null,
@@ -82,6 +115,22 @@
     {/if}
     <textarea class="text" rows="5" placeholder="いまどうしてる？" bind:value={text}></textarea>
 
+    {#if attached.length > 0 || uploading}
+      <div class="attachments">
+        {#each attached as f (f.id)}
+          <div class="thumb">
+            {#if f.mimeType.startsWith("image/")}
+              <img src={f.thumbnailUrl ?? f.url} alt="" />
+            {:else}
+              <span class="file-badge">{f.mimeType}</span>
+            {/if}
+            <button class="thumb-x" title="削除" onclick={() => removeAttached(f.id)}>✕</button>
+          </div>
+        {/each}
+        {#if uploading}<div class="thumb uploading">…</div>{/if}
+      </div>
+    {/if}
+
     {#if usePoll}
       <div class="poll">
         {#each pollChoices as _, i}
@@ -98,6 +147,7 @@
       <select bind:value={visibility}>
         {#each visibilities as o}<option value={o.v}>{o.label}</option>{/each}
       </select>
+      <button class="mini" onclick={pickFiles} disabled={uploading}>📎 画像</button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
@@ -174,6 +224,51 @@
     margin-bottom: 8px;
     font-size: 0.82rem;
     color: var(--text-dim);
+  }
+  .attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .thumb {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .thumb.uploading {
+    color: var(--text-dim);
+  }
+  .file-badge {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    padding: 4px;
+    text-align: center;
+  }
+  .thumb-x {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    line-height: 1;
   }
   .toolbar {
     display: flex;

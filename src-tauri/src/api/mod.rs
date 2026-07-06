@@ -6,6 +6,7 @@
 //! 「全 POST・JSONボディに `i`(token) 同梱」で均一なので、共通処理を [`client`] に集約する。
 
 pub mod client;
+pub mod drive;
 pub mod meta;
 pub mod notes;
 pub mod normalize;
