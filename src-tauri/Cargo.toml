@@ -40,6 +40,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["std", "all
 tauri-plugin-opener = "2.5.4"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 tauri-plugin-dialog = "2.7.1"
+regex = "1.12.4"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
