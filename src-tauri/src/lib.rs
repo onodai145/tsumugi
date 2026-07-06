@@ -3,6 +3,7 @@ mod commands;
 mod domain;
 mod error;
 mod events;
+mod filter;
 mod session;
 mod state;
 mod store;
