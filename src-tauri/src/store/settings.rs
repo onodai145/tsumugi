@@ -6,7 +6,8 @@ use rusqlite::{params, Connection};
 use std::sync::Mutex;
 
 pub struct SettingsStore {
-    conn: Mutex<Connection>,
+    // note_cache.rs（同 crate の別モジュール）からも使うため pub(crate)
+    pub(crate) conn: Mutex<Connection>,
 }
 
 impl SettingsStore {

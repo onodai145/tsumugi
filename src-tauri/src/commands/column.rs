@@ -46,6 +46,7 @@ pub async fn open_home_column(
     state.settings.upsert_column(&column)?;
 
     let notes = fetch_initial(&state, &account_id).await?;
+    state.settings.cache_notes(&column.id, &notes)?;
     state
         .connections
         .open_home(app, column.id.clone(), host, token);
@@ -69,7 +70,16 @@ pub async fn resume_column(
         .ok_or_else(|| Error::Invalid(format!("unknown column: {column_id}")))?;
 
     let (host, token) = state.host_token(&column.account_id)?;
-    let notes = fetch_initial(&state, &column.account_id).await?;
+
+    // 起動時はまずキャッシュから即時復元。空（初回）のみ REST 取得してキャッシュ。
+    let cached = state.settings.load_cached(&column.id, INITIAL_LIMIT)?;
+    let notes = if cached.is_empty() {
+        let rest = fetch_initial(&state, &column.account_id).await?;
+        state.settings.cache_notes(&column.id, &rest)?;
+        rest
+    } else {
+        cached
+    };
     state
         .connections
         .open_home(app, column.id.clone(), host, token);
@@ -84,24 +94,28 @@ pub async fn list_columns(state: State<'_, AppState>) -> Result<Vec<Column>> {
     state.settings.load_columns()
 }
 
-/// 過去ページ（上スクロール）を取得する。`until_id` より古いノートを返す。
+/// 過去ページ（上スクロール）を取得する。`until_id` より古いノートを返し、キャッシュにも保存する。
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_backfill(
     state: State<'_, AppState>,
     account_id: String,
+    column_id: String,
     until_id: String,
 ) -> Result<Vec<Note>> {
     let client = state.client_for(&account_id)?;
-    home_timeline(&client, INITIAL_LIMIT, Some(until_id)).await
+    let notes = home_timeline(&client, INITIAL_LIMIT, Some(until_id)).await?;
+    state.settings.cache_notes(&column_id, &notes)?;
+    Ok(notes)
 }
 
-/// カラムを閉じる（Streaming 購読解除＋永続層から削除）。
+/// カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。
 #[tauri::command]
 #[specta::specta]
 pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Result<()> {
     state.connections.close(&column_id);
     state.settings.delete_column(&column_id)?;
+    state.settings.clear_column_notes(&column_id)?;
     Ok(())
 }
 

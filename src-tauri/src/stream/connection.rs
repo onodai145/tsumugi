@@ -6,8 +6,10 @@
 
 use crate::domain::Note;
 use crate::events::{ColumnConnectionState, ColumnNote, ColumnNoteUpdated, ConnectionState, NoteUpdate};
+use crate::state::AppState;
 use crate::stream::inbox::Dedup;
 use crate::stream::protocol::{self, Incoming};
+use tauri::Manager as _;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
@@ -301,6 +303,10 @@ fn handle_text(app: &AppHandle, column_id: &str, text: &str, dedup: &mut Dedup) 
             if dedup.accept(&note.id) {
                 let id = note.id.clone();
                 let normalized: Note = (*note).into();
+                // 永続キャッシュへ書き込み（再起動時の即時復元用）
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = state.settings.cache_note(column_id, &normalized);
+                }
                 let _ = ColumnNote {
                     column_id: column_id.to_string(),
                     note: normalized,
