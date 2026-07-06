@@ -7,7 +7,10 @@
   ],
   "permissions": [
     "core:default",
-    "opener:allow-open-url",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }, { "url": "http://*" }]
+    },
     "dialog:allow-open"
   ]
 }
