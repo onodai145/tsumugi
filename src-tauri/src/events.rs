@@ -15,7 +15,7 @@ pub struct ColumnNote {
 }
 
 /// キャプチャ中ノートの更新（他者のリアクション/投票/削除）。値のみ更新し、
-/// カラムからの出入りはしない（NQL§6 の方針）。
+/// カラムからの出入りはしない（TQL§6 の方針）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnNoteUpdated {

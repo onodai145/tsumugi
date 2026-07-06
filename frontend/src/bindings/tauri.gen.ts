@@ -95,7 +95,7 @@ export type ColumnConnectionState = {
 	state: ConnectionState,
 };
 
-/**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（NQL §2）。 */
+/**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。 */
 export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; list_id: string } | { type: "search"; query: string };
 
 /**  カラムに新規ノートを追加する（フィルタ通過済み）。 */
@@ -106,7 +106,7 @@ export type ColumnNote = {
 
 /**
  *  キャプチャ中ノートの更新（他者のリアクション/投票/削除）。値のみ更新し、
- *  カラムからの出入りはしない（NQL§6 の方針）。
+ *  カラムからの出入りはしない（TQL§6 の方針）。
  */
 export type ColumnNoteUpdated = {
 	columnId: string,
@@ -162,12 +162,12 @@ export type Error =
 /**  入力・状態の不整合（未知の session_id、未登録アカウント等） */
 { kind: "invalid"; message: string };
 
-/**  MVP=Keywords のみ。Phase 4 で Nql を有効化（filter/ast.rs の Query を保持）。 */
+/**  MVP=Keywords のみ。Phase 4 で Tql を有効化（filter/ast.rs の Query を保持）。 */
 export type FilterQuery = 
 /**  部分一致キーワード（OR）。空 Vec = 素通し。 */
 { kind: "keywords"; value: string[] } | 
-/**  Phase 4: NQL クエリ文字列（保存形）。 */
-{ kind: "nql"; value: string };
+/**  Phase 4: TQL クエリ文字列（保存形）。 */
+{ kind: "tql"; value: string };
 
 /**  `start_miauth` の戻り値。フロントは `url` をブラウザで開く。 */
 export type MiAuthSession = {

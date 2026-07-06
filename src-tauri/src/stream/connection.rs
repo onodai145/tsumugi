@@ -2,7 +2,7 @@
 //! 切断は前提として、指数バックオフで再接続する（設計書§6）。
 //!
 //! homeTimeline を購読しつつ、表示中ノートを subNote でキャプチャして、他者のリアクション/
-//! 投票/削除を `ColumnNoteUpdated` イベントで反映する（NQL§6: 値は更新するが出入りしない）。
+//! 投票/削除を `ColumnNoteUpdated` イベントで反映する（TQL§6: 値は更新するが出入りしない）。
 
 use crate::domain::Note;
 use crate::events::{ColumnConnectionState, ColumnNote, ColumnNoteUpdated, ConnectionState, NoteUpdate};

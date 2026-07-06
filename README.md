@@ -2,7 +2,7 @@
 
 Misskey マルチカラムデスクトップクライアント（Krile 風 UX）。Tauri v2 + Rust コア + Svelte フロント。
 
-設計は [`docs/`](docs/) を参照（設計書 / NQL フィルタDSL / ロードマップ）。
+設計は [`docs/`](docs/) を参照（設計書 / TQL フィルタDSL / ロードマップ）。
 
 ## 必要環境
 

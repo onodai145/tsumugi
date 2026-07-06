@@ -1,4 +1,4 @@
-//! ノートキャッシュの読み書き（NQL§9 の正規化テーブル + 表示復元用 payload）。
+//! ノートキャッシュの読み書き（TQL§9 の正規化テーブル + 表示復元用 payload）。
 //! `SettingsStore`（= ローカル DB アクセス層）に対する inherent impl として実装する。
 
 use super::settings::SettingsStore;

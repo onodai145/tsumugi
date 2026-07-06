@@ -15,7 +15,7 @@ pub struct Column {
     pub notify_desktop: bool,
 }
 
-/// 設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（NQL §2）。
+/// 設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ColumnKind {
@@ -28,12 +28,12 @@ pub enum ColumnKind {
     Search { query: String },
 }
 
-/// MVP=Keywords のみ。Phase 4 で Nql を有効化（filter/ast.rs の Query を保持）。
+/// MVP=Keywords のみ。Phase 4 で Tql を有効化（filter/ast.rs の Query を保持）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]
 pub enum FilterQuery {
     /// 部分一致キーワード（OR）。空 Vec = 素通し。
     Keywords(Vec<String>),
-    /// Phase 4: NQL クエリ文字列（保存形）。
-    Nql(String),
+    /// Phase 4: TQL クエリ文字列（保存形）。
+    Tql(String),
 }

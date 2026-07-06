@@ -22,7 +22,7 @@ pub struct User {
 
 impl User {
     /// "@user" または "@user@host"
-    #[allow(dead_code)] // Phase 2/4: 表示・NQL の user.acct 評価で使用
+    #[allow(dead_code)] // Phase 2/4: 表示・TQL の user.acct 評価で使用
     pub fn acct(&self) -> String {
         match &self.host {
             Some(h) => format!("@{}@{}", self.username, h),
