@@ -1,0 +1,5 @@
+# pnpm 11 の設定置き場（package.json の "pnpm" フィールドは非対応）。
+# esbuild(vite の依存)のビルドを許可し、pnpm の pre-run 依存チェックが
+# "ignored builds" でエラー終了するのを防ぐ（=cargo tauri dev の pnpm dev も通す）。
+allowBuilds:
+  esbuild: true
