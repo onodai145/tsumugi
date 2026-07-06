@@ -25,9 +25,9 @@ export const commands = {
 	resumeColumn: (columnId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("resume_column", { columnId })),
 	/**  永続化済みカラム定義の一覧（起動時に取得 → resume_column で復元）。 */
 	listColumns: () => typedError<Column[], Error>(__TAURI_INVOKE("list_columns")),
-	/**  過去ページ（上スクロール）を取得する。`until_id` より古いノートを返す。 */
-	fetchBackfill: (accountId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { accountId, untilId })),
-	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除）。 */
+	/**  過去ページ（上スクロール）を取得する。`until_id` より古いノートを返し、キャッシュにも保存する。 */
+	fetchBackfill: (accountId: string, columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { accountId, columnId, untilId })),
+	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
 	/**
 	 *  表示中ノートをキャプチャ購読する（他者のリアクション等を追う）。

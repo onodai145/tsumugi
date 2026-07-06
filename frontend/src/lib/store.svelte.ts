@@ -198,7 +198,7 @@ class AppStore {
     col.loadingMore = true;
     try {
       const oldest = col.notes[col.notes.length - 1].id;
-      const older = await unwrap(commands.fetchBackfill(col.accountId, oldest));
+      const older = await unwrap(commands.fetchBackfill(col.accountId, col.id, oldest));
       const known = new Set(col.notes.map((n) => n.id));
       const fresh = older.filter((n) => !known.has(n.id));
       col.notes = [...col.notes, ...fresh].slice(0, MAX_NOTES);
