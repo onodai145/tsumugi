@@ -10,6 +10,17 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
+  // 依存を起動時に事前バンドルし、実行時の再最適化→フルリロードを防ぐ
+  // （再最適化が vite-plugin-svelte の仮想CSSモジュール読込を壊すため）
+  optimizeDeps: {
+    include: [
+      "@tauri-apps/api/core",
+      "@tauri-apps/api/event",
+      "@tauri-apps/plugin-opener",
+      "@tauri-apps/plugin-dialog",
+      "mfm-js",
+    ],
+  },
   server: {
     host: host || "127.0.0.1",
     port: 5173,
