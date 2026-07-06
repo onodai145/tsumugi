@@ -1,6 +1,7 @@
 // アプリの ViewModel（Svelte 5 runes）。カラム構成・受信ノート・接続状態を保持し、
 // Rust からの columnNote / columnConnectionState イベントを購読して更新する。
 import { commands, events, unwrap } from "./ipc";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   Account,
   Note,
@@ -165,7 +166,6 @@ class AppStore {
   async addAccount(host: string): Promise<string> {
     // 認可URLを取得し、既定ブラウザで開く。認可後に completeAccount を呼ぶ。
     const session = await unwrap(commands.startMiauth(host));
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(session.url);
     return session.sessionId;
   }

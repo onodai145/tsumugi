@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
   import { commands, unwrap } from "../lib/ipc";
+  import { open } from "@tauri-apps/plugin-dialog";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -25,7 +26,6 @@
 
   async function pickFiles() {
     err = null;
-    const { open } = await import("@tauri-apps/plugin-dialog");
     const picked = await open({
       multiple: true,
       filters: [{ name: "画像/動画", extensions: ["png", "jpg", "jpeg", "gif", "webp", "mp4", "webm"] }],
