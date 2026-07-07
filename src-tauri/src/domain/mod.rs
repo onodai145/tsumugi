@@ -11,6 +11,7 @@ mod list;
 mod mute;
 mod note;
 mod notification;
+mod notify;
 mod reaction;
 mod user;
 
@@ -20,5 +21,6 @@ pub use list::UserList;
 pub use mute::MuteConfig;
 pub use note::{DriveFile, Note, Poll, PollChoice, Visibility};
 pub use notification::Notification;
+pub use notify::NotifyConfig;
 pub use reaction::{EmojiDef, ReactionSummary};
 pub use user::User;

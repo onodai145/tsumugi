@@ -68,6 +68,10 @@ export const commands = {
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
 	setMute: (config: MuteConfig) => typedError<null, Error>(__TAURI_INVOKE("set_mute", { config })),
+	/**  デスクトップ通知・音の設定を取得。 */
+	getNotify: () => typedError<NotifyConfig, Error>(__TAURI_INVOKE("get_notify")),
+	/**  デスクトップ通知・音の設定を更新（永続化）。 */
+	setNotify: (config: NotifyConfig) => typedError<null, Error>(__TAURI_INVOKE("set_notify", { config })),
 };
 
 /** Events */
@@ -300,6 +304,14 @@ export type Notification = {
 	note: Note | null,
 	/**  リアクション種別（kind == "reaction" のとき） */
 	reaction: string | null,
+};
+
+/**  デスクトップ通知・通知音の設定（グローバル）。通知カラムに新着が来たとき使う。 */
+export type NotifyConfig = {
+	/**  OS のデスクトップ通知を出す */
+	desktop: boolean,
+	/**  通知音を鳴らす */
+	sound: boolean,
 };
 
 /**  タブを開いた結果。所属グループも返す（新規グループの幅などをフロントへ）。 */
