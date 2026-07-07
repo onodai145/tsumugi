@@ -19,29 +19,36 @@ export const commands = {
 	logout: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("logout", { accountId })),
 	/**  指定アカウントで `/i` を叩き、自分の User を返す。 */
 	whoami: (accountId: string) => typedError<User, Error>(__TAURI_INVOKE("whoami", { accountId })),
-	/**  カラムを新規作成する。ソース種別＋フィルタを受け、購読を開始する。 */
-	addColumn: (accountId: string, kind: ColumnKind, filter: FilterQuery) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("add_column", { accountId, kind, filter })),
-	/**  永続化済みカラムを再開する（起動時の復元）。キャッシュ優先で即時表示し購読を張り直す。 */
+	/**  タブを新規作成する。`group_id` が None なら新しい視覚カラム(グループ)を作る。 */
+	addColumn: (accountId: string, kind: ColumnKind, filter: FilterQuery, groupId: string | null) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("add_column", { accountId, kind, filter, groupId })),
+	/**  永続化済みタブを再開する（起動時の復元）。 */
 	resumeColumn: (columnId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("resume_column", { columnId })),
-	/**  永続化済みカラム定義の一覧（起動時に取得 → resume_column で復元）。 */
+	/**  永続化済みグループ一覧。 */
+	listGroups: () => typedError<ColumnGroup[], Error>(__TAURI_INVOKE("list_groups")),
+	/**  永続化済みタブ一覧。 */
 	listColumns: () => typedError<Column[], Error>(__TAURI_INVOKE("list_columns")),
-	/**  過去ページ（上スクロール）。カラムのソースから取得し、フィルタ適用＆キャッシュする。 */
+	/**  過去ページ（上スクロール）。 */
 	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
-	/**  通知カラムの過去ページ。`until_id` より古い通知を返す。 */
+	/**  通知カラムの過去ページ。 */
 	fetchNotificationsBackfill: (columnId: string, untilId: string) => typedError<Notification[], Error>(__TAURI_INVOKE("fetch_notifications_backfill", { columnId, untilId })),
-	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。 */
+	/**  タブを閉じる（購読解除＋永続層から削除＋空グループ掃除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
-	/**  カラム幅を更新（永続化）。 */
-	setColumnWidth: (columnId: string, width: number) => typedError<null, Error>(__TAURI_INVOKE("set_column_width", { columnId, width })),
-	/**  カラムの並び順を更新（与えた id 順に振り直す・永続化）。 */
-	reorderColumns: (orderedIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("reorder_columns", { orderedIds })),
-	/**  表示中ノートをキャプチャ購読する（他者のリアクション等を追う。初期ページ分をフロントが登録）。 */
+	/**  グループ幅を更新（永続化）。 */
+	setGroupWidth: (groupId: string, width: number) => typedError<null, Error>(__TAURI_INVOKE("set_group_width", { groupId, width })),
+	/**  グループ(視覚カラム)の並び順を更新。 */
+	reorderGroups: (orderedIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("reorder_groups", { orderedIds })),
+	/**
+	 *  タブを別グループへ移動し、そのグループ内順序を更新（並べ替え兼移動）。
+	 *  `ordered_tab_ids` は移動先グループのタブを希望順に並べた id 列。
+	 */
+	moveTab: (tabId: string, groupId: string, orderedTabIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("move_tab", { tabId, groupId, orderedTabIds })),
+	/**  表示中ノートをキャプチャ購読する。 */
 	captureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("capture_notes", { columnId, noteIds })),
-	/**  キャプチャ解除（表示領域外に出たノート）。 */
+	/**  キャプチャ解除。 */
 	uncaptureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("uncapture_notes", { columnId, noteIds })),
-	/**  フィルタ（TQL/キーワード）の妥当性を検証する（UI の入力チェック用）。 */
+	/**  フィルタ（TQL/キーワード）の妥当性検証。 */
 	validateFilter: (filter: FilterQuery) => typedError<null, Error>(__TAURI_INVOKE("validate_filter", { filter })),
-	/**  自分のユーザリスト一覧（List カラム作成時の選択用）。 */
+	/**  ユーザリスト一覧（List タブ作成用）。 */
 	listUserLists: (accountId: string) => typedError<UserList[], Error>(__TAURI_INVOKE("list_user_lists", { accountId })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
@@ -85,22 +92,31 @@ export type Account = {
 	avatarUrl: string | null,
 };
 
-/**  カラム = 受信ソース + フィルタ。設計書§5 / phase0-scaffold §2.6。 */
+/**  タブ = 受信ソース + フィルタ（1タイムライン）。視覚的なカラム(ColumnGroup)に属する。 */
 export type Column = {
 	id: string,
 	accountId: string,
 	kind: ColumnKind,
+	/**  グループ内のタブ順 */
 	order: number,
-	width: number,
 	filter: FilterQuery,
 	notifySound: boolean,
 	notifyDesktop: boolean,
+	/**  所属する視覚カラム(ColumnGroup)の id */
+	groupId: string,
 };
 
 /**  カラムの接続状態（UI 表示用）。 */
 export type ColumnConnectionState = {
 	columnId: string,
 	state: ConnectionState,
+};
+
+/**  視覚的なカラム（タブの集合）。幅と並び順を持つ。 */
+export type ColumnGroup = {
+	id: string,
+	order: number,
+	width: number,
 };
 
 /**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。 */
@@ -272,12 +288,11 @@ export type Notification = {
 	reaction: string | null,
 };
 
-/**  カラムを開いた結果。ノートカラムは `notes`、通知カラムは `notifications` が入る。 */
+/**  タブを開いた結果。所属グループも返す（新規グループの幅などをフロントへ）。 */
 export type OpenedColumn = {
 	column: Column,
-	/**  初期表示用の直近ノート（フィルタ通過済み・新しい順） */
+	group: ColumnGroup,
 	notes: Note[],
-	/**  通知カラムの初期通知（新しい順） */
 	notifications: Notification[],
 };
 

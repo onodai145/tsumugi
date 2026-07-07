@@ -2,7 +2,7 @@
   import { app } from "../lib/store.svelte";
   import type { ColumnKind, FilterQuery, UserList } from "../bindings/tauri.gen";
 
-  let { onclose }: { onclose: () => void } = $props();
+  let { onclose, groupId }: { onclose: () => void; groupId: string | null } = $props();
 
   type SrcType = "home" | "local" | "hybrid" | "global" | "list" | "search" | "notifications";
   const srcOptions: { v: SrcType; label: string }[] = [
@@ -78,7 +78,7 @@
     if (filterErr) return;
     busy = true;
     try {
-      await app.addColumn(accountId, kind, buildFilter());
+      await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined);
       onclose();
     } catch (e) {
       submitErr = String(e);
@@ -92,7 +92,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
     <header class="head">
-      <span>カラムを追加</span>
+      <span>{groupId ? "タブを追加" : "カラムを追加"}</span>
       <button class="x" onclick={onclose}>✕</button>
     </header>
 

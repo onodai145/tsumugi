@@ -9,6 +9,16 @@
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
+  let addTabGroupId = $state<string | null>(null);
+
+  function openAddColumn() {
+    addTabGroupId = null; // 新しい視覚カラム
+    showAddColumn = true;
+  }
+  function openAddTab(groupId: string) {
+    addTabGroupId = groupId; // 既存カラムにタブ追加
+    showAddColumn = true;
+  }
 
   onMount(() => {
     app.boot();
@@ -25,7 +35,7 @@
       <div class="spacer"></div>
     {/if}
     {#if app.accounts.length > 0}
-      <button class="bar-btn" onclick={() => (showAddColumn = true)}>＋カラム</button>
+      <button class="bar-btn" onclick={openAddColumn}>＋カラム</button>
     {/if}
     <button class="bar-btn" onclick={() => (showAdd = !showAdd)}>
       {showAdd ? "閉じる" : "＋アカウント"}
@@ -43,14 +53,14 @@
       <div class="center-msg">起動中…</div>
     {:else if showAdd || app.accounts.length === 0}
       <AddAccount />
-    {:else if app.columns.length === 0}
+    {:else if app.groups.length === 0}
       <div class="center-msg">
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。
       </div>
     {:else}
       <div class="columns">
-        {#each app.columns as column (column.id)}
-          <Column {column} />
+        {#each app.groups as group (group.id)}
+          <Column {group} onAddTab={openAddTab} />
         {/each}
       </div>
     {/if}
@@ -60,7 +70,7 @@
     <Compose />
   {/if}
   {#if showAddColumn}
-    <AddColumnModal onclose={() => (showAddColumn = false)} />
+    <AddColumnModal groupId={addTabGroupId} onclose={() => (showAddColumn = false)} />
   {/if}
 </div>
 

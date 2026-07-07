@@ -1,5 +1,5 @@
-// アプリの ViewModel（Svelte 5 runes）。カラム構成・受信ノート・接続状態を保持し、
-// Rust からの columnNote / columnConnectionState イベントを購読して更新する。
+// アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
+// Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
 import { commands, events, unwrap, formatError } from "./ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
@@ -17,18 +17,26 @@ import type {
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-const MAX_NOTES = 300; // カラムあたり DOM に保持する上限（仮想化-lite）
+const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 
-export interface ColumnView {
+/// タブ = 1タイムライン。
+export interface TabView {
   id: string;
   accountId: string;
   kind: ColumnKind;
   title: string;
-  width: number;
   notes: Note[];
   notifications: Notification[];
   state: ConnectionState;
   loadingMore: boolean;
+}
+
+/// 視覚カラム = タブの集合。幅と並び順を持ち、アクティブタブを表示する。
+export interface GroupView {
+  id: string;
+  width: number;
+  tabs: TabView[];
+  activeTabId: string;
 }
 
 /// 投稿フォーム（返信/引用の文脈つき）
@@ -40,11 +48,11 @@ export interface ComposeState {
 
 class AppStore {
   accounts = $state<Account[]>([]);
-  columns = $state<ColumnView[]>([]);
+  groups = $state<GroupView[]>([]);
   booting = $state(true);
   error = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
-  emojis = $state<Record<string, EmojiDef[]>>({}); // accountId -> 絵文字
+  emojis = $state<Record<string, EmojiDef[]>>({});
 
   #unlisten: UnlistenFn[] = [];
 
@@ -53,12 +61,13 @@ class AppStore {
     try {
       this.accounts = await unwrap(commands.listAccounts());
       await this.#subscribe();
-      // 永続化済みカラムを復元（Streaming を張り直し初期ページを取得）
-      const persisted = await unwrap(commands.listColumns());
-      for (const col of persisted) {
+      const groupDefs = await unwrap(commands.listGroups());
+      this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, tabs: [], activeTabId: "" }));
+      const tabDefs = await unwrap(commands.listColumns());
+      for (const tab of tabDefs) {
         try {
-          const opened = await unwrap(commands.resumeColumn(col.id));
-          this.columns = [...this.columns, this.#toView(opened)];
+          const opened = await unwrap(commands.resumeColumn(tab.id));
+          this.#insertTab(opened);
           this.#captureInitial(opened.column.id, opened.notes);
         } catch (e) {
           this.error = String(e);
@@ -71,7 +80,7 @@ class AppStore {
     }
   }
 
-  #toView(opened: OpenedColumn): ColumnView {
+  #makeTab(opened: OpenedColumn): TabView {
     const acc = this.accounts.find((a) => a.id === opened.column.accountId);
     const src = kindLabel(opened.column.kind);
     return {
@@ -79,7 +88,6 @@ class AppStore {
       accountId: opened.column.accountId,
       kind: opened.column.kind,
       title: acc ? `${src} @${acc.username}` : src,
-      width: opened.column.width,
       notes: opened.notes,
       notifications: opened.notifications,
       state: "connecting",
@@ -87,62 +95,89 @@ class AppStore {
     };
   }
 
-  // ---- カラムの並べ替え / 幅 ----
-
-  draggingColumnId = $state<string | null>(null);
-
-  startDragColumn(id: string) {
-    this.draggingColumnId = id;
+  /// OpenedColumn を該当グループに差し込む（無ければグループを作る）。
+  #insertTab(opened: OpenedColumn) {
+    let g = this.groups.find((x) => x.id === opened.group.id);
+    if (!g) {
+      g = { id: opened.group.id, width: opened.group.width, tabs: [], activeTabId: "" };
+      this.groups = [...this.groups, g];
+    }
+    const tab = this.#makeTab(opened);
+    g.tabs = [...g.tabs, tab];
+    if (!g.activeTabId) g.activeTabId = tab.id;
+    return tab;
   }
-  dragOverColumn(overId: string) {
-    const from = this.columns.findIndex((c) => c.id === this.draggingColumnId);
-    const to = this.columns.findIndex((c) => c.id === overId);
+
+  #allTabs(): TabView[] {
+    return this.groups.flatMap((g) => g.tabs);
+  }
+  #findTab(tabId: string): TabView | undefined {
+    for (const g of this.groups) {
+      const t = g.tabs.find((t) => t.id === tabId);
+      if (t) return t;
+    }
+    return undefined;
+  }
+
+  setActiveTab(groupId: string, tabId: string) {
+    const g = this.groups.find((x) => x.id === groupId);
+    if (g) g.activeTabId = tabId;
+  }
+
+  // ---- グループの並べ替え / 幅 ----
+
+  draggingGroupId = $state<string | null>(null);
+
+  startDragGroup(id: string) {
+    this.draggingGroupId = id;
+  }
+  dragOverGroup(overId: string) {
+    const from = this.groups.findIndex((c) => c.id === this.draggingGroupId);
+    const to = this.groups.findIndex((c) => c.id === overId);
     if (from < 0 || to < 0 || from === to) return;
-    const arr = [...this.columns];
+    const arr = [...this.groups];
     const [moved] = arr.splice(from, 1);
     arr.splice(to, 0, moved);
-    this.columns = arr;
+    this.groups = arr;
   }
-  async endDragColumn() {
-    if (!this.draggingColumnId) return;
-    this.draggingColumnId = null;
+  async endDragGroup() {
+    if (!this.draggingGroupId) return;
+    this.draggingGroupId = null;
     try {
-      await unwrap(commands.reorderColumns(this.columns.map((c) => c.id)));
+      await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
     } catch (e) {
       this.error = String(e);
     }
   }
 
-  setColumnWidthLocal(columnId: string, width: number) {
-    const c = this.columns.find((c) => c.id === columnId);
-    if (c) c.width = width;
+  setGroupWidthLocal(groupId: string, width: number) {
+    const g = this.groups.find((c) => c.id === groupId);
+    if (g) g.width = width;
   }
-  async persistColumnWidth(columnId: string, width: number) {
+  async persistGroupWidth(groupId: string, width: number) {
     try {
-      await unwrap(commands.setColumnWidth(columnId, width));
+      await unwrap(commands.setGroupWidth(groupId, width));
     } catch (e) {
       this.error = String(e);
     }
   }
 
   async #subscribe() {
-    // 既存購読を掃除
     for (const u of this.#unlisten) u();
     this.#unlisten = [];
 
     this.#unlisten.push(
       await events.columnNote.listen((e) => {
-        const col = this.columns.find((c) => c.id === e.payload.columnId);
-        if (!col) return;
-        // 先頭に追加（重複はスキップ）
-        if (col.notes.some((n) => n.id === e.payload.note.id)) return;
-        col.notes = [e.payload.note, ...col.notes].slice(0, MAX_NOTES);
+        const tab = this.#findTab(e.payload.columnId);
+        if (!tab) return;
+        if (tab.notes.some((n) => n.id === e.payload.note.id)) return;
+        tab.notes = [e.payload.note, ...tab.notes].slice(0, MAX_NOTES);
       }),
     );
     this.#unlisten.push(
       await events.columnConnectionState.listen((e) => {
-        const col = this.columns.find((c) => c.id === e.payload.columnId);
-        if (col) col.state = e.payload.state;
+        const tab = this.#findTab(e.payload.columnId);
+        if (tab) tab.state = e.payload.state;
       }),
     );
     this.#unlisten.push(
@@ -150,44 +185,39 @@ class AppStore {
     );
     this.#unlisten.push(
       await events.columnNotification.listen((e) => {
-        const col = this.columns.find((c) => c.id === e.payload.columnId);
-        if (!col) return;
-        if (col.notifications.some((n) => n.id === e.payload.notification.id)) return;
-        col.notifications = [e.payload.notification, ...col.notifications].slice(0, MAX_NOTES);
+        const tab = this.#findTab(e.payload.columnId);
+        if (!tab) return;
+        if (tab.notifications.some((n) => n.id === e.payload.notification.id)) return;
+        tab.notifications = [e.payload.notification, ...tab.notifications].slice(0, MAX_NOTES);
       }),
     );
   }
 
-  /// 他者のリアクション/投票/削除を該当ノートへ反映（自分の操作は楽観的更新済みなので無視）。
   #applyNoteUpdate(p: {
     columnId: string;
     noteId: string;
     update: NoteUpdate;
     actorId: string | null;
   }) {
-    const col = this.columns.find((c) => c.id === p.columnId);
-    if (!col) return;
+    const tab = this.#findTab(p.columnId);
+    if (!tab) return;
 
     if (p.update.type === "deleted") {
-      col.notes = col.notes.filter((n) => n.id !== p.noteId);
+      tab.notes = tab.notes.filter((n) => n.id !== p.noteId);
       return;
     }
-
-    // 対象ノート（renote 先も）を集める
     const targets: Note[] = [];
-    for (const n of col.notes) {
+    for (const n of tab.notes) {
       if (n.id === p.noteId) targets.push(n);
       if (n.renote && n.renote.id === p.noteId) targets.push(n.renote);
     }
     if (targets.length === 0) return;
 
-    const mine = this.#myUserIds();
-    const isMine = p.actorId != null && mine.has(p.actorId);
-
+    const isMine = p.actorId != null && this.#myUserIds().has(p.actorId);
     for (const n of targets) {
       switch (p.update.type) {
         case "reacted":
-          if (isMine) break; // 楽観的更新済み
+          if (isMine) break;
           n.reactions[p.update.reaction] = (n.reactions[p.update.reaction] ?? 0) + 1;
           n.reactionCount += 1;
           break;
@@ -201,9 +231,7 @@ class AppStore {
           break;
         }
         case "pollVoted":
-          if (n.poll && n.poll.choices[p.update.choice]) {
-            n.poll.choices[p.update.choice].votes += 1;
-          }
+          if (n.poll && n.poll.choices[p.update.choice]) n.poll.choices[p.update.choice].votes += 1;
           break;
       }
     }
@@ -213,14 +241,12 @@ class AppStore {
     return new Set(this.accounts.map((a) => a.userId));
   }
 
-  /// カラム表示中ノートをキャプチャ購読する（初期ページ分。Streaming 受信分は Rust が自動登録）。
-  #captureInitial(columnId: string, notes: Note[]) {
+  #captureInitial(tabId: string, notes: Note[]) {
     const ids = notes.map((n) => n.id);
-    if (ids.length > 0) void commands.captureNotes(columnId, ids);
+    if (ids.length > 0) void commands.captureNotes(tabId, ids);
   }
 
   async addAccount(host: string): Promise<string> {
-    // 認可URLを取得し、既定ブラウザで開く。認可後に completeAccount を呼ぶ。
     const session = await unwrap(commands.startMiauth(host));
     await openUrl(session.url);
     return session.sessionId;
@@ -236,15 +262,17 @@ class AppStore {
   async removeAccount(accountId: string) {
     await unwrap(commands.removeAccount(accountId));
     this.accounts = this.accounts.filter((a) => a.id !== accountId);
-    // 関連カラムも閉じる
-    for (const c of this.columns.filter((c) => c.accountId === accountId)) {
-      await this.closeColumn(c.id);
+    for (const t of this.#allTabs().filter((t) => t.accountId === accountId)) {
+      await this.closeTab(t.id);
     }
   }
 
-  async addColumn(accountId: string, kind: ColumnKind, filter: FilterQuery) {
-    const opened = await unwrap(commands.addColumn(accountId, kind, filter));
-    this.columns = [...this.columns, this.#toView(opened)];
+  /// タブを追加する。`groupId` を指定するとそのカラムに、None なら新しいカラムを作る。
+  async addColumn(accountId: string, kind: ColumnKind, filter: FilterQuery, groupId?: string) {
+    const opened = await unwrap(commands.addColumn(accountId, kind, filter, groupId ?? null));
+    const tab = this.#insertTab(opened);
+    const g = this.groups.find((x) => x.id === opened.group.id);
+    if (g) g.activeTabId = tab.id;
     this.#captureInitial(opened.column.id, opened.notes);
   }
 
@@ -257,36 +285,40 @@ class AppStore {
     return await unwrap(commands.listUserLists(accountId));
   }
 
-  async loadMore(columnId: string) {
-    const col = this.columns.find((c) => c.id === columnId);
-    if (!col || col.loadingMore) return;
-    col.loadingMore = true;
+  async loadMore(tabId: string) {
+    const tab = this.#findTab(tabId);
+    if (!tab || tab.loadingMore) return;
+    tab.loadingMore = true;
     try {
-      if (col.kind.type === "notifications") {
-        if (col.notifications.length === 0) return;
-        const oldest = col.notifications[col.notifications.length - 1].id;
-        const older = await unwrap(commands.fetchNotificationsBackfill(col.id, oldest));
-        const known = new Set(col.notifications.map((n) => n.id));
-        const fresh = older.filter((n) => !known.has(n.id));
-        col.notifications = [...col.notifications, ...fresh].slice(0, MAX_NOTES);
+      if (tab.kind.type === "notifications") {
+        if (tab.notifications.length === 0) return;
+        const oldest = tab.notifications[tab.notifications.length - 1].id;
+        const older = await unwrap(commands.fetchNotificationsBackfill(tab.id, oldest));
+        const known = new Set(tab.notifications.map((n) => n.id));
+        tab.notifications = [...tab.notifications, ...older.filter((n) => !known.has(n.id))].slice(0, MAX_NOTES);
       } else {
-        if (col.notes.length === 0) return;
-        const oldest = col.notes[col.notes.length - 1].id;
-        const older = await unwrap(commands.fetchBackfill(col.id, oldest));
-        const known = new Set(col.notes.map((n) => n.id));
-        const fresh = older.filter((n) => !known.has(n.id));
-        col.notes = [...col.notes, ...fresh].slice(0, MAX_NOTES);
+        if (tab.notes.length === 0) return;
+        const oldest = tab.notes[tab.notes.length - 1].id;
+        const older = await unwrap(commands.fetchBackfill(tab.id, oldest));
+        const known = new Set(tab.notes.map((n) => n.id));
+        tab.notes = [...tab.notes, ...older.filter((n) => !known.has(n.id))].slice(0, MAX_NOTES);
       }
     } catch (e) {
       this.error = String(e);
     } finally {
-      col.loadingMore = false;
+      tab.loadingMore = false;
     }
   }
 
-  async closeColumn(columnId: string) {
-    await unwrap(commands.closeColumn(columnId));
-    this.columns = this.columns.filter((c) => c.id !== columnId);
+  /// タブを閉じる。グループが空になったらグループも消す。
+  async closeTab(tabId: string) {
+    await unwrap(commands.closeColumn(tabId));
+    for (const g of this.groups) {
+      if (!g.tabs.some((t) => t.id === tabId)) continue;
+      g.tabs = g.tabs.filter((t) => t.id !== tabId);
+      if (g.activeTabId === tabId) g.activeTabId = g.tabs[0]?.id ?? "";
+    }
+    this.groups = this.groups.filter((g) => g.tabs.length > 0);
   }
 
   // ---- Phase 3: 投稿・リアクション ----
@@ -299,7 +331,6 @@ class AppStore {
   }
 
   async postNote(accountId: string, draft: NoteDraft) {
-    // 投稿結果は streaming(home) でも届くため、ここでは送信のみ（重複は購読側で排除）
     await unwrap(commands.postNote(accountId, draft));
     this.compose = null;
   }
@@ -310,9 +341,7 @@ class AppStore {
 
   async deleteNote(accountId: string, noteId: string) {
     await unwrap(commands.deleteNoteCmd(accountId, noteId));
-    for (const col of this.columns) {
-      col.notes = col.notes.filter((n) => n.id !== noteId);
-    }
+    for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
   }
 
   async loadEmojis(accountId: string): Promise<EmojiDef[]> {
@@ -322,39 +351,32 @@ class AppStore {
     return list;
   }
 
-  /// リアクションのトグル（楽観的更新 → 失敗時ロールバック）。
   async toggleReaction(accountId: string, noteId: string, reaction: string) {
     const targets = this.#collectNotes(noteId);
     if (targets.length === 0) return;
     const backups = targets.map((n) => snapshotReaction(n));
     const already = targets[0].myReaction;
 
-    // 楽観的にローカル反映
-    if (already === reaction) {
-      targets.forEach(removeReaction);
-    } else {
-      targets.forEach((n) => addReaction(n, reaction));
-    }
+    if (already === reaction) targets.forEach(removeReaction);
+    else targets.forEach((n) => addReaction(n, reaction));
 
     try {
       if (already === reaction) {
         await unwrap(commands.unreact(accountId, noteId));
       } else {
-        if (already) await unwrap(commands.unreact(accountId, noteId)); // 付け替えは一旦解除
+        if (already) await unwrap(commands.unreact(accountId, noteId));
         await unwrap(commands.react(accountId, noteId, reaction));
       }
     } catch (e) {
-      // ロールバック
       backups.forEach(restoreReaction);
       this.error = String(e);
     }
   }
 
-  /// 指定 noteId のノート実体を全カラムから集める（renote 先も対象）。
   #collectNotes(noteId: string): Note[] {
     const out: Note[] = [];
-    for (const col of this.columns) {
-      for (const n of col.notes) {
+    for (const t of this.#allTabs()) {
+      for (const n of t.notes) {
         if (n.id === noteId) out.push(n);
         if (n.renote && n.renote.id === noteId) out.push(n.renote);
       }
@@ -371,7 +393,6 @@ function addReaction(n: Note, reaction: string) {
   n.myReaction = reaction;
   n.reactionCount += 1;
 }
-
 function removeReaction(n: Note) {
   const cur = n.myReaction;
   if (!cur) return;
@@ -381,7 +402,6 @@ function removeReaction(n: Note) {
   n.reactionCount = Math.max(0, n.reactionCount - 1);
   n.myReaction = null;
 }
-
 function snapshotReaction(n: Note) {
   return { n, reactions: { ...n.reactions }, myReaction: n.myReaction, count: n.reactionCount };
 }

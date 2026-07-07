@@ -1,11 +1,15 @@
 <script lang="ts">
-  import type { ColumnView } from "../lib/store.svelte";
-  import { app } from "../lib/store.svelte";
+  import type { GroupView } from "../lib/store.svelte";
+  import { app, kindLabel } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
 
-  let { column }: { column: ColumnView } = $props();
-  const isNotif = $derived(column.kind.type === "notifications");
+  let { group, onAddTab }: { group: GroupView; onAddTab: (groupId: string) => void } = $props();
+
+  const activeTab = $derived(
+    group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[0],
+  );
+  const isNotif = $derived(activeTab?.kind.type === "notifications");
 
   const stateLabel: Record<string, string> = {
     connecting: "接続中…",
@@ -16,80 +20,92 @@
 
   function onScroll(e: Event) {
     const el = e.currentTarget as HTMLElement;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
-      app.loadMore(column.id);
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300 && activeTab) {
+      app.loadMore(activeTab.id);
     }
   }
 
-  // 幅リサイズ（右端ハンドルをドラッグ）
+  // 幅リサイズ
   let resizing = false;
   let startX = 0;
   let startW = 0;
   function onResizeDown(e: PointerEvent) {
     resizing = true;
     startX = e.clientX;
-    startW = column.width;
+    startW = group.width;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
   function onResizeMove(e: PointerEvent) {
     if (!resizing) return;
     const w = Math.min(720, Math.max(220, startW + (e.clientX - startX)));
-    app.setColumnWidthLocal(column.id, w);
+    app.setGroupWidthLocal(group.id, w);
   }
   function onResizeUp() {
     if (!resizing) return;
     resizing = false;
-    app.persistColumnWidth(column.id, column.width);
+    app.persistGroupWidth(group.id, group.width);
   }
 </script>
 
 <section
   class="column"
-  style={`width:${column.width}px`}
-  class:dragging={app.draggingColumnId === column.id}
+  style={`width:${group.width}px`}
+  class:dragging={app.draggingGroupId === group.id}
   ondragover={(e) => {
     e.preventDefault();
-    app.dragOverColumn(column.id);
+    app.dragOverGroup(group.id);
   }}
   role="group"
 >
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <header
-    class="col-head"
-    draggable="true"
-    ondragstart={(e) => {
-      e.dataTransfer?.setData("text/plain", column.id);
-      app.startDragColumn(column.id);
-    }}
-    ondragend={() => app.endDragColumn()}
-    title="ドラッグで並べ替え"
-  >
-    <span class="dot" data-state={column.state}></span>
-    <span class="title">{column.title}</span>
-    <span class="col-state">{stateLabel[column.state] ?? column.state}</span>
-    <button class="close" title="カラムを閉じる" onclick={() => app.closeColumn(column.id)}>✕</button>
-  </header>
+  <div class="tabbar">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span
+      class="grip"
+      draggable="true"
+      ondragstart={(e) => {
+        e.dataTransfer?.setData("text/plain", group.id);
+        app.startDragGroup(group.id);
+      }}
+      ondragend={() => app.endDragGroup()}
+      title="ドラッグでカラムを並べ替え"
+    >⋮⋮</span>
 
-  <div class="notes" onscroll={onScroll}>
-    {#if isNotif}
-      {#each column.notifications as n (n.id)}
-        <NotificationCard notification={n} />
-      {/each}
-      {#if column.notifications.length === 0 && !column.loadingMore}
-        <div class="empty">まだ通知がありません</div>
-      {/if}
-    {:else}
-      {#each column.notes as note (note.id)}
-        <NoteCard {note} accountId={column.accountId} />
-      {/each}
-      {#if column.notes.length === 0 && !column.loadingMore}
-        <div class="empty">まだノートがありません</div>
-      {/if}
-    {/if}
-    {#if column.loadingMore}
-      <div class="loading">読み込み中…</div>
-    {/if}
+    {#each group.tabs as t (t.id)}
+      <div class="tab" class:active={t.id === group.activeTabId}>
+        <button class="tab-btn" onclick={() => app.setActiveTab(group.id, t.id)} title={t.title}>
+          <span class="tab-dot" data-state={t.state}></span>{kindLabel(t.kind)}
+        </button>
+        <button class="tab-close" title="タブを閉じる" onclick={() => app.closeTab(t.id)}>✕</button>
+      </div>
+    {/each}
+
+    <button class="tab-add" title="タブを追加" onclick={() => onAddTab(group.id)}>＋</button>
   </div>
+
+  {#if activeTab}
+    <div class="head-sub" title={activeTab.title}>
+      {activeTab.title}
+      <span class="col-state">{stateLabel[activeTab.state] ?? activeTab.state}</span>
+    </div>
+    <div class="notes" onscroll={onScroll}>
+      {#if isNotif}
+        {#each activeTab.notifications as n (n.id)}
+          <NotificationCard notification={n} />
+        {/each}
+        {#if activeTab.notifications.length === 0 && !activeTab.loadingMore}
+          <div class="empty">まだ通知がありません</div>
+        {/if}
+      {:else}
+        {#each activeTab.notes as note (note.id)}
+          <NoteCard {note} accountId={activeTab.accountId} />
+        {/each}
+        {#if activeTab.notes.length === 0 && !activeTab.loadingMore}
+          <div class="empty">まだノートがありません</div>
+        {/if}
+      {/if}
+      {#if activeTab.loadingMore}<div class="loading">読み込み中…</div>{/if}
+    </div>
+  {/if}
 
   <div
     class="resize"
@@ -114,56 +130,105 @@
   .column.dragging {
     opacity: 0.55;
   }
-  .col-head {
+  .tabbar {
     display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 8px;
+    align-items: stretch;
+    gap: 1px;
+    background: var(--surface-2);
     border-bottom: 1px solid var(--border);
     border-top: 2px solid var(--accent);
-    background: var(--surface-2);
+    overflow-x: auto;
+    min-height: 26px;
+  }
+  .grip {
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    color: var(--text-dim);
     cursor: grab;
     user-select: none;
+    font-size: 0.7rem;
+    letter-spacing: -2px;
   }
-  .col-head:active {
+  .grip:active {
     cursor: grabbing;
   }
-  .title {
-    font-weight: 600;
-    font-size: 0.82rem;
+  .tab {
+    display: flex;
+    align-items: center;
   }
-  .col-state {
-    margin-left: auto;
-    font-size: 0.68rem;
-    color: var(--text-dim);
+  .tab.active {
+    box-shadow: inset 0 -2px 0 var(--accent);
   }
-  .close {
+  .tab:not(.active) {
+    opacity: 0.65;
+  }
+  .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.76rem;
+    padding: 2px 6px;
+    white-space: nowrap;
+  }
+  .tab-close {
     border: none;
     background: transparent;
     color: var(--text-dim);
     cursor: pointer;
+    font-size: 0.65rem;
+    padding: 0 4px 0 0;
+  }
+  .tab:not(.active) .tab-close {
+    display: none;
+  }
+  .tab-add {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0 8px;
     font-size: 0.85rem;
-    padding: 0 2px;
   }
-  .close:hover {
-    color: var(--text);
+  .tab-add:hover {
+    color: var(--accent);
   }
-  .dot {
-    width: 7px;
-    height: 7px;
+  .tab-dot {
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--text-dim);
     flex: none;
   }
-  .dot[data-state="connected"] {
+  .tab-dot[data-state="connected"] {
     background: #22c55e;
   }
-  .dot[data-state="connecting"],
-  .dot[data-state="reconnecting"] {
+  .tab-dot[data-state="connecting"],
+  .tab-dot[data-state="reconnecting"] {
     background: #eab308;
   }
-  .dot[data-state="error"] {
+  .tab-dot[data-state="error"] {
     background: #ef4444;
+  }
+  .head-sub {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .col-state {
+    margin-left: auto;
+    flex: none;
   }
   .notes {
     overflow-y: auto;
