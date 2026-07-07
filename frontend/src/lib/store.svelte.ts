@@ -56,6 +56,15 @@ export interface ComposeState {
   quoteOf?: Note;
 }
 
+export type LogLevel = "info" | "success" | "warn" | "error";
+/// Backstage（操作ログ/エラー）の1エントリ。
+export interface LogEntry {
+  id: number;
+  at: number; // epoch ms
+  level: LogLevel;
+  text: string;
+}
+
 class AppStore {
   accounts = $state<Account[]>([]);
   groups = $state<GroupView[]>([]);
@@ -69,6 +78,9 @@ class AppStore {
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
   reactPickerNoteId = $state<string | null>(null);
+  // Backstage: 操作ログ・エラー（新しいものが先頭）
+  logs = $state<LogEntry[]>([]);
+  #logSeq = 0;
 
   #unlisten: UnlistenFn[] = [];
 
@@ -90,11 +102,11 @@ class AppStore {
           this.#insertTab(opened);
           this.#captureInitial(opened.column.id, opened.notes);
         } catch (e) {
-          this.error = String(e);
+          this.#fail(e);
         }
       }
     } catch (e) {
-      this.error = String(e);
+      this.#fail(e);
     } finally {
       this.booting = false;
     }
@@ -128,6 +140,25 @@ class AppStore {
     if (!g.activeTabId) g.activeTabId = tab.id;
     if (!this.focusedGroupId) this.focusedGroupId = g.id;
     return tab;
+  }
+
+  // ---- Backstage（操作ログ） ----
+
+  static #LOG_CAP = 300;
+  #log(level: LogLevel, text: string) {
+    this.logs = [{ id: ++this.#logSeq, at: Date.now(), level, text }, ...this.logs].slice(
+      0,
+      AppStore.#LOG_CAP,
+    );
+  }
+  /// エラーをバナー表示＋Backstage へ記録する共通処理。
+  #fail(e: unknown) {
+    const msg = String(e);
+    this.error = msg;
+    this.#log("error", msg);
+  }
+  clearLogs() {
+    this.logs = [];
   }
 
   #allTabs(): TabView[] {
@@ -307,7 +338,7 @@ class AppStore {
       await unwrap(commands.moveTab(dragId, loc.group.id, loc.group.tabs.map((t) => t.id)));
       await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
     } catch (e) {
-      this.error = String(e);
+      this.#fail(e);
     }
   }
 
@@ -333,7 +364,7 @@ class AppStore {
     try {
       await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
     } catch (e) {
-      this.error = String(e);
+      this.#fail(e);
     }
   }
 
@@ -345,7 +376,7 @@ class AppStore {
     try {
       await unwrap(commands.setGroupWidth(groupId, width));
     } catch (e) {
-      this.error = String(e);
+      this.#fail(e);
     }
   }
 
@@ -364,7 +395,15 @@ class AppStore {
     this.#unlisten.push(
       await events.columnConnectionState.listen((e) => {
         const tab = this.#findTab(e.payload.columnId);
-        if (tab) tab.state = e.payload.state;
+        if (!tab) return;
+        const prev = tab.state;
+        tab.state = e.payload.state;
+        // 状態遷移を Backstage に記録（起動時の connecting→connected は除外）
+        const name = tab.title;
+        if (e.payload.state === "error") this.#log("error", `接続エラー: ${name}`);
+        else if (e.payload.state === "reconnecting") this.#log("warn", `再接続中: ${name}`);
+        else if (e.payload.state === "connected" && prev !== "connecting")
+          this.#log("success", `再接続しました: ${name}`);
       }),
     );
     this.#unlisten.push(
@@ -447,14 +486,17 @@ class AppStore {
     if (!this.accounts.some((a) => a.id === account.id)) {
       this.accounts = [...this.accounts, account];
     }
+    this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
   }
 
   async removeAccount(accountId: string) {
+    const acc = this.accounts.find((a) => a.id === accountId);
     await unwrap(commands.removeAccount(accountId));
     this.accounts = this.accounts.filter((a) => a.id !== accountId);
     for (const t of this.#allTabs().filter((t) => t.accountId === accountId)) {
       await this.closeTab(t.id);
     }
+    this.#log("info", `アカウントを削除: ${acc ? `@${acc.username}@${acc.host}` : accountId}`);
   }
 
   /// タブを追加する。`groupId` を指定するとそのカラムに、None なら新しいカラムを作る。
@@ -464,6 +506,7 @@ class AppStore {
     const g = this.groups.find((x) => x.id === opened.group.id);
     if (g) g.activeTabId = tab.id;
     this.#captureInitial(opened.column.id, opened.notes);
+    this.#log("success", `カラムを追加: ${kindLabel(kind)}`);
   }
 
   async validateFilter(filter: FilterQuery): Promise<string | null> {
@@ -483,6 +526,7 @@ class AppStore {
     }
     await unwrap(commands.setNotify(config));
     this.notify = config;
+    this.#log("info", "通知設定を保存しました");
   }
 
   /// 表示設定（テーマ・既定カラム幅）を保存し、テーマを即時反映。
@@ -490,6 +534,7 @@ class AppStore {
     await unwrap(commands.setUiPrefs(prefs));
     this.ui = prefs;
     this.#applyTheme(prefs.theme);
+    this.#log("info", "表示設定を保存しました");
   }
 
   /// data-theme を <html> に反映。auto は属性を外して OS 設定に追従させる。
@@ -521,6 +566,7 @@ class AppStore {
     for (const t of this.#allTabs()) {
       t.notes = t.notes.filter((n) => !isMuted(n, config));
     }
+    this.#log("info", "NG（ミュート）設定を保存しました");
   }
 
   async loadMore(tabId: string) {
@@ -542,7 +588,7 @@ class AppStore {
         tab.notes = [...tab.notes, ...older.filter((n) => !known.has(n.id))].slice(0, MAX_NOTES);
       }
     } catch (e) {
-      this.error = String(e);
+      this.#fail(e);
     } finally {
       tab.loadingMore = false;
     }
@@ -557,6 +603,10 @@ class AppStore {
       if (g.activeTabId === tabId) g.activeTabId = g.tabs[0]?.id ?? "";
     }
     this.groups = this.groups.filter((g) => g.tabs.length > 0);
+    if (this.groups.length > 0 && !this.groups.some((g) => g.id === this.focusedGroupId)) {
+      this.focusedGroupId = this.groups[0].id;
+    }
+    this.#log("info", "タブを閉じました");
   }
 
   // ---- Phase 3: 投稿・リアクション ----
@@ -571,15 +621,22 @@ class AppStore {
   async postNote(accountId: string, draft: NoteDraft) {
     await unwrap(commands.postNote(accountId, draft));
     this.compose = null;
+    this.#log("success", "投稿しました");
   }
 
   async renote(accountId: string, noteId: string, visibility: VisibilityInput = "public") {
-    await unwrap(commands.renote(accountId, noteId, visibility));
+    try {
+      await unwrap(commands.renote(accountId, noteId, visibility));
+      this.#log("success", "Renote しました");
+    } catch (e) {
+      this.#fail(e);
+    }
   }
 
   async deleteNote(accountId: string, noteId: string) {
     await unwrap(commands.deleteNoteCmd(accountId, noteId));
     for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
+    this.#log("info", "ノートを削除しました");
   }
 
   async loadEmojis(accountId: string): Promise<EmojiDef[]> {
@@ -601,13 +658,15 @@ class AppStore {
     try {
       if (already === reaction) {
         await unwrap(commands.unreact(accountId, noteId));
+        this.#log("info", "リアクションを取り消しました");
       } else {
         if (already) await unwrap(commands.unreact(accountId, noteId));
         await unwrap(commands.react(accountId, noteId, reaction));
+        this.#log("success", `リアクション ${reaction}`);
       }
     } catch (e) {
       backups.forEach(restoreReaction);
-      this.error = String(e);
+      this.#fail(e);
     }
   }
 

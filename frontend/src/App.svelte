@@ -7,6 +7,7 @@
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Compose from "./ui/Compose.svelte";
   import Settings from "./ui/Settings.svelte";
+  import Backstage from "./ui/Backstage.svelte";
   import { defaultKeymap, eventToChord } from "./lib/keymap";
 
   const keymap = defaultKeymap();
@@ -106,6 +107,10 @@
       </div>
     {/if}
   </main>
+
+  {#if app.accounts.length > 0 && !app.booting}
+    <Backstage />
+  {/if}
 
   {#if app.compose}
     <Compose />
