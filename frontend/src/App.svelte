@@ -10,13 +10,18 @@
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
+  type SettingsSection = "accounts" | "display" | "notify" | "mute" | "keys";
   let showSettings = $state(false);
-  let settingsInitial = $state<"notify" | "mute">("notify");
+  let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);
 
-  function openSettings(section: "notify" | "mute") {
+  function openSettings(section: SettingsSection) {
     settingsInitial = section;
     showSettings = true;
+  }
+  function addAccountFromSettings() {
+    showSettings = false;
+    showAdd = true;
   }
 
   function openAddColumn() {
@@ -44,7 +49,7 @@
     {/if}
     {#if app.accounts.length > 0}
       <button class="bar-btn" onclick={openAddColumn}>＋カラム</button>
-      <button class="bar-btn" onclick={() => openSettings("notify")} title="設定">⚙ 設定</button>
+      <button class="bar-btn" onclick={() => openSettings("accounts")} title="設定">⚙ 設定</button>
     {/if}
     <button class="bar-btn" onclick={() => (showAdd = !showAdd)}>
       {showAdd ? "閉じる" : "＋アカウント"}
@@ -82,7 +87,11 @@
     <AddColumnModal groupId={addTabGroupId} onclose={() => (showAddColumn = false)} />
   {/if}
   {#if showSettings}
-    <Settings initial={settingsInitial} onclose={() => (showSettings = false)} />
+    <Settings
+      initial={settingsInitial}
+      onAddAccount={addAccountFromSettings}
+      onclose={() => (showSettings = false)}
+    />
   {/if}
 </div>
 

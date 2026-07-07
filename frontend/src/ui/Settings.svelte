@@ -1,13 +1,24 @@
 <script lang="ts">
   import NotifySection from "./settings/NotifySection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
+  import DisplaySection from "./settings/DisplaySection.svelte";
+  import AccountsSection from "./settings/AccountsSection.svelte";
+  import KeysSection from "./settings/KeysSection.svelte";
 
-  let { onclose, initial = "notify" }: { onclose: () => void; initial?: Section } = $props();
+  type Section = "accounts" | "display" | "notify" | "mute" | "keys";
 
-  type Section = "notify" | "mute";
+  let {
+    onclose,
+    onAddAccount,
+    initial = "notify",
+  }: { onclose: () => void; onAddAccount: () => void; initial?: Section } = $props();
+
   const nav: { id: Section; label: string }[] = [
+    { id: "accounts", label: "アカウント" },
+    { id: "display", label: "表示" },
     { id: "notify", label: "通知" },
     { id: "mute", label: "NG（ミュート）" },
+    { id: "keys", label: "キー操作" },
   ];
 
   // initial は開いた時点の初期タブのみ。モーダルは開くたび再生成されるので初期値参照でよい。
@@ -32,10 +43,16 @@
         {/each}
       </nav>
       <section class="pane">
-        {#if active === "notify"}
+        {#if active === "accounts"}
+          <AccountsSection {onAddAccount} />
+        {:else if active === "display"}
+          <DisplaySection />
+        {:else if active === "notify"}
           <NotifySection />
         {:else if active === "mute"}
           <MuteSection />
+        {:else if active === "keys"}
+          <KeysSection />
         {/if}
       </section>
     </div>

@@ -59,10 +59,16 @@ pub async fn add_column(
         }
         None => {
             let order = state.settings.load_groups()?.len() as i32;
+            let width = state
+                .settings
+                .load_ui()
+                .map(|p| p.default_column_width)
+                .unwrap_or(DEFAULT_WIDTH)
+                .clamp(220, 720);
             let group = ColumnGroup {
                 id: uuid::Uuid::new_v4().to_string(),
                 order,
-                width: DEFAULT_WIDTH,
+                width,
             };
             state.settings.upsert_group(&group)?;
             (group, 0)

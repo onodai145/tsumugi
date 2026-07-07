@@ -1,12 +1,13 @@
 //! 設定データ（Account / Column）の永続化。token は含めない（keyring 管轄）。
 
-use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig};
+use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::Result;
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
 
 const MUTE_KEY: &str = "mute";
 const NOTIFY_KEY: &str = "notify";
+const UI_KEY: &str = "ui";
 
 pub struct SettingsStore {
     // note_cache.rs（同 crate の別モジュール）からも使うため pub(crate)
@@ -220,6 +221,17 @@ impl SettingsStore {
 
     pub fn save_notify(&self, cfg: &NotifyConfig) -> Result<()> {
         self.set_kv(NOTIFY_KEY, &serde_json::to_string(cfg)?)
+    }
+
+    pub fn load_ui(&self) -> Result<UiPrefs> {
+        match self.get_kv(UI_KEY)? {
+            Some(s) => Ok(serde_json::from_str(&s)?),
+            None => Ok(UiPrefs::default()),
+        }
+    }
+
+    pub fn save_ui(&self, prefs: &UiPrefs) -> Result<()> {
+        self.set_kv(UI_KEY, &serde_json::to_string(prefs)?)
     }
 
     fn get_kv(&self, key: &str) -> Result<Option<String>> {

@@ -15,8 +15,9 @@
   text-rendering: optimizeLegibility;
 }
 
+/* data-theme 未指定(=auto)のときのみ OS 設定に追従。明示指定は下の [data-theme] が優先。 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --surface-1: #16181d;
     --surface-2: #1d2026;
     --surface-3: #2a2e37;
@@ -25,6 +26,16 @@
     --text-dim: #9aa1ac;
     --accent: #8b6dff;
   }
+}
+/* テーマを明示的に dark 指定した場合は OS 設定に関わらずダーク */
+:root[data-theme="dark"] {
+  --surface-1: #16181d;
+  --surface-2: #1d2026;
+  --surface-3: #2a2e37;
+  --border: #2c313b;
+  --text: #e6e8ec;
+  --text-dim: #9aa1ac;
+  --accent: #8b6dff;
 }
 
 * {

@@ -1,6 +1,6 @@
 //! NG（ミュート）・通知設定の取得・更新。
 
-use crate::domain::{MuteConfig, NotifyConfig};
+use crate::domain::{MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::Result;
 use crate::state::AppState;
 use tauri::State;
@@ -33,4 +33,18 @@ pub async fn get_notify(state: State<'_, AppState>) -> Result<NotifyConfig> {
 #[specta::specta]
 pub async fn set_notify(state: State<'_, AppState>, config: NotifyConfig) -> Result<()> {
     state.settings.save_notify(&config)
+}
+
+/// 表示設定（テーマ・既定カラム幅）を取得。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_ui_prefs(state: State<'_, AppState>) -> Result<UiPrefs> {
+    state.settings.load_ui()
+}
+
+/// 表示設定を更新（永続化）。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<()> {
+    state.settings.save_ui(&prefs)
 }

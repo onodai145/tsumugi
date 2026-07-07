@@ -72,6 +72,10 @@ export const commands = {
 	getNotify: () => typedError<NotifyConfig, Error>(__TAURI_INVOKE("get_notify")),
 	/**  デスクトップ通知・音の設定を更新（永続化）。 */
 	setNotify: (config: NotifyConfig) => typedError<null, Error>(__TAURI_INVOKE("set_notify", { config })),
+	/**  表示設定（テーマ・既定カラム幅）を取得。 */
+	getUiPrefs: () => typedError<UiPrefs, Error>(__TAURI_INVOKE("get_ui_prefs")),
+	/**  表示設定を更新（永続化）。 */
+	setUiPrefs: (prefs: UiPrefs) => typedError<null, Error>(__TAURI_INVOKE("set_ui_prefs", { prefs })),
 };
 
 /** Events */
@@ -346,6 +350,14 @@ export type PollInput_Serialize = {
 	choices: string[],
 	multiple: boolean,
 	expiresAt?: number | null,
+};
+
+/**  表示まわりのグローバル設定。テーマと新規カラムの既定幅。 */
+export type UiPrefs = {
+	/**  "auto" | "light" | "dark" */
+	theme: string,
+	/**  新規カラム（グループ）作成時の既定幅（px） */
+	defaultColumnWidth: number,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
