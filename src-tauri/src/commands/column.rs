@@ -2,10 +2,12 @@
 //! タブはソース種別＋フィルタを持ち、購読＋REST取得しフィルタ適用して表示する。
 //! 定義は SQLite に永続化し、起動時に list_groups/list_columns → resume_column で復元する。
 
-use crate::api::meta::fetch_user_lists;
+use crate::api::meta::{fetch_antennas, fetch_followed_channels, fetch_user_lists, resolve_user};
 use crate::api::notes::fetch_notes;
 use crate::api::notifications::fetch_notifications;
-use crate::domain::{Column, ColumnGroup, ColumnKind, FilterQuery, Note, Notification, UserList};
+use crate::domain::{
+    Column, ColumnGroup, ColumnKind, FilterQuery, Note, Notification, SourceItem, User, UserList,
+};
 use crate::error::{Error, Result};
 use crate::filter::CompiledFilter;
 use crate::state::AppState;
@@ -273,6 +275,40 @@ pub async fn list_user_lists(
 ) -> Result<Vec<UserList>> {
     let client = state.client_for(&account_id)?;
     fetch_user_lists(&client).await
+}
+
+/// アンテナ一覧（Antenna タブ作成用）。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_antennas(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Vec<SourceItem>> {
+    let client = state.client_for(&account_id)?;
+    fetch_antennas(&client).await
+}
+
+/// フォロー中チャンネル一覧（Channel タブ作成用）。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_channels(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Vec<SourceItem>> {
+    let client = state.client_for(&account_id)?;
+    fetch_followed_channels(&client).await
+}
+
+/// acct から User を解決（User タブ作成用）。
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_user_acct(
+    state: State<'_, AppState>,
+    account_id: String,
+    acct: String,
+) -> Result<User> {
+    let client = state.client_for(&account_id)?;
+    resolve_user(&client, &acct).await
 }
 
 // ---- helpers ----

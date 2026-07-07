@@ -18,7 +18,7 @@ mod user;
 
 pub use account::Account;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
-pub use list::UserList;
+pub use list::{SourceItem, UserList};
 pub use mute::MuteConfig;
 pub use note::{DriveFile, Note, Poll, PollChoice, Visibility};
 pub use notification::Notification;

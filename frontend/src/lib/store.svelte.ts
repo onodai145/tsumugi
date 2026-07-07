@@ -541,6 +541,19 @@ class AppStore {
     return await unwrap(commands.listUserLists(accountId));
   }
 
+  async fetchAntennas(accountId: string) {
+    return await unwrap(commands.listAntennas(accountId));
+  }
+
+  async fetchChannels(accountId: string) {
+    return await unwrap(commands.listChannels(accountId));
+  }
+
+  /// acct（@user@host）から userId を解決する。
+  async resolveUser(accountId: string, acct: string) {
+    return await unwrap(commands.resolveUserAcct(accountId, acct));
+  }
+
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
   async setNotify(config: NotifyConfig) {
     if (config.desktop && !(await isPermissionGranted())) {
@@ -817,5 +830,13 @@ export function kindLabel(kind: ColumnKind): string {
       return "List";
     case "search":
       return "検索";
+    case "antenna":
+      return "アンテナ";
+    case "channel":
+      return "チャンネル";
+    case "user":
+      return "User";
+    case "tag":
+      return `#${kind.tag}`;
   }
 }

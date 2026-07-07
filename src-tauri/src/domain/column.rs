@@ -42,6 +42,21 @@ pub enum ColumnKind {
     Search {
         query: String,
     },
+    Antenna {
+        #[serde(rename = "antennaId")]
+        antenna_id: String,
+    },
+    Channel {
+        #[serde(rename = "channelId")]
+        channel_id: String,
+    },
+    User {
+        #[serde(rename = "userId")]
+        user_id: String,
+    },
+    Tag {
+        tag: String,
+    },
 }
 
 impl ColumnKind {
@@ -55,7 +70,9 @@ impl ColumnKind {
             ColumnKind::Global => ("globalTimeline", json!({})),
             ColumnKind::Hybrid => ("hybridTimeline", json!({})),
             ColumnKind::List { list_id } => ("userList", json!({ "listId": list_id })),
-            // Search/Notifications はストリーミング無し（REST のみ）/後続
+            ColumnKind::Antenna { antenna_id } => ("antenna", json!({ "antennaId": antenna_id })),
+            ColumnKind::Channel { channel_id } => ("channel", json!({ "channelId": channel_id })),
+            // Search/Notifications/User/Tag はストリーミング無し（REST のみ）
             _ => return None,
         })
     }
@@ -80,8 +97,71 @@ impl ColumnKind {
                 body["query"] = json!(query);
                 ("notes/search", body)
             }
+            ColumnKind::Antenna { antenna_id } => {
+                body["antennaId"] = json!(antenna_id);
+                ("antennas/notes", body)
+            }
+            ColumnKind::Channel { channel_id } => {
+                body["channelId"] = json!(channel_id);
+                ("channels/timeline", body)
+            }
+            ColumnKind::User { user_id } => {
+                body["userId"] = json!(user_id);
+                ("users/notes", body)
+            }
+            ColumnKind::Tag { tag } => {
+                body["tag"] = json!(tag);
+                ("notes/search-by-tag", body)
+            }
             ColumnKind::Notifications => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn antenna_channel_have_stream_and_rest() {
+        let a = ColumnKind::Antenna { antenna_id: "a1".into() };
+        let (ch, p) = a.stream_request().unwrap();
+        assert_eq!(ch, "antenna");
+        assert_eq!(p["antennaId"], "a1");
+        let (ep, body) = a.rest_request(20, None).unwrap();
+        assert_eq!(ep, "antennas/notes");
+        assert_eq!(body["antennaId"], "a1");
+
+        let c = ColumnKind::Channel { channel_id: "c1".into() };
+        assert_eq!(c.stream_request().unwrap().0, "channel");
+        assert_eq!(c.rest_request(20, None).unwrap().0, "channels/timeline");
+    }
+
+    #[test]
+    fn user_and_tag_are_rest_only() {
+        let u = ColumnKind::User { user_id: "u1".into() };
+        assert!(u.stream_request().is_none());
+        let (ep, body) = u.rest_request(20, Some("x")).unwrap();
+        assert_eq!(ep, "users/notes");
+        assert_eq!(body["userId"], "u1");
+        assert_eq!(body["untilId"], "x");
+
+        let t = ColumnKind::Tag { tag: "misskey".into() };
+        assert!(t.stream_request().is_none());
+        let (ep, body) = t.rest_request(20, None).unwrap();
+        assert_eq!(ep, "notes/search-by-tag");
+        assert_eq!(body["tag"], "misskey");
+    }
+
+    #[test]
+    fn struct_variant_fields_serialize_camelcase() {
+        // tag=type, フィールドは camelCase（antennaId 等）で往復すること
+        let a = ColumnKind::Antenna { antenna_id: "a1".into() };
+        let v = serde_json::to_value(&a).unwrap();
+        assert_eq!(v["type"], "antenna");
+        assert_eq!(v["antennaId"], "a1");
+        let back: ColumnKind = serde_json::from_value(v).unwrap();
+        assert_eq!(back, a);
     }
 }
 
