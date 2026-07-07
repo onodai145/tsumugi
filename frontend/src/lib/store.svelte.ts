@@ -13,6 +13,7 @@ import type {
   NoteUpdate,
   ColumnKind,
   FilterQuery,
+  Notification,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -21,8 +22,10 @@ const MAX_NOTES = 300; // カラムあたり DOM に保持する上限（仮想�
 export interface ColumnView {
   id: string;
   accountId: string;
+  kind: ColumnKind;
   title: string;
   notes: Note[];
+  notifications: Notification[];
   state: ConnectionState;
   loadingMore: boolean;
 }
@@ -73,8 +76,10 @@ class AppStore {
     return {
       id: opened.column.id,
       accountId: opened.column.accountId,
+      kind: opened.column.kind,
       title: acc ? `${src} @${acc.username}` : src,
       notes: opened.notes,
+      notifications: opened.notifications,
       state: "connecting",
       loadingMore: false,
     };
@@ -102,6 +107,14 @@ class AppStore {
     );
     this.#unlisten.push(
       await events.columnNoteUpdated.listen((e) => this.#applyNoteUpdate(e.payload)),
+    );
+    this.#unlisten.push(
+      await events.columnNotification.listen((e) => {
+        const col = this.columns.find((c) => c.id === e.payload.columnId);
+        if (!col) return;
+        if (col.notifications.some((n) => n.id === e.payload.notification.id)) return;
+        col.notifications = [e.payload.notification, ...col.notifications].slice(0, MAX_NOTES);
+      }),
     );
   }
 
@@ -206,14 +219,24 @@ class AppStore {
 
   async loadMore(columnId: string) {
     const col = this.columns.find((c) => c.id === columnId);
-    if (!col || col.loadingMore || col.notes.length === 0) return;
+    if (!col || col.loadingMore) return;
     col.loadingMore = true;
     try {
-      const oldest = col.notes[col.notes.length - 1].id;
-      const older = await unwrap(commands.fetchBackfill(col.id, oldest));
-      const known = new Set(col.notes.map((n) => n.id));
-      const fresh = older.filter((n) => !known.has(n.id));
-      col.notes = [...col.notes, ...fresh].slice(0, MAX_NOTES);
+      if (col.kind.type === "notifications") {
+        if (col.notifications.length === 0) return;
+        const oldest = col.notifications[col.notifications.length - 1].id;
+        const older = await unwrap(commands.fetchNotificationsBackfill(col.id, oldest));
+        const known = new Set(col.notifications.map((n) => n.id));
+        const fresh = older.filter((n) => !known.has(n.id));
+        col.notifications = [...col.notifications, ...fresh].slice(0, MAX_NOTES);
+      } else {
+        if (col.notes.length === 0) return;
+        const oldest = col.notes[col.notes.length - 1].id;
+        const older = await unwrap(commands.fetchBackfill(col.id, oldest));
+        const known = new Set(col.notes.map((n) => n.id));
+        const fresh = older.filter((n) => !known.has(n.id));
+        col.notes = [...col.notes, ...fresh].slice(0, MAX_NOTES);
+      }
     } catch (e) {
       this.error = String(e);
     } finally {

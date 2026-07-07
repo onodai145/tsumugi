@@ -4,8 +4,11 @@
 //! homeTimeline を購読しつつ、表示中ノートを subNote でキャプチャして、他者のリアクション/
 //! 投票/削除を `ColumnNoteUpdated` イベントで反映する（TQL§6: 値は更新するが出入りしない）。
 
-use crate::domain::Note;
-use crate::events::{ColumnConnectionState, ColumnNote, ColumnNoteUpdated, ConnectionState, NoteUpdate};
+use crate::domain::{Note, Notification};
+use crate::events::{
+    ColumnConnectionState, ColumnNote, ColumnNoteUpdated, ColumnNotification, ConnectionState,
+    NoteUpdate,
+};
 use crate::filter::eval::EvalContext;
 use crate::filter::CompiledFilter;
 use crate::state::AppState;
@@ -38,6 +41,16 @@ pub enum StreamCommand {
     Uncapture(Vec<String>),
 }
 
+/// ストリームの扱い方。Notes はフィルタ適用してノートを流し、Notifications は通知を流す。
+#[derive(Clone)]
+enum StreamMode {
+    Notes {
+        filter: Arc<CompiledFilter>,
+        ctx: Arc<EvalContext>,
+    },
+    Notifications,
+}
+
 struct StreamCtl {
     cancel: watch::Sender<bool>,
     cmd: mpsc::Sender<StreamCommand>,
@@ -52,6 +65,7 @@ pub struct ConnectionManager {
 impl ConnectionManager {
     /// 指定チャンネルを購読するストリームを開く。フィルタを適用して通過分のみ emit する。
     /// 同じ column_id が既にあれば張り替える。
+    /// ノートを流すチャンネルを開く（フィルタ適用）。
     #[allow(clippy::too_many_arguments)]
     pub fn open_channel(
         &self,
@@ -64,14 +78,35 @@ impl ConnectionManager {
         filter: CompiledFilter,
         ctx: EvalContext,
     ) {
+        let mode = StreamMode::Notes {
+            filter: Arc::new(filter),
+            ctx: Arc::new(ctx),
+        };
+        self.spawn_stream(app, column_id, host, token, channel, params, mode);
+    }
+
+    /// 通知(main チャンネル)を流すストリームを開く。
+    pub fn open_notifications(&self, app: AppHandle, column_id: String, host: String, token: String) {
+        self.spawn_stream(app, column_id, host, token, "main", serde_json::json!({}), StreamMode::Notifications);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_stream(
+        &self,
+        app: AppHandle,
+        column_id: String,
+        host: String,
+        token: String,
+        channel: &'static str,
+        params: serde_json::Value,
+        mode: StreamMode,
+    ) {
         self.close(&column_id);
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         let col = column_id.clone();
-        let filter = Arc::new(filter);
-        let ctx = Arc::new(ctx);
         let handle = tauri::async_runtime::spawn(async move {
-            run_channel(app, col, host, token, channel, params, cancel_rx, cmd_rx, filter, ctx).await;
+            run_channel(app, col, host, token, channel, params, cancel_rx, cmd_rx, mode).await;
         });
         self.streams.lock().unwrap().insert(
             column_id,
@@ -177,8 +212,7 @@ async fn run_channel(
     params: serde_json::Value,
     mut cancel: watch::Receiver<bool>,
     mut cmd_rx: mpsc::Receiver<StreamCommand>,
-    filter: Arc<CompiledFilter>,
-    ctx: Arc<EvalContext>,
+    mode: StreamMode,
 ) {
     let mut dedup = Dedup::new(DEDUP_CAPACITY);
     let mut capture = CaptureSet::new(CAPTURE_CAP);
@@ -201,8 +235,7 @@ async fn run_channel(
             &mut capture,
             &mut cancel,
             &mut cmd_rx,
-            &filter,
-            &ctx,
+            &mode,
         )
         .await;
 
@@ -232,8 +265,7 @@ async fn connect_and_run(
     capture: &mut CaptureSet,
     cancel: &mut watch::Receiver<bool>,
     cmd_rx: &mut mpsc::Receiver<StreamCommand>,
-    filter: &CompiledFilter,
-    ctx: &EvalContext,
+    mode: &StreamMode,
 ) -> RunOutcome {
     let url = format!("wss://{host}/streaming?i={token}");
     let ws = match tokio_tungstenite::connect_async(&url).await {
@@ -296,7 +328,7 @@ async fn connect_and_run(
             msg = read.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Some(sub) = handle_text(app, column_id, &text, dedup, filter, ctx) {
+                        if let Some(sub) = handle_text(app, column_id, &text, dedup, mode) {
                             // 新規ノートは自動キャプチャ
                             if let Some(evicted) = capture.add(&sub) {
                                 let _ = write.send(Message::Text(protocol::sub_note(&sub).into())).await;
@@ -328,11 +360,13 @@ fn handle_text(
     column_id: &str,
     text: &str,
     dedup: &mut Dedup,
-    filter: &CompiledFilter,
-    ctx: &EvalContext,
+    mode: &StreamMode,
 ) -> Option<String> {
     match protocol::parse_incoming(text) {
         Incoming::ChannelNote { note, .. } => {
+            let StreamMode::Notes { filter, ctx } = mode else {
+                return None;
+            };
             if dedup.accept(&note.id) {
                 let id = note.id.clone();
                 let normalized: Note = (*note).into();
@@ -350,6 +384,17 @@ fn handle_text(
                 }
                 .emit(app);
                 return Some(id);
+            }
+            None
+        }
+        Incoming::ChannelNotification { notification, .. } => {
+            if dedup.accept(&notification.id) {
+                let n: Notification = (*notification).into();
+                let _ = ColumnNotification {
+                    column_id: column_id.to_string(),
+                    notification: n,
+                }
+                .emit(app);
             }
             None
         }

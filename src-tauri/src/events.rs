@@ -1,7 +1,7 @@
 //! Rust → フロントの通知イベント（tauri-specta Event）。設計書§9 / phase0-scaffold §3.2。
 //! ペイロードに token は含めない。
 
-use crate::domain::Note;
+use crate::domain::{Note, Notification};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
@@ -12,6 +12,14 @@ use tauri_specta::Event;
 pub struct ColumnNote {
     pub column_id: String,
     pub note: Note,
+}
+
+/// 通知カラムに新規通知を追加する。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnNotification {
+    pub column_id: String,
+    pub notification: Notification,
 }
 
 /// キャプチャ中ノートの更新（他者のリアクション/投票/削除）。値のみ更新し、

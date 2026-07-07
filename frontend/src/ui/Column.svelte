@@ -2,8 +2,10 @@
   import type { ColumnView } from "../lib/store.svelte";
   import { app } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
+  import NotificationCard from "./NotificationCard.svelte";
 
   let { column }: { column: ColumnView } = $props();
+  const isNotif = $derived(column.kind.type === "notifications");
 
   const stateLabel: Record<string, string> = {
     connecting: "接続中…",
@@ -30,14 +32,23 @@
   </header>
 
   <div class="notes" onscroll={onScroll}>
-    {#each column.notes as note (note.id)}
-      <NoteCard {note} accountId={column.accountId} />
-    {/each}
+    {#if isNotif}
+      {#each column.notifications as n (n.id)}
+        <NotificationCard notification={n} />
+      {/each}
+      {#if column.notifications.length === 0 && !column.loadingMore}
+        <div class="empty">まだ通知がありません</div>
+      {/if}
+    {:else}
+      {#each column.notes as note (note.id)}
+        <NoteCard {note} accountId={column.accountId} />
+      {/each}
+      {#if column.notes.length === 0 && !column.loadingMore}
+        <div class="empty">まだノートがありません</div>
+      {/if}
+    {/if}
     {#if column.loadingMore}
       <div class="loading">読み込み中…</div>
-    {/if}
-    {#if column.notes.length === 0}
-      <div class="empty">まだノートがありません</div>
     {/if}
   </div>
 </section>

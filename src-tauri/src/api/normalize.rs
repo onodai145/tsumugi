@@ -1,6 +1,6 @@
 //! Misskey の生 JSON レスポンスを domain 型へ正規化する。
 
-use crate::domain::{DriveFile, Note, Poll, PollChoice, User, Visibility};
+use crate::domain::{DriveFile, Note, Notification, Poll, PollChoice, User, Visibility};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -42,6 +42,35 @@ impl From<RawUser> for User {
             followers_count: r.followers_count,
             following_count: r.following_count,
             notes_count: r.notes_count,
+        }
+    }
+}
+
+/// Misskey の Notification オブジェクト（i/notifications / main channel）を受ける生型。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawNotification {
+    pub id: String,
+    pub created_at: String,
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default)]
+    pub user: Option<RawUser>,
+    #[serde(default)]
+    pub note: Option<RawNote>,
+    #[serde(default)]
+    pub reaction: Option<String>,
+}
+
+impl From<RawNotification> for Notification {
+    fn from(r: RawNotification) -> Self {
+        Notification {
+            id: r.id,
+            created_at: to_epoch(&r.created_at),
+            kind: r.kind,
+            user: r.user.map(Into::into),
+            note: r.note.map(Into::into),
+            reaction: r.reaction,
         }
     }
 }
