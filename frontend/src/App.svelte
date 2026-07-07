@@ -4,6 +4,7 @@
   import Column from "./ui/Column.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
+  import ComposeBar from "./ui/ComposeBar.svelte";
   import Compose from "./ui/Compose.svelte";
 
   let showAdd = $state(false);
@@ -15,29 +16,27 @@
 </script>
 
 <div class="app">
-  <aside class="toolbar">
+  <!-- 上部: ブランド + 投稿バー + カラム/アカウント追加 -->
+  <header class="appbar">
     <div class="brand">tsumugi</div>
-    <div class="accounts">
-      {#each app.accounts as acc (acc.id)}
-        <div class="acc">
-          {#if acc.avatarUrl}
-            <img class="acc-avatar" src={acc.avatarUrl} alt="" />
-          {:else}
-            <div class="acc-avatar placeholder"></div>
-          {/if}
-          <span class="acc-name" title={`@${acc.username}@${acc.host}`}>@{acc.username}</span>
-          <button class="add-col" title="投稿" onclick={() => app.openCompose(acc.id)}>✎</button>
-        </div>
-      {/each}
-    </div>
     {#if app.accounts.length > 0}
-      <button class="add-account-btn" onclick={() => (showAddColumn = true)}>＋ カラム</button>
+      <ComposeBar />
+    {:else}
+      <div class="spacer"></div>
     {/if}
-    <button class="add-account-btn" onclick={() => (showAdd = !showAdd)}>
-      {showAdd ? "閉じる" : "＋ アカウント"}
+    {#if app.accounts.length > 0}
+      <button class="bar-btn" onclick={() => (showAddColumn = true)}>＋カラム</button>
+    {/if}
+    <button class="bar-btn" onclick={() => (showAdd = !showAdd)}>
+      {showAdd ? "閉じる" : "＋アカウント"}
     </button>
-    {#if app.error}<div class="global-err" title={app.error}>{app.error}</div>{/if}
-  </aside>
+  </header>
+
+  {#if app.error}
+    <div class="global-err" title={app.error} onclick={() => (app.error = null)} role="presentation">
+      {app.error}
+    </div>
+  {/if}
 
   <main class="main">
     {#if app.booting}
@@ -46,7 +45,7 @@
       <AddAccount />
     {:else if app.columns.length === 0}
       <div class="center-msg">
-        左の「＋ カラム」からソースとフィルタを選んでカラムを追加してください。
+        「＋カラム」からソースとフィルタを選んでカラムを追加してください。
       </div>
     {:else}
       <div class="columns">
@@ -68,79 +67,56 @@
 <style>
   .app {
     display: flex;
+    flex-direction: column;
     height: 100vh;
     overflow: hidden;
   }
-  .toolbar {
-    width: 200px;
-    flex: none;
+  .appbar {
     display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 14px 12px;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
     background: var(--surface-2);
-    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    flex: none;
   }
   .brand {
     font-weight: 700;
-    font-size: 1.1rem;
+    font-size: 1rem;
     letter-spacing: 0.02em;
-  }
-  .accounts {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex: 1;
-    overflow-y: auto;
-  }
-  .acc {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.82rem;
-  }
-  .acc-avatar {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    object-fit: cover;
     flex: none;
   }
-  .acc-avatar.placeholder {
-    background: var(--surface-3);
+  .spacer {
+    flex: 1;
   }
-  .acc-name {
+  .bar-btn {
+    flex: none;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .bar-btn:hover {
+    border-color: var(--accent);
+  }
+  .global-err {
+    padding: 4px 10px;
+    background: color-mix(in srgb, #ef4444 15%, var(--surface-1));
+    color: #ef4444;
+    font-size: 0.78rem;
+    cursor: pointer;
+    flex: none;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
-  }
-  .add-col {
-    font-size: 0.72rem;
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-    color: var(--text);
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .add-account-btn {
-    padding: 8px;
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-    color: var(--text);
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .global-err {
-    font-size: 0.72rem;
-    color: #ef4444;
-    max-height: 60px;
-    overflow: hidden;
   }
   .main {
     flex: 1;
     min-width: 0;
+    min-height: 0;
   }
   .columns {
     display: flex;
