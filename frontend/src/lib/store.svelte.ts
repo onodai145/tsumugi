@@ -498,7 +498,16 @@ class AppStore {
       const n = await unwrap(commands.syncServerMutes(accountId));
       if (n > 0) this.#log("info", `サーバのミュート/ブロックを同期: ${n}件`);
     } catch (e) {
-      this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
+      const msg = String(e);
+      // 旧トークンは read:mutes/read:blocks 権限が無い → 再認可が必要
+      if (/PERMISSION_DENIED|forbidden/i.test(msg)) {
+        this.#log(
+          "warn",
+          "サーバミュート同期: 権限不足。設定→アカウントで一度削除し再追加すると反映されます",
+        );
+      } else {
+        this.#log("warn", `サーバミュート同期に失敗: ${msg}`);
+      }
     }
   }
 
