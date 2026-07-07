@@ -4,7 +4,7 @@ use crate::domain::{EmojiDef, MuteConfig};
 use crate::session::{AccountManager, SecretStore};
 use crate::store::SettingsStore;
 use crate::stream::ConnectionManager;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 /// 認可待ちの MiAuth セッション（session_id -> 発行先 host）。
@@ -22,6 +22,9 @@ pub struct AppState {
     pub emoji_cache: Mutex<HashMap<String, Vec<EmojiDef>>>,
     /// ローカル NG（ミュート）設定。ストリーム/REST の受信ノートに適用する
     pub mute: Mutex<MuteConfig>,
+    /// account_id -> サーバ側でミュート/ブロックしているユーザの userId 集合。
+    /// 起動時/アカウント追加時に同期し、受信ノート・通知の抑制に使う（Krile MuteBlockManager 相当）。
+    pub server_mutes: Mutex<HashMap<String, HashSet<String>>>,
     pub settings: SettingsStore,
 }
 
@@ -44,8 +47,26 @@ impl AppState {
             connections: ConnectionManager::default(),
             emoji_cache: Mutex::new(HashMap::new()),
             mute: Mutex::new(mute),
+            server_mutes: Mutex::new(HashMap::new()),
             settings,
         }
+    }
+
+    /// account の user_id がサーバ側ミュート/ブロック対象か。
+    pub fn is_server_muted(&self, account_id: &str, user_id: &str) -> bool {
+        self.server_mutes
+            .lock()
+            .unwrap()
+            .get(account_id)
+            .is_some_and(|s| s.contains(user_id))
+    }
+
+    /// account のサーバ側ミュート/ブロック集合を差し替える。
+    pub fn set_server_mutes(&self, account_id: &str, ids: HashSet<String>) {
+        self.server_mutes
+            .lock()
+            .unwrap()
+            .insert(account_id.to_string(), ids);
     }
 
     #[cfg(test)]

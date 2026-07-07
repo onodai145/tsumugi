@@ -8,6 +8,7 @@
 pub mod client;
 pub mod drive;
 pub mod meta;
+pub mod mutes;
 pub mod notes;
 pub mod notifications;
 pub mod normalize;

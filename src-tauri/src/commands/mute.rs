@@ -1,5 +1,6 @@
 //! NG（ミュート）・通知設定の取得・更新。
 
+use crate::api::mutes::fetch_muted_and_blocked;
 use crate::domain::{MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::Result;
 use crate::state::AppState;
@@ -47,4 +48,16 @@ pub async fn get_ui_prefs(state: State<'_, AppState>) -> Result<UiPrefs> {
 #[specta::specta]
 pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<()> {
     state.settings.save_ui(&prefs)
+}
+
+/// サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。
+/// 起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_server_mutes(state: State<'_, AppState>, account_id: String) -> Result<u32> {
+    let client = state.client_for(&account_id)?;
+    let ids = fetch_muted_and_blocked(&client).await?;
+    let n = ids.len() as u32;
+    state.set_server_mutes(&account_id, ids);
+    Ok(n)
 }

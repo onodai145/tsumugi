@@ -130,6 +130,7 @@ pub async fn resume_column(
             state.connections.open_channel(
                 app,
                 column.id.clone(),
+                column.account_id.clone(),
                 host,
                 token,
                 channel,
@@ -188,7 +189,8 @@ pub async fn fetch_notifications_backfill(
 ) -> Result<Vec<Notification>> {
     let column = load_column(&state, &column_id)?;
     let client = state.client_for(&column.account_id)?;
-    fetch_notifications(&client, INITIAL_LIMIT, Some(&until_id)).await
+    let raw = fetch_notifications(&client, INITIAL_LIMIT, Some(&until_id)).await?;
+    Ok(filter_notifications(&state, &column.account_id, raw))
 }
 
 /// グループ幅を更新（永続化）。
@@ -295,10 +297,15 @@ async fn open_stream_and_fetch(
 ) -> Result<(Vec<Note>, Vec<Notification>)> {
     if matches!(column.kind, ColumnKind::Notifications) {
         let client = state.client_for(&column.account_id)?;
-        let notifications = fetch_notifications(&client, INITIAL_LIMIT, None).await?;
-        state
-            .connections
-            .open_notifications(app.clone(), column.id.clone(), host, token);
+        let raw = fetch_notifications(&client, INITIAL_LIMIT, None).await?;
+        let notifications = filter_notifications(state, &column.account_id, raw);
+        state.connections.open_notifications(
+            app.clone(),
+            column.id.clone(),
+            column.account_id.clone(),
+            host,
+            token,
+        );
         return Ok((vec![], notifications));
     }
 
@@ -308,6 +315,7 @@ async fn open_stream_and_fetch(
         state.connections.open_channel(
             app.clone(),
             column.id.clone(),
+            column.account_id.clone(),
             host,
             token,
             channel,
@@ -336,6 +344,36 @@ async fn fetch_and_filter(
     let mute = state.mute.lock().unwrap().clone();
     Ok(raw
         .into_iter()
-        .filter(|n| compiled.matches(n, &ctx) && !crate::filter::mute::is_muted(n, &mute))
+        .filter(|n| {
+            compiled.matches(n, &ctx)
+                && !crate::filter::mute::is_muted(n, &mute)
+                && !server_muted_note(state, account_id, n)
+        })
         .collect())
+}
+
+/// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
+fn server_muted_note(state: &AppState, account_id: &str, n: &Note) -> bool {
+    if state.is_server_muted(account_id, &n.user.id) {
+        return true;
+    }
+    matches!(&n.renote, Some(r) if state.is_server_muted(account_id, &r.user.id))
+}
+
+/// 通知一覧から、発生元ユーザが NG（ローカル）/サーバミュート・ブロックのものを除く。
+fn filter_notifications(
+    state: &AppState,
+    account_id: &str,
+    raw: Vec<Notification>,
+) -> Vec<Notification> {
+    let mute = state.mute.lock().unwrap().clone();
+    raw.into_iter()
+        .filter(|n| match &n.user {
+            Some(u) => {
+                !state.is_server_muted(account_id, &u.id)
+                    && !crate::filter::mute::is_user_muted(u, &mute)
+            }
+            None => true,
+        })
+        .collect()
 }
