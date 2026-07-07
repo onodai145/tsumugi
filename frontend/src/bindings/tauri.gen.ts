@@ -357,12 +357,17 @@ export type PollInput_Serialize = {
 	expiresAt?: number | null,
 };
 
-/**  表示まわりのグローバル設定。テーマと新規カラムの既定幅。 */
+/**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き。 */
 export type UiPrefs = {
 	/**  "auto" | "light" | "dark" */
 	theme: string,
 	/**  新規カラム（グループ）作成時の既定幅（px） */
 	defaultColumnWidth: number,
+	/**
+	 *  キーバインドの上書き（action -> chord）。空なら既定を使う。
+	 *  中身の解釈はフロント（lib/keymap）に委ねる（Rust からは不透明に永続化）。
+	 */
+	keymap?: { [key in string]: string },
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

@@ -45,3 +45,36 @@ export function defaultKeymap(): Map<string, KeyAction> {
   for (const a of ACTIONS) m.set(a.default, a.action);
   return m;
 }
+
+/// action ごとの実効 chord（上書きがあればそれ、無ければ既定）。
+export function effectiveChord(action: KeyAction, overrides: Record<string, string>): string {
+  return overrides[action] ?? ACTIONS.find((a) => a.action === action)!.default;
+}
+
+/// 上書きを反映した実効キーマップ（chord → action）。
+/// 同じ chord に複数 action が当たる場合は ACTIONS の後勝ち（UI 側で重複を防ぐ想定）。
+export function buildKeymap(overrides: Record<string, string>): Map<string, KeyAction> {
+  const m = new Map<string, KeyAction>();
+  for (const a of ACTIONS) m.set(effectiveChord(a.action, overrides), a.action);
+  return m;
+}
+
+/// chord を表示用に整形（例 "shift+r" → "Shift + R"）。
+export function prettyChord(chord: string): string {
+  return chord
+    .split("+")
+    .map((p) => {
+      if (p === "ctrl") return "Ctrl";
+      if (p === "meta") return "⌘";
+      if (p === "alt") return "Alt";
+      if (p === "shift") return "Shift";
+      if (p === "space") return "Space";
+      return p.length === 1 ? p.toUpperCase() : p;
+    })
+    .join(" + ");
+}
+
+/// 単体の修飾キー（Shift 等）だけ押された状態か。キャプチャ中は確定させない。
+export function isModifierOnly(e: KeyboardEvent): boolean {
+  return ["Shift", "Control", "Alt", "Meta"].includes(e.key);
+}
