@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS column_def (
 );
 CREATE INDEX IF NOT EXISTS idx_column_account ON column_def(account_id);
 
+-- 汎用 key-value 設定（NG設定などの JSON を格納）
+CREATE TABLE IF NOT EXISTS app_setting (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- ノートキャッシュ（TQL§9）。SQL 射影用の正規化カラム＋表示復元用 payload。
 CREATE TABLE IF NOT EXISTS note (
     id            TEXT PRIMARY KEY,

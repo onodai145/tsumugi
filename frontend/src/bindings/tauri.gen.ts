@@ -64,6 +64,10 @@ export const commands = {
 	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
 	/**  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。 */
 	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
+	/**  現在の NG 設定を取得。 */
+	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
+	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
+	setMute: (config: MuteConfig) => typedError<null, Error>(__TAURI_INVOKE("set_mute", { config })),
 };
 
 /** Events */
@@ -203,6 +207,16 @@ export type FilterQuery =
 export type MiAuthSession = {
 	url: string,
 	sessionId: string,
+};
+
+/**  ローカル NG（ミュート）設定。サーバの mute/block とは別の、クライアント側フィルタ。 */
+export type MuteConfig = {
+	/**  本文/CW に含まれると非表示にする語（部分一致・大文字小文字無視） */
+	ngWords: string[],
+	/**  非表示にするユーザ（`@user@host` 形式。`@` は省略可） */
+	ngUsers: string[],
+	/**  非表示にするインスタンス（host。例: example.com） */
+	ngInstances: string[],
 };
 
 /**  docs/filter-dsl-design.md §7 / 設計書§5.1。フィルタ評価の対象そのもの。 */

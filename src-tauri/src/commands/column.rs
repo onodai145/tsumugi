@@ -327,5 +327,9 @@ async fn fetch_and_filter(
     let client = state.client_for(account_id)?;
     let raw = fetch_notes(&client, endpoint, &body).await?;
     let ctx = state.eval_context();
-    Ok(raw.into_iter().filter(|n| compiled.matches(n, &ctx)).collect())
+    let mute = state.mute.lock().unwrap().clone();
+    Ok(raw
+        .into_iter()
+        .filter(|n| compiled.matches(n, &ctx) && !crate::filter::mute::is_muted(n, &mute))
+        .collect())
 }

@@ -374,8 +374,12 @@ fn handle_text(
                 if !filter.matches(&normalized, ctx) {
                     return None;
                 }
-                // 永続キャッシュへ書き込み（再起動時の即時復元用）
                 if let Some(state) = app.try_state::<AppState>() {
+                    // NG（ミュート）に該当したら出さない
+                    if crate::filter::mute::is_muted(&normalized, &state.mute.lock().unwrap()) {
+                        return None;
+                    }
+                    // 永続キャッシュへ書き込み（再起動時の即時復元用）
                     let _ = state.settings.cache_note(column_id, &normalized);
                 }
                 let _ = ColumnNote {

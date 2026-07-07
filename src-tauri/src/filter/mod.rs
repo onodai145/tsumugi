@@ -8,6 +8,7 @@
 
 pub mod ast;
 pub mod eval;
+pub mod mute;
 pub mod parser;
 pub mod sql;
 pub mod token;

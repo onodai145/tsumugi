@@ -1,9 +1,11 @@
 //! 設定データ（Account / Column）の永続化。token は含めない（keyring 管轄）。
 
-use crate::domain::{Account, Column, ColumnGroup};
+use crate::domain::{Account, Column, ColumnGroup, MuteConfig};
 use crate::error::Result;
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
+
+const MUTE_KEY: &str = "mute";
 
 pub struct SettingsStore {
     // note_cache.rs（同 crate の別モジュール）からも使うため pub(crate)
@@ -184,6 +186,34 @@ impl SettingsStore {
     pub fn delete_column(&self, column_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM column_def WHERE id = ?1", params![column_id])?;
+        Ok(())
+    }
+
+    // ---- NG（ミュート）設定 ----
+
+    pub fn load_mute(&self) -> Result<MuteConfig> {
+        let conn = self.conn.lock().unwrap();
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT value FROM app_setting WHERE key = ?1",
+                params![MUTE_KEY],
+                |r| r.get(0),
+            )
+            .ok();
+        match json {
+            Some(s) => Ok(serde_json::from_str(&s)?),
+            None => Ok(MuteConfig::default()),
+        }
+    }
+
+    pub fn save_mute(&self, cfg: &MuteConfig) -> Result<()> {
+        let json = serde_json::to_string(cfg)?;
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO app_setting (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![MUTE_KEY, json],
+        )?;
         Ok(())
     }
 
