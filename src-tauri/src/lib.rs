@@ -54,6 +54,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::set_notify,
             commands::mute::get_ui_prefs,
             commands::mute::set_ui_prefs,
+            commands::mute::sync_server_mutes,
         ])
         .events(collect_events![
             events::ColumnNote,

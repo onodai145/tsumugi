@@ -1,7 +1,7 @@
 //! ローカル NG（ミュート）判定。ノートが NG に該当すれば非表示にする。
 //! Renote 先も対象（NG ユーザ/語を含む投稿の Renote も隠す）。
 
-use crate::domain::{MuteConfig, Note};
+use crate::domain::{MuteConfig, Note, User};
 
 /// note が NG に該当するか（本体 or renote 先のいずれかが該当で true）。
 pub fn is_muted(note: &Note, cfg: &MuteConfig) -> bool {
@@ -12,24 +12,8 @@ pub fn is_muted(note: &Note, cfg: &MuteConfig) -> bool {
 }
 
 fn is_muted_one(n: &Note, cfg: &MuteConfig) -> bool {
-    // インスタンス
-    if let Some(host) = &n.user.host {
-        let h = host.to_lowercase();
-        if cfg
-            .ng_instances
-            .iter()
-            .any(|i| !i.trim().is_empty() && i.trim().to_lowercase() == h)
-        {
-            return true;
-        }
-    }
-    // ユーザ（acct 比較。設定値は @ 省略可）
-    let acct = n.user.acct().to_lowercase();
-    if cfg
-        .ng_users
-        .iter()
-        .any(|u| !u.trim().is_empty() && normalize_acct(u) == acct)
-    {
+    // ユーザ/インスタンス（通知にも使うため共通化）
+    if is_user_muted(&n.user, cfg) {
         return true;
     }
     // NG ワード（本文 + CW を対象に部分一致）
@@ -42,6 +26,27 @@ fn is_muted_one(n: &Note, cfg: &MuteConfig) -> bool {
     cfg.ng_words
         .iter()
         .any(|w| !w.trim().is_empty() && hay.contains(&w.trim().to_lowercase()))
+}
+
+/// ユーザが NG（インスタンス/ユーザ）に該当するか。NG ワードは見ない。
+/// 通知の発生元ユーザ判定にも使う。
+pub fn is_user_muted(user: &User, cfg: &MuteConfig) -> bool {
+    // インスタンス
+    if let Some(host) = &user.host {
+        let h = host.to_lowercase();
+        if cfg
+            .ng_instances
+            .iter()
+            .any(|i| !i.trim().is_empty() && i.trim().to_lowercase() == h)
+        {
+            return true;
+        }
+    }
+    // ユーザ（acct 比較。設定値は @ 省略可）
+    let acct = user.acct().to_lowercase();
+    cfg.ng_users
+        .iter()
+        .any(|u| !u.trim().is_empty() && normalize_acct(u) == acct)
 }
 
 /// "@user@host" / "user@host" を小文字の "@user@host" に正規化。
@@ -147,5 +152,19 @@ mod tests {
     fn empty_config_mutes_nothing() {
         let cfg = MuteConfig::default();
         assert!(!is_muted(&note("anything", "a", Some("h")), &cfg));
+    }
+
+    #[test]
+    fn is_user_muted_ignores_ng_word() {
+        // NG ワードのみの設定では、ユーザ判定は該当しない（通知向けの挙動）
+        let cfg = MuteConfig {
+            ng_words: vec!["bad".into()],
+            ng_users: vec!["bob@ex.com".into()],
+            ..Default::default()
+        };
+        let n = note("bad word", "bob", Some("ex.com"));
+        assert!(is_user_muted(&n.user, &cfg)); // ユーザ一致
+        let n2 = note("bad word", "alice", Some("ex.com"));
+        assert!(!is_user_muted(&n2.user, &cfg)); // ワード一致でもユーザ判定はしない
     }
 }

@@ -76,6 +76,11 @@ export const commands = {
 	getUiPrefs: () => typedError<UiPrefs, Error>(__TAURI_INVOKE("get_ui_prefs")),
 	/**  表示設定を更新（永続化）。 */
 	setUiPrefs: (prefs: UiPrefs) => typedError<null, Error>(__TAURI_INVOKE("set_ui_prefs", { prefs })),
+	/**
+	 *  サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。
+	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
+	 */
+	syncServerMutes: (accountId: string) => typedError<number, Error>(__TAURI_INVOKE("sync_server_mutes", { accountId })),
 };
 
 /** Events */

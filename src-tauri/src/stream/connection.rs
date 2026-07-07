@@ -45,10 +45,22 @@ pub enum StreamCommand {
 #[derive(Clone)]
 enum StreamMode {
     Notes {
+        account_id: String,
         filter: Arc<CompiledFilter>,
         ctx: Arc<EvalContext>,
     },
-    Notifications,
+    Notifications {
+        account_id: String,
+    },
+}
+
+impl StreamMode {
+    fn account_id(&self) -> &str {
+        match self {
+            StreamMode::Notes { account_id, .. } => account_id,
+            StreamMode::Notifications { account_id } => account_id,
+        }
+    }
 }
 
 struct StreamCtl {
@@ -71,6 +83,7 @@ impl ConnectionManager {
         &self,
         app: AppHandle,
         column_id: String,
+        account_id: String,
         host: String,
         token: String,
         channel: &'static str,
@@ -79,6 +92,7 @@ impl ConnectionManager {
         ctx: EvalContext,
     ) {
         let mode = StreamMode::Notes {
+            account_id,
             filter: Arc::new(filter),
             ctx: Arc::new(ctx),
         };
@@ -86,8 +100,23 @@ impl ConnectionManager {
     }
 
     /// 通知(main チャンネル)を流すストリームを開く。
-    pub fn open_notifications(&self, app: AppHandle, column_id: String, host: String, token: String) {
-        self.spawn_stream(app, column_id, host, token, "main", serde_json::json!({}), StreamMode::Notifications);
+    pub fn open_notifications(
+        &self,
+        app: AppHandle,
+        column_id: String,
+        account_id: String,
+        host: String,
+        token: String,
+    ) {
+        self.spawn_stream(
+            app,
+            column_id,
+            host,
+            token,
+            "main",
+            serde_json::json!({}),
+            StreamMode::Notifications { account_id },
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -364,7 +393,7 @@ fn handle_text(
 ) -> Option<String> {
     match protocol::parse_incoming(text) {
         Incoming::ChannelNote { note, .. } => {
-            let StreamMode::Notes { filter, ctx } = mode else {
+            let StreamMode::Notes { account_id, filter, ctx } = mode else {
                 return None;
             };
             if dedup.accept(&note.id) {
@@ -375,8 +404,12 @@ fn handle_text(
                     return None;
                 }
                 if let Some(state) = app.try_state::<AppState>() {
-                    // NG（ミュート）に該当したら出さない
+                    // ローカル NG（ミュート）に該当したら出さない
                     if crate::filter::mute::is_muted(&normalized, &state.mute.lock().unwrap()) {
+                        return None;
+                    }
+                    // サーバ側ミュート/ブロック（本体 or renote 先のユーザ）
+                    if is_server_muted_note(&state, account_id, &normalized) {
                         return None;
                     }
                     // 永続キャッシュへ書き込み（再起動時の即時復元用）
@@ -394,6 +427,12 @@ fn handle_text(
         Incoming::ChannelNotification { notification, .. } => {
             if dedup.accept(&notification.id) {
                 let n: Notification = (*notification).into();
+                // 発生元ユーザが NG / サーバミュート/ブロックなら通知も出さない
+                if let Some(state) = app.try_state::<AppState>() {
+                    if notification_muted(&state, mode.account_id(), &n) {
+                        return None;
+                    }
+                }
                 let _ = ColumnNotification {
                     column_id: column_id.to_string(),
                     notification: n,
@@ -416,6 +455,25 @@ fn handle_text(
         }
         Incoming::Other => None,
     }
+}
+
+/// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
+fn is_server_muted_note(state: &AppState, account_id: &str, note: &Note) -> bool {
+    if state.is_server_muted(account_id, &note.user.id) {
+        return true;
+    }
+    matches!(&note.renote, Some(r) if state.is_server_muted(account_id, &r.user.id))
+}
+
+/// 通知の発生元ユーザが NG（ローカル）またはサーバ側ミュート/ブロックか。
+fn notification_muted(state: &AppState, account_id: &str, n: &Notification) -> bool {
+    let Some(user) = &n.user else {
+        return false;
+    };
+    if state.is_server_muted(account_id, &user.id) {
+        return true;
+    }
+    crate::filter::mute::is_user_muted(user, &state.mute.lock().unwrap())
 }
 
 /// noteUpdated の kind/body を型付き NoteUpdate に落とす。

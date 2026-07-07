@@ -92,6 +92,8 @@ class AppStore {
       this.notify = await unwrap(commands.getNotify());
       this.ui = await unwrap(commands.getUiPrefs());
       this.#applyTheme(this.ui.theme);
+      // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
+      await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, tabs: [], activeTabId: "" }));
@@ -487,6 +489,26 @@ class AppStore {
       this.accounts = [...this.accounts, account];
     }
     this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
+    await this.#syncServerMutes(account.id);
+  }
+
+  /// サーバ側ミュート/ブロックを同期（失敗しても致命的でないのでログのみ）。
+  async #syncServerMutes(accountId: string) {
+    try {
+      const n = await unwrap(commands.syncServerMutes(accountId));
+      if (n > 0) this.#log("info", `サーバのミュート/ブロックを同期: ${n}件`);
+    } catch (e) {
+      const msg = String(e);
+      // 旧トークンは read:mutes/read:blocks 権限が無い → 再認可が必要
+      if (/PERMISSION_DENIED|forbidden/i.test(msg)) {
+        this.#log(
+          "warn",
+          "サーバミュート同期: 権限不足。設定→アカウントで一度削除し再追加すると反映されます",
+        );
+      } else {
+        this.#log("warn", `サーバミュート同期に失敗: ${msg}`);
+      }
+    }
   }
 
   async removeAccount(accountId: string) {
