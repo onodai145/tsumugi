@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod column;
+pub mod mute;
 pub mod note;
 
 // lib.rs は commands::<mod>::* をフルパス参照するため、この再エクスポートは今は未使用。
@@ -20,3 +21,5 @@ pub use column::{
 pub use note::{
     delete_note_cmd, list_custom_emojis, post_note, react, renote, unreact, upload_file,
 };
+#[allow(unused_imports)]
+pub use mute::{get_mute, set_mute};

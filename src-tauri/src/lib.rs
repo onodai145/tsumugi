@@ -48,6 +48,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::unreact,
             commands::note::list_custom_emojis,
             commands::note::upload_file,
+            commands::mute::get_mute,
+            commands::mute::set_mute,
         ])
         .events(collect_events![
             events::ColumnNote,

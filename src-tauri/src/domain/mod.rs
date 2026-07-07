@@ -8,6 +8,7 @@
 mod account;
 mod column;
 mod list;
+mod mute;
 mod note;
 mod notification;
 mod reaction;
@@ -16,6 +17,7 @@ mod user;
 pub use account::Account;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::UserList;
+pub use mute::MuteConfig;
 pub use note::{DriveFile, Note, Poll, PollChoice, Visibility};
 pub use notification::Notification;
 pub use reaction::{EmojiDef, ReactionSummary};

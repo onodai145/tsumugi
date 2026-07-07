@@ -14,6 +14,7 @@ import type {
   ColumnKind,
   FilterQuery,
   Notification,
+  MuteConfig,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -53,6 +54,7 @@ class AppStore {
   error = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
   emojis = $state<Record<string, EmojiDef[]>>({});
+  mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
 
   #unlisten: UnlistenFn[] = [];
 
@@ -60,6 +62,7 @@ class AppStore {
     this.booting = true;
     try {
       this.accounts = await unwrap(commands.listAccounts());
+      this.mute = await unwrap(commands.getMute());
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, tabs: [], activeTabId: "" }));
@@ -346,6 +349,15 @@ class AppStore {
     return await unwrap(commands.listUserLists(accountId));
   }
 
+  /// NG 設定を保存し、表示中の該当ノートも即座に取り除く。
+  async setMute(config: MuteConfig) {
+    await unwrap(commands.setMute(config));
+    this.mute = config;
+    for (const t of this.#allTabs()) {
+      t.notes = t.notes.filter((n) => !isMuted(n, config));
+    }
+  }
+
   async loadMore(tabId: string) {
     const tab = this.#findTab(tabId);
     if (!tab || tab.loadingMore) return;
@@ -470,6 +482,29 @@ function restoreReaction(s: ReturnType<typeof snapshotReaction>) {
   s.n.reactions = s.reactions;
   s.n.myReaction = s.myReaction;
   s.n.reactionCount = s.count;
+}
+
+// ---- NG 判定（Rust の filter::mute と同じ規則。表示中ノートの即時除去用） ----
+
+function acctOf(u: Note["user"]): string {
+  return u.host ? `@${u.username}@${u.host}` : `@${u.username}`;
+}
+function normalizeAcct(s: string): string {
+  const t = s.trim().toLowerCase();
+  return t.startsWith("@") ? t : `@${t}`;
+}
+function noteMutedOne(n: Note, cfg: MuteConfig): boolean {
+  if (n.user.host) {
+    const h = n.user.host.toLowerCase();
+    if (cfg.ngInstances.some((i) => i.trim() && i.trim().toLowerCase() === h)) return true;
+  }
+  const acct = acctOf(n.user).toLowerCase();
+  if (cfg.ngUsers.some((u) => u.trim() && normalizeAcct(u) === acct)) return true;
+  const hay = `${n.text ?? ""} ${n.cw ?? ""}`.toLowerCase();
+  return cfg.ngWords.some((w) => w.trim() && hay.includes(w.trim().toLowerCase()));
+}
+export function isMuted(n: Note, cfg: MuteConfig): boolean {
+  return noteMutedOne(n, cfg) || (n.renote ? noteMutedOne(n.renote, cfg) : false);
 }
 
 export const app = new AppStore();

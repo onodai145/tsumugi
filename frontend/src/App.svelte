@@ -6,9 +6,11 @@
   import AddColumnModal from "./ui/AddColumnModal.svelte";
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Compose from "./ui/Compose.svelte";
+  import MuteSettings from "./ui/MuteSettings.svelte";
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
+  let showMute = $state(false);
   let addTabGroupId = $state<string | null>(null);
 
   function openAddColumn() {
@@ -36,6 +38,7 @@
     {/if}
     {#if app.accounts.length > 0}
       <button class="bar-btn" onclick={openAddColumn}>＋カラム</button>
+      <button class="bar-btn" onclick={() => (showMute = true)} title="NG（ミュート）設定">NG</button>
     {/if}
     <button class="bar-btn" onclick={() => (showAdd = !showAdd)}>
       {showAdd ? "閉じる" : "＋アカウント"}
@@ -71,6 +74,9 @@
   {/if}
   {#if showAddColumn}
     <AddColumnModal groupId={addTabGroupId} onclose={() => (showAddColumn = false)} />
+  {/if}
+  {#if showMute}
+    <MuteSettings onclose={() => (showMute = false)} />
   {/if}
 </div>
 

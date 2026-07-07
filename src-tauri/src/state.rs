@@ -1,6 +1,6 @@
 //! Tauri が管理するアプリ状態（command から `State<AppState>` で参照）。
 
-use crate::domain::EmojiDef;
+use crate::domain::{EmojiDef, MuteConfig};
 use crate::session::{AccountManager, SecretStore};
 use crate::store::SettingsStore;
 use crate::stream::ConnectionManager;
@@ -20,6 +20,8 @@ pub struct AppState {
     pub connections: ConnectionManager,
     /// host -> カスタム絵文字一覧（インスタンス単位でキャッシュ）
     pub emoji_cache: Mutex<HashMap<String, Vec<EmojiDef>>>,
+    /// ローカル NG（ミュート）設定。ストリーム/REST の受信ノートに適用する
+    pub mute: Mutex<MuteConfig>,
     pub settings: SettingsStore,
 }
 
@@ -30,6 +32,7 @@ impl AppState {
             log::error!("failed to load accounts: {e}");
             Vec::new()
         });
+        let mute = settings.load_mute().unwrap_or_default();
         Self {
             http: reqwest::Client::builder()
                 .user_agent(concat!("tsumugi/", env!("CARGO_PKG_VERSION")))
@@ -40,6 +43,7 @@ impl AppState {
             pending: Mutex::new(HashMap::new()),
             connections: ConnectionManager::default(),
             emoji_cache: Mutex::new(HashMap::new()),
+            mute: Mutex::new(mute),
             settings,
         }
     }
