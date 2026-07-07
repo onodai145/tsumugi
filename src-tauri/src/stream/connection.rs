@@ -2,13 +2,16 @@
 //! 切断は前提として、指数バックオフで再接続する（設計書§6）。
 //!
 //! homeTimeline を購読しつつ、表示中ノートを subNote でキャプチャして、他者のリアクション/
-//! 投票/削除を `ColumnNoteUpdated` イベントで反映する（NQL§6: 値は更新するが出入りしない）。
+//! 投票/削除を `ColumnNoteUpdated` イベントで反映する（TQL§6: 値は更新するが出入りしない）。
 
 use crate::domain::Note;
 use crate::events::{ColumnConnectionState, ColumnNote, ColumnNoteUpdated, ConnectionState, NoteUpdate};
+use crate::filter::eval::EvalContext;
+use crate::filter::CompiledFilter;
 use crate::state::AppState;
 use crate::stream::inbox::Dedup;
 use crate::stream::protocol::{self, Incoming};
+use std::sync::Arc;
 use tauri::Manager as _;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -47,14 +50,28 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
-    /// homeTimeline を購読するストリームを開く。同じ column_id が既にあれば張り替える。
-    pub fn open_home(&self, app: AppHandle, column_id: String, host: String, token: String) {
+    /// 指定チャンネルを購読するストリームを開く。フィルタを適用して通過分のみ emit する。
+    /// 同じ column_id が既にあれば張り替える。
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_channel(
+        &self,
+        app: AppHandle,
+        column_id: String,
+        host: String,
+        token: String,
+        channel: &'static str,
+        params: serde_json::Value,
+        filter: CompiledFilter,
+        ctx: EvalContext,
+    ) {
         self.close(&column_id);
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let (cmd_tx, cmd_rx) = mpsc::channel(64);
         let col = column_id.clone();
+        let filter = Arc::new(filter);
+        let ctx = Arc::new(ctx);
         let handle = tauri::async_runtime::spawn(async move {
-            run_channel(app, col, host, token, "homeTimeline", cancel_rx, cmd_rx).await;
+            run_channel(app, col, host, token, channel, params, cancel_rx, cmd_rx, filter, ctx).await;
         });
         self.streams.lock().unwrap().insert(
             column_id,
@@ -157,8 +174,11 @@ async fn run_channel(
     host: String,
     token: String,
     channel: &str,
+    params: serde_json::Value,
     mut cancel: watch::Receiver<bool>,
     mut cmd_rx: mpsc::Receiver<StreamCommand>,
+    filter: Arc<CompiledFilter>,
+    ctx: Arc<EvalContext>,
 ) {
     let mut dedup = Dedup::new(DEDUP_CAPACITY);
     let mut capture = CaptureSet::new(CAPTURE_CAP);
@@ -176,10 +196,13 @@ async fn run_channel(
             &host,
             &token,
             channel,
+            &params,
             &mut dedup,
             &mut capture,
             &mut cancel,
             &mut cmd_rx,
+            &filter,
+            &ctx,
         )
         .await;
 
@@ -204,10 +227,13 @@ async fn connect_and_run(
     host: &str,
     token: &str,
     channel: &str,
+    params: &serde_json::Value,
     dedup: &mut Dedup,
     capture: &mut CaptureSet,
     cancel: &mut watch::Receiver<bool>,
     cmd_rx: &mut mpsc::Receiver<StreamCommand>,
+    filter: &CompiledFilter,
+    ctx: &EvalContext,
 ) -> RunOutcome {
     let url = format!("wss://{host}/streaming?i={token}");
     let ws = match tokio_tungstenite::connect_async(&url).await {
@@ -223,7 +249,7 @@ async fn connect_and_run(
     let sub_id = uuid::Uuid::new_v4().to_string();
     if write
         .send(Message::Text(
-            protocol::connect(channel, &sub_id, serde_json::json!({})).into(),
+            protocol::connect(channel, &sub_id, params.clone()).into(),
         ))
         .await
         .is_err()
@@ -270,7 +296,7 @@ async fn connect_and_run(
             msg = read.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Some(sub) = handle_text(app, column_id, &text, dedup) {
+                        if let Some(sub) = handle_text(app, column_id, &text, dedup, filter, ctx) {
                             // 新規ノートは自動キャプチャ
                             if let Some(evicted) = capture.add(&sub) {
                                 let _ = write.send(Message::Text(protocol::sub_note(&sub).into())).await;
@@ -297,12 +323,23 @@ async fn connect_and_run(
 
 /// テキストフレームを解釈。新規ノートなら emit して、その note_id を返す（自動キャプチャ用）。
 /// noteUpdated なら ColumnNoteUpdated を emit する。
-fn handle_text(app: &AppHandle, column_id: &str, text: &str, dedup: &mut Dedup) -> Option<String> {
+fn handle_text(
+    app: &AppHandle,
+    column_id: &str,
+    text: &str,
+    dedup: &mut Dedup,
+    filter: &CompiledFilter,
+    ctx: &EvalContext,
+) -> Option<String> {
     match protocol::parse_incoming(text) {
         Incoming::ChannelNote { note, .. } => {
             if dedup.accept(&note.id) {
                 let id = note.id.clone();
                 let normalized: Note = (*note).into();
+                // フィルタを通過しないノートは出さない（キャッシュ・キャプチャもしない）
+                if !filter.matches(&normalized, ctx) {
+                    return None;
+                }
                 // 永続キャッシュへ書き込み（再起動時の即時復元用）
                 if let Some(state) = app.try_state::<AppState>() {
                     let _ = state.settings.cache_note(column_id, &normalized);

@@ -1,6 +1,6 @@
 // アプリの ViewModel（Svelte 5 runes）。カラム構成・受信ノート・接続状態を保持し、
 // Rust からの columnNote / columnConnectionState イベントを購読して更新する。
-import { commands, events, unwrap } from "./ipc";
+import { commands, events, unwrap, formatError } from "./ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   Account,
@@ -11,6 +11,8 @@ import type {
   VisibilityInput,
   OpenedColumn,
   NoteUpdate,
+  ColumnKind,
+  FilterQuery,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -67,10 +69,11 @@ class AppStore {
 
   #toView(opened: OpenedColumn): ColumnView {
     const acc = this.accounts.find((a) => a.id === opened.column.accountId);
+    const src = kindLabel(opened.column.kind);
     return {
       id: opened.column.id,
       accountId: opened.column.accountId,
-      title: acc ? `Home @${acc.username}` : "Home",
+      title: acc ? `${src} @${acc.username}` : src,
       notes: opened.notes,
       state: "connecting",
       loadingMore: false,
@@ -186,10 +189,19 @@ class AppStore {
     }
   }
 
-  async addHomeColumn(accountId: string) {
-    const opened = await unwrap(commands.openHomeColumn(accountId));
+  async addColumn(accountId: string, kind: ColumnKind, filter: FilterQuery) {
+    const opened = await unwrap(commands.addColumn(accountId, kind, filter));
     this.columns = [...this.columns, this.#toView(opened)];
     this.#captureInitial(opened.column.id, opened.notes);
+  }
+
+  async validateFilter(filter: FilterQuery): Promise<string | null> {
+    const r = await commands.validateFilter(filter);
+    return r.status === "ok" ? null : formatError(r.error);
+  }
+
+  async fetchUserLists(accountId: string) {
+    return await unwrap(commands.listUserLists(accountId));
   }
 
   async loadMore(columnId: string) {
@@ -198,7 +210,7 @@ class AppStore {
     col.loadingMore = true;
     try {
       const oldest = col.notes[col.notes.length - 1].id;
-      const older = await unwrap(commands.fetchBackfill(col.accountId, col.id, oldest));
+      const older = await unwrap(commands.fetchBackfill(col.id, oldest));
       const known = new Set(col.notes.map((n) => n.id));
       const fresh = older.filter((n) => !known.has(n.id));
       col.notes = [...col.notes, ...fresh].slice(0, MAX_NOTES);
@@ -317,3 +329,22 @@ function restoreReaction(s: ReturnType<typeof snapshotReaction>) {
 }
 
 export const app = new AppStore();
+
+export function kindLabel(kind: ColumnKind): string {
+  switch (kind.type) {
+    case "home":
+      return "Home";
+    case "local":
+      return "Local";
+    case "global":
+      return "Global";
+    case "hybrid":
+      return "Hybrid";
+    case "notifications":
+      return "通知";
+    case "list":
+      return "List";
+    case "search":
+      return "検索";
+  }
+}

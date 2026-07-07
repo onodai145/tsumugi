@@ -1,4 +1,4 @@
-# Misskey Note フィルタDSL 設計書（NQL: Note Query Language）
+# Misskey Note フィルタDSL 設計書（TQL: Tsumugi Query Language）
 
 KrileのKQL（Krile Query Language）を Misskey Note 向けに翻訳した、カラム定義用フィルタ言語の設計。
 Rustバックエンドの Model層で「パーサ→AST→評価器（インメモリ / SQL射影の二段）」として実装する。

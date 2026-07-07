@@ -1,5 +1,5 @@
 //! SQLite 接続とスキーマ初期化。設定（Account/Column）とノートキャッシュを永続化する。
-//! ノートキャッシュは NQL§9 の正規化スキーマ（SQL 射影の前提）＋表示復元用の payload(JSON)。
+//! ノートキャッシュは TQL§9 の正規化スキーマ（SQL 射影の前提）＋表示復元用の payload(JSON)。
 
 use crate::error::Result;
 use rusqlite::Connection;
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS column_def (
 );
 CREATE INDEX IF NOT EXISTS idx_column_account ON column_def(account_id);
 
--- ノートキャッシュ（NQL§9）。SQL 射影用の正規化カラム＋表示復元用 payload。
+-- ノートキャッシュ（TQL§9）。SQL 射影用の正規化カラム＋表示復元用 payload。
 CREATE TABLE IF NOT EXISTS note (
     id            TEXT PRIMARY KEY,
     created_at    INTEGER NOT NULL,

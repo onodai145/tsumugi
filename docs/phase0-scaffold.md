@@ -2,10 +2,10 @@
 
 - 作成日: 2026-07-05
 - 対象: `misskey-client-prompts.md` Phase 0
-- 前提資料: `misskey-multicolumn-client-design.md`（設計書=正）／`filter-dsl-design.md`（NQL）
+- 前提資料: `misskey-multicolumn-client-design.md`（設計書=正）／`filter-dsl-design.md`（TQL）
 - 本書の位置づけ: **実装コードは書かず**、(1) リポジトリ構成、(2) 主要ドメインモデルの下書き、(3) Rust↔フロント境界（command/event）、(4) データフロー図 の4点を確定するための設計成果物。
 
-> 設計書と矛盾する場合は設計書を正とする。本書はレイヤー構成(§4)・データモデル(§5)・IPC一覧(§9)・NQL構成(§5)を Phase 0 の粒度に落とし込んだもの。
+> 設計書と矛盾する場合は設計書を正とする。本書はレイヤー構成(§4)・データモデル(§5)・IPC一覧(§9)・TQL構成(§5)を Phase 0 の粒度に落とし込んだもの。
 
 ---
 
@@ -17,7 +17,7 @@
 tsumugi/
 ├─ docs/
 │  ├─ misskey-multicolumn-client-design.md   # 設計書（正）
-│  ├─ filter-dsl-design.md                    # NQL 設計
+│  ├─ filter-dsl-design.md                    # TQL 設計
 │  ├─ misskey-client-prompts.md               # ロードマップ
 │  └─ phase0-scaffold.md                      # 本書
 │
@@ -60,20 +60,20 @@ tsumugi/
 │     ├─ store/                               # 永続化（SQLite / keyring）
 │     │  ├─ mod.rs
 │     │  ├─ db.rs                             # 接続・マイグレーション実行
-│     │  ├─ schema.sql                        # note/user/note_* テーブル（NQL§9をそのまま）
+│     │  ├─ schema.sql                        # note/user/note_* テーブル（TQL§9をそのまま）
 │     │  ├─ migrations/                       # スキーマ移行（バージョン管理）
 │     │  ├─ note_cache.rs                     # Note の upsert / 範囲取得 / 既読位置
 │     │  ├─ settings.rs                       # Account/Column 構成の永続化
 │     │  └─ secrets.rs                        # keyring ラッパ。token は Core 内のみ
 │     │
-│     ├─ filter/                              # フィルタ評価（MVP=キーワード / 将来=NQL。§5・NQL§5）
+│     ├─ filter/                              # フィルタ評価（MVP=キーワード / 将来=TQL。§5・TQL§5）
 │     │  ├─ mod.rs
 │     │  ├─ keyword.rs                        # MVP: 部分一致キーワード評価
-│     │  ├─ token.rs                          # NQL: 字句解析（Phase 4）
-│     │  ├─ parser.rs                         # NQL: 再帰下降 + 型検査
-│     │  ├─ ast.rs                            # NQL: Expr / Value / Field / Source
-│     │  ├─ eval.rs                           # NQL: インメモリ評価（Streaming受信時）
-│     │  ├─ sql.rs                            # NQL: SQLite WHERE 射影（キャッシュ検索）
+│     │  ├─ token.rs                          # TQL: 字句解析（Phase 4）
+│     │  ├─ parser.rs                         # TQL: 再帰下降 + 型検査
+│     │  ├─ ast.rs                            # TQL: Expr / Value / Field / Source
+│     │  ├─ eval.rs                           # TQL: インメモリ評価（Streaming受信時）
+│     │  ├─ sql.rs                            # TQL: SQLite WHERE 射影（キャッシュ検索）
 │     │  ├─ source.rs                         # from節ソース → Receiver 起動
 │     │  └─ context.rs                        # EvalContext（mine/following/to_me 解決）
 │     │
@@ -133,14 +133,14 @@ tsumugi/
 
 **分割の意図**
 - `api`（REST）と `stream`（WS）を分けるのは、前者が OpenAPI 生成物中心・後者が全面手書きという実装コストの性質差（設計書§6.1）に対応させるため。
-- `filter` は MVP の `keyword.rs` と将来の NQL 一式を同居させ、`Column.filter` の型を差し替えるだけで移行できるようにする（§2.6）。
+- `filter` は MVP の `keyword.rs` と将来の TQL 一式を同居させ、`Column.filter` の型を差し替えるだけで移行できるようにする（§2.6）。
 - `domain` を独立させ、`api`(正規化先)・`stream`(評価対象)・`store`(永続化)・`filter`(評価入力)・`commands`(IPCペイロード) 全てがここを共有する。TS 型はここから `tauri-specta` で一括生成。
 
 ---
 
 ## 2. 主要ドメインモデル（Rust struct 下書き）
 
-`domain/` に置く。全型に `serde::{Serialize,Deserialize}` + `specta::Type` を付け、`tauri-specta` で TS 型を生成する（二重管理しない・必須）。`Note`/`User`/`DriveFile`/`Poll` は NQL§7・設計書§5.1 で確定済みの定義をそのまま採用する（フィルタ評価語彙と過不足なく揃えるため）。
+`domain/` に置く。全型に `serde::{Serialize,Deserialize}` + `specta::Type` を付け、`tauri-specta` で TS 型を生成する（二重管理しない・必須）。`Note`/`User`/`DriveFile`/`Poll` は TQL§7・設計書§5.1 で確定済みの定義をそのまま採用する（フィルタ評価語彙と過不足なく揃えるため）。
 
 > serde 命名規約: フロント(TS)を camelCase に揃えるため、複数語フィールドを持つ型には `#[serde(rename_all = "camelCase")]` を付ける。Rust側は snake_case のまま。
 
@@ -165,7 +165,7 @@ pub struct Account {
 }
 ```
 
-### 2.2 User（NQL§7 / 設計書§5.1）
+### 2.2 User（TQL§7 / 設計書§5.1）
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -181,10 +181,10 @@ pub struct User {
     pub following_count: u32,
     pub notes_count: u32,
 }
-// acct() -> "@user" or "@user@host" は impl 側（NQL§7）
+// acct() -> "@user" or "@user@host" は impl 側（TQL§7）
 ```
 
-### 2.3 Note（NQL§7 / 設計書§5.1）
+### 2.3 Note（TQL§7 / 設計書§5.1）
 
 ```rust
 use std::collections::HashMap;
@@ -227,7 +227,7 @@ pub struct Note {
 pub enum Visibility { Public, Home, Followers, Specified } // Specified = direct
 ```
 
-### 2.4 DriveFile / Poll（NQL§7）
+### 2.4 DriveFile / Poll（TQL§7）
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -255,7 +255,7 @@ pub struct PollChoice { pub text: String, pub votes: u32, pub is_voted: bool }
 
 ### 2.5 Reaction（絵文字ピッカー用の絵文字定義 / 集計表示）
 
-> **重要な区別**: `Note.reactions` は「絵文字キー→集計数」の `HashMap` であり、**誰がリアクションしたかは Misskey が返さない**（設計書§5.1注意 / NQL§3.4）。したがって「Reaction」は個々のリアクションイベントではなく、(a) **リアクションピッカーに並べる絵文字定義** と (b) **表示用の集計エントリ** の2つを指す。
+> **重要な区別**: `Note.reactions` は「絵文字キー→集計数」の `HashMap` であり、**誰がリアクションしたかは Misskey が返さない**（設計書§5.1注意 / TQL§3.4）。したがって「Reaction」は個々のリアクションイベントではなく、(a) **リアクションピッカーに並べる絵文字定義** と (b) **表示用の集計エントリ** の2つを指す。
 
 ```rust
 /// (a) リアクションピッカー用。カスタム絵文字はインスタンス単位でキャッシュ（未確定§6）。
@@ -282,7 +282,7 @@ pub struct ReactionSummary {
 
 ### 2.6 Column / ColumnKind / FilterQuery
 
-MVP は部分一致キーワードのみ。将来の NQL 導入時に `FilterQuery` のバリアントを増やすだけで移行できるよう、フィルタを **enum で抽象化** しておく（設計書§5.1「将来は Query AST に置き換える」に対応）。
+MVP は部分一致キーワードのみ。将来の TQL 導入時に `FilterQuery` のバリアントを増やすだけで移行できるよう、フィルタを **enum で抽象化** しておく（設計書§5.1「将来は Query AST に置き換える」に対応）。
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -298,7 +298,7 @@ pub struct Column {
     pub notify_desktop: bool,
 }
 
-/// 設計書§8.2 の MVP スコープ。Antenna 等は将来拡張（NQL§2 のソースが上位互換）。
+/// 設計書§8.2 の MVP スコープ。Antenna 等は将来拡張（TQL§2 のソースが上位互換）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ColumnKind {
@@ -312,18 +312,18 @@ pub enum ColumnKind {
     // 将来: Antenna { antenna_id }, Channel { channel_id }, User { acct }, Tag { tag }, Cache
 }
 
-/// MVP=Keywords のみ。将来 NQL 導入で Nql を有効化（filter/ast.rs の Query を保持）。
+/// MVP=Keywords のみ。将来 TQL 導入で Tql を有効化（filter/ast.rs の Query を保持）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]
 pub enum FilterQuery {
     /// 部分一致キーワード（OR）。空 Vec = 素通し。
     Keywords(Vec<String>),
-    /// Phase 4: NQL クエリ文字列（保存形）。パース結果 AST は Core 側でキャッシュ。
-    Nql(String),
+    /// Phase 4: TQL クエリ文字列（保存形）。パース結果 AST は Core 側でキャッシュ。
+    Tql(String),
 }
 ```
 
-> **フロント↔DB の扱い**: `Column`/`Account` は `store::settings` が SQLite に永続化する設定データ。`Note` は `store::note_cache` が別途キャッシュ（NQL§9 スキーマ）。`FilterQuery::Nql` の中身の評価は `filter/` 一式（Phase 4）に委譲し、MVP では `Keywords` のみ `filter/keyword.rs` が処理する。
+> **フロント↔DB の扱い**: `Column`/`Account` は `store::settings` が SQLite に永続化する設定データ。`Note` は `store::note_cache` が別途キャッシュ（TQL§9 スキーマ）。`FilterQuery::Tql` の中身の評価は `filter/` 一式（Phase 4）に委譲し、MVP では `Keywords` のみ `filter/keyword.rs` が処理する。
 
 ---
 
@@ -383,7 +383,7 @@ pub struct MiAuthSession { url: String, session_id: String }
 | イベント名 | ペイロード | 用途 |
 |---|---|---|
 | `column:note` | `{ column_id: String, note: Note }` | 新規ノート受信（Broadcaster がフィルタ通過分のみ発火） |
-| `column:note_updated` | `{ column_id, note_id, patch: NotePatch }` | リアクション/投票/カウント更新（値は更新・出入りなし。NQL§6） |
+| `column:note_updated` | `{ column_id, note_id, patch: NotePatch }` | リアクション/投票/カウント更新（値は更新・出入りなし。TQL§6） |
 | `column:note_deleted` | `{ column_id, note_id }` | 削除（唯一カラムから除去するケース） |
 | `column:connection_state` | `{ column_id, state: ConnectionState }` | 接続状態のUI表示 |
 | `notification:new` | `{ account_id, notification: Notification }` | Notificationsカラム／デスクトップ通知トリガー |
@@ -432,7 +432,7 @@ sequenceDiagram
     CM->>IB: 生ペイロードを引き渡し
     IB->>IB: domain::Note へ正規化 (api/normalize)
     IB->>IB: NoteID で重複排除
-    IB->>DB: upsert (SQLite キャッシュ / NQL§9 スキーマ)
+    IB->>DB: upsert (SQLite キャッシュ / TQL§9 スキーマ)
     IB->>BC: 正規化済み Note
 
     Note over BC,EV: 同一WS上の複数カラムへファンアウト
@@ -453,7 +453,7 @@ sequenceDiagram
     MI-->>CM: noteUpdated (reacted / pollVoted / deleted)
     CM->>BC: NotePatch へ変換
     BC-->>FE: emit "column:note_updated" { column_id, note_id, patch }
-    FE->>FE: 該当Noteの値のみ更新（出入りなし・NQL§6）
+    FE->>FE: 該当Noteの値のみ更新（出入りなし・TQL§6）
 
     Note over CM,MI: 切断は前提（§6）
     MI--xCM: disconnect
