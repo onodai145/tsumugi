@@ -74,7 +74,7 @@ class AppStore {
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false });
-  ui = $state<UiPrefs>({ theme: "auto", defaultColumnWidth: 300 });
+  ui = $state<UiPrefs>({ theme: "auto", defaultColumnWidth: 300, keymap: {} });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
   reactPickerNoteId = $state<string | null>(null);
@@ -90,7 +90,8 @@ class AppStore {
       this.accounts = await unwrap(commands.listAccounts());
       this.mute = await unwrap(commands.getMute());
       this.notify = await unwrap(commands.getNotify());
-      this.ui = await unwrap(commands.getUiPrefs());
+      const ui = await unwrap(commands.getUiPrefs());
+      this.ui = { ...ui, keymap: ui.keymap ?? {} };
       this.#applyTheme(this.ui.theme);
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
@@ -554,9 +555,16 @@ class AppStore {
   /// 表示設定（テーマ・既定カラム幅）を保存し、テーマを即時反映。
   async setUiPrefs(prefs: UiPrefs) {
     await unwrap(commands.setUiPrefs(prefs));
-    this.ui = prefs;
+    this.ui = { ...prefs, keymap: prefs.keymap ?? {} };
     this.#applyTheme(prefs.theme);
     this.#log("info", "表示設定を保存しました");
+  }
+
+  /// キーバインドの上書きを保存（他の表示設定は据え置き）。
+  async setKeymap(overrides: Record<string, string>) {
+    await unwrap(commands.setUiPrefs({ ...this.ui, keymap: overrides }));
+    this.ui = { ...this.ui, keymap: overrides };
+    this.#log("info", "キー割り当てを更新しました");
   }
 
   /// data-theme を <html> に反映。auto は属性を外して OS 設定に追従させる。

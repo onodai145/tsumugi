@@ -8,9 +8,10 @@
   import Compose from "./ui/Compose.svelte";
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
-  import { defaultKeymap, eventToChord } from "./lib/keymap";
+  import { buildKeymap, eventToChord } from "./lib/keymap";
 
-  const keymap = defaultKeymap();
+  // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
+  const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
