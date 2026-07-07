@@ -131,6 +131,30 @@ impl SettingsStore {
         conn.execute("DELETE FROM column_def WHERE id = ?1", params![column_id])?;
         Ok(())
     }
+
+    /// カラム幅を更新する。
+    pub fn set_column_width(&self, column_id: &str, width: i32) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE column_def SET width = ?1 WHERE id = ?2",
+            params![width, column_id],
+        )?;
+        Ok(())
+    }
+
+    /// 与えられた id 順に ord を 0..n で振り直す（並べ替え）。
+    pub fn reorder_columns(&self, ordered_ids: &[String]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for (i, id) in ordered_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE column_def SET ord = ?1 WHERE id = ?2",
+                params![i as i32, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

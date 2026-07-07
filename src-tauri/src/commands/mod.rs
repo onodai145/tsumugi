@@ -13,7 +13,8 @@ pub use account::{
 #[allow(unused_imports)]
 pub use column::{
     add_column, capture_notes, close_column, fetch_backfill, fetch_notifications_backfill,
-    list_columns, list_user_lists, resume_column, uncapture_notes, validate_filter, OpenedColumn,
+    list_columns, list_user_lists, reorder_columns, resume_column, set_column_width,
+    uncapture_notes, validate_filter, OpenedColumn,
 };
 #[allow(unused_imports)]
 pub use note::{

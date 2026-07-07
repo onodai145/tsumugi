@@ -14,7 +14,7 @@ use specta::Type;
 use tauri::{AppHandle, State};
 
 const INITIAL_LIMIT: u32 = 20;
-const DEFAULT_WIDTH: i32 = 340;
+const DEFAULT_WIDTH: i32 = 300;
 
 /// カラムを開いた結果。ノートカラムは `notes`、通知カラムは `notifications` が入る。
 #[derive(Debug, Serialize, Type)]
@@ -187,6 +187,24 @@ pub async fn fetch_notifications_backfill(
     let column = load_column(&state, &column_id)?;
     let client = state.client_for(&column.account_id)?;
     fetch_notifications(&client, INITIAL_LIMIT, Some(&until_id)).await
+}
+
+/// カラム幅を更新（永続化）。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_column_width(
+    state: State<'_, AppState>,
+    column_id: String,
+    width: i32,
+) -> Result<()> {
+    state.settings.set_column_width(&column_id, width.clamp(220, 720))
+}
+
+/// カラムの並び順を更新（与えた id 順に振り直す・永続化）。
+#[tauri::command]
+#[specta::specta]
+pub async fn reorder_columns(state: State<'_, AppState>, ordered_ids: Vec<String>) -> Result<()> {
+    state.settings.reorder_columns(&ordered_ids)
 }
 
 /// カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。

@@ -24,6 +24,7 @@ export interface ColumnView {
   accountId: string;
   kind: ColumnKind;
   title: string;
+  width: number;
   notes: Note[];
   notifications: Notification[];
   state: ConnectionState;
@@ -78,11 +79,50 @@ class AppStore {
       accountId: opened.column.accountId,
       kind: opened.column.kind,
       title: acc ? `${src} @${acc.username}` : src,
+      width: opened.column.width,
       notes: opened.notes,
       notifications: opened.notifications,
       state: "connecting",
       loadingMore: false,
     };
+  }
+
+  // ---- カラムの並べ替え / 幅 ----
+
+  draggingColumnId = $state<string | null>(null);
+
+  startDragColumn(id: string) {
+    this.draggingColumnId = id;
+  }
+  dragOverColumn(overId: string) {
+    const from = this.columns.findIndex((c) => c.id === this.draggingColumnId);
+    const to = this.columns.findIndex((c) => c.id === overId);
+    if (from < 0 || to < 0 || from === to) return;
+    const arr = [...this.columns];
+    const [moved] = arr.splice(from, 1);
+    arr.splice(to, 0, moved);
+    this.columns = arr;
+  }
+  async endDragColumn() {
+    if (!this.draggingColumnId) return;
+    this.draggingColumnId = null;
+    try {
+      await unwrap(commands.reorderColumns(this.columns.map((c) => c.id)));
+    } catch (e) {
+      this.error = String(e);
+    }
+  }
+
+  setColumnWidthLocal(columnId: string, width: number) {
+    const c = this.columns.find((c) => c.id === columnId);
+    if (c) c.width = width;
+  }
+  async persistColumnWidth(columnId: string, width: number) {
+    try {
+      await unwrap(commands.setColumnWidth(columnId, width));
+    } catch (e) {
+      this.error = String(e);
+    }
   }
 
   async #subscribe() {

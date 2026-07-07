@@ -31,6 +31,10 @@ export const commands = {
 	fetchNotificationsBackfill: (columnId: string, untilId: string) => typedError<Notification[], Error>(__TAURI_INVOKE("fetch_notifications_backfill", { columnId, untilId })),
 	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
+	/**  カラム幅を更新（永続化）。 */
+	setColumnWidth: (columnId: string, width: number) => typedError<null, Error>(__TAURI_INVOKE("set_column_width", { columnId, width })),
+	/**  カラムの並び順を更新（与えた id 順に振り直す・永続化）。 */
+	reorderColumns: (orderedIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("reorder_columns", { orderedIds })),
 	/**  表示中ノートをキャプチャ購読する（他者のリアクション等を追う。初期ページ分をフロントが登録）。 */
 	captureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("capture_notes", { columnId, noteIds })),
 	/**  キャプチャ解除（表示領域外に出たノート）。 */
