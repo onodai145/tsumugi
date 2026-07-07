@@ -1,6 +1,6 @@
-//! NG（ミュート）設定の取得・更新。
+//! NG（ミュート）・通知設定の取得・更新。
 
-use crate::domain::MuteConfig;
+use crate::domain::{MuteConfig, NotifyConfig};
 use crate::error::Result;
 use crate::state::AppState;
 use tauri::State;
@@ -19,4 +19,18 @@ pub async fn set_mute(state: State<'_, AppState>, config: MuteConfig) -> Result<
     state.settings.save_mute(&config)?;
     *state.mute.lock().unwrap() = config;
     Ok(())
+}
+
+/// デスクトップ通知・音の設定を取得。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_notify(state: State<'_, AppState>) -> Result<NotifyConfig> {
+    state.settings.load_notify()
+}
+
+/// デスクトップ通知・音の設定を更新（永続化）。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_notify(state: State<'_, AppState>, config: NotifyConfig) -> Result<()> {
+    state.settings.save_notify(&config)
 }

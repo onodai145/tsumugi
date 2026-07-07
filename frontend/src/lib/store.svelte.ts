@@ -2,6 +2,11 @@
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
 import { commands, events, unwrap, formatError } from "./ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import type {
   Account,
   Note,
@@ -15,6 +20,7 @@ import type {
   FilterQuery,
   Notification,
   MuteConfig,
+  NotifyConfig,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -55,6 +61,7 @@ class AppStore {
   compose = $state<ComposeState | null>(null);
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
+  notify = $state<NotifyConfig>({ desktop: false, sound: false });
 
   #unlisten: UnlistenFn[] = [];
 
@@ -63,6 +70,7 @@ class AppStore {
     try {
       this.accounts = await unwrap(commands.listAccounts());
       this.mute = await unwrap(commands.getMute());
+      this.notify = await unwrap(commands.getNotify());
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, tabs: [], activeTabId: "" }));
@@ -253,6 +261,9 @@ class AppStore {
         if (!tab) return;
         if (tab.notifications.some((n) => n.id === e.payload.notification.id)) return;
         tab.notifications = [e.payload.notification, ...tab.notifications].slice(0, MAX_NOTES);
+        // デスクトップ通知 / 音
+        if (this.notify.desktop) void this.#osNotify(e.payload.notification);
+        if (this.notify.sound) beep();
       }),
     );
   }
@@ -347,6 +358,28 @@ class AppStore {
 
   async fetchUserLists(accountId: string) {
     return await unwrap(commands.listUserLists(accountId));
+  }
+
+  /// 通知設定を保存。desktop を有効化したら権限を要求する。
+  async setNotify(config: NotifyConfig) {
+    if (config.desktop && !(await isPermissionGranted())) {
+      const p = await requestPermission();
+      if (p !== "granted") config = { ...config, desktop: false };
+    }
+    await unwrap(commands.setNotify(config));
+    this.notify = config;
+  }
+
+  async #osNotify(n: Notification) {
+    try {
+      if (!(await isPermissionGranted())) return;
+      const actor = n.user ? (n.user.name ?? n.user.username) : "";
+      const title = `${actor} ${notifActionLabel(n.type)}`.trim();
+      const body = n.note?.text ?? (n.reaction ?? "");
+      sendNotification({ title: title || "通知", body });
+    } catch {
+      // 通知失敗は無視
+    }
   }
 
   /// NG 設定を保存し、表示中の該当ノートも即座に取り除く。
@@ -505,6 +538,44 @@ function noteMutedOne(n: Note, cfg: MuteConfig): boolean {
 }
 export function isMuted(n: Note, cfg: MuteConfig): boolean {
   return noteMutedOne(n, cfg) || (n.renote ? noteMutedOne(n.renote, cfg) : false);
+}
+
+// ---- 通知の見出し / 音 ----
+
+function notifActionLabel(type: string): string {
+  const labels: Record<string, string> = {
+    follow: "にフォローされました",
+    mention: "からメンション",
+    reply: "から返信",
+    renote: "がRenote",
+    quote: "が引用",
+    reaction: "がリアクション",
+    pollEnded: "の投票が終了",
+    receiveFollowRequest: "からフォローリクエスト",
+    followRequestAccepted: "がフォローを承認",
+  };
+  return labels[type] ?? type;
+}
+
+let audioCtx: AudioContext | null = null;
+function beep() {
+  try {
+    audioCtx ??= new AudioContext();
+    const ctx = audioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.value = 0.0001;
+    osc.connect(gain).connect(ctx.destination);
+    const now = ctx.currentTime;
+    gain.gain.exponentialRampToValueAtTime(0.15, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    osc.start(now);
+    osc.stop(now + 0.19);
+  } catch {
+    // 音の失敗は無視
+  }
 }
 
 export const app = new AppStore();

@@ -1,11 +1,12 @@
 //! 設定データ（Account / Column）の永続化。token は含めない（keyring 管轄）。
 
-use crate::domain::{Account, Column, ColumnGroup, MuteConfig};
+use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig};
 use crate::error::Result;
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
 
 const MUTE_KEY: &str = "mute";
+const NOTIFY_KEY: &str = "notify";
 
 pub struct SettingsStore {
     // note_cache.rs（同 crate の別モジュール）からも使うため pub(crate)
@@ -207,12 +208,32 @@ impl SettingsStore {
     }
 
     pub fn save_mute(&self, cfg: &MuteConfig) -> Result<()> {
-        let json = serde_json::to_string(cfg)?;
+        self.set_kv(MUTE_KEY, &serde_json::to_string(cfg)?)
+    }
+
+    pub fn load_notify(&self) -> Result<NotifyConfig> {
+        match self.get_kv(NOTIFY_KEY)? {
+            Some(s) => Ok(serde_json::from_str(&s)?),
+            None => Ok(NotifyConfig::default()),
+        }
+    }
+
+    pub fn save_notify(&self, cfg: &NotifyConfig) -> Result<()> {
+        self.set_kv(NOTIFY_KEY, &serde_json::to_string(cfg)?)
+    }
+
+    fn get_kv(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn
+            .query_row("SELECT value FROM app_setting WHERE key = ?1", params![key], |r| r.get(0))
+            .ok())
+    }
+    fn set_kv(&self, key: &str, value: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO app_setting (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![MUTE_KEY, json],
+            params![key, value],
         )?;
         Ok(())
     }

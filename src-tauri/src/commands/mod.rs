@@ -22,4 +22,4 @@ pub use note::{
     delete_note_cmd, list_custom_emojis, post_note, react, renote, unreact, upload_file,
 };
 #[allow(unused_imports)]
-pub use mute::{get_mute, set_mute};
+pub use mute::{get_mute, get_notify, set_mute, set_notify};

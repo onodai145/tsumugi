@@ -18,6 +18,7 @@ export default defineConfig({
       "@tauri-apps/api/event",
       "@tauri-apps/plugin-opener",
       "@tauri-apps/plugin-dialog",
+      "@tauri-apps/plugin-notification",
       "mfm-js",
     ],
   },

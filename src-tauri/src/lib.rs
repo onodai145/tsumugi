@@ -50,6 +50,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::upload_file,
             commands::mute::get_mute,
             commands::mute::set_mute,
+            commands::mute::get_notify,
+            commands::mute::set_notify,
         ])
         .events(collect_events![
             events::ColumnNote,
@@ -78,6 +80,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
