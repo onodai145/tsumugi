@@ -51,9 +51,6 @@
       <button class="bar-btn" onclick={openAddColumn}>＋カラム</button>
       <button class="bar-btn" onclick={() => openSettings("accounts")} title="設定">⚙ 設定</button>
     {/if}
-    <button class="bar-btn" onclick={() => (showAdd = !showAdd)}>
-      {showAdd ? "閉じる" : "＋アカウント"}
-    </button>
   </header>
 
   {#if app.error}
@@ -66,7 +63,7 @@
     {#if app.booting}
       <div class="center-msg">起動中…</div>
     {:else if showAdd || app.accounts.length === 0}
-      <AddAccount />
+      <AddAccount onclose={app.accounts.length > 0 ? () => (showAdd = false) : undefined} />
     {:else if app.groups.length === 0}
       <div class="center-msg">
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。
