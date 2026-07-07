@@ -51,6 +51,7 @@
   class="column"
   style={`width:${group.width}px`}
   class:dragging={app.draggingGroupId === group.id}
+  class:focused={app.focusedGroupId === group.id}
   ondragover={(e) => {
     e.preventDefault();
     app.dragOverGroup(group.id);
@@ -125,7 +126,12 @@
         {/if}
       {:else}
         {#each activeTab.notes as note (note.id)}
-          <NoteCard {note} accountId={activeTab.accountId} />
+          <NoteCard
+            {note}
+            accountId={activeTab.accountId}
+            tabId={activeTab.id}
+            selected={note.id === activeTab.selectedNoteId}
+          />
         {/each}
         {#if activeTab.notes.length === 0 && !activeTab.loadingMore}
           <div class="empty">まだノートがありません</div>
@@ -164,9 +170,13 @@
     gap: 1px;
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
-    border-top: 2px solid var(--accent);
+    border-top: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
     overflow-x: auto;
     min-height: 26px;
+  }
+  /* キーボードフォーカス中のカラムは上端をはっきり表示 */
+  .column.focused .tabbar {
+    border-top-color: var(--accent);
   }
   .grip {
     display: flex;

@@ -7,6 +7,9 @@
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Compose from "./ui/Compose.svelte";
   import Settings from "./ui/Settings.svelte";
+  import { defaultKeymap, eventToChord } from "./lib/keymap";
+
+  const keymap = defaultKeymap();
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
@@ -33,8 +36,35 @@
     showAddColumn = true;
   }
 
+  function onGlobalKey(e: KeyboardEvent) {
+    const el = document.activeElement as HTMLElement | null;
+    // 入力中はキーバインドを無効化（タイプを妨げない）
+    if (
+      el &&
+      (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)
+    ) {
+      return;
+    }
+    // Esc: 開いているリアクションピッカーを閉じる
+    if (e.key === "Escape") {
+      if (app.reactPickerNoteId) {
+        app.reactPickerNoteId = null;
+        e.preventDefault();
+      }
+      return;
+    }
+    // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
+    if (showAdd || showAddColumn || showSettings || app.compose) return;
+    const action = keymap.get(eventToChord(e));
+    if (!action) return;
+    e.preventDefault();
+    app.runKeyAction(action);
+  }
+
   onMount(() => {
     app.boot();
+    window.addEventListener("keydown", onGlobalKey);
+    return () => window.removeEventListener("keydown", onGlobalKey);
   });
 </script>
 

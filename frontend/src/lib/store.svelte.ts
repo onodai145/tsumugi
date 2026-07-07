@@ -24,6 +24,7 @@ import type {
   UiPrefs,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { KeyAction } from "./keymap";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 
@@ -37,6 +38,7 @@ export interface TabView {
   notifications: Notification[];
   state: ConnectionState;
   loadingMore: boolean;
+  selectedNoteId: string | null;
 }
 
 /// 視覚カラム = タブの集合。幅と並び順を持ち、アクティブタブを表示する。
@@ -64,6 +66,9 @@ class AppStore {
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false });
   ui = $state<UiPrefs>({ theme: "auto", defaultColumnWidth: 300 });
+  // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
+  focusedGroupId = $state<string | null>(null);
+  reactPickerNoteId = $state<string | null>(null);
 
   #unlisten: UnlistenFn[] = [];
 
@@ -107,6 +112,7 @@ class AppStore {
       notifications: opened.notifications,
       state: "connecting",
       loadingMore: false,
+      selectedNoteId: null,
     };
   }
 
@@ -120,6 +126,7 @@ class AppStore {
     const tab = this.#makeTab(opened);
     g.tabs = [...g.tabs, tab];
     if (!g.activeTabId) g.activeTabId = tab.id;
+    if (!this.focusedGroupId) this.focusedGroupId = g.id;
     return tab;
   }
 
@@ -137,6 +144,110 @@ class AppStore {
   setActiveTab(groupId: string, tabId: string) {
     const g = this.groups.find((x) => x.id === groupId);
     if (g) g.activeTabId = tabId;
+    this.focusedGroupId = groupId;
+  }
+
+  // ---- キーボード操作 ----
+
+  #focusedGroup(): GroupView | undefined {
+    return this.groups.find((g) => g.id === this.focusedGroupId) ?? this.groups[0];
+  }
+  #focusedTab(): TabView | undefined {
+    const g = this.#focusedGroup();
+    if (!g) return undefined;
+    return g.tabs.find((t) => t.id === g.activeTabId) ?? g.tabs[0];
+  }
+
+  /// ノートをクリック等で選択（そのカラムにフォーカスも移す）。
+  selectNote(tabId: string, noteId: string) {
+    const t = this.#findTab(tabId);
+    if (!t) return;
+    t.selectedNoteId = noteId;
+    for (const g of this.groups) {
+      if (g.tabs.some((x) => x.id === tabId)) {
+        this.focusedGroupId = g.id;
+        break;
+      }
+    }
+  }
+
+  /// フォーカス中タブの選択を delta 分だけ動かす（ノートタブのみ）。
+  #moveSelection(delta: number) {
+    const t = this.#focusedTab();
+    if (!t || t.kind.type === "notifications" || t.notes.length === 0) return;
+    const cur = t.notes.findIndex((n) => n.id === t.selectedNoteId);
+    let next = cur < 0 ? 0 : cur + delta;
+    next = Math.max(0, Math.min(t.notes.length - 1, next));
+    t.selectedNoteId = t.notes[next].id;
+  }
+
+  /// フォーカスを隣のカラムへ。
+  #moveFocusColumn(delta: number) {
+    if (this.groups.length === 0) return;
+    const idx = this.groups.findIndex((g) => g.id === this.focusedGroupId);
+    const cur = idx < 0 ? 0 : idx;
+    const next = Math.max(0, Math.min(this.groups.length - 1, cur + delta));
+    this.focusedGroupId = this.groups[next].id;
+  }
+
+  #selectedNote(): { tab: TabView; note: Note } | null {
+    const t = this.#focusedTab();
+    if (!t || t.kind.type === "notifications") return null;
+    let note = t.notes.find((n) => n.id === t.selectedNoteId);
+    if (!note) {
+      // 未選択なら先頭を選択して対象にする
+      note = t.notes[0];
+      if (!note) return null;
+      t.selectedNoteId = note.id;
+    }
+    return { tab: t, note };
+  }
+
+  /// キーバインドから呼ばれるアクション実行。
+  runKeyAction(action: KeyAction) {
+    switch (action) {
+      case "note.next":
+        this.#moveSelection(1);
+        return;
+      case "note.prev":
+        this.#moveSelection(-1);
+        return;
+      case "column.prev":
+        this.#moveFocusColumn(-1);
+        return;
+      case "column.next":
+        this.#moveFocusColumn(1);
+        return;
+      case "compose.new": {
+        const t = this.#focusedTab();
+        const accountId = t?.accountId ?? this.accounts[0]?.id;
+        if (accountId) this.openCompose(accountId);
+        return;
+      }
+    }
+    // 以降は選択ノートが対象
+    const sel = this.#selectedNote();
+    if (!sel) return;
+    const target = !sel.note.text && sel.note.renote ? sel.note.renote : sel.note; // 純粋Renoteは中身
+    switch (action) {
+      case "note.reply":
+        this.openCompose(sel.tab.accountId, { replyTo: target });
+        return;
+      case "note.quote":
+        this.openCompose(sel.tab.accountId, { quoteOf: target });
+        return;
+      case "note.renote":
+        void this.renote(sel.tab.accountId, target.id);
+        return;
+      case "note.react":
+        this.reactPickerNoteId = this.reactPickerNoteId === target.id ? null : target.id;
+        return;
+      case "note.open": {
+        const acc = this.accounts.find((a) => a.id === sel.tab.accountId);
+        if (acc) void openUrl(`https://${acc.host}/notes/${target.id}`);
+        return;
+      }
+    }
   }
 
   // ---- タブの D&D（グループ内並べ替え / グループ間移動） ----
