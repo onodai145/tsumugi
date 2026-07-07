@@ -200,6 +200,10 @@ class AppStore {
     return r.status === "ok" ? null : formatError(r.error);
   }
 
+  async fetchUserLists(accountId: string) {
+    return await unwrap(commands.listUserLists(accountId));
+  }
+
   async loadMore(columnId: string) {
     const col = this.columns.find((c) => c.id === columnId);
     if (!col || col.loadingMore || col.notes.length === 0) return;

@@ -7,29 +7,13 @@ use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TimelineArgs {
-    limit: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    until_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    since_id: Option<String>,
-}
-
-/// 指定エンドポイントのタイムラインを取得する。`until_id` で過去ページ。返りは新しい順。
-pub async fn fetch_timeline(
+/// 指定エンドポイントへ任意ボディを POST してノート配列を得る（timeline/list/search 共通）。
+pub async fn fetch_notes(
     client: &MisskeyClient,
     endpoint: &str,
-    limit: u32,
-    until_id: Option<String>,
+    body: &serde_json::Value,
 ) -> Result<Vec<Note>> {
-    let args = TimelineArgs {
-        limit: limit.clamp(1, 100),
-        until_id,
-        since_id: None,
-    };
-    let raw: Vec<RawNote> = client.post(endpoint, &args).await?;
+    let raw: Vec<RawNote> = client.post(endpoint, body).await?;
     Ok(raw.into_iter().map(Into::into).collect())
 }
 
@@ -195,23 +179,24 @@ mod tests {
     }
 
     #[test]
-    fn timeline_args_omit_none_cursors() {
-        let v = serde_json::to_value(TimelineArgs {
-            limit: 20,
-            until_id: None,
-            since_id: None,
-        })
-        .unwrap();
-        assert_eq!(v["limit"], 20);
-        assert!(v.get("untilId").is_none());
-        assert!(v.get("sinceId").is_none());
+    fn rest_request_builds_bodies() {
+        use crate::domain::ColumnKind;
+        let (ep, body) = ColumnKind::Home.rest_request(20, None).unwrap();
+        assert_eq!(ep, "notes/timeline");
+        assert_eq!(body["limit"], 20);
+        assert!(body.get("untilId").is_none());
 
-        let v2 = serde_json::to_value(TimelineArgs {
-            limit: 20,
-            until_id: Some("n1".into()),
-            since_id: None,
-        })
-        .unwrap();
-        assert_eq!(v2["untilId"], "n1");
+        let (ep, body) = ColumnKind::List { list_id: "L1".into() }.rest_request(20, Some("n9")).unwrap();
+        assert_eq!(ep, "notes/user-list-timeline");
+        assert_eq!(body["listId"], "L1");
+        assert_eq!(body["untilId"], "n9");
+
+        let (ep, body) = ColumnKind::Search { query: "rust".into() }.rest_request(20, None).unwrap();
+        assert_eq!(ep, "notes/search");
+        assert_eq!(body["query"], "rust");
+
+        // Search はストリーミング無し
+        assert!(ColumnKind::Search { query: "x".into() }.stream_request().is_none());
+        assert_eq!(ColumnKind::List { list_id: "L".into() }.stream_request().unwrap().0, "userList");
     }
 }

@@ -35,6 +35,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::capture_notes,
             commands::column::uncapture_notes,
             commands::column::validate_filter,
+            commands::column::list_user_lists,
             commands::note::post_note,
             commands::note::renote,
             commands::note::delete_note_cmd,

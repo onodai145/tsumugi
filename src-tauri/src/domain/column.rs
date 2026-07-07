@@ -24,31 +24,52 @@ pub enum ColumnKind {
     Global,
     Hybrid,
     Notifications,
-    List { list_id: String },
-    Search { query: String },
+    List {
+        #[serde(rename = "listId")]
+        list_id: String,
+    },
+    Search {
+        query: String,
+    },
 }
 
 impl ColumnKind {
-    /// Misskey Streaming のチャンネル名（未対応ソースは None）。
-    pub fn stream_channel(&self) -> Option<&'static str> {
+    /// Streaming チャンネル名 + 接続パラメータ（`connect` の body.params）。
+    /// ストリーミングを持たないソース（Search など）は None（＝REST のみ）。
+    pub fn stream_request(&self) -> Option<(&'static str, serde_json::Value)> {
+        use serde_json::json;
         Some(match self {
-            ColumnKind::Home => "homeTimeline",
-            ColumnKind::Local => "localTimeline",
-            ColumnKind::Global => "globalTimeline",
-            ColumnKind::Hybrid => "hybridTimeline",
-            // List/Search/Notifications は追加パラメータや別扱いが要るため後続で対応
+            ColumnKind::Home => ("homeTimeline", json!({})),
+            ColumnKind::Local => ("localTimeline", json!({})),
+            ColumnKind::Global => ("globalTimeline", json!({})),
+            ColumnKind::Hybrid => ("hybridTimeline", json!({})),
+            ColumnKind::List { list_id } => ("userList", json!({ "listId": list_id })),
+            // Search/Notifications はストリーミング無し（REST のみ）/後続
             _ => return None,
         })
     }
 
-    /// 初期ページ取得の REST エンドポイント（未対応ソースは None）。
-    pub fn rest_endpoint(&self) -> Option<&'static str> {
+    /// 初期ページ/過去ページ取得の REST エンドポイント + ボディ（未対応ソースは None）。
+    pub fn rest_request(&self, limit: u32, until_id: Option<&str>) -> Option<(&'static str, serde_json::Value)> {
+        use serde_json::json;
+        let mut body = json!({ "limit": limit });
+        if let Some(u) = until_id {
+            body["untilId"] = json!(u);
+        }
         Some(match self {
-            ColumnKind::Home => "notes/timeline",
-            ColumnKind::Local => "notes/local-timeline",
-            ColumnKind::Global => "notes/global-timeline",
-            ColumnKind::Hybrid => "notes/hybrid-timeline",
-            _ => return None,
+            ColumnKind::Home => ("notes/timeline", body),
+            ColumnKind::Local => ("notes/local-timeline", body),
+            ColumnKind::Global => ("notes/global-timeline", body),
+            ColumnKind::Hybrid => ("notes/hybrid-timeline", body),
+            ColumnKind::List { list_id } => {
+                body["listId"] = json!(list_id);
+                ("notes/user-list-timeline", body)
+            }
+            ColumnKind::Search { query } => {
+                body["query"] = json!(query);
+                ("notes/search", body)
+            }
+            ColumnKind::Notifications => return None,
         })
     }
 }

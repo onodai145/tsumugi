@@ -2,8 +2,9 @@
 //! フィルタ（TQL述語 or キーワード）を適用して通過分のみ表示する。
 //! カラム定義は SQLite に永続化し、再起動時に list_columns → resume_column で復元する。
 
-use crate::api::notes::fetch_timeline;
-use crate::domain::{Column, ColumnKind, FilterQuery, Note};
+use crate::api::meta::fetch_user_lists;
+use crate::api::notes::fetch_notes;
+use crate::domain::{Column, ColumnKind, FilterQuery, Note, UserList};
 use crate::error::{Error, Result};
 use crate::filter::CompiledFilter;
 use crate::state::AppState;
@@ -34,9 +35,10 @@ pub async fn add_column(
     filter: FilterQuery,
 ) -> Result<OpenedColumn> {
     let (host, token) = state.host_token(&account_id)?;
-    let channel = kind
-        .stream_channel()
-        .ok_or_else(|| Error::Invalid("このソースはまだ未対応です".into()))?;
+    // REST 取得できないソース（Notifications 等）はまだ未対応
+    if kind.rest_request(1, None).is_none() {
+        return Err(Error::Invalid("このソースはまだ未対応です".into()));
+    }
     // フィルタをコンパイル（TQL のパースエラーはここで弾く）
     let compiled = CompiledFilter::compile(&filter).map_err(Error::Invalid)?;
 
@@ -53,17 +55,21 @@ pub async fn add_column(
     };
     state.settings.upsert_column(&column)?;
 
-    let notes = fetch_and_filter(&state, &account_id, &column, &compiled).await?;
+    let notes = fetch_and_filter(&state, &account_id, &column, &compiled, None).await?;
     state.settings.cache_notes(&column.id, &notes)?;
-    state.connections.open_channel(
-        app,
-        column.id.clone(),
-        host,
-        token,
-        channel,
-        compiled,
-        state.eval_context(),
-    );
+    // ストリーミングを持つソースのみ購読を開く（Search は REST のみ）
+    if let Some((channel, params)) = column.kind.stream_request() {
+        state.connections.open_channel(
+            app,
+            column.id.clone(),
+            host,
+            token,
+            channel,
+            params,
+            compiled,
+            state.eval_context(),
+        );
+    }
 
     Ok(OpenedColumn { column, notes })
 }
@@ -78,30 +84,32 @@ pub async fn resume_column(
 ) -> Result<OpenedColumn> {
     let column = load_column(&state, &column_id)?;
     let (host, token) = state.host_token(&column.account_id)?;
-    let channel = column
-        .kind
-        .stream_channel()
-        .ok_or_else(|| Error::Invalid("このソースはまだ未対応です".into()))?;
+    if column.kind.rest_request(1, None).is_none() {
+        return Err(Error::Invalid("このソースはまだ未対応です".into()));
+    }
     let compiled = CompiledFilter::compile(&column.filter).map_err(Error::Invalid)?;
 
     // キャッシュ（既にフィルタ通過済み）を即時表示。空なら REST 取得。
     let cached = state.settings.load_cached(&column.id, INITIAL_LIMIT)?;
     let notes = if cached.is_empty() {
-        let fresh = fetch_and_filter(&state, &column.account_id, &column, &compiled).await?;
+        let fresh = fetch_and_filter(&state, &column.account_id, &column, &compiled, None).await?;
         state.settings.cache_notes(&column.id, &fresh)?;
         fresh
     } else {
         cached
     };
-    state.connections.open_channel(
-        app,
-        column.id.clone(),
-        host,
-        token,
-        channel,
-        compiled,
-        state.eval_context(),
-    );
+    if let Some((channel, params)) = column.kind.stream_request() {
+        state.connections.open_channel(
+            app,
+            column.id.clone(),
+            host,
+            token,
+            channel,
+            params,
+            compiled,
+            state.eval_context(),
+        );
+    }
 
     Ok(OpenedColumn { column, notes })
 }
@@ -123,14 +131,7 @@ pub async fn fetch_backfill(
 ) -> Result<Vec<Note>> {
     let column = load_column(&state, &column_id)?;
     let compiled = CompiledFilter::compile(&column.filter).map_err(Error::Invalid)?;
-    let endpoint = column
-        .kind
-        .rest_endpoint()
-        .ok_or_else(|| Error::Invalid("このソースはまだ未対応です".into()))?;
-    let client = state.client_for(&column.account_id)?;
-    let raw = fetch_timeline(&client, endpoint, INITIAL_LIMIT, Some(until_id)).await?;
-    let ctx = state.eval_context();
-    let notes: Vec<Note> = raw.into_iter().filter(|n| compiled.matches(n, &ctx)).collect();
+    let notes = fetch_and_filter(&state, &column.account_id, &column, &compiled, Some(&until_id)).await?;
     state.settings.cache_notes(&column.id, &notes)?;
     Ok(notes)
 }
@@ -176,6 +177,17 @@ pub async fn validate_filter(filter: FilterQuery) -> Result<()> {
     CompiledFilter::compile(&filter).map(|_| ()).map_err(Error::Invalid)
 }
 
+/// 自分のユーザリスト一覧（List カラム作成時の選択用）。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_user_lists(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Vec<UserList>> {
+    let client = state.client_for(&account_id)?;
+    fetch_user_lists(&client).await
+}
+
 fn load_column(state: &AppState, column_id: &str) -> Result<Column> {
     state
         .settings
@@ -185,19 +197,20 @@ fn load_column(state: &AppState, column_id: &str) -> Result<Column> {
         .ok_or_else(|| Error::Invalid(format!("unknown column: {column_id}")))
 }
 
-/// カラムのソースから初期ページを取得し、フィルタ通過分のみ返す。
+/// カラムのソースから 1 ページ取得し、フィルタ通過分のみ返す（until_id で過去ページ）。
 async fn fetch_and_filter(
     state: &AppState,
     account_id: &str,
     column: &Column,
     compiled: &CompiledFilter,
+    until_id: Option<&str>,
 ) -> Result<Vec<Note>> {
-    let endpoint = column
+    let (endpoint, body) = column
         .kind
-        .rest_endpoint()
+        .rest_request(INITIAL_LIMIT, until_id)
         .ok_or_else(|| Error::Invalid("このソースはまだ未対応です".into()))?;
     let client = state.client_for(account_id)?;
-    let raw = fetch_timeline(&client, endpoint, INITIAL_LIMIT, None).await?;
+    let raw = fetch_notes(&client, endpoint, &body).await?;
     let ctx = state.eval_context();
     Ok(raw.into_iter().filter(|n| compiled.matches(n, &ctx)).collect())
 }

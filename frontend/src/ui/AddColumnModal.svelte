@@ -1,22 +1,52 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
-  import type { ColumnKind, FilterQuery } from "../bindings/tauri.gen";
+  import type { ColumnKind, FilterQuery, UserList } from "../bindings/tauri.gen";
 
   let { onclose }: { onclose: () => void } = $props();
 
-  const sources: { kind: ColumnKind; label: string }[] = [
-    { kind: { type: "home" }, label: "Home（ホーム）" },
-    { kind: { type: "local" }, label: "Local（ローカル）" },
-    { kind: { type: "hybrid" }, label: "Hybrid（ソーシャル）" },
-    { kind: { type: "global" }, label: "Global（グローバル）" },
+  type SrcType = "home" | "local" | "hybrid" | "global" | "list" | "search";
+  const srcOptions: { v: SrcType; label: string }[] = [
+    { v: "home", label: "Home（ホーム）" },
+    { v: "local", label: "Local（ローカル）" },
+    { v: "hybrid", label: "Hybrid（ソーシャル）" },
+    { v: "global", label: "Global（グローバル）" },
+    { v: "list", label: "List（リスト）" },
+    { v: "search", label: "Search（検索・ライブ更新なし）" },
   ];
 
   let accountId = $state(app.accounts[0]?.id ?? "");
-  let sourceIdx = $state(0);
+  let sourceType = $state<SrcType>("home");
+  let searchQuery = $state("");
+  let listId = $state("");
+  let lists = $state<UserList[]>([]);
   let filterText = $state("");
   let filterErr = $state<string | null>(null);
   let busy = $state(false);
   let submitErr = $state<string | null>(null);
+
+  // List 選択時にアカウントのリストを取得
+  $effect(() => {
+    if (sourceType === "list" && accountId) {
+      app
+        .fetchUserLists(accountId)
+        .then((l) => {
+          lists = l;
+          if (l.length > 0 && !l.some((x) => x.id === listId)) listId = l[0].id;
+        })
+        .catch((e) => (submitErr = String(e)));
+    }
+  });
+
+  function buildKind(): ColumnKind | null {
+    switch (sourceType) {
+      case "list":
+        return listId ? { type: "list", listId } : null;
+      case "search":
+        return searchQuery.trim() ? { type: "search", query: searchQuery.trim() } : null;
+      default:
+        return { type: sourceType };
+    }
+  }
 
   function buildFilter(): FilterQuery {
     return filterText.trim()
@@ -24,7 +54,6 @@
       : { kind: "keywords", value: [] };
   }
 
-  // TQL の入力を都度検証（空は常にOK）
   async function onFilterInput() {
     submitErr = null;
     if (!filterText.trim()) {
@@ -40,10 +69,15 @@
       submitErr = "アカウントを選択してください";
       return;
     }
+    const kind = buildKind();
+    if (!kind) {
+      submitErr = sourceType === "list" ? "リストを選択してください" : "検索語を入力してください";
+      return;
+    }
     if (filterErr) return;
     busy = true;
     try {
-      await app.addColumn(accountId, sources[sourceIdx].kind, buildFilter());
+      await app.addColumn(accountId, kind, buildFilter());
       onclose();
     } catch (e) {
       submitErr = String(e);
@@ -72,10 +106,30 @@
 
     <label class="field">
       <span>ソース</span>
-      <select bind:value={sourceIdx}>
-        {#each sources as s, i}<option value={i}>{s.label}</option>{/each}
+      <select bind:value={sourceType}>
+        {#each srcOptions as s}<option value={s.v}>{s.label}</option>{/each}
       </select>
     </label>
+
+    {#if sourceType === "list"}
+      <label class="field">
+        <span>リスト</span>
+        {#if lists.length > 0}
+          <select bind:value={listId}>
+            {#each lists as l (l.id)}<option value={l.id}>{l.name || l.id}</option>{/each}
+          </select>
+        {:else}
+          <span class="hint">リストがありません（Misskey 側で作成してください）</span>
+        {/if}
+      </label>
+    {/if}
+
+    {#if sourceType === "search"}
+      <label class="field">
+        <span>検索語</span>
+        <input placeholder="キーワード" bind:value={searchQuery} />
+      </label>
+    {/if}
 
     <label class="field">
       <span>フィルタ（TQL・空欄で全件）</span>
@@ -138,7 +192,7 @@
     margin-bottom: 10px;
     font-size: 0.85rem;
   }
-  .field span {
+  .field > span:first-child {
     color: var(--text-dim);
   }
   select,

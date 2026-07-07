@@ -35,6 +35,8 @@ export const commands = {
 	uncaptureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("uncapture_notes", { columnId, noteIds })),
 	/**  フィルタ（TQL/キーワード）の妥当性を検証する（UI の入力チェック用）。 */
 	validateFilter: (filter: FilterQuery) => typedError<null, Error>(__TAURI_INVOKE("validate_filter", { filter })),
+	/**  自分のユーザリスト一覧（List カラム作成時の選択用）。 */
+	listUserLists: (accountId: string) => typedError<UserList[], Error>(__TAURI_INVOKE("list_user_lists", { accountId })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -95,7 +97,7 @@ export type ColumnConnectionState = {
 };
 
 /**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。 */
-export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; list_id: string } | { type: "search"; query: string };
+export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; listId: string } | { type: "search"; query: string };
 
 /**  カラムに新規ノートを追加する（フィルタ通過済み）。 */
 export type ColumnNote = {
@@ -287,6 +289,12 @@ export type User = {
 	followersCount: number,
 	followingCount: number,
 	notesCount: number,
+};
+
+/**  ユーザリスト（List カラムのソース選択用）。 */
+export type UserList = {
+	id: string,
+	name: string,
 };
 
 /**  Specified = direct */

@@ -60,6 +60,7 @@ impl ConnectionManager {
         host: String,
         token: String,
         channel: &'static str,
+        params: serde_json::Value,
         filter: CompiledFilter,
         ctx: EvalContext,
     ) {
@@ -70,7 +71,7 @@ impl ConnectionManager {
         let filter = Arc::new(filter);
         let ctx = Arc::new(ctx);
         let handle = tauri::async_runtime::spawn(async move {
-            run_channel(app, col, host, token, channel, cancel_rx, cmd_rx, filter, ctx).await;
+            run_channel(app, col, host, token, channel, params, cancel_rx, cmd_rx, filter, ctx).await;
         });
         self.streams.lock().unwrap().insert(
             column_id,
@@ -173,6 +174,7 @@ async fn run_channel(
     host: String,
     token: String,
     channel: &str,
+    params: serde_json::Value,
     mut cancel: watch::Receiver<bool>,
     mut cmd_rx: mpsc::Receiver<StreamCommand>,
     filter: Arc<CompiledFilter>,
@@ -194,6 +196,7 @@ async fn run_channel(
             &host,
             &token,
             channel,
+            &params,
             &mut dedup,
             &mut capture,
             &mut cancel,
@@ -224,6 +227,7 @@ async fn connect_and_run(
     host: &str,
     token: &str,
     channel: &str,
+    params: &serde_json::Value,
     dedup: &mut Dedup,
     capture: &mut CaptureSet,
     cancel: &mut watch::Receiver<bool>,
@@ -245,7 +249,7 @@ async fn connect_and_run(
     let sub_id = uuid::Uuid::new_v4().to_string();
     if write
         .send(Message::Text(
-            protocol::connect(channel, &sub_id, serde_json::json!({})).into(),
+            protocol::connect(channel, &sub_id, params.clone()).into(),
         ))
         .await
         .is_err()
