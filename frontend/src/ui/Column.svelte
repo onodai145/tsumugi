@@ -57,7 +57,16 @@
   }}
   role="group"
 >
-  <div class="tabbar">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="tabbar"
+    ondragover={(e) => {
+      if (app.draggingTabId) {
+        e.preventDefault();
+        app.dragOverTabBarEnd(group.id);
+      }
+    }}
+  >
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <span
       class="grip"
@@ -71,7 +80,26 @@
     >⋮⋮</span>
 
     {#each group.tabs as t (t.id)}
-      <div class="tab" class:active={t.id === group.activeTabId}>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="tab"
+        class:active={t.id === group.activeTabId}
+        class:tabdrag={app.draggingTabId === t.id}
+        draggable="true"
+        ondragstart={(e) => {
+          e.dataTransfer?.setData("text/plain", t.id);
+          e.stopPropagation();
+          app.startDragTab(t.id);
+        }}
+        ondragend={() => app.endDragTab()}
+        ondragover={(e) => {
+          if (app.draggingTabId) {
+            e.preventDefault();
+            e.stopPropagation();
+            app.dragOverTab(group.id, t.id);
+          }
+        }}
+      >
         <button class="tab-btn" onclick={() => app.setActiveTab(group.id, t.id)} title={t.title}>
           <span class="tab-dot" data-state={t.state}></span>{kindLabel(t.kind)}
         </button>
@@ -157,11 +185,20 @@
     display: flex;
     align-items: center;
   }
+  .tab {
+    cursor: grab;
+  }
+  .tab:active {
+    cursor: grabbing;
+  }
   .tab.active {
     box-shadow: inset 0 -2px 0 var(--accent);
   }
   .tab:not(.active) {
     opacity: 0.65;
+  }
+  .tab.tabdrag {
+    opacity: 0.4;
   }
   .tab-btn {
     display: flex;

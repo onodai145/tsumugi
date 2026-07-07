@@ -124,6 +124,67 @@ class AppStore {
     if (g) g.activeTabId = tabId;
   }
 
+  // ---- タブの D&D（グループ内並べ替え / グループ間移動） ----
+
+  draggingTabId = $state<string | null>(null);
+
+  #findTabLoc(tabId: string): { group: GroupView; index: number } | null {
+    for (const g of this.groups) {
+      const index = g.tabs.findIndex((t) => t.id === tabId);
+      if (index >= 0) return { group: g, index };
+    }
+    return null;
+  }
+
+  startDragTab(tabId: string) {
+    this.draggingTabId = tabId;
+  }
+
+  /// ドラッグ中タブを overTab の位置へ（別グループなら移動）。ライブ反映。
+  dragOverTab(overGroupId: string, overTabId: string) {
+    const dragId = this.draggingTabId;
+    if (!dragId || dragId === overTabId) return;
+    const src = this.#findTabLoc(dragId);
+    const dst = this.groups.find((g) => g.id === overGroupId);
+    if (!src || !dst) return;
+    const tab = src.group.tabs[src.index];
+    src.group.tabs = src.group.tabs.filter((t) => t.id !== dragId);
+    const overIdx = dst.tabs.findIndex((t) => t.id === overTabId);
+    const at = overIdx < 0 ? dst.tabs.length : overIdx;
+    dst.tabs = [...dst.tabs.slice(0, at), tab, ...dst.tabs.slice(at)];
+    dst.activeTabId = dragId;
+    this.groups = this.groups.filter((g) => g.tabs.length > 0);
+  }
+
+  /// タブバーの空き部分に落とした = そのグループの末尾へ。
+  dragOverTabBarEnd(groupId: string) {
+    const dragId = this.draggingTabId;
+    if (!dragId) return;
+    const src = this.#findTabLoc(dragId);
+    const dst = this.groups.find((g) => g.id === groupId);
+    if (!src || !dst) return;
+    if (src.group.id === groupId && src.index === src.group.tabs.length - 1) return;
+    const tab = src.group.tabs[src.index];
+    src.group.tabs = src.group.tabs.filter((t) => t.id !== dragId);
+    dst.tabs = [...dst.tabs, tab];
+    dst.activeTabId = dragId;
+    this.groups = this.groups.filter((g) => g.tabs.length > 0);
+  }
+
+  async endDragTab() {
+    const dragId = this.draggingTabId;
+    this.draggingTabId = null;
+    if (!dragId) return;
+    const loc = this.#findTabLoc(dragId);
+    if (!loc) return;
+    try {
+      await unwrap(commands.moveTab(dragId, loc.group.id, loc.group.tabs.map((t) => t.id)));
+      await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
+    } catch (e) {
+      this.error = String(e);
+    }
+  }
+
   // ---- グループの並べ替え / 幅 ----
 
   draggingGroupId = $state<string | null>(null);
