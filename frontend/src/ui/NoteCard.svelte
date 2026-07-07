@@ -9,22 +9,39 @@
   import { app } from "../lib/store.svelte";
 
   // accountId があれば操作ボタンを出す（引用ネスト時は undefined = 表示のみ）
-  let { note, quoted = false, accountId }: { note: Note; quoted?: boolean; accountId?: string } =
+  // tabId/selected はトップレベル表示時のみ（キーボード選択のハイライト/スクロール用）
+  let {
+    note,
+    quoted = false,
+    accountId,
+    tabId,
+    selected = false,
+  }: { note: Note; quoted?: boolean; accountId?: string; tabId?: string; selected?: boolean } =
     $props();
 
-  let showPicker = $state(false);
+  // 純粋Renote（本文なし＋renote先あり）は「誰が」を出して中身を委譲
+  const isPureRenote = $derived(!note.text && !!note.renote);
+  const inner = $derived(isPureRenote ? note.renote! : note);
+
+  // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）
+  const showPicker = $derived(app.reactPickerNoteId === inner.id);
+  function togglePicker() {
+    app.reactPickerNoteId = showPicker ? null : inner.id;
+  }
 
   function react(reaction: string) {
-    showPicker = false;
+    app.reactPickerNoteId = null;
     if (accountId) app.toggleReaction(accountId, inner.id, reaction);
   }
   function doRenote() {
     if (accountId) app.renote(accountId, inner.id);
   }
 
-  // 純粋Renote（本文なし＋renote先あり）は「誰が」を出して中身を委譲
-  const isPureRenote = $derived(!note.text && !!note.renote);
-  const inner = $derived(isPureRenote ? note.renote! : note);
+  // キーボード選択中はスクロールで見える位置へ
+  let el = $state<HTMLElement | null>(null);
+  $effect(() => {
+    if (selected && el) el.scrollIntoView({ block: "nearest" });
+  });
 
   let cwOpen = $state(false);
   const displayName = (u: Note["user"]) => u.name ?? u.username;
@@ -35,7 +52,15 @@
   );
 </script>
 
-<article class="note" class:quoted>
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<article
+  class="note"
+  class:quoted
+  class:selected={selected && !quoted}
+  bind:this={el}
+  onclick={tabId ? () => app.selectNote(tabId, note.id) : undefined}
+>
   {#if isPureRenote}
     <div class="renote-banner">🔁 {displayName(note.user)} がRenote</div>
   {/if}
@@ -119,7 +144,7 @@
             <button
               title="リアクション"
               class:on={showPicker}
-              onclick={() => (showPicker = !showPicker)}
+              onclick={togglePicker}
             >
               ➕ {inner.reactionCount || ""}
             </button>
@@ -149,6 +174,10 @@
     margin-top: 6px;
     padding: 5px 7px;
     content-visibility: visible;
+  }
+  .note.selected {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    box-shadow: inset 3px 0 0 var(--accent);
   }
   .renote-banner {
     font-size: 0.74rem;
