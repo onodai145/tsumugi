@@ -13,6 +13,7 @@ mod note;
 mod notification;
 mod notify;
 mod reaction;
+mod ui;
 mod user;
 
 pub use account::Account;
@@ -23,4 +24,5 @@ pub use note::{DriveFile, Note, Poll, PollChoice, Visibility};
 pub use notification::Notification;
 pub use notify::NotifyConfig;
 pub use reaction::{EmojiDef, ReactionSummary};
+pub use ui::UiPrefs;
 pub use user::User;

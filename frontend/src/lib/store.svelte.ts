@@ -21,6 +21,7 @@ import type {
   Notification,
   MuteConfig,
   NotifyConfig,
+  UiPrefs,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -62,6 +63,7 @@ class AppStore {
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false });
+  ui = $state<UiPrefs>({ theme: "auto", defaultColumnWidth: 300 });
 
   #unlisten: UnlistenFn[] = [];
 
@@ -71,6 +73,8 @@ class AppStore {
       this.accounts = await unwrap(commands.listAccounts());
       this.mute = await unwrap(commands.getMute());
       this.notify = await unwrap(commands.getNotify());
+      this.ui = await unwrap(commands.getUiPrefs());
+      this.#applyTheme(this.ui.theme);
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, tabs: [], activeTabId: "" }));
@@ -368,6 +372,23 @@ class AppStore {
     }
     await unwrap(commands.setNotify(config));
     this.notify = config;
+  }
+
+  /// 表示設定（テーマ・既定カラム幅）を保存し、テーマを即時反映。
+  async setUiPrefs(prefs: UiPrefs) {
+    await unwrap(commands.setUiPrefs(prefs));
+    this.ui = prefs;
+    this.#applyTheme(prefs.theme);
+  }
+
+  /// data-theme を <html> に反映。auto は属性を外して OS 設定に追従させる。
+  #applyTheme(theme: string) {
+    const root = document.documentElement;
+    if (theme === "light" || theme === "dark") {
+      root.dataset.theme = theme;
+    } else {
+      delete root.dataset.theme;
+    }
   }
 
   async #osNotify(n: Notification) {

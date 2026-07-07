@@ -1,6 +1,10 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
 
+  // onclose があれば「戻る」導線を出す（ログイン済みで設定経由で開いた場合）。
+  // 初回（アカウント0件）は onclose 未指定で戻る先が無いため非表示。
+  let { onclose }: { onclose?: () => void } = $props();
+
   let host = $state("");
   let sessionId = $state<string | null>(null);
   let busy = $state(false);
@@ -26,6 +30,7 @@
       await app.completeAccount(sessionId);
       sessionId = null;
       host = "";
+      onclose?.(); // 追加できたらカラム表示へ戻る
     } catch (e) {
       err = String(e);
     } finally {
@@ -35,7 +40,12 @@
 </script>
 
 <div class="add-account">
-  <h2>アカウントを追加</h2>
+  <div class="head">
+    <h2>アカウントを追加</h2>
+    {#if onclose}
+      <button class="close" onclick={onclose} title="戻る">✕</button>
+    {/if}
+  </div>
   {#if !sessionId}
     <p class="hint">Misskeyインスタンスのホスト名を入力してください（例: misskey.io）</p>
     <div class="form">
@@ -69,9 +79,24 @@
     border: 1px solid var(--border);
     border-radius: 14px;
   }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
   h2 {
-    margin: 0 0 8px;
+    margin: 0;
     font-size: 1.1rem;
+  }
+  .close {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 2px 6px;
+    width: auto;
   }
   .hint {
     color: var(--text-dim);

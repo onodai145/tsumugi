@@ -6,14 +6,23 @@
   import AddColumnModal from "./ui/AddColumnModal.svelte";
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Compose from "./ui/Compose.svelte";
-  import MuteSettings from "./ui/MuteSettings.svelte";
-  import NotifySettings from "./ui/NotifySettings.svelte";
+  import Settings from "./ui/Settings.svelte";
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
-  let showMute = $state(false);
-  let showNotify = $state(false);
+  type SettingsSection = "accounts" | "display" | "notify" | "mute" | "keys";
+  let showSettings = $state(false);
+  let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);
+
+  function openSettings(section: SettingsSection) {
+    settingsInitial = section;
+    showSettings = true;
+  }
+  function addAccountFromSettings() {
+    showSettings = false;
+    showAdd = true;
+  }
 
   function openAddColumn() {
     addTabGroupId = null; // 新しい視覚カラム
@@ -40,12 +49,8 @@
     {/if}
     {#if app.accounts.length > 0}
       <button class="bar-btn" onclick={openAddColumn}>＋カラム</button>
-      <button class="bar-btn" onclick={() => (showMute = true)} title="NG（ミュート）設定">NG</button>
-      <button class="bar-btn" onclick={() => (showNotify = true)} title="通知設定">⚙</button>
+      <button class="bar-btn" onclick={() => openSettings("accounts")} title="設定">⚙ 設定</button>
     {/if}
-    <button class="bar-btn" onclick={() => (showAdd = !showAdd)}>
-      {showAdd ? "閉じる" : "＋アカウント"}
-    </button>
   </header>
 
   {#if app.error}
@@ -58,7 +63,7 @@
     {#if app.booting}
       <div class="center-msg">起動中…</div>
     {:else if showAdd || app.accounts.length === 0}
-      <AddAccount />
+      <AddAccount onclose={app.accounts.length > 0 ? () => (showAdd = false) : undefined} />
     {:else if app.groups.length === 0}
       <div class="center-msg">
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。
@@ -78,11 +83,12 @@
   {#if showAddColumn}
     <AddColumnModal groupId={addTabGroupId} onclose={() => (showAddColumn = false)} />
   {/if}
-  {#if showMute}
-    <MuteSettings onclose={() => (showMute = false)} />
-  {/if}
-  {#if showNotify}
-    <NotifySettings onclose={() => (showNotify = false)} />
+  {#if showSettings}
+    <Settings
+      initial={settingsInitial}
+      onAddAccount={addAccountFromSettings}
+      onclose={() => (showSettings = false)}
+    />
   {/if}
 </div>
 
