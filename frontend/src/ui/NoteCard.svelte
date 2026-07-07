@@ -137,31 +137,32 @@
 
 <style>
   .note {
-    padding: 10px 12px;
+    padding: 6px 9px;
     border-bottom: 1px solid var(--border);
     /* 仮想化-lite: 画面外は描画スキップ */
     content-visibility: auto;
-    contain-intrinsic-size: auto 120px;
+    contain-intrinsic-size: auto 92px;
   }
   .note.quoted {
     border: 1px solid var(--border);
-    border-radius: 10px;
-    margin-top: 8px;
+    border-radius: 4px;
+    margin-top: 6px;
+    padding: 5px 7px;
     content-visibility: visible;
   }
   .renote-banner {
-    font-size: 0.78rem;
+    font-size: 0.74rem;
     color: var(--text-dim);
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
   .row {
     display: flex;
-    gap: 10px;
+    gap: 7px;
   }
   .avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
+    width: 34px;
+    height: 34px;
+    border-radius: 5px;
     object-fit: cover;
     flex: none;
   }
@@ -175,31 +176,33 @@
   .head {
     display: flex;
     align-items: baseline;
-    gap: 6px;
+    gap: 5px;
     flex-wrap: wrap;
   }
   .name {
     font-weight: 600;
+    font-size: 0.86rem;
   }
   .acct,
   .time,
   .vis {
     color: var(--text-dim);
-    font-size: 0.82rem;
+    font-size: 0.76rem;
   }
   .time {
     margin-left: auto;
   }
   .vis {
-    padding: 0 5px;
+    padding: 0 4px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 3px;
   }
   .text {
-    margin-top: 2px;
+    margin-top: 1px;
     white-space: pre-wrap;
     word-break: break-word;
-    line-height: 1.5;
+    line-height: 1.42;
+    font-size: 0.9rem;
   }
   .cw {
     margin-top: 2px;
@@ -244,7 +247,7 @@
     padding: 1px 7px;
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius:  3px;
     font-size: 0.85rem;
     color: var(--text);
     cursor: pointer;

@@ -34,7 +34,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 4px;
     margin-top: 8px;
-    border-radius: 10px;
+    border-radius:  5px;
     overflow: hidden;
   }
   .media-grid.single {

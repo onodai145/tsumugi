@@ -1,18 +1,29 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-/// カラム = 受信ソース + フィルタ。設計書§5 / phase0-scaffold §2.6。
+/// タブ = 受信ソース + フィルタ（1タイムライン）。視覚的なカラム(ColumnGroup)に属する。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Column {
     pub id: String,
     pub account_id: String,
     pub kind: ColumnKind,
+    /// グループ内のタブ順
     pub order: i32,
-    pub width: i32,
     pub filter: FilterQuery,
     pub notify_sound: bool,
     pub notify_desktop: bool,
+    /// 所属する視覚カラム(ColumnGroup)の id
+    pub group_id: String,
+}
+
+/// 視覚的なカラム（タブの集合）。幅と並び順を持つ。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnGroup {
+    pub id: String,
+    pub order: i32,
+    pub width: i32,
 }
 
 /// 設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。

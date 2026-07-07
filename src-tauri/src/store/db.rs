@@ -16,15 +16,24 @@ CREATE TABLE IF NOT EXISTS account (
     avatar_url    TEXT
 );
 
+-- 視覚的なカラム（タブの集合）。幅と並び順を持つ。
+CREATE TABLE IF NOT EXISTS column_group (
+    id    TEXT PRIMARY KEY,
+    ord   INTEGER NOT NULL,
+    width INTEGER NOT NULL
+);
+
+-- タブ（1タイムライン）。group_id で視覚カラムに属し、ord はグループ内順序。
 CREATE TABLE IF NOT EXISTS column_def (
     id             TEXT PRIMARY KEY,
     account_id     TEXT NOT NULL,
     kind           TEXT NOT NULL,   -- ColumnKind の JSON
     ord            INTEGER NOT NULL,
-    width          INTEGER NOT NULL,
+    width          INTEGER NOT NULL,  -- 旧: カラム幅（現在は column_group.width が正）
     filter         TEXT NOT NULL,   -- FilterQuery の JSON
     notify_sound   INTEGER NOT NULL,
-    notify_desktop INTEGER NOT NULL
+    notify_desktop INTEGER NOT NULL,
+    group_id       TEXT             -- 所属する column_group.id
 );
 CREATE INDEX IF NOT EXISTS idx_column_account ON column_def(account_id);
 
@@ -88,13 +97,53 @@ CREATE TABLE IF NOT EXISTS column_note (
 CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id);
 "#;
 
-/// DB を開き（無ければ作成し）、スキーマを適用する。
+/// DB を開き（無ければ作成し）、スキーマを適用してマイグレーションを行う。
 pub fn open(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.execute_batch(SCHEMA)?;
+    migrate(&conn)?;
     Ok(conn)
+}
+
+/// 旧スキーマ（group_id 無し）からの移行。既存カラムを各自 1 グループへ割り当てる。
+fn migrate(conn: &Connection) -> Result<()> {
+    // 既存 DB で group_id 列が無ければ追加（列追加後にインデックスを張る）
+    if !column_exists(conn, "column_def", "group_id")? {
+        conn.execute_batch("ALTER TABLE column_def ADD COLUMN group_id TEXT")?;
+    }
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_column_group ON column_def(group_id)")?;
+    // group_id が未設定のタブを、それぞれ新規グループへ（新規 DB では該当なし）
+    let orphans: Vec<(String, i32, i32)> = {
+        let mut stmt =
+            conn.prepare("SELECT id, ord, width FROM column_def WHERE group_id IS NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (id, ord, width) in orphans {
+        let gid = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO column_group (id, ord, width) VALUES (?1, ?2, ?3)",
+            rusqlite::params![gid, ord, width],
+        )?;
+        conn.execute(
+            "UPDATE column_def SET group_id = ?1, ord = 0 WHERE id = ?2",
+            rusqlite::params![gid, id],
+        )?;
+    }
+    Ok(())
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |r| r.get::<_, String>(1))?;
+    for n in names {
+        if n? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// インメモリ DB（テスト用）。
@@ -102,5 +151,52 @@ pub fn open(path: &Path) -> Result<Connection> {
 pub fn open_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
     conn.execute_batch(SCHEMA)?;
+    migrate(&conn)?;
     Ok(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_old_column_def_to_groups() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 旧スキーマ（group_id 無し）＋既存カラム1件
+        conn.execute_batch(
+            "CREATE TABLE column_def (
+                id TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL,
+                ord INTEGER NOT NULL, width INTEGER NOT NULL, filter TEXT NOT NULL,
+                notify_sound INTEGER NOT NULL, notify_desktop INTEGER NOT NULL);
+             INSERT INTO column_def VALUES('c1','a1','{}',2,360,'{}',0,0);",
+        )
+        .unwrap();
+        // 新スキーマ適用（column_def は IF NOT EXISTS で維持、column_group は作成）＋移行
+        conn.execute_batch(SCHEMA).unwrap();
+        migrate(&conn).unwrap();
+
+        // タブに group_id が付与され、グループが作られている
+        let gid: Option<String> = conn
+            .query_row("SELECT group_id FROM column_def WHERE id='c1'", [], |r| r.get(0))
+            .unwrap();
+        let gid = gid.expect("group_id should be set");
+        let (gord, gwidth): (i32, i32) = conn
+            .query_row("SELECT ord, width FROM column_group WHERE id=?1", [&gid], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(gord, 2); // 旧 ord をグループ順に引き継ぐ
+        assert_eq!(gwidth, 360); // 旧 width をグループ幅に
+        let tab_ord: i32 = conn
+            .query_row("SELECT ord FROM column_def WHERE id='c1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tab_ord, 0); // グループ内では単独タブ
+
+        // 冪等: 再度 migrate しても増えない
+        migrate(&conn).unwrap();
+        let groups: i32 = conn
+            .query_row("SELECT COUNT(*) FROM column_group", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(groups, 1);
+    }
 }
