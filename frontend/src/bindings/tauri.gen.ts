@@ -50,6 +50,12 @@ export const commands = {
 	validateFilter: (filter: FilterQuery) => typedError<null, Error>(__TAURI_INVOKE("validate_filter", { filter })),
 	/**  ユーザリスト一覧（List タブ作成用）。 */
 	listUserLists: (accountId: string) => typedError<UserList[], Error>(__TAURI_INVOKE("list_user_lists", { accountId })),
+	/**  アンテナ一覧（Antenna タブ作成用）。 */
+	listAntennas: (accountId: string) => typedError<SourceItem[], Error>(__TAURI_INVOKE("list_antennas", { accountId })),
+	/**  フォロー中チャンネル一覧（Channel タブ作成用）。 */
+	listChannels: (accountId: string) => typedError<SourceItem[], Error>(__TAURI_INVOKE("list_channels", { accountId })),
+	/**  acct から User を解決（User タブ作成用）。 */
+	resolveUserAcct: (accountId: string, acct: string) => typedError<User, Error>(__TAURI_INVOKE("resolve_user_acct", { accountId, acct })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -137,7 +143,7 @@ export type ColumnGroup = {
 };
 
 /**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。 */
-export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; listId: string } | { type: "search"; query: string };
+export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; listId: string } | { type: "search"; query: string } | { type: "antenna"; antennaId: string } | { type: "channel"; channelId: string } | { type: "user"; userId: string } | { type: "tag"; tag: string };
 
 /**  カラムに新規ノートを追加する（フィルタ通過済み）。 */
 export type ColumnNote = {
@@ -355,6 +361,12 @@ export type PollInput_Serialize = {
 	choices: string[],
 	multiple: boolean,
 	expiresAt?: number | null,
+};
+
+/**  id + 表示名の軽量参照（アンテナ/チャンネル等のソース選択用）。 */
+export type SourceItem = {
+	id: string,
+	name: string,
 };
 
 /**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き。 */

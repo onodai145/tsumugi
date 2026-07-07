@@ -13,6 +13,7 @@ pub const PERMISSIONS: &[&str] = &[
     "read:following",
     "read:mutes",
     "read:blocks",
+    "read:channels",
     "write:notes",
     "write:reactions",
     "write:following",

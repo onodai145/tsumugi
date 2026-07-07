@@ -1,16 +1,31 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
-  import type { ColumnKind, FilterQuery, UserList } from "../bindings/tauri.gen";
+  import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
 
   let { onclose, groupId }: { onclose: () => void; groupId: string | null } = $props();
 
-  type SrcType = "home" | "local" | "hybrid" | "global" | "list" | "search" | "notifications";
+  type SrcType =
+    | "home"
+    | "local"
+    | "hybrid"
+    | "global"
+    | "list"
+    | "antenna"
+    | "channel"
+    | "user"
+    | "tag"
+    | "search"
+    | "notifications";
   const srcOptions: { v: SrcType; label: string }[] = [
     { v: "home", label: "Home（ホーム）" },
     { v: "local", label: "Local（ローカル）" },
     { v: "hybrid", label: "Hybrid（ソーシャル）" },
     { v: "global", label: "Global（グローバル）" },
     { v: "list", label: "List（リスト）" },
+    { v: "antenna", label: "Antenna（アンテナ）" },
+    { v: "channel", label: "Channel（チャンネル）" },
+    { v: "user", label: "User（ユーザのノート・ライブ更新なし）" },
+    { v: "tag", label: "Tag（ハッシュタグ・ライブ更新なし）" },
     { v: "search", label: "Search（検索・ライブ更新なし）" },
     { v: "notifications", label: "Notifications（通知）" },
   ];
@@ -20,6 +35,12 @@
   let searchQuery = $state("");
   let listId = $state("");
   let lists = $state<UserList[]>([]);
+  let antennaId = $state("");
+  let antennas = $state<SourceItem[]>([]);
+  let channelId = $state("");
+  let channels = $state<SourceItem[]>([]);
+  let userAcct = $state("");
+  let tagText = $state("");
   let filterText = $state("");
   let filterErr = $state<string | null>(null);
   let busy = $state(false);
@@ -38,12 +59,49 @@
     }
   });
 
+  // Antenna 選択時にアンテナ一覧を取得
+  $effect(() => {
+    if (sourceType === "antenna" && accountId) {
+      app
+        .fetchAntennas(accountId)
+        .then((l) => {
+          antennas = l;
+          if (l.length > 0 && !l.some((x) => x.id === antennaId)) antennaId = l[0].id;
+        })
+        .catch((e) => (submitErr = String(e)));
+    }
+  });
+
+  // Channel 選択時にフォロー中チャンネル一覧を取得
+  $effect(() => {
+    if (sourceType === "channel" && accountId) {
+      app
+        .fetchChannels(accountId)
+        .then((l) => {
+          channels = l;
+          if (l.length > 0 && !l.some((x) => x.id === channelId)) channelId = l[0].id;
+        })
+        .catch((e) => (submitErr = String(e)));
+    }
+  });
+
+  // User/Tag 以外は同期的に kind を組める。User は submit 時に acct を解決する。
   function buildKind(): ColumnKind | null {
     switch (sourceType) {
       case "list":
         return listId ? { type: "list", listId } : null;
+      case "antenna":
+        return antennaId ? { type: "antenna", antennaId } : null;
+      case "channel":
+        return channelId ? { type: "channel", channelId } : null;
+      case "tag": {
+        const t = tagText.trim().replace(/^#/, "");
+        return t ? { type: "tag", tag: t } : null;
+      }
       case "search":
         return searchQuery.trim() ? { type: "search", query: searchQuery.trim() } : null;
+      case "user":
+        return null; // submit 側で解決
       default:
         return { type: sourceType };
     }
@@ -64,20 +122,38 @@
     filterErr = await app.validateFilter(buildFilter());
   }
 
+  const missingMsg: Partial<Record<SrcType, string>> = {
+    list: "リストを選択してください",
+    antenna: "アンテナを選択してください",
+    channel: "チャンネルを選択してください",
+    tag: "ハッシュタグを入力してください",
+    search: "検索語を入力してください",
+    user: "ユーザ（@user@host）を入力してください",
+  };
+
   async function submit() {
     submitErr = null;
     if (!accountId) {
       submitErr = "アカウントを選択してください";
       return;
     }
-    const kind = buildKind();
-    if (!kind) {
-      submitErr = sourceType === "list" ? "リストを選択してください" : "検索語を入力してください";
-      return;
-    }
     if (filterErr) return;
     busy = true;
     try {
+      let kind = buildKind();
+      // User は acct を userId へ解決してから作成
+      if (sourceType === "user") {
+        if (!userAcct.trim()) {
+          submitErr = missingMsg.user!;
+          return;
+        }
+        const u = await app.resolveUser(accountId, userAcct.trim());
+        kind = { type: "user", userId: u.id };
+      }
+      if (!kind) {
+        submitErr = missingMsg[sourceType] ?? "入力が不足しています";
+        return;
+      }
       await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined);
       onclose();
     } catch (e) {
@@ -122,6 +198,46 @@
         {:else}
           <span class="hint">リストがありません（Misskey 側で作成してください）</span>
         {/if}
+      </label>
+    {/if}
+
+    {#if sourceType === "antenna"}
+      <label class="field">
+        <span>アンテナ</span>
+        {#if antennas.length > 0}
+          <select bind:value={antennaId}>
+            {#each antennas as a (a.id)}<option value={a.id}>{a.name || a.id}</option>{/each}
+          </select>
+        {:else}
+          <span class="hint">アンテナがありません（Misskey 側で作成してください）</span>
+        {/if}
+      </label>
+    {/if}
+
+    {#if sourceType === "channel"}
+      <label class="field">
+        <span>チャンネル（フォロー中）</span>
+        {#if channels.length > 0}
+          <select bind:value={channelId}>
+            {#each channels as c (c.id)}<option value={c.id}>{c.name || c.id}</option>{/each}
+          </select>
+        {:else}
+          <span class="hint">フォロー中のチャンネルがありません</span>
+        {/if}
+      </label>
+    {/if}
+
+    {#if sourceType === "user"}
+      <label class="field">
+        <span>ユーザ（@user@host。ローカルは @host 省略可）</span>
+        <input placeholder="@alice@misskey.io" bind:value={userAcct} />
+      </label>
+    {/if}
+
+    {#if sourceType === "tag"}
+      <label class="field">
+        <span>ハッシュタグ（# は省略可）</span>
+        <input placeholder="misskey" bind:value={tagText} />
       </label>
     {/if}
 
