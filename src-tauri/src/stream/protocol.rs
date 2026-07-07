@@ -1,7 +1,7 @@
 //! Misskey Streaming(WebSocket) のメッセージ組み立て・解釈。OpenAPI 仕様外のため手書き。
 //! 参考: Misskey Hub「Streaming API」。1接続内で複数チャンネルを id で多重化する。
 
-use crate::api::normalize::RawNote;
+use crate::api::normalize::{RawNote, RawNotification};
 use serde_json::{json, Value};
 
 /// チャンネル購読を開始する `connect` メッセージ（JSON文字列）。
@@ -40,6 +40,11 @@ pub enum Incoming {
         channel_id: String,
         note: Box<RawNote>,
     },
+    /// main チャンネルに通知が流れてきた
+    ChannelNotification {
+        channel_id: String,
+        notification: Box<RawNotification>,
+    },
     /// キャプチャ中ノートの更新（reacted / unreacted / pollVoted / deleted 等）
     NoteUpdated {
         note_id: String,
@@ -64,15 +69,28 @@ pub fn parse_incoming(text: &str) -> Incoming {
             };
             let channel_id = body.get("id").and_then(Value::as_str).unwrap_or("");
             let inner_type = body.get("type").and_then(Value::as_str).unwrap_or("");
-            if inner_type == "note" {
-                if let Some(note_val) = body.get("body") {
-                    if let Ok(note) = serde_json::from_value::<RawNote>(note_val.clone()) {
-                        return Incoming::ChannelNote {
-                            channel_id: channel_id.to_string(),
-                            note: Box::new(note),
-                        };
+            match inner_type {
+                "note" => {
+                    if let Some(note_val) = body.get("body") {
+                        if let Ok(note) = serde_json::from_value::<RawNote>(note_val.clone()) {
+                            return Incoming::ChannelNote {
+                                channel_id: channel_id.to_string(),
+                                note: Box::new(note),
+                            };
+                        }
                     }
                 }
+                "notification" => {
+                    if let Some(n_val) = body.get("body") {
+                        if let Ok(n) = serde_json::from_value::<RawNotification>(n_val.clone()) {
+                            return Incoming::ChannelNotification {
+                                channel_id: channel_id.to_string(),
+                                notification: Box::new(n),
+                            };
+                        }
+                    }
+                }
+                _ => {}
             }
             Incoming::Other
         }

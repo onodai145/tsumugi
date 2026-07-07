@@ -4,7 +4,8 @@
 
 use crate::api::meta::fetch_user_lists;
 use crate::api::notes::fetch_notes;
-use crate::domain::{Column, ColumnKind, FilterQuery, Note, UserList};
+use crate::api::notifications::fetch_notifications;
+use crate::domain::{Column, ColumnKind, FilterQuery, Note, Notification, UserList};
 use crate::error::{Error, Result};
 use crate::filter::CompiledFilter;
 use crate::state::AppState;
@@ -15,13 +16,15 @@ use tauri::{AppHandle, State};
 const INITIAL_LIMIT: u32 = 20;
 const DEFAULT_WIDTH: i32 = 340;
 
-/// カラムを開いた結果。
+/// カラムを開いた結果。ノートカラムは `notes`、通知カラムは `notifications` が入る。
 #[derive(Debug, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenedColumn {
     pub column: Column,
     /// 初期表示用の直近ノート（フィルタ通過済み・新しい順）
     pub notes: Vec<Note>,
+    /// 通知カラムの初期通知（新しい順）
+    pub notifications: Vec<Notification>,
 }
 
 /// カラムを新規作成する。ソース種別＋フィルタを受け、購読を開始する。
@@ -35,8 +38,9 @@ pub async fn add_column(
     filter: FilterQuery,
 ) -> Result<OpenedColumn> {
     let (host, token) = state.host_token(&account_id)?;
-    // REST 取得できないソース（Notifications 等）はまだ未対応
-    if kind.rest_request(1, None).is_none() {
+    let is_notif = matches!(kind, ColumnKind::Notifications);
+    // REST 取得できないソースはまだ未対応（Notifications は別経路なので除外）
+    if !is_notif && kind.rest_request(1, None).is_none() {
         return Err(Error::Invalid("このソースはまだ未対応です".into()));
     }
     // フィルタをコンパイル（TQL のパースエラーはここで弾く）
@@ -55,6 +59,19 @@ pub async fn add_column(
     };
     state.settings.upsert_column(&column)?;
 
+    if is_notif {
+        let client = state.client_for(&account_id)?;
+        let notifications = fetch_notifications(&client, INITIAL_LIMIT, None).await?;
+        state
+            .connections
+            .open_notifications(app, column.id.clone(), host, token);
+        return Ok(OpenedColumn {
+            column,
+            notes: vec![],
+            notifications,
+        });
+    }
+
     let notes = fetch_and_filter(&state, &account_id, &column, &compiled, None).await?;
     state.settings.cache_notes(&column.id, &notes)?;
     // ストリーミングを持つソースのみ購読を開く（Search は REST のみ）
@@ -71,7 +88,11 @@ pub async fn add_column(
         );
     }
 
-    Ok(OpenedColumn { column, notes })
+    Ok(OpenedColumn {
+        column,
+        notes,
+        notifications: vec![],
+    })
 }
 
 /// 永続化済みカラムを再開する（起動時の復元）。キャッシュ優先で即時表示し購読を張り直す。
@@ -84,6 +105,21 @@ pub async fn resume_column(
 ) -> Result<OpenedColumn> {
     let column = load_column(&state, &column_id)?;
     let (host, token) = state.host_token(&column.account_id)?;
+
+    // 通知カラムはキャッシュせず毎回 i/notifications を取得
+    if matches!(column.kind, ColumnKind::Notifications) {
+        let client = state.client_for(&column.account_id)?;
+        let notifications = fetch_notifications(&client, INITIAL_LIMIT, None).await?;
+        state
+            .connections
+            .open_notifications(app, column.id.clone(), host, token);
+        return Ok(OpenedColumn {
+            column,
+            notes: vec![],
+            notifications,
+        });
+    }
+
     if column.kind.rest_request(1, None).is_none() {
         return Err(Error::Invalid("このソースはまだ未対応です".into()));
     }
@@ -111,7 +147,11 @@ pub async fn resume_column(
         );
     }
 
-    Ok(OpenedColumn { column, notes })
+    Ok(OpenedColumn {
+        column,
+        notes,
+        notifications: vec![],
+    })
 }
 
 /// 永続化済みカラム定義の一覧（起動時に取得 → resume_column で復元）。
@@ -134,6 +174,19 @@ pub async fn fetch_backfill(
     let notes = fetch_and_filter(&state, &column.account_id, &column, &compiled, Some(&until_id)).await?;
     state.settings.cache_notes(&column.id, &notes)?;
     Ok(notes)
+}
+
+/// 通知カラムの過去ページ。`until_id` より古い通知を返す。
+#[tauri::command]
+#[specta::specta]
+pub async fn fetch_notifications_backfill(
+    state: State<'_, AppState>,
+    column_id: String,
+    until_id: String,
+) -> Result<Vec<Notification>> {
+    let column = load_column(&state, &column_id)?;
+    let client = state.client_for(&column.account_id)?;
+    fetch_notifications(&client, INITIAL_LIMIT, Some(&until_id)).await
 }
 
 /// カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。

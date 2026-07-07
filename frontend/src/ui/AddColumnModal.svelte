@@ -4,7 +4,7 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type SrcType = "home" | "local" | "hybrid" | "global" | "list" | "search";
+  type SrcType = "home" | "local" | "hybrid" | "global" | "list" | "search" | "notifications";
   const srcOptions: { v: SrcType; label: string }[] = [
     { v: "home", label: "Home（ホーム）" },
     { v: "local", label: "Local（ローカル）" },
@@ -12,6 +12,7 @@
     { v: "global", label: "Global（グローバル）" },
     { v: "list", label: "List（リスト）" },
     { v: "search", label: "Search（検索・ライブ更新なし）" },
+    { v: "notifications", label: "Notifications（通知）" },
   ];
 
   let accountId = $state(app.accounts[0]?.id ?? "");
@@ -131,20 +132,22 @@
       </label>
     {/if}
 
-    <label class="field">
-      <span>フィルタ（TQL・空欄で全件）</span>
-      <input
-        placeholder={"例: has_files && !cw && reactions >= 5"}
-        bind:value={filterText}
-        oninput={onFilterInput}
-        class:invalid={!!filterErr}
-      />
-    </label>
-    <p class="hint">
-      例: <code>has_files</code> / <code>!bot && local</code> /
-      <code>reactions &gt;= 10</code> / <code>text -&gt; "rust"</code>
-    </p>
-    {#if filterErr}<p class="err">TQLエラー: {filterErr}</p>{/if}
+    {#if sourceType !== "notifications"}
+      <label class="field">
+        <span>フィルタ（TQL・空欄で全件）</span>
+        <input
+          placeholder={"例: has_files && !cw && reactions >= 5"}
+          bind:value={filterText}
+          oninput={onFilterInput}
+          class:invalid={!!filterErr}
+        />
+      </label>
+      <p class="hint">
+        例: <code>has_files</code> / <code>!bot && local</code> /
+        <code>reactions &gt;= 10</code> / <code>text -&gt; "rust"</code>
+      </p>
+      {#if filterErr}<p class="err">TQLエラー: {filterErr}</p>{/if}
+    {/if}
 
     <div class="actions">
       <button class="submit" disabled={busy || !!filterErr} onclick={submit}>

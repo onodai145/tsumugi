@@ -27,6 +27,8 @@ export const commands = {
 	listColumns: () => typedError<Column[], Error>(__TAURI_INVOKE("list_columns")),
 	/**  過去ページ（上スクロール）。カラムのソースから取得し、フィルタ適用＆キャッシュする。 */
 	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
+	/**  通知カラムの過去ページ。`until_id` より古い通知を返す。 */
+	fetchNotificationsBackfill: (columnId: string, untilId: string) => typedError<Notification[], Error>(__TAURI_INVOKE("fetch_notifications_backfill", { columnId, untilId })),
 	/**  カラムを閉じる（Streaming 購読解除＋永続層から削除＋キャッシュの所属も掃除）。 */
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
 	/**  表示中ノートをキャプチャ購読する（他者のリアクション等を追う。初期ページ分をフロントが登録）。 */
@@ -58,6 +60,7 @@ export const events = {
 	columnConnectionState: makeEvent<ColumnConnectionState>("column-connection-state"),
 	columnNote: makeEvent<ColumnNote>("column-note"),
 	columnNoteUpdated: makeEvent<ColumnNoteUpdated>("column-note-updated"),
+	columnNotification: makeEvent<ColumnNotification>("column-notification"),
 };
 
 /* Types */
@@ -115,6 +118,12 @@ export type ColumnNoteUpdated = {
 	update: NoteUpdate,
 	/**  更新を起こしたユーザ（自分の操作は楽観的更新済みなのでフロントで無視するため） */
 	actorId: string | null,
+};
+
+/**  通知カラムに新規通知を追加する。 */
+export type ColumnNotification = {
+	columnId: string,
+	notification: Notification,
 };
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";
@@ -241,11 +250,31 @@ export type NoteDraft_Serialize = {
 
 export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };
 
-/**  カラムを開いた結果。 */
+/**  通知（Notifications カラム用）。Note とは別物で、フォロー/メンション/リアクション等を表す。 */
+export type Notification = {
+	id: string,
+	/**  epoch秒 */
+	createdAt: number,
+	/**
+	 *  種別: follow / mention / reply / renote / quote / reaction / pollEnded /
+	 *  receiveFollowRequest / followRequestAccepted / achievementEarned / app 等
+	 */
+	type: string,
+	/**  通知を起こしたユーザ（follow/reaction 等） */
+	user: User | null,
+	/**  対象ノート（mention/reply/renote/quote/reaction/pollEnded） */
+	note: Note | null,
+	/**  リアクション種別（kind == "reaction" のとき） */
+	reaction: string | null,
+};
+
+/**  カラムを開いた結果。ノートカラムは `notes`、通知カラムは `notifications` が入る。 */
 export type OpenedColumn = {
 	column: Column,
 	/**  初期表示用の直近ノート（フィルタ通過済み・新しい順） */
 	notes: Note[],
+	/**  通知カラムの初期通知（新しい順） */
+	notifications: Notification[],
 };
 
 export type Poll = {
