@@ -7,6 +7,13 @@ use crate::stream::ConnectionManager;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
+/// REST/WebSocket 双方で送る User-Agent。
+pub const USER_AGENT: &str = concat!(
+    "tsumugi/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/onodai145/tsumugi)"
+);
+
 /// 認可待ちの MiAuth セッション（session_id -> 発行先 host）。
 pub struct PendingMiAuth {
     pub host: String,
@@ -38,7 +45,7 @@ impl AppState {
         let mute = settings.load_mute().unwrap_or_default();
         Self {
             http: reqwest::Client::builder()
-                .user_agent(concat!("tsumugi/", env!("CARGO_PKG_VERSION")))
+                .user_agent(USER_AGENT)
                 .build()
                 .expect("failed to build reqwest client"),
             accounts: Mutex::new(AccountManager::with_accounts(accounts)),
