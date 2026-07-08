@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
+  import Dropdown from "./Dropdown.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
 
   let { onclose, groupId }: { onclose: () => void; groupId: string | null } = $props();
@@ -175,53 +176,45 @@
 
     <div class="field">
       <span>アカウント</span>
-      <AccountSelect bind:value={accountId} accounts={app.accounts} />
+      <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel />
     </div>
 
-    <label class="field">
+    <div class="field">
       <span>ソース</span>
-      <select bind:value={sourceType}>
-        {#each srcOptions as s}<option value={s.v}>{s.label}</option>{/each}
-      </select>
-    </label>
+      <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} />
+    </div>
 
     {#if sourceType === "list"}
-      <label class="field">
+      <div class="field">
         <span>リスト</span>
         {#if lists.length > 0}
-          <select bind:value={listId}>
-            {#each lists as l (l.id)}<option value={l.id}>{l.name || l.id}</option>{/each}
-          </select>
+          <Dropdown bind:value={listId} options={lists.map((l) => ({ value: l.id, label: l.name || l.id }))} />
         {:else}
           <span class="hint">リストがありません（Misskey 側で作成してください）</span>
         {/if}
-      </label>
+      </div>
     {/if}
 
     {#if sourceType === "antenna"}
-      <label class="field">
+      <div class="field">
         <span>アンテナ</span>
         {#if antennas.length > 0}
-          <select bind:value={antennaId}>
-            {#each antennas as a (a.id)}<option value={a.id}>{a.name || a.id}</option>{/each}
-          </select>
+          <Dropdown bind:value={antennaId} options={antennas.map((a) => ({ value: a.id, label: a.name || a.id }))} />
         {:else}
           <span class="hint">アンテナがありません（Misskey 側で作成してください）</span>
         {/if}
-      </label>
+      </div>
     {/if}
 
     {#if sourceType === "channel"}
-      <label class="field">
+      <div class="field">
         <span>チャンネル（フォロー中）</span>
         {#if channels.length > 0}
-          <select bind:value={channelId}>
-            {#each channels as c (c.id)}<option value={c.id}>{c.name || c.id}</option>{/each}
-          </select>
+          <Dropdown bind:value={channelId} options={channels.map((c) => ({ value: c.id, label: c.name || c.id }))} />
         {:else}
           <span class="hint">フォロー中のチャンネルがありません</span>
         {/if}
-      </label>
+      </div>
     {/if}
 
     {#if sourceType === "user"}
@@ -311,7 +304,6 @@
   .field > span:first-child {
     color: var(--text-dim);
   }
-  select,
   input {
     padding: 8px 10px;
     border: 1px solid var(--border);
