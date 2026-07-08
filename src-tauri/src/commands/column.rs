@@ -86,10 +86,61 @@ pub async fn add_column(
         notify_sound: false,
         notify_desktop: false,
         group_id: group.id.clone(),
+        title: None,
     };
     state.settings.upsert_column(&column)?;
 
     let (notes, notifications) = open_stream_and_fetch(&app, &state, &column, compiled, host, token).await?;
+    Ok(OpenedColumn {
+        column,
+        group,
+        notes,
+        notifications,
+    })
+}
+
+/// 既存タブのソース種別・フィルタ・名前を変更し、ストリームを張り直す。
+/// アカウントは変更しない。フィルタ変更でキャッシュが不整合になるためクリアして再取得する。
+#[tauri::command]
+#[specta::specta]
+pub async fn update_column(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    column_id: String,
+    kind: ColumnKind,
+    filter: FilterQuery,
+    title: Option<String>,
+) -> Result<OpenedColumn> {
+    let mut column = load_column(&state, &column_id)?;
+    let is_notif = matches!(kind, ColumnKind::Notifications);
+    if !is_notif && kind.rest_request(1, None).is_none() {
+        return Err(Error::Invalid("このソースはまだ未対応です".into()));
+    }
+    let compiled = CompiledFilter::compile(&filter).map_err(Error::Invalid)?;
+
+    column.kind = kind;
+    column.filter = filter;
+    column.title = title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    state.settings.upsert_column(&column)?;
+
+    // 既存ストリームを閉じ、旧フィルタで貯めたキャッシュを捨てる
+    state.connections.close(&column_id);
+    state.settings.clear_column_notes(&column_id)?;
+
+    let group = state
+        .settings
+        .load_groups()?
+        .into_iter()
+        .find(|g| g.id == column.group_id)
+        .ok_or_else(|| Error::Invalid(format!("unknown group: {}", column.group_id)))?;
+    let (host, token) = state.host_token(&column.account_id)?;
+    let (notes, notifications) =
+        open_stream_and_fetch(&app, &state, &column, compiled, host, token).await?;
+
     Ok(OpenedColumn {
         column,
         group,
@@ -275,6 +326,18 @@ pub async fn list_user_lists(
 ) -> Result<Vec<UserList>> {
     let client = state.client_for(&account_id)?;
     fetch_user_lists(&client).await
+}
+
+/// タブ名を変更する（空文字/None で自動生成名に戻す）。
+#[tauri::command]
+#[specta::specta]
+pub async fn rename_column(
+    state: State<'_, AppState>,
+    column_id: String,
+    title: Option<String>,
+) -> Result<()> {
+    let trimmed = title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    state.settings.set_column_title(&column_id, trimmed)
 }
 
 /// アンテナ一覧（Antenna タブ作成用）。

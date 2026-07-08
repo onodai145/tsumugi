@@ -56,6 +56,13 @@ export const commands = {
 	listChannels: (accountId: string) => typedError<SourceItem[], Error>(__TAURI_INVOKE("list_channels", { accountId })),
 	/**  acct から User を解決（User タブ作成用）。 */
 	resolveUserAcct: (accountId: string, acct: string) => typedError<User, Error>(__TAURI_INVOKE("resolve_user_acct", { accountId, acct })),
+	/**  タブ名を変更する（空文字/None で自動生成名に戻す）。 */
+	renameColumn: (columnId: string, title: string | null) => typedError<null, Error>(__TAURI_INVOKE("rename_column", { columnId, title })),
+	/**
+	 *  既存タブのソース種別・フィルタ・名前を変更し、ストリームを張り直す。
+	 *  アカウントは変更しない。フィルタ変更でキャッシュが不整合になるためクリアして再取得する。
+	 */
+	updateColumn: (columnId: string, kind: ColumnKind, filter: FilterQuery, title: string | null) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("update_column", { columnId, kind, filter, title })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -127,6 +134,8 @@ export type Column = {
 	notifyDesktop: boolean,
 	/**  所属する視覚カラム(ColumnGroup)の id */
 	groupId: string,
+	/**  ユーザ設定のタブ名。None なら種別から自動生成した名前を使う。 */
+	title: string | null,
 };
 
 /**  カラムの接続状態（UI 表示用）。 */

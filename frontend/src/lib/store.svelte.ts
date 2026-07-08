@@ -33,12 +33,22 @@ export interface TabView {
   id: string;
   accountId: string;
   kind: ColumnKind;
+  /// 種別＋アカウントから自動生成した名前
   title: string;
+  /// ユーザが付けたカスタム名（無ければ自動生成名を使う）
+  customTitle: string | null;
+  /// 適用中フィルタ（編集モーダルのプレフィル用）
+  filter: FilterQuery;
   notes: Note[];
   notifications: Notification[];
   state: ConnectionState;
   loadingMore: boolean;
   selectedNoteId: string | null;
+}
+
+/// タブに表示する名前（カスタム名優先）。
+export function tabName(t: TabView): string {
+  return t.customTitle || kindLabel(t.kind);
 }
 
 /// 視覚カラム = タブの集合。幅と並び順を持ち、アクティブタブを表示する。
@@ -123,6 +133,8 @@ class AppStore {
       accountId: opened.column.accountId,
       kind: opened.column.kind,
       title: acc ? `${src} @${acc.username}` : src,
+      customTitle: opened.column.title,
+      filter: opened.column.filter,
       notes: opened.notes,
       notifications: opened.notifications,
       state: "connecting",
@@ -179,6 +191,19 @@ class AppStore {
     const g = this.groups.find((x) => x.id === groupId);
     if (g) g.activeTabId = tabId;
     this.focusedGroupId = groupId;
+  }
+
+  /// タブ名を変更（空なら自動生成名に戻す）。永続化して即反映。
+  async renameTab(tabId: string, title: string) {
+    const trimmed = title.trim();
+    const value = trimmed.length > 0 ? trimmed : null;
+    const tab = this.#findTab(tabId);
+    if (tab) tab.customTitle = value;
+    try {
+      await unwrap(commands.renameColumn(tabId, value));
+    } catch (e) {
+      this.#fail(e);
+    }
   }
 
   // ---- キーボード操作 ----
@@ -523,13 +548,42 @@ class AppStore {
   }
 
   /// タブを追加する。`groupId` を指定するとそのカラムに、None なら新しいカラムを作る。
-  async addColumn(accountId: string, kind: ColumnKind, filter: FilterQuery, groupId?: string) {
+  async addColumn(
+    accountId: string,
+    kind: ColumnKind,
+    filter: FilterQuery,
+    groupId?: string,
+    title?: string,
+  ) {
     const opened = await unwrap(commands.addColumn(accountId, kind, filter, groupId ?? null));
     const tab = this.#insertTab(opened);
     const g = this.groups.find((x) => x.id === opened.group.id);
     if (g) g.activeTabId = tab.id;
     this.#captureInitial(opened.column.id, opened.notes);
-    this.#log("success", `カラムを追加: ${kindLabel(kind)}`);
+    const name = title?.trim();
+    if (name) await this.renameTab(tab.id, name);
+    this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
+  }
+
+  /// 既存タブのソース/フィルタ/名前を変更し、ストリームを張り直して内容を差し替える。
+  async updateColumn(tabId: string, kind: ColumnKind, filter: FilterQuery, title?: string) {
+    const name = title?.trim() || null;
+    const opened = await unwrap(commands.updateColumn(tabId, kind, filter, name));
+    const tab = this.#findTab(tabId);
+    if (tab) {
+      const acc = this.accounts.find((a) => a.id === opened.column.accountId);
+      const src = kindLabel(opened.column.kind);
+      tab.kind = opened.column.kind;
+      tab.filter = opened.column.filter;
+      tab.customTitle = opened.column.title;
+      tab.title = acc ? `${src} @${acc.username}` : src;
+      tab.notes = opened.notes;
+      tab.notifications = opened.notifications;
+      tab.selectedNoteId = null;
+      tab.state = "connecting";
+    }
+    this.#captureInitial(tabId, opened.notes);
+    this.#log("success", `タブを更新: ${opened.column.title || kindLabel(kind)}`);
   }
 
   async validateFilter(filter: FilterQuery): Promise<string | null> {

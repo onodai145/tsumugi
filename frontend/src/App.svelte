@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { app } from "./lib/store.svelte";
+  import type { TabView } from "./lib/store.svelte";
   import Column from "./ui/Column.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
@@ -15,6 +16,7 @@
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
+  let editTab = $state<TabView | null>(null);
   type SettingsSection = "accounts" | "display" | "notify" | "mute" | "keys";
   let showSettings = $state(false);
   let settingsInitial = $state<SettingsSection>("notify");
@@ -31,10 +33,17 @@
 
   function openAddColumn() {
     addTabGroupId = null; // 新しい視覚カラム
+    editTab = null;
     showAddColumn = true;
   }
   function openAddTab(groupId: string) {
     addTabGroupId = groupId; // 既存カラムにタブ追加
+    editTab = null;
+    showAddColumn = true;
+  }
+  function openEditTab(tab: TabView) {
+    editTab = tab; // 既存タブを編集
+    addTabGroupId = null;
     showAddColumn = true;
   }
 
@@ -102,7 +111,7 @@
     {:else}
       <div class="columns">
         {#each app.groups as group (group.id)}
-          <Column {group} onAddTab={openAddTab} />
+          <Column {group} onAddTab={openAddTab} onEditTab={openEditTab} />
         {/each}
       </div>
     {/if}
@@ -116,7 +125,11 @@
     <Compose />
   {/if}
   {#if showAddColumn}
-    <AddColumnModal groupId={addTabGroupId} onclose={() => (showAddColumn = false)} />
+    <AddColumnModal
+      groupId={addTabGroupId}
+      editTab={editTab ?? undefined}
+      onclose={() => (showAddColumn = false)}
+    />
   {/if}
   {#if showSettings}
     <Settings

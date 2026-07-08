@@ -15,6 +15,8 @@ pub struct Column {
     pub notify_desktop: bool,
     /// 所属する視覚カラム(ColumnGroup)の id
     pub group_id: String,
+    /// ユーザ設定のタブ名。None なら種別から自動生成した名前を使う。
+    pub title: Option<String>,
 }
 
 /// 視覚的なカラム（タブの集合）。幅と並び順を持つ。

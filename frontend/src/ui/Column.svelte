@@ -1,10 +1,18 @@
 <script lang="ts">
-  import type { GroupView } from "../lib/store.svelte";
-  import { app, kindLabel } from "../lib/store.svelte";
+  import type { GroupView, TabView } from "../lib/store.svelte";
+  import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
 
-  let { group, onAddTab }: { group: GroupView; onAddTab: (groupId: string) => void } = $props();
+  let {
+    group,
+    onAddTab,
+    onEditTab,
+  }: {
+    group: GroupView;
+    onAddTab: (groupId: string) => void;
+    onEditTab: (tab: TabView) => void;
+  } = $props();
 
   const activeTab = $derived(
     group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[0],
@@ -101,8 +109,13 @@
           }
         }}
       >
-        <button class="tab-btn" onclick={() => app.setActiveTab(group.id, t.id)} title={t.title}>
-          <span class="tab-dot" data-state={t.state}></span>{kindLabel(t.kind)}
+        <button
+          class="tab-btn"
+          onclick={() => app.setActiveTab(group.id, t.id)}
+          ondblclick={() => onEditTab(t)}
+          title={`${tabName(t)}（ダブルクリックで編集）`}
+        >
+          <span class="tab-dot" data-state={t.state}></span>{tabName(t)}
         </button>
         <button class="tab-close" title="タブを閉じる" onclick={() => app.closeTab(t.id)}>✕</button>
       </div>

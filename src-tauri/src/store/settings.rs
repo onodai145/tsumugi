@@ -126,7 +126,7 @@ impl SettingsStore {
     pub fn load_columns(&self) -> Result<Vec<Column>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, account_id, kind, ord, filter, notify_sound, notify_desktop, group_id
+            "SELECT id, account_id, kind, ord, filter, notify_sound, notify_desktop, group_id, title
              FROM column_def ORDER BY ord, rowid",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -139,12 +139,13 @@ impl SettingsStore {
                 r.get::<_, i64>(5)? != 0,
                 r.get::<_, i64>(6)? != 0,
                 r.get::<_, Option<String>>(7)?.unwrap_or_default(),
+                r.get::<_, Option<String>>(8)?,
             ))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            let (id, account_id, kind_json, ord, filter_json, notify_sound, notify_desktop, group_id) =
+            let (id, account_id, kind_json, ord, filter_json, notify_sound, notify_desktop, group_id, title) =
                 row?;
             out.push(Column {
                 id,
@@ -155,9 +156,20 @@ impl SettingsStore {
                 notify_sound,
                 notify_desktop,
                 group_id,
+                title,
             });
         }
         Ok(out)
+    }
+
+    /// タブのカスタム名を設定/解除（None で自動生成名に戻す）。
+    pub fn set_column_title(&self, column_id: &str, title: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE column_def SET title = ?1 WHERE id = ?2",
+            params![title, column_id],
+        )?;
+        Ok(())
     }
 
     pub fn upsert_column(&self, c: &Column) -> Result<()> {
@@ -165,12 +177,13 @@ impl SettingsStore {
         let filter_json = serde_json::to_string(&c.filter)?;
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO column_def (id, account_id, kind, ord, width, filter, notify_sound, notify_desktop, group_id)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8)
+            "INSERT INTO column_def (id, account_id, kind, ord, width, filter, notify_sound, notify_desktop, group_id, title)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                account_id=excluded.account_id, kind=excluded.kind, ord=excluded.ord,
                filter=excluded.filter, notify_sound=excluded.notify_sound,
-               notify_desktop=excluded.notify_desktop, group_id=excluded.group_id",
+               notify_desktop=excluded.notify_desktop, group_id=excluded.group_id,
+               title=excluded.title",
             params![
                 c.id,
                 c.account_id,
@@ -180,6 +193,7 @@ impl SettingsStore {
                 c.notify_sound as i64,
                 c.notify_desktop as i64,
                 c.group_id,
+                c.title,
             ],
         )?;
         Ok(())
@@ -300,6 +314,7 @@ mod tests {
             notify_sound: false,
             notify_desktop: true,
             group_id: "g1".into(),
+            title: None,
         }
     }
 
