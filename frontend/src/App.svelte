@@ -71,9 +71,8 @@
 </script>
 
 <div class="app">
-  <!-- 上部: ブランド + 投稿バー + カラム/アカウント追加 -->
+  <!-- 上部: 投稿バー + カラム/アカウント追加 -->
   <header class="appbar">
-    <div class="brand">tsumugi</div>
     {#if app.accounts.length > 0}
       <ComposeBar />
     {:else}
@@ -142,12 +141,6 @@
     padding: 6px 10px;
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
-    flex: none;
-  }
-  .brand {
-    font-weight: 700;
-    font-size: 1rem;
-    letter-spacing: 0.02em;
     flex: none;
   }
   .spacer {
