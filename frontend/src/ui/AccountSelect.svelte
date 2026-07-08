@@ -8,11 +8,13 @@
     accounts,
     showLabel = false,
     showHost = true,
+    disabled = false,
   }: {
     value: string;
     accounts: Account[];
     showLabel?: boolean;
     showHost?: boolean;
+    disabled?: boolean;
   } = $props();
 
   const selected = $derived(accounts.find((a) => a.id === value) ?? accounts[0]);
@@ -55,6 +57,7 @@
   class:full={showLabel}
   bind:this={trigger}
   onclick={toggle}
+  {disabled}
   title={selected ? handle(selected) : "アカウントを選択"}
   type="button"
 >
@@ -116,6 +119,13 @@
   }
   .trigger:hover {
     border-color: var(--accent);
+  }
+  .trigger:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+  .trigger:disabled:hover {
+    border-color: var(--border);
   }
   /* フォーム用（showLabel）は全幅にして他ドロップダウンと揃える */
   .trigger.full {

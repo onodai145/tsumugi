@@ -1,10 +1,20 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { app } from "../lib/store.svelte";
+  import type { TabView } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
 
-  let { onclose, groupId }: { onclose: () => void; groupId: string | null } = $props();
+  // editTab を渡すと「編集」モード（アカウントは固定、ソース/フィルタ/名前を変更）。
+  let {
+    onclose,
+    groupId,
+    editTab,
+  }: { onclose: () => void; groupId: string | null; editTab?: TabView } = $props();
+  // モーダルは開くたび再生成されるので editTab は初期値スナップショットで扱う。
+  const edit = untrack(() => editTab);
+  const isEdit = !!edit;
 
   type SrcType =
     | "home"
@@ -32,18 +42,22 @@
     { v: "notifications", label: "Notifications（通知）" },
   ];
 
-  let accountId = $state(app.accounts[0]?.id ?? "");
-  let sourceType = $state<SrcType>("home");
-  let searchQuery = $state("");
-  let listId = $state("");
+  const k = edit?.kind;
+  let accountId = $state(edit?.accountId ?? app.accounts[0]?.id ?? "");
+  let sourceType = $state<SrcType>((k?.type as SrcType) ?? "home");
+  let searchQuery = $state(k?.type === "search" ? k.query : "");
+  let listId = $state(k?.type === "list" ? k.listId : "");
   let lists = $state<UserList[]>([]);
-  let antennaId = $state("");
+  let antennaId = $state(k?.type === "antenna" ? k.antennaId : "");
   let antennas = $state<SourceItem[]>([]);
-  let channelId = $state("");
+  let channelId = $state(k?.type === "channel" ? k.channelId : "");
   let channels = $state<SourceItem[]>([]);
   let userAcct = $state("");
-  let tagText = $state("");
-  let filterText = $state("");
+  // User 編集時は元の userId を保持（acct 未入力なら維持）
+  const editUserId = k?.type === "user" ? k.userId : "";
+  let tagText = $state(k?.type === "tag" ? k.tag : "");
+  let name = $state(edit?.customTitle ?? "");
+  let filterText = $state(edit?.filter.kind === "tql" ? edit.filter.value : "");
   let filterErr = $state<string | null>(null);
   let busy = $state(false);
   let submitErr = $state<string | null>(null);
@@ -143,20 +157,27 @@
     busy = true;
     try {
       let kind = buildKind();
-      // User は acct を userId へ解決してから作成
+      // User は acct を userId へ解決。編集時に acct 未入力なら元の userId を維持。
       if (sourceType === "user") {
-        if (!userAcct.trim()) {
+        if (userAcct.trim()) {
+          const u = await app.resolveUser(accountId, userAcct.trim());
+          kind = { type: "user", userId: u.id };
+        } else if (editUserId) {
+          kind = { type: "user", userId: editUserId };
+        } else {
           submitErr = missingMsg.user!;
           return;
         }
-        const u = await app.resolveUser(accountId, userAcct.trim());
-        kind = { type: "user", userId: u.id };
       }
       if (!kind) {
         submitErr = missingMsg[sourceType] ?? "入力が不足しています";
         return;
       }
-      await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined);
+      if (isEdit && edit) {
+        await app.updateColumn(edit.id, kind, buildFilter(), name);
+      } else {
+        await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined, name);
+      }
       onclose();
     } catch (e) {
       submitErr = String(e);
@@ -170,14 +191,19 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
     <header class="head">
-      <span>{groupId ? "タブを追加" : "カラムを追加"}</span>
+      <span>{isEdit ? "タブを編集" : groupId ? "タブを追加" : "カラムを追加"}</span>
       <button class="x" onclick={onclose}>✕</button>
     </header>
 
     <div class="field">
-      <span>アカウント</span>
-      <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel />
+      <span>アカウント{isEdit ? "（変更不可）" : ""}</span>
+      <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel disabled={isEdit} />
     </div>
+
+    <label class="field">
+      <span>名前（空欄で自動）</span>
+      <input placeholder={edit?.title ?? "自動でつけます"} bind:value={name} />
+    </label>
 
     <div class="field">
       <span>ソース</span>
@@ -220,7 +246,10 @@
     {#if sourceType === "user"}
       <label class="field">
         <span>ユーザ（@user@host。ローカルは @host 省略可）</span>
-        <input placeholder="@alice@misskey.io" bind:value={userAcct} />
+        <input
+          placeholder={editUserId ? "空欄で現在のユーザを維持" : "@alice@misskey.io"}
+          bind:value={userAcct}
+        />
       </label>
     {/if}
 
@@ -257,7 +286,7 @@
 
     <div class="actions">
       <button class="submit" disabled={busy || !!filterErr} onclick={submit}>
-        {busy ? "作成中…" : "追加"}
+        {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
       </button>
     </div>
     {#if submitErr}<p class="err">{submitErr}</p>{/if}
