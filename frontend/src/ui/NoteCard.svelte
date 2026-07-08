@@ -9,6 +9,13 @@
   import { app } from "../lib/store.svelte";
   import { reactionEmoji } from "../lib/emoji";
 
+  // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
+  // なるため、ピッカーは body 直下へ portal して封じ込めを脱出させる。
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   // accountId があれば操作ボタンを出す（引用ネスト時は undefined = 表示のみ）
   // tabId/selected はトップレベル表示時のみ（キーボード選択のハイライト/スクロール用）
   // emojiAccountId は絵文字解決専用（操作性に影響しない）。未指定なら accountId を使う。
@@ -44,6 +51,23 @@
   function togglePicker() {
     app.reactPickerNoteId = showPicker ? null : inner.id;
   }
+
+  // ピッカーは position:fixed でスクロール領域(.notes の overflow)を脱出させる。
+  // ボタン位置から算出し、上下スペースを見て開く向きを決めビューポート内にクランプ。
+  // （キーボード起動でも $effect で計算されるよう showPicker に依存）
+  const PICKER_W = 260;
+  const PICKER_H = 290;
+  let pickerBtn = $state<HTMLElement | null>(null);
+  let pickerPos = $state<{ left: number; top: number } | null>(null);
+  $effect(() => {
+    if (!showPicker || !pickerBtn) return;
+    const r = pickerBtn.getBoundingClientRect();
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - PICKER_W - 8);
+    const spaceBelow = window.innerHeight - r.bottom;
+    const top =
+      spaceBelow >= PICKER_H + 8 ? r.bottom + 6 : Math.max(8, r.top - PICKER_H - 6);
+    pickerPos = { left, top };
+  });
 
   function react(reaction: string) {
     app.reactPickerNoteId = null;
@@ -160,15 +184,27 @@
           <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>❝</button>
           <div class="react-wrap">
             <button
+              bind:this={pickerBtn}
               title="リアクション"
               class:on={showPicker}
               onclick={togglePicker}
             >
               ➕ {inner.reactionCount || ""}
             </button>
-            {#if showPicker}
-              <div class="picker-pop">
-                <ReactionPicker {accountId} onpick={react} />
+            {#if showPicker && pickerPos}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="picker-overlay" use:portal onclick={() => (app.reactPickerNoteId = null)} role="presentation">
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="picker-pop"
+                  style={`left:${pickerPos.left}px;top:${pickerPos.top}px`}
+                  onclick={(e) => e.stopPropagation()}
+                  role="presentation"
+                >
+                  <ReactionPicker {accountId} onpick={react} />
+                </div>
               </div>
             {/if}
           </div>
@@ -334,11 +370,12 @@
   .react-wrap {
     position: relative;
   }
+  .picker-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+  }
   .picker-pop {
-    position: absolute;
-    bottom: 100%;
-    left: 0;
-    z-index: 20;
-    margin-bottom: 6px;
+    position: fixed;
   }
 </style>
