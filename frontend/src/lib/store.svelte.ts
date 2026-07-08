@@ -94,6 +94,13 @@ class AppStore {
 
   #unlisten: UnlistenFn[] = [];
 
+  /// Tauri イベント購読をすべて解除する。dev の HMR で古いインスタンスの
+  /// リスナーが残り通知が多重化するのを防ぐために使う（本番では未使用）。
+  teardown() {
+    for (const u of this.#unlisten) u();
+    this.#unlisten = [];
+  }
+
   async boot() {
     this.booting = true;
     try {
@@ -443,9 +450,12 @@ class AppStore {
         if (!tab) return;
         if (tab.notifications.some((n) => n.id === e.payload.notification.id)) return;
         tab.notifications = [e.payload.notification, ...tab.notifications].slice(0, MAX_NOTES);
-        // デスクトップ通知 / 音
-        if (this.notify.desktop) void this.#osNotify(e.payload.notification);
-        if (this.notify.sound) beep();
+        // デスクトップ通知 / 音は「通知IDでグローバルに1回だけ」。
+        // 通知カラムが複数あると同じ通知が各カラムに届くため、ここで重複を弾く。
+        if (this.#markNotified(e.payload.notification.id)) {
+          if (this.notify.desktop) void this.#osNotify(e.payload.notification);
+          if (this.notify.sound) beep();
+        }
       }),
     );
   }
@@ -642,6 +652,20 @@ class AppStore {
     } else {
       delete root.dataset.theme;
     }
+  }
+
+  // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。
+  #notifiedIds = new Set<string>();
+  #notifiedOrder: string[] = [];
+  #markNotified(id: string): boolean {
+    if (this.#notifiedIds.has(id)) return false;
+    this.#notifiedIds.add(id);
+    this.#notifiedOrder.push(id);
+    if (this.#notifiedOrder.length > 500) {
+      const old = this.#notifiedOrder.shift();
+      if (old) this.#notifiedIds.delete(old);
+    }
+    return true;
   }
 
   async #osNotify(n: Notification) {
@@ -890,6 +914,12 @@ function beep() {
 }
 
 export const app = new AppStore();
+
+// dev の HMR で本モジュールが差し替わる際、古いインスタンスの Tauri イベント
+// 購読を解除する（本番では import.meta.hot が無く、このブロックは除去される）。
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => app.teardown());
+}
 
 export function kindLabel(kind: ColumnKind): string {
   switch (kind.type) {
