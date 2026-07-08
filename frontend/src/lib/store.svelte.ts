@@ -94,6 +94,13 @@ class AppStore {
 
   #unlisten: UnlistenFn[] = [];
 
+  /// Tauri イベント購読をすべて解除する。dev の HMR で古いインスタンスの
+  /// リスナーが残り通知が多重化するのを防ぐために使う（本番では未使用）。
+  teardown() {
+    for (const u of this.#unlisten) u();
+    this.#unlisten = [];
+  }
+
   async boot() {
     this.booting = true;
     try {
@@ -907,6 +914,12 @@ function beep() {
 }
 
 export const app = new AppStore();
+
+// dev の HMR で本モジュールが差し替わる際、古いインスタンスの Tauri イベント
+// 購読を解除する（本番では import.meta.hot が無く、このブロックは除去される）。
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => app.teardown());
+}
 
 export function kindLabel(kind: ColumnKind): string {
   switch (kind.type) {
