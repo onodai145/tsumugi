@@ -297,7 +297,23 @@ async fn connect_and_run(
     mode: &StreamMode,
 ) -> RunOutcome {
     let url = format!("wss://{host}/streaming?i={token}");
-    let ws = match tokio_tungstenite::connect_async(&url).await {
+    // ハンドシェイクに User-Agent を付ける（既定では送られないため）。
+    let request = {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::tungstenite::http::header::{HeaderValue, USER_AGENT};
+        match url.as_str().into_client_request() {
+            Ok(mut req) => {
+                req.headers_mut()
+                    .insert(USER_AGENT, HeaderValue::from_static(crate::state::USER_AGENT));
+                req
+            }
+            Err(e) => {
+                log::warn!("[{column_id}] ws request build failed: {e}");
+                return RunOutcome::Disconnected;
+            }
+        }
+    };
+    let ws = match tokio_tungstenite::connect_async(request).await {
         Ok((ws, _resp)) => ws,
         Err(e) => {
             log::warn!("[{column_id}] ws connect failed: {e}");
