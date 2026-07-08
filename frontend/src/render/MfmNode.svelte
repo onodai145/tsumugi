@@ -2,12 +2,41 @@
   import type { MfmNode } from "mfm-js";
   import Self from "./MfmNode.svelte";
   import CustomEmoji from "./CustomEmoji.svelte";
+  import Sparkle from "./Sparkle.svelte";
+  import { mfmFn, isKnownFn } from "../lib/mfm";
 
   let { node, emojis = {} }: { node: MfmNode; emojis?: Record<string, string> } = $props();
 
   // props はノード種別ごとに異なるため any 経由でアクセス
   const p = $derived((node as any).props ?? {});
   const children = $derived<MfmNode[]>((node as any).children ?? []);
+  // fn ノード（$[name.args ...]）の装飾。本家は全 fn に一律 display:inline-block を付与する。
+  const fn = $derived(node.type === "fn" ? mfmFn(p.name, p.args ?? {}) : { class: "", style: "" });
+  const fnKnown = $derived(node.type !== "fn" || isKnownFn(p.name));
+
+  // $[ruby base reading]。本家準拠: 子が単一テキストなら空白で base/rt を分割、
+  // それ以外は末尾テキストを rt、残りを base として描画する。
+  function rubyParts(cs: MfmNode[]): { base: MfmNode[]; baseText?: string; rt: string } {
+    if (cs.length === 1 && cs[0].type === "text") {
+      const t = String((cs[0] as any).props?.text ?? "");
+      const sp = t.split(" ");
+      return { base: [], baseText: sp[0], rt: sp[1] ?? "" };
+    }
+    const last = cs[cs.length - 1];
+    const rt = last && last.type === "text" ? String((last as any).props?.text ?? "").trim() : "";
+    return { base: cs.slice(0, -1), rt };
+  }
+  const ruby = $derived(
+    node.type === "fn" && p.name === "ruby" ? rubyParts(children) : null,
+  );
+
+  // $[unixtime <epoch秒>]。子テキストの数値をローカル日時で表示する。
+  const unixMs = $derived.by(() => {
+    if (node.type !== "fn" || p.name !== "unixtime") return NaN;
+    const t = parseInt(String((children[0] as any)?.props?.text ?? ""), 10);
+    return Number.isFinite(t) ? t * 1000 : NaN;
+  });
+  const unixLabel = $derived(Number.isFinite(unixMs) ? new Date(unixMs).toLocaleString() : "");
 </script>
 
 {#if node.type === "text"}
@@ -25,8 +54,21 @@
 {:else if node.type === "quote"}
   <blockquote class="mfm-quote">{#each children as c}<Self node={c} {emojis} />{/each}</blockquote>
 {:else if node.type === "fn"}
-  <!-- MFM関数(spin等)は装飾を省略し子要素のみ描画 -->
-  <span>{#each children as c}<Self node={c} {emojis} />{/each}</span>
+  {#if ruby}
+    <ruby>{#if ruby.baseText !== undefined}{ruby.baseText}{:else}{#each ruby.base as c}<Self node={c} {emojis} />{/each}{/if}<rt>{ruby.rt}</rt></ruby>
+  {:else if p.name === "unixtime" && unixLabel}
+    <span class="mfm-unixtime" title={unixLabel}>🕛 {unixLabel}</span>
+  {:else if p.name === "sparkle"}
+    <Sparkle>{#each children as c}<Self node={c} {emojis} />{/each}</Sparkle>
+  {:else if p.name === "clickable"}
+    <!-- プラグイン用イベント。機構が無いので中身のみ描画 -->
+    {#each children as c}<Self node={c} {emojis} />{/each}
+  {:else if fnKnown}
+    <span class={fn.class} style={`display:inline-block;${fn.style}`}>{#each children as c}<Self node={c} {emojis} />{/each}</span>
+  {:else}
+    <!-- 未対応の MFM 関数: 本家準拠で $[name ...] をそのまま表示 -->
+    <span>$[{p.name} {#each children as c}<Self node={c} {emojis} />{/each}]</span>
+  {/if}
 {:else if node.type === "url"}
   <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}</a>
 {:else if node.type === "link"}

@@ -259,7 +259,8 @@ export type Note = {
 	tags: string[],
 	/**  メンション先 userId */
 	mentions: string[],
-	emojis: string[],
+	/**  カスタム絵文字 name -> url（本文 MFM の `:name:` とリアクション絵文字の描画に使う） */
+	emojis: { [key in string]: string },
 	channelId: string | null,
 	via: string | null,
 	lang: string | null,

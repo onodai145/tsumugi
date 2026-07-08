@@ -7,21 +7,37 @@
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
+  import { reactionEmoji } from "../lib/emoji";
 
   // accountId があれば操作ボタンを出す（引用ネスト時は undefined = 表示のみ）
   // tabId/selected はトップレベル表示時のみ（キーボード選択のハイライト/スクロール用）
+  // emojiAccountId は絵文字解決専用（操作性に影響しない）。未指定なら accountId を使う。
   let {
     note,
     quoted = false,
     accountId,
+    emojiAccountId,
     tabId,
     selected = false,
-  }: { note: Note; quoted?: boolean; accountId?: string; tabId?: string; selected?: boolean } =
-    $props();
+  }: {
+    note: Note;
+    quoted?: boolean;
+    accountId?: string;
+    emojiAccountId?: string;
+    tabId?: string;
+    selected?: boolean;
+  } = $props();
 
   // 純粋Renote（本文なし＋renote先あり）は「誰が」を出して中身を委譲
   const isPureRenote = $derived(!note.text && !!note.renote);
   const inner = $derived(isPureRenote ? note.renote! : note);
+
+  // 絵文字 name->url: ローカル絵文字（閲覧インスタンス）をフォールバックに、
+  // note.emojis（リモート＋リアクション絵文字）を上書きで重ねる。
+  const emojiAcct = $derived(emojiAccountId ?? accountId);
+  const emojiMap = $derived(
+    emojiAcct ? { ...app.localEmojiUrls(emojiAcct), ...inner.emojis } : inner.emojis,
+  );
 
   // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）
   const showPicker = $derived(app.reactPickerNoteId === inner.id);
@@ -50,6 +66,7 @@
   const reactionList = $derived(
     Object.entries(inner.reactions).sort((a, b) => b[1] - a[1]),
   );
+
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -83,7 +100,7 @@
 
       {#if inner.cw}
         <div class="cw">
-          <span class="cw-text"><Mfm text={inner.cw} /></span>
+          <span class="cw-text"><Mfm text={inner.cw} emojis={emojiMap} /></span>
           <button class="cw-toggle" onclick={() => (cwOpen = !cwOpen)}>
             {cwOpen ? "隠す" : `続きを見る${inner.text ? "" : ""}`}
           </button>
@@ -92,7 +109,7 @@
 
       {#if !inner.cw || cwOpen}
         {#if inner.text}
-          <div class="text"><Mfm text={inner.text} /></div>
+          <div class="text"><Mfm text={inner.text} emojis={emojiMap} /></div>
         {/if}
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
@@ -123,7 +140,8 @@
               onclick={() => react(key)}
             >
               {#if key.startsWith(":")}
-                <CustomEmoji name={key.replace(/^:|:$/g, "")} />
+                {@const e = reactionEmoji(key, emojiMap)}
+                <CustomEmoji name={e.name} url={e.url} />
               {:else}
                 {key}
               {/if}

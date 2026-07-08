@@ -119,7 +119,7 @@
     <div class="notes" onscroll={onScroll}>
       {#if isNotif}
         {#each activeTab.notifications as n (n.id)}
-          <NotificationCard notification={n} />
+          <NotificationCard notification={n} accountId={activeTab.accountId} />
         {/each}
         {#if activeTab.notifications.length === 0 && !activeTab.loadingMore}
           <div class="empty">まだ通知がありません</div>

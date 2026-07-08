@@ -147,9 +147,12 @@ pub struct RawNote {
     pub tags: Vec<String>,
     #[serde(default)]
     pub mentions: Vec<String>,
-    /// Misskey は {name: url} のオブジェクトで返す。キーだけ使う。
+    /// Misskey は {name: url} のオブジェクトで返す（本文中のカスタム絵文字）。
     #[serde(default)]
     pub emojis: HashMap<String, String>,
+    /// リアクションのカスタム絵文字 {name: url}（新しめの Misskey）。
+    #[serde(default)]
+    pub reaction_emojis: HashMap<String, String>,
     #[serde(default)]
     pub channel_id: Option<String>,
     #[serde(default)]
@@ -226,7 +229,12 @@ impl From<RawNote> for Note {
             poll: r.poll.map(Into::into),
             tags: r.tags,
             mentions: r.mentions,
-            emojis: r.emojis.into_keys().collect(),
+            emojis: {
+                // 本文絵文字とリアクション絵文字を1つの name->url マップに統合
+                let mut m = r.emojis;
+                m.extend(r.reaction_emojis);
+                m
+            },
             channel_id: r.channel_id,
             via: None,
             lang: r.lang,
@@ -269,7 +277,7 @@ mod tests {
         assert_eq!(n.my_reaction.as_deref(), Some("👍"));
         assert_eq!(n.files.len(), 1);
         assert_eq!(n.files[0].mime_type, "image/png");
-        assert_eq!(n.emojis, vec!["blobcat".to_string()]);
+        assert_eq!(n.emojis.get("blobcat").map(String::as_str), Some("http://x/e.png"));
         assert_eq!(n.tags, vec!["rust".to_string()]);
     }
 

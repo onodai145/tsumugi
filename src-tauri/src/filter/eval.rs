@@ -216,7 +216,7 @@ fn eval_set(v: &Value, n: &Note, ctx: &EvalContext) -> HashSet<String> {
                 Reactions => n.reactions.keys().map(|k| normalize_reaction(k)).collect(),
                 Tags => n.tags.iter().cloned().collect(),
                 Mentions => n.mentions.iter().cloned().collect(),
-                Emojis => n.emojis.iter().cloned().collect(),
+                Emojis => n.emojis.keys().cloned().collect(),
                 FileTypes => n
                     .files
                     .iter()
@@ -305,7 +305,7 @@ mod tests {
             poll: None,
             tags: vec!["rust".into()],
             mentions: vec!["bob".into()],
-            emojis: vec![],
+            emojis: std::collections::HashMap::new(),
             channel_id: None,
             via: None,
             lang: None,
