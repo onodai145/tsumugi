@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
+  import AccountSelect from "./AccountSelect.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import type {
@@ -86,11 +87,7 @@
 </script>
 
 <div class="composebar">
-  <select class="acc" bind:value={accountId} title="投稿アカウント">
-    {#each app.accounts as acc (acc.id)}
-      <option value={acc.id}>@{acc.username}</option>
-    {/each}
-  </select>
+  <AccountSelect bind:value={accountId} accounts={app.accounts} />
 
   <textarea
     class="text"
@@ -129,7 +126,6 @@
     flex: 1;
     min-width: 0;
   }
-  .acc,
   .vis {
     padding: 4px 6px;
     border: 1px solid var(--border);

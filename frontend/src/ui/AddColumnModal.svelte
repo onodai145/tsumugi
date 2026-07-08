@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
+  import AccountSelect from "./AccountSelect.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
 
   let { onclose, groupId }: { onclose: () => void; groupId: string | null } = $props();
@@ -172,14 +173,10 @@
       <button class="x" onclick={onclose}>✕</button>
     </header>
 
-    <label class="field">
+    <div class="field">
       <span>アカウント</span>
-      <select bind:value={accountId}>
-        {#each app.accounts as acc (acc.id)}
-          <option value={acc.id}>@{acc.username}@{acc.host}</option>
-        {/each}
-      </select>
-    </label>
+      <AccountSelect bind:value={accountId} accounts={app.accounts} />
+    </div>
 
     <label class="field">
       <span>ソース</span>
