@@ -52,6 +52,7 @@
 
 <button
   class="trigger"
+  class:full={showLabel}
   bind:this={trigger}
   onclick={toggle}
   title={selected ? handle(selected) : "アカウントを選択"}
@@ -115,6 +116,14 @@
   }
   .trigger:hover {
     border-color: var(--accent);
+  }
+  /* フォーム用（showLabel）は全幅にして他ドロップダウンと揃える */
+  .trigger.full {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .trigger.full .caret {
+    margin-left: auto;
   }
   .avatar {
     width: 22px;
