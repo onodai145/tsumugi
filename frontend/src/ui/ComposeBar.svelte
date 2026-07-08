@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
+  import VisibilitySelect from "./VisibilitySelect.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import type {
@@ -21,13 +22,6 @@
   $effect(() => {
     if (!accountId && app.accounts.length > 0) accountId = app.accounts[0].id;
   });
-
-  const visibilities: { v: VisibilityInput; label: string }[] = [
-    { v: "public", label: "公開" },
-    { v: "home", label: "ホーム" },
-    { v: "followers", label: "フォロワー" },
-    { v: "specified", label: "ダイレクト" },
-  ];
 
   async function pickFiles() {
     err = null;
@@ -110,9 +104,7 @@
     </div>
   {/if}
 
-  <select class="vis" bind:value={visibility} title="公開範囲">
-    {#each visibilities as o}<option value={o.v}>{o.label}</option>{/each}
-  </select>
+  <VisibilitySelect bind:value={visibility} />
   <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}>📎</button>
   <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
   {#if err}<span class="err" title={err}>!</span>{/if}
@@ -125,16 +117,6 @@
     gap: 6px;
     flex: 1;
     min-width: 0;
-  }
-  .vis {
-    padding: 4px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-size: 0.8rem;
-    flex: none;
-    max-width: 120px;
   }
   .text {
     flex: 1;

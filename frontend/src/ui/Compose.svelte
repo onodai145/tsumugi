@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
+  import VisibilitySelect from "./VisibilitySelect.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import type {
@@ -48,13 +49,6 @@
   function removeAttached(id: string) {
     attached = attached.filter((f) => f.id !== id);
   }
-
-  const visibilities: { v: VisibilityInput; label: string }[] = [
-    { v: "public", label: "公開" },
-    { v: "home", label: "ホーム" },
-    { v: "followers", label: "フォロワー" },
-    { v: "specified", label: "ダイレクト" },
-  ];
 
   async function submit() {
     err = null;
@@ -144,9 +138,7 @@
     {/if}
 
     <div class="toolbar">
-      <select bind:value={visibility}>
-        {#each visibilities as o}<option value={o.v}>{o.label}</option>{/each}
-      </select>
+      <VisibilitySelect bind:value={visibility} />
       <button class="mini" onclick={pickFiles} disabled={uploading}>📎 画像</button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
@@ -275,13 +267,6 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-  }
-  select {
-    padding: 7px 9px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
   }
   .mini {
     padding: 6px 10px;
