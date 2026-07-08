@@ -443,9 +443,12 @@ class AppStore {
         if (!tab) return;
         if (tab.notifications.some((n) => n.id === e.payload.notification.id)) return;
         tab.notifications = [e.payload.notification, ...tab.notifications].slice(0, MAX_NOTES);
-        // デスクトップ通知 / 音
-        if (this.notify.desktop) void this.#osNotify(e.payload.notification);
-        if (this.notify.sound) beep();
+        // デスクトップ通知 / 音は「通知IDでグローバルに1回だけ」。
+        // 通知カラムが複数あると同じ通知が各カラムに届くため、ここで重複を弾く。
+        if (this.#markNotified(e.payload.notification.id)) {
+          if (this.notify.desktop) void this.#osNotify(e.payload.notification);
+          if (this.notify.sound) beep();
+        }
       }),
     );
   }
@@ -642,6 +645,20 @@ class AppStore {
     } else {
       delete root.dataset.theme;
     }
+  }
+
+  // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。
+  #notifiedIds = new Set<string>();
+  #notifiedOrder: string[] = [];
+  #markNotified(id: string): boolean {
+    if (this.#notifiedIds.has(id)) return false;
+    this.#notifiedIds.add(id);
+    this.#notifiedOrder.push(id);
+    if (this.#notifiedOrder.length > 500) {
+      const old = this.#notifiedOrder.shift();
+      if (old) this.#notifiedIds.delete(old);
+    }
+    return true;
   }
 
   async #osNotify(n: Notification) {
