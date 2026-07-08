@@ -158,7 +158,7 @@ fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
     for uid in &n.mentions {
         conn.execute("INSERT INTO note_mention (note_id, user_id) VALUES (?1, ?2)", params![n.id, uid])?;
     }
-    for e in &n.emojis {
+    for e in n.emojis.keys() {
         conn.execute("INSERT INTO note_emoji (note_id, emoji) VALUES (?1, ?2)", params![n.id, e])?;
     }
     for f in &n.files {
@@ -214,7 +214,7 @@ mod tests {
             poll: None,
             tags: vec!["rust".into()],
             mentions: vec![],
-            emojis: vec![],
+            emojis: std::collections::HashMap::new(),
             channel_id: None,
             via: None,
             lang: None,

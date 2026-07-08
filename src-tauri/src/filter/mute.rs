@@ -92,7 +92,7 @@ mod tests {
             poll: None,
             tags: vec![],
             mentions: vec![],
-            emojis: vec![],
+            emojis: std::collections::HashMap::new(),
             channel_id: None,
             via: None,
             lang: None,

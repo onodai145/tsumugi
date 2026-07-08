@@ -3,11 +3,25 @@
   import NoteCard from "./NoteCard.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import { relativeTime } from "../lib/time";
+  import { app } from "../lib/store.svelte";
+  import { reactionEmoji } from "../lib/emoji";
 
-  let { notification }: { notification: Notification } = $props();
+  let { notification, accountId }: { notification: Notification; accountId?: string } = $props();
   const n = $derived(notification);
 
   const actor = $derived(n.user ? (n.user.name ?? n.user.username) : "");
+
+  // リアクション絵文字の解決用マップ: ローカル絵文字（閲覧インスタンス）＋対象ノートの絵文字。
+  const emojiMap = $derived({
+    ...(accountId ? app.localEmojiUrls(accountId) : {}),
+    ...(n.note?.emojis ?? {}),
+  });
+  // カスタム絵文字（:name:）のみ解決。Unicode 絵文字はそのまま表示する。
+  const reaction = $derived(
+    n.type === "reaction" && n.reaction?.startsWith(":")
+      ? reactionEmoji(n.reaction, emojiMap)
+      : null,
+  );
 
   const labels: Record<string, string> = {
     follow: "にフォローされました",
@@ -47,8 +61,8 @@
       {labels[n.type] ?? n.type}
       {#if n.type === "reaction" && n.reaction}
         <span class="reaction">
-          {#if n.reaction.startsWith(":")}
-            <CustomEmoji name={n.reaction.replace(/^:|:$/g, "")} />
+          {#if reaction}
+            <CustomEmoji name={reaction.name} url={reaction.url} />
           {:else}{n.reaction}{/if}
         </span>
       {/if}
@@ -57,7 +71,7 @@
   </div>
   {#if n.note}
     <div class="note-preview">
-      <NoteCard note={n.note} quoted={true} />
+      <NoteCard note={n.note} quoted={true} emojiAccountId={accountId} />
     </div>
   {/if}
 </article>

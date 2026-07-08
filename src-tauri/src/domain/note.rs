@@ -27,7 +27,8 @@ pub struct Note {
     pub tags: Vec<String>,
     /// メンション先 userId
     pub mentions: Vec<String>,
-    pub emojis: Vec<String>,
+    /// カスタム絵文字 name -> url（本文 MFM の `:name:` とリアクション絵文字の描画に使う）
+    pub emojis: HashMap<String, String>,
     pub channel_id: Option<String>,
     pub via: Option<String>,
     pub lang: Option<String>,

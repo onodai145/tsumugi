@@ -682,11 +682,34 @@ class AppStore {
     this.#log("info", "ノートを削除しました");
   }
 
+  #emojiLoads = new Map<string, Promise<EmojiDef[]>>();
   async loadEmojis(accountId: string): Promise<EmojiDef[]> {
     if (this.emojis[accountId]) return this.emojis[accountId];
-    const list = await unwrap(commands.listCustomEmojis(accountId));
-    this.emojis = { ...this.emojis, [accountId]: list };
-    return list;
+    // 同一アカウントの並行呼び出しは1リクエストに集約する
+    const inflight = this.#emojiLoads.get(accountId);
+    if (inflight) return inflight;
+    const p = unwrap(commands.listCustomEmojis(accountId))
+      .then((list) => {
+        this.emojis = { ...this.emojis, [accountId]: list };
+        return list;
+      })
+      .finally(() => this.#emojiLoads.delete(accountId));
+    this.#emojiLoads.set(accountId, p);
+    return p;
+  }
+
+  /// アカウント（＝閲覧インスタンス）のローカルカスタム絵文字を name->url で返す。
+  /// 最近の Misskey はローカル絵文字を note.emojis に含めないため、本文/リアクションの
+  /// フォールバックに使う。未ロードなら取得を仕掛けて空を返す（ロード後に再描画される）。
+  localEmojiUrls(accountId: string): Record<string, string> {
+    const list = this.emojis[accountId];
+    if (!list) {
+      void this.loadEmojis(accountId).catch(() => {});
+      return {};
+    }
+    const m: Record<string, string> = {};
+    for (const e of list) if (!e.host) m[e.name] = e.url;
+    return m;
   }
 
   async toggleReaction(accountId: string, noteId: string, reaction: string) {
