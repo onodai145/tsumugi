@@ -379,7 +379,7 @@ export type SourceItem = {
 	name: string,
 };
 
-/**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き。 */
+/**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント。 */
 export type UiPrefs = {
 	/**  "auto" | "light" | "dark" */
 	theme: string,
@@ -390,6 +390,11 @@ export type UiPrefs = {
 	 *  中身の解釈はフロント（lib/keymap）に委ねる（Rust からは不透明に永続化）。
 	 */
 	keymap?: { [key in string]: string },
+	/**
+	 *  CSS font-family 値をそのまま保持（例 `"Cascadia Code", monospace`）。
+	 *  空文字なら既定フォントスタックを使う。
+	 */
+	fontFamily?: string,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

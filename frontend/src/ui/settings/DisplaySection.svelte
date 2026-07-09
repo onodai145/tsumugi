@@ -3,6 +3,7 @@
 
   let theme = $state(app.ui.theme);
   let width = $state(app.ui.defaultColumnWidth);
+  let fontFamily = $state(app.ui.fontFamily ?? "");
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -13,6 +14,14 @@
     { id: "dark", label: "ダーク" },
   ];
 
+  const fontPresets: { label: string; value: string }[] = [
+    { label: "既定", value: "" },
+    { label: "游ゴシック", value: '"Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif' },
+    { label: "メイリオ", value: "Meiryo, sans-serif" },
+    { label: "等幅", value: 'ui-monospace, "Cascadia Code", "SF Mono", monospace' },
+    { label: "明朝", value: '"Yu Mincho", "Hiragino Mincho ProN", serif' },
+  ];
+
   async function save() {
     err = null;
     saved = false;
@@ -20,7 +29,7 @@
     try {
       const w = Math.min(720, Math.max(220, Math.round(width) || 300));
       width = w;
-      await app.setUiPrefs({ theme, defaultColumnWidth: w, keymap: app.ui.keymap });
+      await app.setUiPrefs({ theme, defaultColumnWidth: w, keymap: app.ui.keymap, fontFamily });
       saved = true;
     } catch (e) {
       err = String(e);
@@ -46,6 +55,30 @@
   <input type="number" min="220" max="720" step="10" bind:value={width} />
 </label>
 <p class="hint">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
+
+<div class="field">
+  <span>フォント</span>
+  <div class="seg">
+    {#each fontPresets as p (p.value)}
+      <button
+        class="seg-btn"
+        class:active={fontFamily === p.value}
+        onclick={() => (fontFamily = p.value)}
+      >
+        {p.label}
+      </button>
+    {/each}
+  </div>
+  <input
+    type="text"
+    class="font-input"
+    placeholder='CSS の font-family 値（例: "Noto Sans JP", sans-serif）'
+    bind:value={fontFamily}
+  />
+</div>
+<p class="hint" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
+  プレビュー: あいうえお ABCDEFG 123
+</p>
 
 <div class="actions">
   {#if saved}<span class="ok">保存しました</span>{/if}
@@ -100,6 +133,16 @@
     color: var(--text);
     font-family: inherit;
     width: 140px;
+  }
+  .font-input {
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: inherit;
+    width: 100%;
+    margin-top: 6px;
   }
   .hint {
     font-size: 0.76rem;
