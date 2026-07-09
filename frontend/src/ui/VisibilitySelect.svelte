@@ -1,13 +1,15 @@
 <script lang="ts">
   import type { VisibilityInput } from "../bindings/tauri.gen";
+  import type { Component } from "svelte";
+  import { Globe, House, Lock, Mail } from "@lucide/svelte";
 
   let { value = $bindable() }: { value: VisibilityInput } = $props();
 
-  const OPTIONS: { v: VisibilityInput; label: string; icon: string; desc: string }[] = [
-    { v: "public", label: "公開", icon: "🌐", desc: "誰でも見られます" },
-    { v: "home", label: "ホーム", icon: "🏠", desc: "ホーム TL とプロフィールのみ" },
-    { v: "followers", label: "フォロワー", icon: "🔒", desc: "フォロワーのみ" },
-    { v: "specified", label: "ダイレクト", icon: "✉️", desc: "指定した相手のみ" },
+  const OPTIONS: { v: VisibilityInput; label: string; icon: Component; desc: string }[] = [
+    { v: "public", label: "公開", icon: Globe, desc: "誰でも見られます" },
+    { v: "home", label: "ホーム", icon: House, desc: "ホーム TL とプロフィールのみ" },
+    { v: "followers", label: "フォロワー", icon: Lock, desc: "フォロワーのみ" },
+    { v: "specified", label: "ダイレクト", icon: Mail, desc: "指定した相手のみ" },
   ];
 
   const current = $derived(OPTIONS.find((o) => o.v === value) ?? OPTIONS[0]);
@@ -50,7 +52,7 @@
   title={`公開範囲: ${current.label}`}
   type="button"
 >
-  <span class="ico">{current.icon}</span>
+  <span class="ico"><current.icon size={14} /></span>
   <span class="label">{current.label}</span>
   <span class="caret">▾</span>
 </button>
@@ -64,7 +66,7 @@
     <div class="menu" style={`left:${pos.left}px;top:${pos.top}px`} onclick={(e) => e.stopPropagation()} role="listbox" tabindex="-1">
       {#each OPTIONS as o (o.v)}
         <button class="item" class:active={o.v === value} onclick={() => choose(o.v)} type="button">
-          <span class="ico">{o.icon}</span>
+          <span class="ico"><o.icon size={16} /></span>
           <span class="meta">
             <span class="name">{o.label}</span>
             <span class="desc">{o.desc}</span>
@@ -94,6 +96,7 @@
     border-color: var(--accent);
   }
   .ico {
+    display: inline-flex;
     flex: none;
   }
   .label {
@@ -140,7 +143,7 @@
     background: color-mix(in srgb, var(--accent) 16%, transparent);
   }
   .item .ico {
-    font-size: 1rem;
+    color: var(--text-dim);
   }
   .meta {
     display: flex;
