@@ -3,7 +3,8 @@
   --surface-2: #f3f4f6;
   --surface-3: #e5e7eb;
   --border: #e2e4e8;
-  --text: #1b1d22;
+  /* 完全な無彩色だと MFM rainbow(hue-rotate)が体感できないため、アクセント系の色相にわずかに寄せてある */
+  --text: #191523;
   --text-dim: #6b7280;
   --accent: #7c5cff;
 
@@ -22,7 +23,7 @@
     --surface-2: #1d2026;
     --surface-3: #2a2e37;
     --border: #2c313b;
-    --text: #e6e8ec;
+    --text: #e2dfec;
     --text-dim: #9aa1ac;
     --accent: #8b6dff;
   }
@@ -33,7 +34,7 @@
   --surface-2: #1d2026;
   --surface-3: #2a2e37;
   --border: #2c313b;
-  --text: #e6e8ec;
+  --text: #e2dfec;
   --text-dim: #9aa1ac;
   --accent: #8b6dff;
 }
