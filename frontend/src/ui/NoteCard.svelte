@@ -92,6 +92,17 @@
     Object.entries(inner.reactions).sort((a, b) => b[1] - a[1]),
   );
 
+  // 本家準拠(use-note.ts canRenote): public/home は誰でも可、followers は本人のみ、
+  // specified(ダイレクト) は不可。RN/引用ボタンはこの条件を満たす時だけ表示する。
+  const canRenote = $derived.by(() => {
+    if (inner.visibility === "public" || inner.visibility === "home") return true;
+    if (inner.visibility === "followers") {
+      const acc = accountId ? app.accounts.find((a) => a.id === accountId) : undefined;
+      return !!acc && acc.userId === inner.user.id;
+    }
+    return false;
+  });
+
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -181,12 +192,14 @@
           <button title="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
             <Reply size={15} /> {inner.replyCount || ""}
           </button>
-          <button title="Renote" onclick={doRenote}>
-            <Repeat2 size={15} /> {inner.renoteCount || ""}
-          </button>
-          <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
-            <Quote size={15} />
-          </button>
+          {#if canRenote}
+            <button title="Renote" onclick={doRenote}>
+              <Repeat2 size={15} /> {inner.renoteCount || ""}
+            </button>
+            <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
+              <Quote size={15} />
+            </button>
+          {/if}
           <div class="react-wrap">
             <button
               bind:this={pickerBtn}
