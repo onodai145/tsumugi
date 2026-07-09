@@ -126,7 +126,8 @@ impl SettingsStore {
     pub fn load_columns(&self) -> Result<Vec<Column>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, account_id, kind, ord, filter, notify_sound, notify_desktop, group_id, title
+            "SELECT id, account_id, kind, ord, filter, notify_sound, notify_desktop,
+                    group_id, title, notify_sound_choice
              FROM column_def ORDER BY ord, rowid",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -140,13 +141,24 @@ impl SettingsStore {
                 r.get::<_, i64>(6)? != 0,
                 r.get::<_, Option<String>>(7)?.unwrap_or_default(),
                 r.get::<_, Option<String>>(8)?,
+                r.get::<_, Option<String>>(9)?.unwrap_or_default(),
             ))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            let (id, account_id, kind_json, ord, filter_json, notify_sound, notify_desktop, group_id, title) =
-                row?;
+            let (
+                id,
+                account_id,
+                kind_json,
+                ord,
+                filter_json,
+                notify_sound,
+                notify_desktop,
+                group_id,
+                title,
+                notify_sound_choice,
+            ) = row?;
             out.push(Column {
                 id,
                 account_id,
@@ -155,6 +167,7 @@ impl SettingsStore {
                 filter: serde_json::from_str(&filter_json)?,
                 notify_sound,
                 notify_desktop,
+                notify_sound_choice,
                 group_id,
                 title,
             });
@@ -172,17 +185,20 @@ impl SettingsStore {
         Ok(())
     }
 
-    /// タブごとの通知可否（デスクトップ/音）を更新する。ストリーム/キャッシュには影響しない軽量操作。
+    /// タブごとの通知可否（デスクトップ/音/通知音の選択）を更新する。
+    /// ストリーム/キャッシュには影響しない軽量操作。
     pub fn set_column_notify(
         &self,
         column_id: &str,
         notify_desktop: bool,
         notify_sound: bool,
+        notify_sound_choice: &str,
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE column_def SET notify_desktop = ?1, notify_sound = ?2 WHERE id = ?3",
-            params![notify_desktop, notify_sound, column_id],
+            "UPDATE column_def SET notify_desktop = ?1, notify_sound = ?2, notify_sound_choice = ?3
+             WHERE id = ?4",
+            params![notify_desktop, notify_sound, notify_sound_choice, column_id],
         )?;
         Ok(())
     }
@@ -192,13 +208,13 @@ impl SettingsStore {
         let filter_json = serde_json::to_string(&c.filter)?;
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO column_def (id, account_id, kind, ord, width, filter, notify_sound, notify_desktop, group_id, title)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO column_def (id, account_id, kind, ord, width, filter, notify_sound, notify_desktop, group_id, title, notify_sound_choice)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET
                account_id=excluded.account_id, kind=excluded.kind, ord=excluded.ord,
                filter=excluded.filter, notify_sound=excluded.notify_sound,
                notify_desktop=excluded.notify_desktop, group_id=excluded.group_id,
-               title=excluded.title",
+               title=excluded.title, notify_sound_choice=excluded.notify_sound_choice",
             params![
                 c.id,
                 c.account_id,
@@ -209,6 +225,7 @@ impl SettingsStore {
                 c.notify_desktop as i64,
                 c.group_id,
                 c.title,
+                c.notify_sound_choice,
             ],
         )?;
         Ok(())
@@ -328,6 +345,7 @@ mod tests {
             filter: FilterQuery::Keywords(vec!["rust".into()]),
             notify_sound: false,
             notify_desktop: true,
+            notify_sound_choice: String::new(),
             group_id: "g1".into(),
             title: None,
         }

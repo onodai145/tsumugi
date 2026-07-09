@@ -13,6 +13,8 @@ pub struct Column {
     pub filter: FilterQuery,
     pub notify_sound: bool,
     pub notify_desktop: bool,
+    /// このタブの通知音（プリセットIDまたはdata URL）。空文字なら設定→通知のグローバル選択を継承する。
+    pub notify_sound_choice: String,
     /// 所属する視覚カラム(ColumnGroup)の id
     pub group_id: String,
     /// ユーザ設定のタブ名。None なら種別から自動生成した名前を使う。

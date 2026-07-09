@@ -40,9 +40,11 @@ export interface TabView {
   customTitle: string | null;
   /// 適用中フィルタ（編集モーダルのプレフィル用）
   filter: FilterQuery;
-  /// タブ単位の通知フィルタ（設定→通知のグローバルスイッチと両方ONで発火。Notifications種別のみ意味を持つ）
+  /// タブ単位の通知フィルタ（設定→通知のグローバルスイッチと両方ONで発火）
   notifyDesktop: boolean;
   notifySound: boolean;
+  /// このタブの通知音（プリセットID/data URL）。空文字なら設定→通知のグローバル選択を継承
+  notifySoundChoice: string;
   notes: Note[];
   notifications: Notification[];
   state: ConnectionState;
@@ -87,7 +89,7 @@ class AppStore {
   compose = $state<ComposeState | null>(null);
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
-  notify = $state<NotifyConfig>({ desktop: false, sound: false });
+  notify = $state<NotifyConfig>({ desktop: false, sound: false, soundChoice: "" });
   ui = $state<UiPrefs>({
     theme: "auto",
     defaultColumnWidth: 300,
@@ -119,7 +121,8 @@ class AppStore {
     try {
       this.accounts = await unwrap(commands.listAccounts());
       this.mute = await unwrap(commands.getMute());
-      this.notify = await unwrap(commands.getNotify());
+      const notify = await unwrap(commands.getNotify());
+      this.notify = { ...notify, soundChoice: notify.soundChoice ?? "" };
       const ui = await unwrap(commands.getUiPrefs());
       this.ui = {
         ...ui,
@@ -167,6 +170,7 @@ class AppStore {
       filter: opened.column.filter,
       notifyDesktop: opened.column.notifyDesktop,
       notifySound: opened.column.notifySound,
+      notifySoundChoice: opened.column.notifySoundChoice,
       notes: opened.notes,
       notifications: opened.notifications,
       state: "connecting",
@@ -239,17 +243,33 @@ class AppStore {
   }
 
   /// タブ単位の通知設定（デスクトップ/音）を変更する。ストリームは張り直さない。
-  async setColumnNotify(tabId: string, notifyDesktop: boolean, notifySound: boolean) {
+  async setColumnNotify(
+    tabId: string,
+    notifyDesktop: boolean,
+    notifySound: boolean,
+    notifySoundChoice: string,
+  ) {
     const tab = this.#findTab(tabId);
     if (tab) {
       tab.notifyDesktop = notifyDesktop;
       tab.notifySound = notifySound;
+      tab.notifySoundChoice = notifySoundChoice;
     }
     try {
-      await unwrap(commands.setColumnNotify(tabId, notifyDesktop, notifySound));
+      await unwrap(commands.setColumnNotify(tabId, notifyDesktop, notifySound, notifySoundChoice));
     } catch (e) {
       this.#fail(e);
     }
+  }
+
+  /// 音声ファイルを選んで通知音として読み込む（data URL化のみ。保存は setColumnNotify/setNotify で）。
+  async pickNotifySoundFile(): Promise<string | null> {
+    const path = await openDialog({
+      multiple: false,
+      filters: [{ name: "音声", extensions: ["mp3", "wav", "ogg", "m4a", "aac", "flac", "webm"] }],
+    });
+    if (!path || Array.isArray(path)) return null;
+    return unwrap(commands.readAudioDataUrl(path));
   }
 
   // ---- キーボード操作 ----
@@ -473,7 +493,7 @@ class AppStore {
         const wantsSound = !isOwn && this.notify.sound && tab.notifySound;
         if ((wantsDesktop || wantsSound) && this.#markNotified(`note:${e.payload.note.id}`)) {
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
-          if (wantsSound) beep();
+          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
       }),
     );
@@ -508,7 +528,7 @@ class AppStore {
         const wantsSound = this.notify.sound && tab.notifySound;
         if ((wantsDesktop || wantsSound) && this.#markNotified(e.payload.notification.id)) {
           if (wantsDesktop) void this.#osNotify(e.payload.notification);
-          if (wantsSound) beep();
+          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
       }),
     );
@@ -768,6 +788,12 @@ class AppStore {
     return true;
   }
 
+  /// このタブで実際に鳴らす通知音を決める。タブ側の選択があればそれを優先し、
+  /// 無ければ設定→通知のグローバル選択を継承する（どちらも空なら既定=beep）。
+  #resolveSoundChoice(tab: TabView): string {
+    return tab.notifySoundChoice || this.notify.soundChoice || "";
+  }
+
   async #osNotify(n: Notification) {
     const actor = n.user ? (n.user.name ?? n.user.username) : "";
     const title = `${actor} ${notifActionLabel(n.type)}`.trim();
@@ -1004,22 +1030,58 @@ function notifActionLabel(type: string): string {
   return labels[type] ?? type;
 }
 
+/// 通知音のプリセット一覧（設定UIの選択肢用）。"" は未選択＝継承を表す特別値なのでここには含めない。
+export const NOTIFY_SOUND_PRESETS: { id: string; label: string }[] = [
+  { id: "beep", label: "ビープ" },
+  { id: "chime", label: "チャイム" },
+  { id: "ping", label: "ピン" },
+  { id: "pop", label: "ポップ" },
+];
+
 let audioCtx: AudioContext | null = null;
-function beep() {
+function playTone(freq: number, delay: number, dur: number, type: OscillatorType = "sine", peak = 0.15) {
+  audioCtx ??= new AudioContext();
+  const ctx = audioCtx;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.value = 0.0001;
+  osc.connect(gain).connect(ctx.destination);
+  const now = ctx.currentTime + delay;
+  gain.gain.exponentialRampToValueAtTime(peak, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+  osc.start(now);
+  osc.stop(now + dur + 0.02);
+}
+
+function playPreset(preset: string) {
+  switch (preset) {
+    case "chime":
+      playTone(660, 0, 0.12);
+      playTone(880, 0.1, 0.16);
+      break;
+    case "ping":
+      playTone(1300, 0, 0.09, "sine", 0.12);
+      break;
+    case "pop":
+      playTone(220, 0, 0.09, "triangle", 0.2);
+      break;
+    case "beep":
+    default:
+      playTone(880, 0, 0.18);
+      break;
+  }
+}
+
+/// 通知音を鳴らす。choice は プリセットID / data URL(カスタム音声) / 空文字(既定=beep)。
+export function playNotifySound(choice: string) {
   try {
-    audioCtx ??= new AudioContext();
-    const ctx = audioCtx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = 880;
-    gain.gain.value = 0.0001;
-    osc.connect(gain).connect(ctx.destination);
-    const now = ctx.currentTime;
-    gain.gain.exponentialRampToValueAtTime(0.15, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-    osc.start(now);
-    osc.stop(now + 0.19);
+    if (choice.startsWith("data:")) {
+      void new Audio(choice).play().catch(() => {});
+      return;
+    }
+    playPreset(choice || "beep");
   } catch {
     // 音の失敗は無視
   }

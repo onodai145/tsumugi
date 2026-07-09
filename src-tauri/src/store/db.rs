@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS column_def (
     notify_sound   INTEGER NOT NULL,
     notify_desktop INTEGER NOT NULL,
     group_id       TEXT,            -- 所属する column_group.id
-    title          TEXT             -- ユーザ設定のタブ名（NULL=自動生成名）
+    title          TEXT,            -- ユーザ設定のタブ名（NULL=自動生成名）
+    notify_sound_choice TEXT NOT NULL DEFAULT ''  -- プリセットIDまたはdata URL。空=グローバル継承
 );
 CREATE INDEX IF NOT EXISTS idx_column_account ON column_def(account_id);
 
@@ -124,6 +125,12 @@ fn migrate(conn: &Connection) -> Result<()> {
     // タブのカスタム名（無い旧 DB には追加）
     if !column_exists(conn, "column_def", "title")? {
         conn.execute_batch("ALTER TABLE column_def ADD COLUMN title TEXT")?;
+    }
+    // タブごとの通知音選択（無い旧 DB には追加。既定は空文字＝グローバル継承）
+    if !column_exists(conn, "column_def", "notify_sound_choice")? {
+        conn.execute_batch(
+            "ALTER TABLE column_def ADD COLUMN notify_sound_choice TEXT NOT NULL DEFAULT ''",
+        )?;
     }
     // group_id が未設定のタブを、それぞれ新規グループへ（新規 DB では該当なし）
     let orphans: Vec<(String, i32, i32)> = {

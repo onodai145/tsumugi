@@ -61,6 +61,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::get_ui_prefs,
             commands::mute::set_ui_prefs,
             commands::mute::read_image_data_url,
+            commands::mute::read_audio_data_url,
             commands::mute::sync_server_mutes,
         ])
         .events(collect_events![
