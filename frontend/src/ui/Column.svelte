@@ -20,13 +20,6 @@
   );
   const isNotif = $derived(activeTab?.kind.type === "notifications");
 
-  const stateLabel: Record<string, string> = {
-    connecting: "接続中…",
-    connected: "接続済み",
-    reconnecting: "再接続中…",
-    error: "エラー",
-  };
-
   function onScroll(e: Event) {
     const el = e.currentTarget as HTMLElement;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300 && activeTab) {
@@ -126,10 +119,6 @@
   </div>
 
   {#if activeTab}
-    <div class="head-sub" title={activeTab.title}>
-      {activeTab.title}
-      <span class="col-state">{stateLabel[activeTab.state] ?? activeTab.state}</span>
-    </div>
     <div class="notes" onscroll={onScroll}>
       {#if isNotif}
         {#each activeTab.notifications as n (n.id)}
@@ -274,22 +263,6 @@
   }
   .tab-dot[data-state="error"] {
     background: #ef4444;
-  }
-  .head-sub {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 8px;
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .col-state {
-    margin-left: auto;
-    flex: none;
   }
   .notes {
     overflow-y: auto;
