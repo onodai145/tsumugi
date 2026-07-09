@@ -162,7 +162,8 @@
     flex: none;
     height: 100%;
     border-right: 1px solid var(--border);
-    background: var(--surface-1);
+    /* 背景画像設定時にカラムを透けさせるための不透明度。未設定なら 100%(不透明)のまま */
+    background: color-mix(in srgb, var(--surface-1) var(--column-opacity, 100%), transparent);
   }
   .column.dragging {
     opacity: 0.55;

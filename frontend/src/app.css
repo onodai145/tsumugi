@@ -64,6 +64,27 @@
   background: var(--text-dim);
 }
 
+/* 背景画像（設定→表示で選択）。#applyBackground が --bg-image 等を <html> にセットする。
+   body ではなく ::before に描画し、blur を背景だけに掛ける（body 自体を blur すると
+   子要素まで巻き込まれるため）。位置は fixed で viewport 全体、z-index で最背面に固定。 */
+body {
+  position: relative;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: linear-gradient(
+      rgba(0, 0, 0, var(--bg-dim, 0)),
+      rgba(0, 0, 0, var(--bg-dim, 0))
+    ), var(--bg-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(var(--bg-blur, 0px));
+}
+
 html,
 body {
   margin: 0;

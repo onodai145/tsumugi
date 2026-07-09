@@ -2,6 +2,7 @@
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
 import { commands, events, unwrap, formatError } from "./ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   isPermissionGranted,
   requestPermission,
@@ -84,7 +85,16 @@ class AppStore {
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false });
-  ui = $state<UiPrefs>({ theme: "auto", defaultColumnWidth: 300, keymap: {}, fontFamily: "" });
+  ui = $state<UiPrefs>({
+    theme: "auto",
+    defaultColumnWidth: 300,
+    keymap: {},
+    fontFamily: "",
+    backgroundImage: "",
+    backgroundDim: 0,
+    backgroundBlur: 0,
+    columnOpacity: 100,
+  });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
   reactPickerNoteId = $state<string | null>(null);
@@ -108,9 +118,18 @@ class AppStore {
       this.mute = await unwrap(commands.getMute());
       this.notify = await unwrap(commands.getNotify());
       const ui = await unwrap(commands.getUiPrefs());
-      this.ui = { ...ui, keymap: ui.keymap ?? {}, fontFamily: ui.fontFamily ?? "" };
+      this.ui = {
+        ...ui,
+        keymap: ui.keymap ?? {},
+        fontFamily: ui.fontFamily ?? "",
+        backgroundImage: ui.backgroundImage ?? "",
+        backgroundDim: ui.backgroundDim ?? 0,
+        backgroundBlur: ui.backgroundBlur ?? 0,
+        columnOpacity: ui.columnOpacity ?? 100,
+      };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
+      this.#applyBackground(this.ui);
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
       await this.#subscribe();
@@ -633,10 +652,29 @@ class AppStore {
   /// 表示設定（テーマ・既定カラム幅・フォント）を保存し、即時反映。
   async setUiPrefs(prefs: UiPrefs) {
     await unwrap(commands.setUiPrefs(prefs));
-    this.ui = { ...prefs, keymap: prefs.keymap ?? {}, fontFamily: prefs.fontFamily ?? "" };
+    this.ui = {
+      ...prefs,
+      keymap: prefs.keymap ?? {},
+      fontFamily: prefs.fontFamily ?? "",
+      backgroundImage: prefs.backgroundImage ?? "",
+      backgroundDim: prefs.backgroundDim ?? 0,
+      backgroundBlur: prefs.backgroundBlur ?? 0,
+      columnOpacity: prefs.columnOpacity ?? 100,
+    };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");
+    this.#applyBackground(this.ui);
     this.#log("info", "表示設定を保存しました");
+  }
+
+  /// 画像ファイルを選んで背景画像として読み込む（data URL化のみ。保存は setUiPrefs で）。
+  async pickBackgroundImage(): Promise<string | null> {
+    const path = await openDialog({
+      multiple: false,
+      filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"] }],
+    });
+    if (!path || Array.isArray(path)) return null;
+    return unwrap(commands.readImageDataUrl(path));
   }
 
   /// キーバインドの上書きを保存（他の表示設定は据え置き）。
@@ -665,6 +703,20 @@ class AppStore {
     } else {
       root.style.removeProperty("--font-family");
     }
+  }
+
+  /// 背景画像/オーバーレイ/カラム不透明度を <html> に反映する。
+  #applyBackground(prefs: Pick<UiPrefs, "backgroundImage" | "backgroundDim" | "backgroundBlur" | "columnOpacity">) {
+    const root = document.documentElement;
+    const img = prefs.backgroundImage ?? "";
+    if (img) {
+      root.style.setProperty("--bg-image", `url("${img}")`);
+    } else {
+      root.style.removeProperty("--bg-image");
+    }
+    root.style.setProperty("--bg-dim", String((prefs.backgroundDim ?? 0) / 100));
+    root.style.setProperty("--bg-blur", `${prefs.backgroundBlur ?? 0}px`);
+    root.style.setProperty("--column-opacity", `${prefs.columnOpacity ?? 100}%`);
   }
 
   // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。

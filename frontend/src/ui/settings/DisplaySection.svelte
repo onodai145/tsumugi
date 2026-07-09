@@ -4,6 +4,11 @@
   let theme = $state(app.ui.theme);
   let width = $state(app.ui.defaultColumnWidth);
   let fontFamily = $state(app.ui.fontFamily ?? "");
+  let backgroundImage = $state(app.ui.backgroundImage ?? "");
+  let backgroundDim = $state(app.ui.backgroundDim ?? 0);
+  let backgroundBlur = $state(app.ui.backgroundBlur ?? 0);
+  let columnOpacity = $state(app.ui.columnOpacity ?? 100);
+  let pickingImage = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -22,6 +27,23 @@
     { label: "明朝", value: '"Yu Mincho", "Hiragino Mincho ProN", serif' },
   ];
 
+  async function pickImage() {
+    err = null;
+    pickingImage = true;
+    try {
+      const url = await app.pickBackgroundImage();
+      if (url) backgroundImage = url;
+    } catch (e) {
+      err = String(e);
+    } finally {
+      pickingImage = false;
+    }
+  }
+
+  function clearImage() {
+    backgroundImage = "";
+  }
+
   async function save() {
     err = null;
     saved = false;
@@ -29,7 +51,16 @@
     try {
       const w = Math.min(720, Math.max(220, Math.round(width) || 300));
       width = w;
-      await app.setUiPrefs({ theme, defaultColumnWidth: w, keymap: app.ui.keymap, fontFamily });
+      await app.setUiPrefs({
+        theme,
+        defaultColumnWidth: w,
+        keymap: app.ui.keymap,
+        fontFamily,
+        backgroundImage,
+        backgroundDim,
+        backgroundBlur,
+        columnOpacity,
+      });
       saved = true;
     } catch (e) {
       err = String(e);
@@ -79,6 +110,37 @@
 <p class="hint" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
   プレビュー: あいうえお ABCDEFG 123
 </p>
+
+<div class="field">
+  <span>背景画像</span>
+  <div class="bg-row">
+    {#if backgroundImage}
+      <img class="bg-thumb" src={backgroundImage} alt="背景プレビュー" />
+    {/if}
+    <button class="mini-btn" disabled={pickingImage} onclick={pickImage}>
+      {pickingImage ? "読み込み中…" : backgroundImage ? "画像を変更" : "画像を選択"}
+    </button>
+    {#if backgroundImage}
+      <button class="mini-btn" onclick={clearImage}>解除</button>
+    {/if}
+  </div>
+</div>
+
+{#if backgroundImage}
+  <label class="field">
+    <span>背景の暗さ（{backgroundDim}%）</span>
+    <input type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
+  </label>
+  <label class="field">
+    <span>背景のぼかし（{backgroundBlur}px）</span>
+    <input type="range" min="0" max="40" step="2" bind:value={backgroundBlur} />
+  </label>
+  <label class="field">
+    <span>カラムの不透明度（{columnOpacity}%）</span>
+    <input type="range" min="60" max="100" step="5" bind:value={columnOpacity} />
+  </label>
+  <p class="hint">数値が低いほど背景画像が透けて見えます。</p>
+{/if}
 
 <div class="actions">
   {#if saved}<span class="ok">保存しました</span>{/if}
@@ -148,6 +210,39 @@
     font-size: 0.76rem;
     color: var(--text-dim);
     margin: 0 0 16px;
+  }
+  .bg-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .bg-thumb {
+    width: 56px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .mini-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .mini-btn:hover {
+    border-color: var(--accent);
+  }
+  .mini-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  input[type="range"] {
+    accent-color: var(--accent);
+    width: 100%;
+    max-width: 320px;
   }
   .actions {
     display: flex;
