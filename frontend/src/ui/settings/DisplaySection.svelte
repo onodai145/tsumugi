@@ -51,10 +51,12 @@
     try {
       const w = Math.min(720, Math.max(220, Math.round(width) || 300));
       width = w;
+      // このセクションが編集しないフィールド(既定アカウント等)を保存で消さないよう、
+      // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
+        ...app.ui,
         theme,
         defaultColumnWidth: w,
-        keymap: app.ui.keymap,
         fontFamily,
         backgroundImage,
         backgroundDim,
