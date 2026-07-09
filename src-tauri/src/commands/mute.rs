@@ -2,9 +2,13 @@
 
 use crate::api::mutes::fetch_muted_and_blocked;
 use crate::domain::{MuteConfig, NotifyConfig, UiPrefs};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::state::AppState;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tauri::State;
+
+/// 背景画像として許容する最大サイズ（DB肥大化を防ぐ）。
+const MAX_BACKGROUND_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// 現在の NG 設定を取得。
 #[tauri::command]
@@ -48,6 +52,45 @@ pub async fn get_ui_prefs(state: State<'_, AppState>) -> Result<UiPrefs> {
 #[specta::specta]
 pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<()> {
     state.settings.save_ui(&prefs)
+}
+
+/// ローカル画像ファイルを data URL(base64)へ変換する（背景画像設定用）。
+/// UiPrefs.background_image に直接保存できる形にする。拡張子から MIME を推定する。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_image_data_url(path: String) -> Result<String> {
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?;
+    if bytes.len() > MAX_BACKGROUND_IMAGE_BYTES {
+        return Err(Error::Invalid(format!(
+            "画像が大きすぎます（{}MB超）。{}MB以下の画像を選んでください",
+            MAX_BACKGROUND_IMAGE_BYTES / 1024 / 1024,
+            MAX_BACKGROUND_IMAGE_BYTES / 1024 / 1024
+        )));
+    }
+    let mime = guess_image_mime(&path);
+    let b64 = STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
+}
+
+/// 拡張子から画像 MIME を推定する。不明な拡張子は octet-stream(ブラウザ側で概ね表示可)。
+fn guess_image_mime(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
 }
 
 /// サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。

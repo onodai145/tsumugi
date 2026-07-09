@@ -90,6 +90,11 @@ export const commands = {
 	/**  表示設定を更新（永続化）。 */
 	setUiPrefs: (prefs: UiPrefs) => typedError<null, Error>(__TAURI_INVOKE("set_ui_prefs", { prefs })),
 	/**
+	 *  ローカル画像ファイルを data URL(base64)へ変換する（背景画像設定用）。
+	 *  UiPrefs.background_image に直接保存できる形にする。拡張子から MIME を推定する。
+	 */
+	readImageDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_image_data_url", { path })),
+	/**
 	 *  サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
 	 */
@@ -379,7 +384,7 @@ export type SourceItem = {
 	name: string,
 };
 
-/**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント。 */
+/**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。 */
 export type UiPrefs = {
 	/**  "auto" | "light" | "dark" */
 	theme: string,
@@ -395,6 +400,14 @@ export type UiPrefs = {
 	 *  空文字なら既定フォントスタックを使う。
 	 */
 	fontFamily?: string,
+	/**  背景画像を data URL(base64)でそのまま保持。空文字なら背景画像なし。 */
+	backgroundImage?: string,
+	/**  背景に乗せる黒オーバーレイの濃さ（0〜100%）。可読性確保用。 */
+	backgroundDim?: number,
+	/**  背景画像のぼかし量（px, 0〜40）。 */
+	backgroundBlur?: number,
+	/**  カラム背景の不透明度（60〜100%）。背景画像を透けさせる。 */
+	columnOpacity?: number,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
