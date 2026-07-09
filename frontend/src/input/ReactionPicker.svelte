@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
+  import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import type { EmojiDef } from "../bindings/tauri.gen";
 
   let { accountId, onpick }: { accountId: string; onpick: (reaction: string) => void } = $props();
@@ -27,7 +28,7 @@
 <div class="picker">
   <div class="common">
     {#each COMMON as e}
-      <button class="emoji-btn" onclick={() => onpick(e)}>{e}</button>
+      <button class="emoji-btn" onclick={() => onpick(e)}><UnicodeEmoji char={e} /></button>
     {/each}
   </div>
   <input class="search" placeholder="カスタム絵文字を検索…" bind:value={query} />

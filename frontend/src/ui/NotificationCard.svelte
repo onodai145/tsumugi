@@ -3,6 +3,7 @@
   import type { Component } from "svelte";
   import NoteCard from "./NoteCard.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
+  import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji } from "../lib/emoji";
@@ -77,7 +78,7 @@
         <span class="reaction">
           {#if reaction}
             <CustomEmoji name={reaction.name} url={reaction.url} />
-          {:else}{n.reaction}{/if}
+          {:else}<UnicodeEmoji char={n.reaction} />{/if}
         </span>
       {/if}
     </span>

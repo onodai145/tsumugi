@@ -2,6 +2,7 @@
   import type { MfmNode } from "mfm-js";
   import Self from "./MfmNode.svelte";
   import CustomEmoji from "./CustomEmoji.svelte";
+  import UnicodeEmoji from "./UnicodeEmoji.svelte";
   import Sparkle from "./Sparkle.svelte";
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
@@ -94,7 +95,7 @@
 {:else if node.type === "emojiCode"}
   <CustomEmoji name={p.name} url={emojis[p.name]} />
 {:else if node.type === "unicodeEmoji"}
-  {p.emoji}
+  <UnicodeEmoji char={p.emoji} />
 {:else if node.type === "inlineCode"}
   <code class="mfm-code">{p.code}</code>
 {:else if node.type === "blockCode"}

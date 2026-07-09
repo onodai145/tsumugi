@@ -3,6 +3,7 @@
   import Mfm from "../render/Mfm.svelte";
   import MediaGrid from "../render/MediaGrid.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
+  import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
@@ -184,7 +185,7 @@
                 {@const e = reactionEmoji(key, emojiMap)}
                 <CustomEmoji name={e.name} url={e.url} />
               {:else}
-                {key}
+                <UnicodeEmoji char={key} />
               {/if}
               <span class="rcount">{count}</span>
             </button>

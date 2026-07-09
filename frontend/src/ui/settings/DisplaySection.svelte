@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
+  import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
 
   let theme = $state(app.ui.theme);
   let width = $state(app.ui.defaultColumnWidth);
@@ -8,6 +9,7 @@
   let backgroundDim = $state(app.ui.backgroundDim ?? 0);
   let backgroundBlur = $state(app.ui.backgroundBlur ?? 0);
   let columnOpacity = $state(app.ui.columnOpacity ?? 100);
+  let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let pickingImage = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -18,6 +20,16 @@
     { id: "light", label: "ライト" },
     { id: "dark", label: "ダーク" },
   ];
+
+  const emojiStyles: { id: EmojiStyle; label: string }[] = [
+    { id: "twemoji", label: "Twemoji" },
+    { id: "fluentEmoji", label: "Fluent Emoji" },
+    { id: "native", label: "OS標準" },
+  ];
+  const emojiHost = app.accounts.find((a) => a.id === app.defaultAccountId())?.host;
+  function emojiPreviewUrl(style: EmojiStyle): string | null {
+    return unicodeEmojiUrl("😺", style, emojiHost);
+  }
 
   const fontPresets: { label: string; value: string }[] = [
     { label: "既定", value: "" },
@@ -62,6 +74,7 @@
         backgroundDim,
         backgroundBlur,
         columnOpacity,
+        emojiStyle,
       });
       saved = true;
     } catch (e) {
@@ -88,6 +101,30 @@
   <input type="number" min="220" max="720" step="10" bind:value={width} />
 </label>
 <p class="hint">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
+
+<div class="field">
+  <span>絵文字のスタイル</span>
+  <div class="seg">
+    {#each emojiStyles as s (s.id)}
+      <button class="seg-btn" class:active={emojiStyle === s.id} onclick={() => (emojiStyle = s.id)}>
+        {#if emojiPreviewUrl(s.id)}
+          <img class="emoji-style-thumb" src={emojiPreviewUrl(s.id)} alt="" />
+        {/if}
+        {s.label}
+      </button>
+    {/each}
+  </div>
+  <p class="hint preview-row">
+    Unicode絵文字（リアクション等）の見た目です。プレビュー:
+    {#each ["😺", "👍", "🎉"] as c}
+      {#if emojiPreviewUrl(emojiStyle)}
+        <img class="emoji-preview" src={unicodeEmojiUrl(c, emojiStyle, emojiHost) ?? undefined} alt={c} />
+      {:else}
+        {c}
+      {/if}
+    {/each}
+  </p>
+</div>
 
 <div class="field">
   <span>フォント</span>
@@ -212,6 +249,24 @@
     font-size: 0.76rem;
     color: var(--text-dim);
     margin: 0 0 16px;
+  }
+  .emoji-style-thumb {
+    height: 1.2em;
+    width: 1.2em;
+    object-fit: contain;
+    vertical-align: -0.25em;
+    margin-right: 4px;
+  }
+  .preview-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .emoji-preview {
+    height: 1.3em;
+    width: 1.3em;
+    object-fit: contain;
   }
   .bg-row {
     display: flex;
