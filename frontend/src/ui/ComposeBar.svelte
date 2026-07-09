@@ -11,7 +11,9 @@
     DriveFile,
   } from "../bindings/tauri.gen";
 
-  let accountId = $state(app.accounts[0]?.id ?? "");
+  let accountId = $state(app.defaultAccountId());
+  // ユーザが手動でアカウントを切り替えたら、以後は設定→アカウントの既定変更に追従しない
+  let accountTouched = $state(false);
   let text = $state("");
   let visibility = $state<VisibilityInput>("public");
   let attached = $state<DriveFile[]>([]);
@@ -19,9 +21,9 @@
   let busy = $state(false);
   let err = $state<string | null>(null);
 
-  // アカウントが後から読まれた場合の既定選択
+  // アカウントが後から読まれた場合／既定アカウントが変更された場合の追従（手動選択後は止める）
   $effect(() => {
-    if (!accountId && app.accounts.length > 0) accountId = app.accounts[0].id;
+    if (!accountTouched) accountId = app.defaultAccountId();
   });
 
   async function pickFiles() {
@@ -82,7 +84,16 @@
 </script>
 
 <div class="composebar">
-  <AccountSelect bind:value={accountId} accounts={app.accounts} />
+  <AccountSelect
+    bind:value={
+      () => accountId,
+      (v) => {
+        accountId = v;
+        accountTouched = true;
+      }
+    }
+    accounts={app.accounts}
+  />
 
   <textarea
     class="text"

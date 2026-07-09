@@ -426,6 +426,8 @@ export type UiPrefs = {
 	backgroundBlur?: number,
 	/**  カラム背景の不透明度（60〜100%）。背景画像を透けさせる。 */
 	columnOpacity?: number,
+	/**  既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。 */
+	defaultAccountId?: string,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

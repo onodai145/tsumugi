@@ -101,6 +101,7 @@ class AppStore {
     backgroundDim: 0,
     backgroundBlur: 0,
     columnOpacity: 100,
+    defaultAccountId: "",
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -134,6 +135,7 @@ class AppStore {
         backgroundDim: ui.backgroundDim ?? 0,
         backgroundBlur: ui.backgroundBlur ?? 0,
         columnOpacity: ui.columnOpacity ?? 100,
+        defaultAccountId: ui.defaultAccountId ?? "",
       };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
@@ -347,7 +349,7 @@ class AppStore {
         return;
       case "compose.new": {
         const t = this.#focusedTab();
-        const accountId = t?.accountId ?? this.accounts[0]?.id;
+        const accountId = t?.accountId ?? this.defaultAccountId();
         if (accountId) this.openCompose(accountId);
         return;
       }
@@ -727,11 +729,19 @@ class AppStore {
       backgroundDim: prefs.backgroundDim ?? 0,
       backgroundBlur: prefs.backgroundBlur ?? 0,
       columnOpacity: prefs.columnOpacity ?? 100,
+      defaultAccountId: prefs.defaultAccountId ?? "",
     };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");
     this.#applyBackground(this.ui);
     this.#log("info", "表示設定を保存しました");
+  }
+
+  /// 既定アカウントの id。未設定/削除済みならアカウント一覧の先頭にフォールバック。
+  defaultAccountId(): string {
+    const id = this.ui.defaultAccountId;
+    if (id && this.accounts.some((a) => a.id === id)) return id;
+    return this.accounts[0]?.id ?? "";
   }
 
   /// 画像ファイルを選んで背景画像として読み込む（data URL化のみ。保存は setUiPrefs で）。

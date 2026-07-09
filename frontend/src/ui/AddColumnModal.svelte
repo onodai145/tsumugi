@@ -44,7 +44,7 @@
   ];
 
   const k = edit?.kind;
-  let accountId = $state(edit?.accountId ?? app.accounts[0]?.id ?? "");
+  let accountId = $state(edit?.accountId ?? app.defaultAccountId());
   let sourceType = $state<SrcType>((k?.type as SrcType) ?? "home");
   let searchQuery = $state(k?.type === "search" ? k.query : "");
   let listId = $state(k?.type === "list" ? k.listId : "");

@@ -30,6 +30,9 @@ pub struct UiPrefs {
     /// カラム背景の不透明度（60〜100%）。背景画像を透けさせる。
     #[serde(default = "default_column_opacity")]
     pub column_opacity: i32,
+    /// 既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。
+    #[serde(default)]
+    pub default_account_id: String,
 }
 
 fn default_column_opacity() -> i32 {
@@ -47,6 +50,7 @@ impl Default for UiPrefs {
             background_dim: 0,
             background_blur: 0,
             column_opacity: default_column_opacity(),
+            default_account_id: String::new(),
         }
     }
 }
@@ -85,6 +89,7 @@ mod tests {
             background_dim: 40,
             background_blur: 8,
             column_opacity: 85,
+            default_account_id: "a1".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
