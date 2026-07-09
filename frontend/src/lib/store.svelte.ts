@@ -61,6 +61,8 @@ export function tabName(t: TabView): string {
 export interface GroupView {
   id: string;
   width: number;
+  /// true ならウィンドウ幅に応じて自動調整(flex)。false なら width(px) 固定
+  auto: boolean;
   tabs: TabView[];
   activeTabId: string;
 }
@@ -140,7 +142,7 @@ class AppStore {
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
-      this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, tabs: [], activeTabId: "" }));
+      this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, auto: g.auto, tabs: [], activeTabId: "" }));
       const tabDefs = await unwrap(commands.listColumns());
       for (const tab of tabDefs) {
         try {
@@ -183,7 +185,7 @@ class AppStore {
   #insertTab(opened: OpenedColumn) {
     let g = this.groups.find((x) => x.id === opened.group.id);
     if (!g) {
-      g = { id: opened.group.id, width: opened.group.width, tabs: [], activeTabId: "" };
+      g = { id: opened.group.id, width: opened.group.width, auto: opened.group.auto, tabs: [], activeTabId: "" };
       this.groups = [...this.groups, g];
     }
     const tab = this.#makeTab(opened);
@@ -469,6 +471,16 @@ class AppStore {
   async persistGroupWidth(groupId: string, width: number) {
     try {
       await unwrap(commands.setGroupWidth(groupId, width));
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
+  async setGroupAuto(groupId: string, auto: boolean) {
+    const g = this.groups.find((c) => c.id === groupId);
+    if (g) g.auto = auto;
+    try {
+      await unwrap(commands.setGroupAuto(groupId, auto));
     } catch (e) {
       this.#fail(e);
     }

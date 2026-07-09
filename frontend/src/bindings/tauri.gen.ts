@@ -35,6 +35,8 @@ export const commands = {
 	closeColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("close_column", { columnId })),
 	/**  グループ幅を更新（永続化）。 */
 	setGroupWidth: (groupId: string, width: number) => typedError<null, Error>(__TAURI_INVOKE("set_group_width", { groupId, width })),
+	/**  グループの幅モード（固定/自動調整）を更新。 */
+	setGroupAuto: (groupId: string, auto: boolean) => typedError<null, Error>(__TAURI_INVOKE("set_group_auto", { groupId, auto })),
 	/**  グループ(視覚カラム)の並び順を更新。 */
 	reorderGroups: (orderedIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("reorder_groups", { orderedIds })),
 	/**
@@ -163,6 +165,8 @@ export type ColumnGroup = {
 	id: string,
 	order: number,
 	width: number,
+	/**  true なら幅固定ではなくウィンドウ幅に応じて自動調整(flex)する */
+	auto: boolean,
 };
 
 /**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。 */

@@ -35,6 +35,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::fetch_notifications_backfill,
             commands::column::close_column,
             commands::column::set_group_width,
+            commands::column::set_group_auto,
             commands::column::reorder_groups,
             commands::column::move_tab,
             commands::column::capture_notes,

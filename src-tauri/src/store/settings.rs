@@ -67,12 +67,13 @@ impl SettingsStore {
     pub fn load_groups(&self) -> Result<Vec<ColumnGroup>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt =
-            conn.prepare("SELECT id, ord, width FROM column_group ORDER BY ord, rowid")?;
+            conn.prepare("SELECT id, ord, width, auto FROM column_group ORDER BY ord, rowid")?;
         let rows = stmt.query_map([], |r| {
             Ok(ColumnGroup {
                 id: r.get(0)?,
                 order: r.get(1)?,
                 width: r.get(2)?,
+                auto: r.get::<_, i64>(3)? != 0,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -81,9 +82,9 @@ impl SettingsStore {
     pub fn upsert_group(&self, g: &ColumnGroup) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO column_group (id, ord, width) VALUES (?1, ?2, ?3)
-             ON CONFLICT(id) DO UPDATE SET ord=excluded.ord, width=excluded.width",
-            params![g.id, g.order, g.width],
+            "INSERT INTO column_group (id, ord, width, auto) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET ord=excluded.ord, width=excluded.width, auto=excluded.auto",
+            params![g.id, g.order, g.width, g.auto as i64],
         )?;
         Ok(())
     }
@@ -93,6 +94,15 @@ impl SettingsStore {
         conn.execute(
             "UPDATE column_group SET width = ?1 WHERE id = ?2",
             params![width, group_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_group_auto(&self, group_id: &str, auto: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE column_group SET auto = ?1 WHERE id = ?2",
+            params![auto as i64, group_id],
         )?;
         Ok(())
     }
@@ -404,8 +414,8 @@ mod tests {
     fn groups_and_move_tab() {
         let s = store();
         s.upsert_account(&account("a1")).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300 }).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300 }).unwrap();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
         s.upsert_column(&column("c1", "a1", 0)).unwrap(); // g1
         // タブを g2 へ移動
         s.move_tab("c1", "g2", &["c1".into()]).unwrap();
@@ -420,13 +430,27 @@ mod tests {
     #[test]
     fn set_group_width_and_reorder() {
         let s = store();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300 }).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300 }).unwrap();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
         s.set_group_width("g1", 420).unwrap();
         s.reorder_groups(&["g2".into(), "g1".into()]).unwrap();
         let groups = s.load_groups().unwrap();
         assert_eq!(groups[0].id, "g2");
         assert_eq!(groups[1].id, "g1");
         assert_eq!(groups[1].width, 420);
+    }
+
+    #[test]
+    fn group_auto_roundtrips_and_set_group_auto_updates() {
+        let s = store();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: true }).unwrap();
+        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
+        let groups = s.load_groups().unwrap();
+        assert!(groups.iter().find(|g| g.id == "g1").unwrap().auto);
+        assert!(!groups.iter().find(|g| g.id == "g2").unwrap().auto);
+
+        s.set_group_auto("g2", true).unwrap();
+        let groups = s.load_groups().unwrap();
+        assert!(groups.iter().find(|g| g.id == "g2").unwrap().auto);
     }
 }

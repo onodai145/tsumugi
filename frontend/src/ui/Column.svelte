@@ -9,10 +9,12 @@
     group,
     onAddTab,
     onEditTab,
+    onEditGroup,
   }: {
     group: GroupView;
     onAddTab: (groupId: string) => void;
     onEditTab: (tab: TabView) => void;
+    onEditGroup: (groupId: string) => void;
   } = $props();
 
   const activeTab = $derived(
@@ -51,7 +53,7 @@
 
 <section
   class="column"
-  style={`width:${group.width}px`}
+  style={group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
   class:dragging={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
   ondragover={(e) => {
@@ -79,7 +81,8 @@
         app.startDragGroup(group.id);
       }}
       ondragend={() => app.endDragGroup()}
-      title="ドラッグでカラムを並べ替え"
+      ondblclick={() => onEditGroup(group.id)}
+      title="ドラッグでカラムを並べ替え（ダブルクリックでカラム設定）"
     >⋮⋮</span>
 
     {#each group.tabs as t (t.id)}
@@ -144,14 +147,16 @@
     </div>
   {/if}
 
-  <div
-    class="resize"
-    onpointerdown={onResizeDown}
-    onpointermove={onResizeMove}
-    onpointerup={onResizeUp}
-    role="separator"
-    aria-label="幅を変更"
-  ></div>
+  {#if !group.auto}
+    <div
+      class="resize"
+      onpointerdown={onResizeDown}
+      onpointermove={onResizeMove}
+      onpointerup={onResizeUp}
+      role="separator"
+      aria-label="幅を変更"
+    ></div>
+  {/if}
 </section>
 
 <style>

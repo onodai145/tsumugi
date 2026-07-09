@@ -71,6 +71,7 @@ pub async fn add_column(
                 id: uuid::Uuid::new_v4().to_string(),
                 order,
                 width,
+                auto: false,
             };
             state.settings.upsert_group(&group)?;
             (group, 0)
@@ -255,6 +256,13 @@ pub async fn fetch_notifications_backfill(
 #[specta::specta]
 pub async fn set_group_width(state: State<'_, AppState>, group_id: String, width: i32) -> Result<()> {
     state.settings.set_group_width(&group_id, width.clamp(220, 720))
+}
+
+/// グループの幅モード（固定/自動調整）を更新。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_group_auto(state: State<'_, AppState>, group_id: String, auto: bool) -> Result<()> {
+    state.settings.set_group_auto(&group_id, auto)
 }
 
 /// グループ(視覚カラム)の並び順を更新。
