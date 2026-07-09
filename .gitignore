@@ -6,6 +6,9 @@
 node_modules
 /frontend/dist
 /frontend/node_modules
+# @misskey-dev/emoji-assets（絵文字画像）。node_modules から postinstall/pre*スクリプトでコピーされる生成物
+/frontend/public/twemoji
+/frontend/public/fluent-emoji
 
 # Tauri generated
 /src-tauri/gen/schemas

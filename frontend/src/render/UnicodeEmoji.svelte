@@ -5,10 +5,24 @@
   let { char }: { char: string } = $props();
 
   const url = $derived(app.emojiImageUrl(char));
+  // 同梱アセットに無い文字（未知の絵文字コードポイント組み合わせ等）は生テキストへフォールバック
+  let broken = $state(false);
+  $effect(() => {
+    url;
+    broken = false;
+  });
 </script>
 
-{#if url}
-  <img class="unicode-emoji" src={url} alt={char} title={char} draggable="false" loading="lazy" />
+{#if url && !broken}
+  <img
+    class="unicode-emoji"
+    src={url}
+    alt={char}
+    title={char}
+    draggable="false"
+    loading="lazy"
+    onerror={() => (broken = true)}
+  />
 {:else}
   {char}
 {/if}

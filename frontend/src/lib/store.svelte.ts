@@ -748,11 +748,10 @@ class AppStore {
     return this.accounts[0]?.id ?? "";
   }
 
-  /// Unicode絵文字の画像URL（native設定/host不明時は null＝生テキストのまま表示）。
-  /// 資産はどのMisskeyインスタンスも同じものを配信するため、既定アカウントの host を使う。
+  /// Unicode絵文字の画像URL（native設定時は null＝生テキストのまま表示）。
+  /// 画像はアプリに同梱済み(@misskey-dev/emoji-assets)なのでインスタンス通信は発生しない。
   emojiImageUrl(char: string): string | null {
-    const host = this.accounts.find((a) => a.id === this.defaultAccountId())?.host;
-    return unicodeEmojiUrl(char, (this.ui.emojiStyle as EmojiStyle) ?? "twemoji", host);
+    return unicodeEmojiUrl(char, (this.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   }
 
   /// 画像ファイルを選んで背景画像として読み込む（data URL化のみ。保存は setUiPrefs で）。

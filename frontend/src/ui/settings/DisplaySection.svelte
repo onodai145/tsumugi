@@ -26,9 +26,8 @@
     { id: "fluentEmoji", label: "Fluent Emoji" },
     { id: "native", label: "OS標準" },
   ];
-  const emojiHost = app.accounts.find((a) => a.id === app.defaultAccountId())?.host;
   function emojiPreviewUrl(style: EmojiStyle): string | null {
-    return unicodeEmojiUrl("😺", style, emojiHost);
+    return unicodeEmojiUrl("😺", style);
   }
 
   const fontPresets: { label: string; value: string }[] = [
@@ -118,7 +117,7 @@
     Unicode絵文字（リアクション等）の見た目です。プレビュー:
     {#each ["😺", "👍", "🎉"] as c}
       {#if emojiPreviewUrl(emojiStyle)}
-        <img class="emoji-preview" src={unicodeEmojiUrl(c, emojiStyle, emojiHost) ?? undefined} alt={c} />
+        <img class="emoji-preview" src={unicodeEmojiUrl(c, emojiStyle) ?? undefined} alt={c} />
       {:else}
         {c}
       {/if}
