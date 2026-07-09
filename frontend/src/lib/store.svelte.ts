@@ -84,7 +84,7 @@ class AppStore {
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false });
-  ui = $state<UiPrefs>({ theme: "auto", defaultColumnWidth: 300, keymap: {} });
+  ui = $state<UiPrefs>({ theme: "auto", defaultColumnWidth: 300, keymap: {}, fontFamily: "" });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
   reactPickerNoteId = $state<string | null>(null);
@@ -108,8 +108,9 @@ class AppStore {
       this.mute = await unwrap(commands.getMute());
       this.notify = await unwrap(commands.getNotify());
       const ui = await unwrap(commands.getUiPrefs());
-      this.ui = { ...ui, keymap: ui.keymap ?? {} };
+      this.ui = { ...ui, keymap: ui.keymap ?? {}, fontFamily: ui.fontFamily ?? "" };
       this.#applyTheme(this.ui.theme);
+      this.#applyFont(this.ui.fontFamily ?? "");
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
       await this.#subscribe();
@@ -629,11 +630,12 @@ class AppStore {
     this.#log("info", "通知設定を保存しました");
   }
 
-  /// 表示設定（テーマ・既定カラム幅）を保存し、テーマを即時反映。
+  /// 表示設定（テーマ・既定カラム幅・フォント）を保存し、即時反映。
   async setUiPrefs(prefs: UiPrefs) {
     await unwrap(commands.setUiPrefs(prefs));
-    this.ui = { ...prefs, keymap: prefs.keymap ?? {} };
+    this.ui = { ...prefs, keymap: prefs.keymap ?? {}, fontFamily: prefs.fontFamily ?? "" };
     this.#applyTheme(prefs.theme);
+    this.#applyFont(prefs.fontFamily ?? "");
     this.#log("info", "表示設定を保存しました");
   }
 
@@ -651,6 +653,17 @@ class AppStore {
       root.dataset.theme = theme;
     } else {
       delete root.dataset.theme;
+    }
+  }
+
+  /// --font-family を <html> に反映（CSS font-family 値をそのまま渡す）。
+  /// 空文字なら未設定に戻し、app.css の既定フォントスタックへフォールバックさせる。
+  #applyFont(fontFamily: string) {
+    const root = document.documentElement;
+    if (fontFamily.trim()) {
+      root.style.setProperty("--font-family", fontFamily);
+    } else {
+      root.style.removeProperty("--font-family");
     }
   }
 

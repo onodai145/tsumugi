@@ -7,9 +7,12 @@
   --text: #191523;
   --text-dim: #6b7280;
   --accent: #7c5cff;
-
-  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN",
+  --font-family-default: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN",
     "Noto Sans JP", sans-serif;
+
+  /* 設定でユーザが --font-family を指定していればそちらを優先（未指定時はここでは
+     var() の第2引数フォールバックにより --font-family-default が使われる） */
+  font-family: var(--font-family, var(--font-family-default));
   color: var(--text);
   background: var(--surface-1);
   font-synthesis: none;
