@@ -3,6 +3,7 @@
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { ImagePlus } from "@lucide/svelte";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -139,7 +140,7 @@
 
     <div class="toolbar">
       <VisibilitySelect bind:value={visibility} />
-      <button class="mini" onclick={pickFiles} disabled={uploading}>📎 画像</button>
+      <button class="mini" onclick={pickFiles} disabled={uploading}><ImagePlus size={14} /> 画像</button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
@@ -269,6 +270,9 @@
     flex-wrap: wrap;
   }
   .mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 6px 10px;
     border: 1px solid var(--border);
     border-radius: 8px;

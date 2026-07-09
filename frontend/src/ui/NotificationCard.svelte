@@ -1,10 +1,23 @@
 <script lang="ts">
   import type { Notification } from "../bindings/tauri.gen";
+  import type { Component } from "svelte";
   import NoteCard from "./NoteCard.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji } from "../lib/emoji";
+  import {
+    UserPlus,
+    MessageCircle,
+    Repeat2,
+    Quote,
+    Star,
+    Vote,
+    Clock,
+    UserCheck,
+    Trophy,
+    Bell,
+  } from "@lucide/svelte";
 
   let { notification, accountId }: { notification: Notification; accountId?: string } = $props();
   const n = $derived(notification);
@@ -36,23 +49,24 @@
     achievementEarned: "実績を獲得",
     app: "アプリ通知",
   };
-  const icons: Record<string, string> = {
-    follow: "➕",
-    mention: "💬",
-    reply: "💬",
-    renote: "🔁",
-    quote: "❝",
-    reaction: "⭐",
-    pollEnded: "📊",
-    receiveFollowRequest: "❓",
-    followRequestAccepted: "✅",
-    achievementEarned: "🏆",
+  const icons: Record<string, Component> = {
+    follow: UserPlus,
+    mention: MessageCircle,
+    reply: MessageCircle,
+    renote: Repeat2,
+    quote: Quote,
+    reaction: Star,
+    pollEnded: Vote,
+    receiveFollowRequest: Clock,
+    followRequestAccepted: UserCheck,
+    achievementEarned: Trophy,
   };
+  const IconComp = $derived(icons[n.type] ?? Bell);
 </script>
 
 <article class="notif">
   <div class="head">
-    <span class="icon">{icons[n.type] ?? "🔔"}</span>
+    <span class="icon"><IconComp size={15} /></span>
     {#if n.user?.avatarUrl}
       <img class="avatar" src={n.user.avatarUrl} alt="" loading="lazy" />
     {/if}
@@ -90,7 +104,9 @@
     font-size: 0.86rem;
   }
   .icon {
-    font-size: 0.95rem;
+    display: inline-flex;
+    color: var(--text-dim);
+    flex: none;
   }
   .avatar {
     width: 24px;

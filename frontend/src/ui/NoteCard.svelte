@@ -8,6 +8,7 @@
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji } from "../lib/emoji";
+  import { Reply, Repeat2, Quote, SmilePlus } from "@lucide/svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
   // なるため、ピッカーは body 直下へ portal して封じ込めを脱出させる。
@@ -103,7 +104,7 @@
   onclick={tabId ? () => app.selectNote(tabId, note.id) : undefined}
 >
   {#if isPureRenote}
-    <div class="renote-banner">🔁 {displayName(note.user)} がRenote</div>
+    <div class="renote-banner"><Repeat2 size={13} /> {displayName(note.user)} がRenote</div>
   {/if}
 
   <div class="row">
@@ -178,10 +179,14 @@
       {#if !quoted && accountId}
         <footer class="actions">
           <button title="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
-            💬 {inner.replyCount || ""}
+            <Reply size={15} /> {inner.replyCount || ""}
           </button>
-          <button title="Renote" onclick={doRenote}>🔁 {inner.renoteCount || ""}</button>
-          <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>❝</button>
+          <button title="Renote" onclick={doRenote}>
+            <Repeat2 size={15} /> {inner.renoteCount || ""}
+          </button>
+          <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
+            <Quote size={15} />
+          </button>
           <div class="react-wrap">
             <button
               bind:this={pickerBtn}
@@ -189,7 +194,7 @@
               class:on={showPicker}
               onclick={togglePicker}
             >
-              ➕ {inner.reactionCount || ""}
+              <SmilePlus size={15} /> {inner.reactionCount || ""}
             </button>
             {#if showPicker && pickerPos}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -234,6 +239,9 @@
     box-shadow: inset 3px 0 0 var(--accent);
   }
   .renote-banner {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 0.74rem;
     color: var(--text-dim);
     margin-bottom: 2px;
@@ -354,6 +362,9 @@
     font-size: 0.8rem;
   }
   .actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     background: transparent;
     border: none;
     color: var(--text-dim);
