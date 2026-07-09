@@ -28,6 +28,8 @@ pub struct ColumnGroup {
     pub id: String,
     pub order: i32,
     pub width: i32,
+    /// true なら幅固定ではなくウィンドウ幅に応じて自動調整(flex)する
+    pub auto: bool,
 }
 
 /// 設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。

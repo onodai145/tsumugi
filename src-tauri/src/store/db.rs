@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS account (
 CREATE TABLE IF NOT EXISTS column_group (
     id    TEXT PRIMARY KEY,
     ord   INTEGER NOT NULL,
-    width INTEGER NOT NULL
+    width INTEGER NOT NULL,
+    auto  INTEGER NOT NULL DEFAULT 0
 );
 
 -- タブ（1タイムライン）。group_id で視覚カラムに属し、ord はグループ内順序。
@@ -131,6 +132,10 @@ fn migrate(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "ALTER TABLE column_def ADD COLUMN notify_sound_choice TEXT NOT NULL DEFAULT ''",
         )?;
+    }
+    // カラム幅の固定/自動調整（無い旧 DB には追加。既定は0=固定、従来どおり）
+    if !column_exists(conn, "column_group", "auto")? {
+        conn.execute_batch("ALTER TABLE column_group ADD COLUMN auto INTEGER NOT NULL DEFAULT 0")?;
     }
     // group_id が未設定のタブを、それぞれ新規グループへ（新規 DB では該当なし）
     let orphans: Vec<(String, i32, i32)> = {

@@ -18,6 +18,7 @@
   let showAdd = $state(false);
   let showAddColumn = $state(false);
   let editTab = $state<TabView | null>(null);
+  let editGroupId = $state<string | null>(null);
   type SettingsSection = "accounts" | "display" | "notify" | "mute" | "keys";
   let showSettings = $state(false);
   let settingsInitial = $state<SettingsSection>("notify");
@@ -35,15 +36,18 @@
   function openAddColumn() {
     addTabGroupId = null; // 新しい視覚カラム
     editTab = null;
+    editGroupId = null;
     showAddColumn = true;
   }
   function openAddTab(groupId: string) {
     addTabGroupId = groupId; // 既存カラムにタブ追加
     editTab = null;
+    editGroupId = null;
     showAddColumn = true;
   }
-  function openEditTab(tab: TabView) {
+  function openEditTab(tab: TabView, groupId: string) {
     editTab = tab; // 既存タブを編集
+    editGroupId = groupId;
     addTabGroupId = null;
     showAddColumn = true;
   }
@@ -131,6 +135,7 @@
     <AddColumnModal
       groupId={addTabGroupId}
       editTab={editTab ?? undefined}
+      editGroupId={editGroupId ?? undefined}
       onclose={() => (showAddColumn = false)}
     />
   {/if}

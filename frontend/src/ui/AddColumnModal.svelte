@@ -12,10 +12,18 @@
     onclose,
     groupId,
     editTab,
-  }: { onclose: () => void; groupId: string | null; editTab?: TabView } = $props();
+    editGroupId,
+  }: {
+    onclose: () => void;
+    groupId: string | null;
+    editTab?: TabView;
+    editGroupId?: string;
+  } = $props();
   // モーダルは開くたび再生成されるので editTab は初期値スナップショットで扱う。
   const edit = untrack(() => editTab);
   const isEdit = !!edit;
+  // タブが属するカラム(視覚カラム)の幅モード。編集時のみ意味を持つ。
+  let groupAuto = $state(untrack(() => app.groups.find((g) => g.id === editGroupId)?.auto ?? false));
 
   type SrcType =
     | "home"
@@ -218,6 +226,7 @@
       if (isEdit && edit) {
         await app.updateColumn(edit.id, kind, buildFilter(), name);
         await app.setColumnNotify(edit.id, notifyDesktop, notifySound, notifySoundChoice);
+        if (editGroupId) await app.setGroupAuto(editGroupId, groupAuto);
       } else {
         const tab = await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined, name);
         // 既定値と異なる場合のみ追加で呼ぶ（既定は backend 側の add_column が設定済み）
@@ -255,6 +264,14 @@
       <span>名前（空欄で自動）</span>
       <input placeholder={edit?.title ?? "自動でつけます"} bind:value={name} />
     </label>
+
+    {#if isEdit && editGroupId}
+      <div class="field">
+        <span>このカラムの幅</span>
+        <label class="check-row"><input type="radio" name="width-mode" checked={!groupAuto} onchange={() => (groupAuto = false)} /> 固定（ドラッグで調整）</label>
+        <label class="check-row"><input type="radio" name="width-mode" checked={groupAuto} onchange={() => (groupAuto = true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）</label>
+      </div>
+    {/if}
 
     <div class="field">
       <span>ソース</span>
