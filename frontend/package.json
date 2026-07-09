@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/copy-emoji-assets.mjs",
+    "predev": "node scripts/copy-emoji-assets.mjs",
+    "prebuild": "node scripts/copy-emoji-assets.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -20,6 +23,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.23.0",
+    "@misskey-dev/emoji-assets": "^17.0.6",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",

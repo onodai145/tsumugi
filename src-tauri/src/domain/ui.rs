@@ -33,10 +33,17 @@ pub struct UiPrefs {
     /// 既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。
     #[serde(default)]
     pub default_account_id: String,
+    /// Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。
+    #[serde(default = "default_emoji_style")]
+    pub emoji_style: String,
 }
 
 fn default_column_opacity() -> i32 {
     100
+}
+
+fn default_emoji_style() -> String {
+    "twemoji".into()
 }
 
 impl Default for UiPrefs {
@@ -51,6 +58,7 @@ impl Default for UiPrefs {
             background_blur: 0,
             column_opacity: default_column_opacity(),
             default_account_id: String::new(),
+            emoji_style: default_emoji_style(),
         }
     }
 }
@@ -74,6 +82,8 @@ mod tests {
         // column_opacity は #[serde(default = ...)] で 0 ではなく 100（不透明）にフォールバックすること。
         // 既存ユーザの見た目を壊さないための後方互換。
         assert_eq!(v.column_opacity, 100);
+        // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
+        assert_eq!(v.emoji_style, "twemoji");
     }
 
     #[test]
@@ -90,6 +100,7 @@ mod tests {
             background_blur: 8,
             column_opacity: 85,
             default_account_id: "a1".into(),
+            emoji_style: "fluentEmoji".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();

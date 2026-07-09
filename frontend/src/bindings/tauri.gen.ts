@@ -428,6 +428,8 @@ export type UiPrefs = {
 	columnOpacity?: number,
 	/**  既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。 */
 	defaultAccountId?: string,
+	/**  Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。 */
+	emojiStyle?: string,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

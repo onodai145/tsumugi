@@ -26,6 +26,7 @@ import type {
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
+import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 
@@ -102,6 +103,7 @@ class AppStore {
     backgroundBlur: 0,
     columnOpacity: 100,
     defaultAccountId: "",
+    emojiStyle: "twemoji",
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -136,6 +138,7 @@ class AppStore {
         backgroundBlur: ui.backgroundBlur ?? 0,
         columnOpacity: ui.columnOpacity ?? 100,
         defaultAccountId: ui.defaultAccountId ?? "",
+        emojiStyle: ui.emojiStyle ?? "twemoji",
       };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
@@ -730,6 +733,7 @@ class AppStore {
       backgroundBlur: prefs.backgroundBlur ?? 0,
       columnOpacity: prefs.columnOpacity ?? 100,
       defaultAccountId: prefs.defaultAccountId ?? "",
+      emojiStyle: prefs.emojiStyle ?? "twemoji",
     };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");
@@ -742,6 +746,12 @@ class AppStore {
     const id = this.ui.defaultAccountId;
     if (id && this.accounts.some((a) => a.id === id)) return id;
     return this.accounts[0]?.id ?? "";
+  }
+
+  /// Unicode絵文字の画像URL（native設定時は null＝生テキストのまま表示）。
+  /// 画像はアプリに同梱済み(@misskey-dev/emoji-assets)なのでインスタンス通信は発生しない。
+  emojiImageUrl(char: string): string | null {
+    return unicodeEmojiUrl(char, (this.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   }
 
   /// 画像ファイルを選んで背景画像として読み込む（data URL化のみ。保存は setUiPrefs で）。
