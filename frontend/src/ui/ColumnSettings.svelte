@@ -10,6 +10,13 @@
   function setAuto(auto: boolean) {
     if (groupId) app.setGroupAuto(groupId, auto);
   }
+
+  function setWidth(w: number) {
+    if (!groupId || !Number.isFinite(w)) return;
+    const clamped = Math.min(720, Math.max(220, Math.round(w)));
+    app.setGroupWidthLocal(groupId, clamped);
+    app.persistGroupWidth(groupId, clamped);
+  }
 </script>
 
 <div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
@@ -30,6 +37,19 @@
           <input type="radio" name="width-mode" checked={group.auto} onchange={() => setAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
         </label>
       </div>
+
+      {#if !group.auto}
+        <label class="field num-field">
+          <span>幅（px、220〜720）</span>
+          <input
+            type="number"
+            min="220"
+            max="720"
+            value={group.width}
+            onchange={(e) => setWidth(Number((e.currentTarget as HTMLInputElement).value))}
+          />
+        </label>
+      {/if}
     {/if}
   </div>
 </div>
@@ -79,5 +99,17 @@
     align-items: center;
     gap: 6px;
     font-size: 0.85rem;
+  }
+  .num-field {
+    margin-top: 10px;
+  }
+  .num-field input {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: inherit;
+    width: 100px;
   }
 </style>
