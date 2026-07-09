@@ -4,8 +4,15 @@
   import CustomEmoji from "./CustomEmoji.svelte";
   import Sparkle from "./Sparkle.svelte";
   import { mfmFn, isKnownFn } from "../lib/mfm";
+  import { nyaize } from "../lib/nyaize";
 
-  let { node, emojis = {} }: { node: MfmNode; emojis?: Record<string, string> } = $props();
+  // nyaize: 投稿者が isCat のとき本文テキストを にゃん語化する（本家 :nyaize="'respect'" 相当）。
+  // link/quote/plain の中身は本家同様 nyaize しない（disableNyaize）。
+  let {
+    node,
+    emojis = {},
+    nyaize: shouldNyaize = false,
+  }: { node: MfmNode; emojis?: Record<string, string>; nyaize?: boolean } = $props();
 
   // props はノード種別ごとに異なるため any 経由でアクセス
   const p = $derived((node as any).props ?? {});
@@ -29,6 +36,10 @@
   const ruby = $derived(
     node.type === "fn" && p.name === "ruby" ? rubyParts(children) : null,
   );
+  const rubyBaseText = $derived(
+    ruby?.baseText !== undefined ? (shouldNyaize ? nyaize(ruby.baseText) : ruby.baseText) : undefined,
+  );
+  const rubyRt = $derived(ruby ? (shouldNyaize ? nyaize(ruby.rt) : ruby.rt) : "");
 
   // $[unixtime <epoch秒>]。子テキストの数値をローカル日時で表示する。
   const unixMs = $derived.by(() => {
@@ -40,38 +51,41 @@
 </script>
 
 {#if node.type === "text"}
-  {#each String(p.text ?? "").split("\n") as line, i}{#if i > 0}<br />{/if}{line}{/each}
+  {@const text = shouldNyaize ? nyaize(String(p.text ?? "")) : String(p.text ?? "")}
+  {#each text.split("\n") as line, i}{#if i > 0}<br />{/if}{line}{/each}
 {:else if node.type === "bold"}
-  <b>{#each children as c}<Self node={c} {emojis} />{/each}</b>
+  <b>{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</b>
 {:else if node.type === "italic"}
-  <i>{#each children as c}<Self node={c} {emojis} />{/each}</i>
+  <i>{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</i>
 {:else if node.type === "strike"}
-  <s>{#each children as c}<Self node={c} {emojis} />{/each}</s>
+  <s>{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</s>
 {:else if node.type === "small"}
-  <small>{#each children as c}<Self node={c} {emojis} />{/each}</small>
+  <small>{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</small>
 {:else if node.type === "center"}
-  <div style="text-align:center">{#each children as c}<Self node={c} {emojis} />{/each}</div>
+  <div style="text-align:center">{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</div>
 {:else if node.type === "quote"}
+  <!-- 本家準拠: quote 内は nyaize しない（disableNyaize） -->
   <blockquote class="mfm-quote">{#each children as c}<Self node={c} {emojis} />{/each}</blockquote>
 {:else if node.type === "fn"}
   {#if ruby}
-    <ruby>{#if ruby.baseText !== undefined}{ruby.baseText}{:else}{#each ruby.base as c}<Self node={c} {emojis} />{/each}{/if}<rt>{ruby.rt}</rt></ruby>
+    <ruby>{#if rubyBaseText !== undefined}{rubyBaseText}{:else}{#each ruby.base as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}{/if}<rt>{rubyRt}</rt></ruby>
   {:else if p.name === "unixtime" && unixLabel}
     <span class="mfm-unixtime" title={unixLabel}>🕛 {unixLabel}</span>
   {:else if p.name === "sparkle"}
-    <Sparkle>{#each children as c}<Self node={c} {emojis} />{/each}</Sparkle>
+    <Sparkle>{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</Sparkle>
   {:else if p.name === "clickable"}
     <!-- プラグイン用イベント。機構が無いので中身のみ描画 -->
-    {#each children as c}<Self node={c} {emojis} />{/each}
+    {#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}
   {:else if fnKnown}
-    <span class={fn.class} style={`display:inline-block;${fn.style}`}>{#each children as c}<Self node={c} {emojis} />{/each}</span>
+    <span class={fn.class} style={`display:inline-block;${fn.style}`}>{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</span>
   {:else}
     <!-- 未対応の MFM 関数: 本家準拠で $[name ...] をそのまま表示 -->
-    <span>$[{p.name} {#each children as c}<Self node={c} {emojis} />{/each}]</span>
+    <span>$[{p.name} {#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}]</span>
   {/if}
 {:else if node.type === "url"}
   <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}</a>
 {:else if node.type === "link"}
+  <!-- 本家準拠: リンクラベル内は nyaize しない（disableNyaize） -->
   <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{#each children as c}<Self node={c} {emojis} />{/each}</a>
 {:else if node.type === "mention"}
   <span class="mfm-mention">{p.acct}</span>
@@ -90,8 +104,9 @@
 {:else if node.type === "search"}
   <span>{p.query}</span>
 {:else if node.type === "plain"}
+  <!-- 本家準拠: $[plain ...] 内は nyaize しない（disableNyaize） -->
   {#each children as c}<Self node={c} {emojis} />{/each}
 {:else}
   <!-- 未対応ノード: 子があれば描画 -->
-  {#each children as c}<Self node={c} {emojis} />{/each}
+  {#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}
 {/if}
