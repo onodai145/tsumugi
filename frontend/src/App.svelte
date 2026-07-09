@@ -10,6 +10,7 @@
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
   import { buildKeymap, eventToChord } from "./lib/keymap";
+  import { Settings as SettingsIcon } from "@lucide/svelte";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
@@ -89,7 +90,9 @@
     {/if}
     {#if app.accounts.length > 0}
       <button class="bar-btn" onclick={openAddColumn}>＋カラム</button>
-      <button class="bar-btn" onclick={() => openSettings("accounts")} title="設定">⚙ 設定</button>
+      <button class="bar-btn" onclick={() => openSettings("accounts")} title="設定">
+        <SettingsIcon size={14} /> 設定
+      </button>
     {/if}
   </header>
 
@@ -160,6 +163,9 @@
     flex: 1;
   }
   .bar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     flex: none;
     padding: 5px 10px;
     border: 1px solid var(--border);

@@ -4,6 +4,7 @@
   import DisplaySection from "./settings/DisplaySection.svelte";
   import AccountsSection from "./settings/AccountsSection.svelte";
   import KeysSection from "./settings/KeysSection.svelte";
+  import { X } from "@lucide/svelte";
 
   type Section = "accounts" | "display" | "notify" | "mute" | "keys";
 
@@ -31,7 +32,7 @@
   <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
     <header class="head">
       <span>設定</span>
-      <button class="x" onclick={onclose}>✕</button>
+      <button class="x" onclick={onclose}><X size={16} /></button>
     </header>
 
     <div class="body">
@@ -87,11 +88,11 @@
     border-bottom: 1px solid var(--border);
   }
   .x {
+    display: inline-flex;
     border: none;
     background: transparent;
     color: var(--text-dim);
     cursor: pointer;
-    font-size: 0.9rem;
   }
   .body {
     display: flex;

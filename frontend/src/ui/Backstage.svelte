@@ -1,16 +1,18 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
   import type { LogLevel } from "../lib/store.svelte";
+  import type { Component } from "svelte";
+  import { Circle, Check, TriangleAlert, X, ChevronUp, ChevronDown } from "@lucide/svelte";
 
   let open = $state(false);
 
   const latest = $derived(app.logs[0] ?? null);
 
-  const icon: Record<LogLevel, string> = {
-    info: "•",
-    success: "✓",
-    warn: "!",
-    error: "✕",
+  const icon: Record<LogLevel, Component> = {
+    info: Circle,
+    success: Check,
+    warn: TriangleAlert,
+    error: X,
   };
 
   function hhmmss(ms: number): string {
@@ -29,8 +31,9 @@
         <div class="empty">ログはまだありません</div>
       {:else}
         {#each app.logs as l (l.id)}
+          {@const Ic = icon[l.level]}
           <div class="log-row" data-level={l.level}>
-            <span class="ic" data-level={l.level}>{icon[l.level]}</span>
+            <span class="ic" data-level={l.level}><Ic size={12} /></span>
             <span class="ts">{hhmmss(l.at)}</span>
             <span class="msg">{l.text}</span>
           </div>
@@ -41,12 +44,13 @@
 
   <div class="bar">
     <button class="toggle" onclick={() => (open = !open)} title="操作ログ (Backstage)">
-      {open ? "▼" : "▲"} ログ
+      {#if open}<ChevronDown size={13} />{:else}<ChevronUp size={13} />{/if} ログ
       {#if errorCount > 0}<span class="badge">{errorCount}</span>{/if}
     </button>
     <div class="tail" data-level={latest?.level ?? "info"}>
       {#if latest}
-        <span class="ic" data-level={latest.level}>{icon[latest.level]}</span>
+        {@const LatestIc = icon[latest.level]}
+        <span class="ic" data-level={latest.level}><LatestIc size={12} /></span>
         <span class="tail-ts">{hhmmss(latest.at)}</span>
         <span class="tail-msg">{latest.text}</span>
       {:else}
@@ -155,10 +159,8 @@
     word-break: break-word;
   }
   .ic {
+    display: inline-flex;
     flex: none;
-    width: 1em;
-    text-align: center;
-    font-weight: 700;
   }
   .ic[data-level="success"] {
     color: #22c55e;
