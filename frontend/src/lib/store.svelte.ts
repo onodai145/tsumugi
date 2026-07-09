@@ -40,6 +40,9 @@ export interface TabView {
   customTitle: string | null;
   /// 適用中フィルタ（編集モーダルのプレフィル用）
   filter: FilterQuery;
+  /// タブ単位の通知フィルタ（設定→通知のグローバルスイッチと両方ONで発火。Notifications種別のみ意味を持つ）
+  notifyDesktop: boolean;
+  notifySound: boolean;
   notes: Note[];
   notifications: Notification[];
   state: ConnectionState;
@@ -162,6 +165,8 @@ class AppStore {
       title: acc ? `${src} @${acc.username}` : src,
       customTitle: opened.column.title,
       filter: opened.column.filter,
+      notifyDesktop: opened.column.notifyDesktop,
+      notifySound: opened.column.notifySound,
       notes: opened.notes,
       notifications: opened.notifications,
       state: "connecting",
@@ -228,6 +233,20 @@ class AppStore {
     if (tab) tab.customTitle = value;
     try {
       await unwrap(commands.renameColumn(tabId, value));
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
+  /// タブ単位の通知設定（デスクトップ/音）を変更する。ストリームは張り直さない。
+  async setColumnNotify(tabId: string, notifyDesktop: boolean, notifySound: boolean) {
+    const tab = this.#findTab(tabId);
+    if (tab) {
+      tab.notifyDesktop = notifyDesktop;
+      tab.notifySound = notifySound;
+    }
+    try {
+      await unwrap(commands.setColumnNotify(tabId, notifyDesktop, notifySound));
     } catch (e) {
       this.#fail(e);
     }
@@ -445,6 +464,17 @@ class AppStore {
         if (!tab) return;
         if (tab.notes.some((n) => n.id === e.payload.note.id)) return;
         tab.notes = [e.payload.note, ...tab.notes].slice(0, MAX_NOTES);
+        // 通知カラム以外でも「このタブに新着ノートが届いたら」通知できる（タブごとの設定次第）。
+        // 通知種別(main チャンネル)はサーバ側で自分の操作を除外するが、Home/Local 等の
+        // ストリームは自分の投稿もそのまま流れてくるため、自分のノートは通知しない。
+        const acc = this.accounts.find((a) => a.id === tab.accountId);
+        const isOwn = acc && e.payload.note.user.id === acc.userId;
+        const wantsDesktop = !isOwn && this.notify.desktop && tab.notifyDesktop;
+        const wantsSound = !isOwn && this.notify.sound && tab.notifySound;
+        if ((wantsDesktop || wantsSound) && this.#markNotified(`note:${e.payload.note.id}`)) {
+          if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
+          if (wantsSound) beep();
+        }
       }),
     );
     this.#unlisten.push(
@@ -470,11 +500,15 @@ class AppStore {
         if (!tab) return;
         if (tab.notifications.some((n) => n.id === e.payload.notification.id)) return;
         tab.notifications = [e.payload.notification, ...tab.notifications].slice(0, MAX_NOTES);
-        // デスクトップ通知 / 音は「通知IDでグローバルに1回だけ」。
-        // 通知カラムが複数あると同じ通知が各カラムに届くため、ここで重複を弾く。
-        if (this.#markNotified(e.payload.notification.id)) {
-          if (this.notify.desktop) void this.#osNotify(e.payload.notification);
-          if (this.notify.sound) beep();
+        // 発火条件は「設定→通知のグローバルスイッチ」と「このタブの通知設定」の両方がON。
+        // デスクトップ通知 / 音は「通知IDでグローバルに1回だけ」。通知カラムが複数あると
+        // 同じ通知が各カラムに届くため、ここで重複を弾く（このタブが望まない場合は
+        // dedup 枠を消費しない＝別タブに同じ通知が来たときそちらで発火できるようにする）。
+        const wantsDesktop = this.notify.desktop && tab.notifyDesktop;
+        const wantsSound = this.notify.sound && tab.notifySound;
+        if ((wantsDesktop || wantsSound) && this.#markNotified(e.payload.notification.id)) {
+          if (wantsDesktop) void this.#osNotify(e.payload.notification);
+          if (wantsSound) beep();
         }
       }),
     );
@@ -593,6 +627,7 @@ class AppStore {
     const name = title?.trim();
     if (name) await this.renameTab(tab.id, name);
     this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
+    return tab;
   }
 
   /// 既存タブのソース/フィルタ/名前を変更し、ストリームを張り直して内容を差し替える。
@@ -734,12 +769,24 @@ class AppStore {
   }
 
   async #osNotify(n: Notification) {
+    const actor = n.user ? (n.user.name ?? n.user.username) : "";
+    const title = `${actor} ${notifActionLabel(n.type)}`.trim();
+    const body = n.note?.text ?? (n.reaction ?? "");
+    await this.#osNotifyRaw(title || "通知", body);
+  }
+
+  /// タブ(通知種別以外)に新着ノートが届いたときのOS通知。
+  async #osNotifyNote(tab: TabView, note: Note) {
+    const actor = note.user.name ?? note.user.username;
+    const title = `${actor}（${tabName(tab)}）`;
+    const body = note.text ?? (note.cw ? `CW: ${note.cw}` : note.files.length > 0 ? "(添付ファイル)" : "");
+    await this.#osNotifyRaw(title, body);
+  }
+
+  async #osNotifyRaw(title: string, body: string) {
     try {
       if (!(await isPermissionGranted())) return;
-      const actor = n.user ? (n.user.name ?? n.user.username) : "";
-      const title = `${actor} ${notifActionLabel(n.type)}`.trim();
-      const body = n.note?.text ?? (n.reaction ?? "");
-      sendNotification({ title: title || "通知", body });
+      sendNotification({ title, body });
     } catch {
       // 通知失敗は無視
     }

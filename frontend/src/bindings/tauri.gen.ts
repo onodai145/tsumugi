@@ -58,6 +58,8 @@ export const commands = {
 	resolveUserAcct: (accountId: string, acct: string) => typedError<User, Error>(__TAURI_INVOKE("resolve_user_acct", { accountId, acct })),
 	/**  タブ名を変更する（空文字/None で自動生成名に戻す）。 */
 	renameColumn: (columnId: string, title: string | null) => typedError<null, Error>(__TAURI_INVOKE("rename_column", { columnId, title })),
+	/**  タブごとの通知可否（デスクトップ/音）を変更する。ストリームは張り直さない軽量操作。 */
+	setColumnNotify: (columnId: string, notifyDesktop: boolean, notifySound: boolean) => typedError<null, Error>(__TAURI_INVOKE("set_column_notify", { columnId, notifyDesktop, notifySound })),
 	/**
 	 *  既存タブのソース種別・フィルタ・名前を変更し、ストリームを張り直す。
 	 *  アカウントは変更しない。フィルタ変更でキャッシュが不整合になるためクリアして再取得する。

@@ -2,7 +2,7 @@
 //! ノートキャッシュは TQL§9 の正規化スキーマ（SQL 射影の前提）＋表示復元用の payload(JSON)。
 
 use crate::error::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
 
 /// 現行スキーマ。将来の移行は `user_version` で管理する。
@@ -143,6 +143,31 @@ fn migrate(conn: &Connection) -> Result<()> {
             rusqlite::params![gid, id],
         )?;
     }
+
+    // notify_sound/notify_desktop 列は元々未実装で常に false のまま保存されていた。
+    // 通知種別(Notifications)カラムは「通知カラムがあれば全部鳴る」というグローバル挙動
+    // だったので、それをタブ単位のフィルタとして実際に使うようにした今、既存ユーザの
+    // 見た目（＝これまで通り全部通知される）を壊さないよう通知カラムに限り一度だけ
+    // true に migrate する。他種別(Home/List等)は今回追加した新機能なので false のまま
+    // （新規タブと同じオプトイン）。以後はユーザ操作で変わり得るので再実行しないよう
+    // マーカーを立てる。
+    let migrated: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_setting WHERE key = 'notify_flags_migrated_v1'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if migrated.is_none() {
+        conn.execute_batch(
+            "UPDATE column_def SET notify_sound = 1, notify_desktop = 1
+             WHERE json_extract(kind, '$.type') = 'notifications'",
+        )?;
+        conn.execute(
+            "INSERT INTO app_setting (key, value) VALUES ('notify_flags_migrated_v1', '1')",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -209,5 +234,49 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM column_group", [], |r| r.get(0))
             .unwrap();
         assert_eq!(groups, 1);
+    }
+
+    #[test]
+    fn migrates_notify_flags_to_true_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE column_def (
+                id TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL,
+                ord INTEGER NOT NULL, width INTEGER NOT NULL, filter TEXT NOT NULL,
+                notify_sound INTEGER NOT NULL, notify_desktop INTEGER NOT NULL);
+             INSERT INTO column_def VALUES('c1','a1','{\"type\":\"notifications\"}',0,300,'{}',0,0);
+             INSERT INTO column_def VALUES('c2','a1','{\"type\":\"home\"}',1,300,'{}',0,0);",
+        )
+        .unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        migrate(&conn).unwrap();
+
+        // 通知カラム(c1)は旧「常にfalse」から一度だけ true へ移行
+        let (sound, desktop): (i64, i64) = conn
+            .query_row(
+                "SELECT notify_sound, notify_desktop FROM column_def WHERE id='c1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((sound, desktop), (1, 1));
+
+        // 通知カラム以外(c2)は新機能のため false のまま（オプトイン）
+        let (sound2, desktop2): (i64, i64) = conn
+            .query_row(
+                "SELECT notify_sound, notify_desktop FROM column_def WHERE id='c2'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((sound2, desktop2), (0, 0));
+
+        // ユーザが明示的に false へ戻した後、再 migrate しても上書きされない（冪等）
+        conn.execute_batch("UPDATE column_def SET notify_sound = 0 WHERE id='c1'").unwrap();
+        migrate(&conn).unwrap();
+        let sound: i64 = conn
+            .query_row("SELECT notify_sound FROM column_def WHERE id='c1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sound, 0);
     }
 }

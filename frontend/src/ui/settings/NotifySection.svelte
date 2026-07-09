@@ -7,8 +7,8 @@
   let err = $state<string | null>(null);
   let saved = $state(false);
 
-  const hasNotifColumn = $derived(
-    app.groups.some((g) => g.tabs.some((t) => t.kind.type === "notifications")),
+  const hasNotifyEnabledTab = $derived(
+    app.groups.some((g) => g.tabs.some((t) => t.notifyDesktop || t.notifySound)),
   );
 
   async function save() {
@@ -29,12 +29,14 @@
 
 <h3 class="title">通知</h3>
 
-<label class="row"><input type="checkbox" bind:checked={desktop} /> デスクトップ通知を出す</label>
-<label class="row"><input type="checkbox" bind:checked={sound} /> 通知音を鳴らす</label>
+<label class="row"><input type="checkbox" bind:checked={desktop} /> デスクトップ通知を出す（全体スイッチ）</label>
+<label class="row"><input type="checkbox" bind:checked={sound} /> 通知音を鳴らす（全体スイッチ）</label>
 
 <p class="hint">
-  通知は<b>通知カラム</b>への新着で発火します。通知カラムが無いと動きません。
-  {#if !hasNotifColumn}<br /><span class="warn">※ 現在、通知カラムがありません。「＋カラム」→ Notifications で追加してください。</span>{/if}
+  通知は<b>通知カラムへの新着</b>、または<b>通知をONにしたタブへの新着ノート</b>で発火します。
+  ここは全タブ共通のマスタースイッチで、タブごとの個別ON/OFFは各タブをダブルクリックして
+  編集してください（両方ONのときのみ実際に発火します）。
+  {#if !hasNotifyEnabledTab}<br /><span class="warn">※ 現在、通知がONのタブがありません。タブをダブルクリック→「このタブの通知」で有効にしてください。</span>{/if}
 </p>
 
 <div class="actions">

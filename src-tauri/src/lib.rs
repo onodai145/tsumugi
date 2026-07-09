@@ -45,6 +45,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::list_channels,
             commands::column::resolve_user_acct,
             commands::column::rename_column,
+            commands::column::set_column_notify,
             commands::column::update_column,
             commands::note::post_note,
             commands::note::renote,

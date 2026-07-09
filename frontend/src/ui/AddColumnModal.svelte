@@ -58,6 +58,10 @@
   const editUserId = k?.type === "user" ? k.userId : "";
   let tagText = $state(k?.type === "tag" ? k.tag : "");
   let name = $state(edit?.customTitle ?? "");
+  // 新規作成時の既定は通知タブのみON（Global等の高頻度タブでの通知過多を避ける）。
+  // ソース種別を後で切り替えても追従させない（ユーザの選択を上書きしないため）ので untrack で初期値を固定する。
+  let notifyDesktop = $state(edit?.notifyDesktop ?? untrack(() => sourceType === "notifications"));
+  let notifySound = $state(edit?.notifySound ?? untrack(() => sourceType === "notifications"));
   let filterText = $state(edit?.filter.kind === "tql" ? edit.filter.value : "");
   let filterErr = $state<string | null>(null);
   let busy = $state(false);
@@ -176,8 +180,13 @@
       }
       if (isEdit && edit) {
         await app.updateColumn(edit.id, kind, buildFilter(), name);
+        await app.setColumnNotify(edit.id, notifyDesktop, notifySound);
       } else {
-        await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined, name);
+        const tab = await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined, name);
+        // 既定値と異なる場合のみ追加で呼ぶ（既定は backend 側の add_column が設定済み）
+        if (notifyDesktop !== tab.notifyDesktop || notifySound !== tab.notifySound) {
+          await app.setColumnNotify(tab.id, notifyDesktop, notifySound);
+        }
       }
       onclose();
     } catch (e) {
@@ -268,6 +277,20 @@
       </label>
     {/if}
 
+    {#if sourceType !== "search" && sourceType !== "user" && sourceType !== "tag"}
+      <div class="field">
+        <span>このタブの通知</span>
+        <label class="check-row"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
+        <label class="check-row"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
+      </div>
+      <p class="hint">
+        {sourceType === "notifications" ? "通知カラムへの新着" : "このタブに新着ノート"}が届いたら発火します。
+        設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。
+      </p>
+    {:else}
+      <p class="hint">このソースはライブ更新（ストリーミング）に対応していないため通知は鳴りません。</p>
+    {/if}
+
     {#if sourceType !== "notifications"}
       <label class="field">
         <span>フィルタ（TQL・空欄で全件）</span>
@@ -334,6 +357,12 @@
   }
   .field > span:first-child {
     color: var(--text-dim);
+  }
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
   }
   input {
     padding: 8px 10px;

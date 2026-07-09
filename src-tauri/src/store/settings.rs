@@ -172,6 +172,21 @@ impl SettingsStore {
         Ok(())
     }
 
+    /// タブごとの通知可否（デスクトップ/音）を更新する。ストリーム/キャッシュには影響しない軽量操作。
+    pub fn set_column_notify(
+        &self,
+        column_id: &str,
+        notify_desktop: bool,
+        notify_sound: bool,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE column_def SET notify_desktop = ?1, notify_sound = ?2 WHERE id = ?3",
+            params![notify_desktop, notify_sound, column_id],
+        )?;
+        Ok(())
+    }
+
     pub fn upsert_column(&self, c: &Column) -> Result<()> {
         let kind_json = serde_json::to_string(&c.kind)?;
         let filter_json = serde_json::to_string(&c.filter)?;
