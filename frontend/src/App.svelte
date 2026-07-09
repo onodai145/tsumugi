@@ -5,6 +5,7 @@
   import Column from "./ui/Column.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
+  import ColumnSettings from "./ui/ColumnSettings.svelte";
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Compose from "./ui/Compose.svelte";
   import Settings from "./ui/Settings.svelte";
@@ -18,11 +19,11 @@
   let showAdd = $state(false);
   let showAddColumn = $state(false);
   let editTab = $state<TabView | null>(null);
-  let editGroupId = $state<string | null>(null);
   type SettingsSection = "accounts" | "display" | "notify" | "mute" | "keys";
   let showSettings = $state(false);
   let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);
+  let columnSettingsGroupId = $state<string | null>(null);
 
   function openSettings(section: SettingsSection) {
     settingsInitial = section;
@@ -36,20 +37,20 @@
   function openAddColumn() {
     addTabGroupId = null; // 新しい視覚カラム
     editTab = null;
-    editGroupId = null;
     showAddColumn = true;
   }
   function openAddTab(groupId: string) {
     addTabGroupId = groupId; // 既存カラムにタブ追加
     editTab = null;
-    editGroupId = null;
     showAddColumn = true;
   }
-  function openEditTab(tab: TabView, groupId: string) {
+  function openEditTab(tab: TabView) {
     editTab = tab; // 既存タブを編集
-    editGroupId = groupId;
     addTabGroupId = null;
     showAddColumn = true;
+  }
+  function openColumnSettings(groupId: string) {
+    columnSettingsGroupId = groupId; // カラム(視覚カラム)自体の設定
   }
 
   function onGlobalKey(e: KeyboardEvent) {
@@ -118,7 +119,7 @@
     {:else}
       <div class="columns">
         {#each app.groups as group (group.id)}
-          <Column {group} onAddTab={openAddTab} onEditTab={openEditTab} />
+          <Column {group} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} />
         {/each}
       </div>
     {/if}
@@ -135,9 +136,11 @@
     <AddColumnModal
       groupId={addTabGroupId}
       editTab={editTab ?? undefined}
-      editGroupId={editGroupId ?? undefined}
       onclose={() => (showAddColumn = false)}
     />
+  {/if}
+  {#if columnSettingsGroupId}
+    <ColumnSettings groupId={columnSettingsGroupId} onclose={() => (columnSettingsGroupId = null)} />
   {/if}
   {#if showSettings}
     <Settings

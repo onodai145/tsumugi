@@ -9,10 +9,12 @@
     group,
     onAddTab,
     onEditTab,
+    onEditGroup,
   }: {
     group: GroupView;
     onAddTab: (groupId: string) => void;
-    onEditTab: (tab: TabView, groupId: string) => void;
+    onEditTab: (tab: TabView) => void;
+    onEditGroup: (groupId: string) => void;
   } = $props();
 
   const activeTab = $derived(
@@ -79,7 +81,8 @@
         app.startDragGroup(group.id);
       }}
       ondragend={() => app.endDragGroup()}
-      title="ドラッグでカラムを並べ替え"
+      ondblclick={() => onEditGroup(group.id)}
+      title="ドラッグでカラムを並べ替え（ダブルクリックでカラム設定）"
     >⋮⋮</span>
 
     {#each group.tabs as t (t.id)}
@@ -106,7 +109,7 @@
         <button
           class="tab-btn"
           onclick={() => app.setActiveTab(group.id, t.id)}
-          ondblclick={() => onEditTab(t, group.id)}
+          ondblclick={() => onEditTab(t)}
           title={`${tabName(t)}（ダブルクリックで編集）`}
         >
           <span class="tab-dot" data-state={t.state}></span>{tabName(t)}
