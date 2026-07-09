@@ -125,7 +125,7 @@
 
       {#if inner.cw}
         <div class="cw">
-          <span class="cw-text"><Mfm text={inner.cw} emojis={emojiMap} /></span>
+          <span class="cw-text"><Mfm text={inner.cw} emojis={emojiMap} nyaize={inner.user.isCat} /></span>
           <button class="cw-toggle" onclick={() => (cwOpen = !cwOpen)}>
             {cwOpen ? "隠す" : `続きを見る${inner.text ? "" : ""}`}
           </button>
@@ -134,7 +134,7 @@
 
       {#if !inner.cw || cwOpen}
         {#if inner.text}
-          <div class="text"><Mfm text={inner.text} emojis={emojiMap} /></div>
+          <div class="text"><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
         {/if}
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
