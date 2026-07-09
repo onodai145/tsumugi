@@ -506,22 +506,24 @@ async fn connect_and_run(
                                 let _ = write.send(Message::Text(protocol::unsub_note(&nid).into())).await;
                             }
                         }
+                        // 送信前に subs へ登録しておく: send が失敗しても reconnect ループが
+                        // subs を走査して再購読するので、このカラムを失わずに済む。
                         let sub_id = uuid::Uuid::new_v4().to_string();
+                        sub_index.insert(sub_id.clone(), column_id.clone());
+                        subs.insert(column_id.clone(), ChannelSub {
+                            sub_id: sub_id.clone(),
+                            channel: channel.clone(),
+                            params: params.clone(),
+                            mode,
+                            dedup: Dedup::new(DEDUP_CAPACITY),
+                        });
                         if write
-                            .send(Message::Text(protocol::connect(&channel, &sub_id, params.clone()).into()))
+                            .send(Message::Text(protocol::connect(&channel, &sub_id, params).into()))
                             .await
                             .is_err()
                         {
                             return RunOutcome::Disconnected;
                         }
-                        sub_index.insert(sub_id.clone(), column_id.clone());
-                        subs.insert(column_id.clone(), ChannelSub {
-                            sub_id,
-                            channel,
-                            params,
-                            mode,
-                            dedup: Dedup::new(DEDUP_CAPACITY),
-                        });
                         emit_state(app, &column_id, ConnectionState::Connected);
                     }
                     Some(AccountCommand::RemoveChannel { column_id }) => {
