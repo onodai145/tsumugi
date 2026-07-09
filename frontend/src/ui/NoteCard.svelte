@@ -8,7 +8,7 @@
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji } from "../lib/emoji";
-  import { Reply, Repeat2, Quote, SmilePlus } from "@lucide/svelte";
+  import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail } from "@lucide/svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
   // なるため、ピッカーは body 直下へ portal して封じ込めを脱出させる。
@@ -86,6 +86,8 @@
 
   let cwOpen = $state(false);
   const displayName = (u: Note["user"]) => u.name ?? u.username;
+  const VIS_ICON = { public: Globe, home: House, followers: Lock, specified: Mail } as const;
+  const VIS_LABEL = { public: "公開", home: "ホーム", followers: "フォロワー", specified: "ダイレクト" } as const;
   const acct = (u: Note["user"]) => (u.host ? `@${u.username}@${u.host}` : `@${u.username}`);
   // reactions: { key: count } を件数降順に
   const reactionList = $derived(
@@ -131,7 +133,10 @@
         <span class="time" title={new Date(inner.createdAt * 1000).toLocaleString()}>
           {relativeTime(inner.createdAt)}
         </span>
-        {#if inner.visibility !== "public"}<span class="vis">{inner.visibility}</span>{/if}
+        {#if inner.visibility !== "public"}
+          {@const VisIcon = VIS_ICON[inner.visibility]}
+          <span class="vis" title={VIS_LABEL[inner.visibility]}><VisIcon size={12} /></span>
+        {/if}
       </header>
 
       {#if inner.cw}
@@ -297,7 +302,9 @@
     margin-left: auto;
   }
   .vis {
-    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
     border: 1px solid var(--border);
     border-radius: 3px;
   }
