@@ -3,6 +3,7 @@
   import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
+  import { X } from "@lucide/svelte";
 
   let {
     group,
@@ -117,7 +118,7 @@
         >
           <span class="tab-dot" data-state={t.state}></span>{tabName(t)}
         </button>
-        <button class="tab-close" title="タブを閉じる" onclick={() => app.closeTab(t.id)}>✕</button>
+        <button class="tab-close" title="タブを閉じる" onclick={() => app.closeTab(t.id)}><X size={12} /></button>
       </div>
     {/each}
 
@@ -236,11 +237,11 @@
     white-space: nowrap;
   }
   .tab-close {
+    display: inline-flex;
     border: none;
     background: transparent;
     color: var(--text-dim);
     cursor: pointer;
-    font-size: 0.65rem;
     padding: 0 4px 0 0;
   }
   .tab:not(.active) .tab-close {

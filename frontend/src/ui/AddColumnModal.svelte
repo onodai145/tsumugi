@@ -4,6 +4,7 @@
   import type { TabView } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
+  import { X } from "@lucide/svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
 
   // editTab を渡すと「編集」モード（アカウントは固定、ソース/フィルタ/名前を変更）。
@@ -192,7 +193,7 @@
   <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
     <header class="head">
       <span>{isEdit ? "タブを編集" : groupId ? "タブを追加" : "カラムを追加"}</span>
-      <button class="x" onclick={onclose}>✕</button>
+      <button class="x" onclick={onclose}><X size={16} /></button>
     </header>
 
     <div class="field">
@@ -318,6 +319,7 @@
     margin-bottom: 12px;
   }
   .x {
+    display: inline-flex;
     border: none;
     background: transparent;
     color: var(--text-dim);

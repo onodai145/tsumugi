@@ -19,6 +19,7 @@
     "vite": "^7.3.6"
   },
   "dependencies": {
+    "@lucide/svelte": "^1.23.0",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",

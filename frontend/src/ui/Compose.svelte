@@ -3,6 +3,7 @@
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { ImagePlus, X } from "@lucide/svelte";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -94,7 +95,7 @@
   >
     <header class="head">
       <span>{c.replyTo ? "返信" : c.quoteOf ? "引用Renote" : "新規投稿"}</span>
-      <button class="x" onclick={() => app.closeCompose()}>✕</button>
+      <button class="x" onclick={() => app.closeCompose()}><X size={16} /></button>
     </header>
 
     {#if c.replyTo}
@@ -118,7 +119,7 @@
             {:else}
               <span class="file-badge">{f.mimeType}</span>
             {/if}
-            <button class="thumb-x" title="削除" onclick={() => removeAttached(f.id)}>✕</button>
+            <button class="thumb-x" title="削除" onclick={() => removeAttached(f.id)}><X size={12} /></button>
           </div>
         {/each}
         {#if uploading}<div class="thumb uploading">…</div>{/if}
@@ -139,7 +140,7 @@
 
     <div class="toolbar">
       <VisibilitySelect bind:value={visibility} />
-      <button class="mini" onclick={pickFiles} disabled={uploading}>📎 画像</button>
+      <button class="mini" onclick={pickFiles} disabled={uploading}><ImagePlus size={14} /> 画像</button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
@@ -176,6 +177,7 @@
     margin-bottom: 8px;
   }
   .x {
+    display: inline-flex;
     border: none;
     background: transparent;
     color: var(--text-dim);
@@ -249,6 +251,9 @@
     text-align: center;
   }
   .thumb-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     position: absolute;
     top: 2px;
     right: 2px;
@@ -258,9 +263,7 @@
     border-radius: 50%;
     width: 18px;
     height: 18px;
-    font-size: 0.7rem;
     cursor: pointer;
-    line-height: 1;
   }
   .toolbar {
     display: flex;
@@ -269,6 +272,9 @@
     flex-wrap: wrap;
   }
   .mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 6px 10px;
     border: 1px solid var(--border);
     border-radius: 8px;

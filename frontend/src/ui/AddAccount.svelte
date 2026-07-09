@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
+  import { X } from "@lucide/svelte";
 
   // onclose があれば「戻る」導線を出す（ログイン済みで設定経由で開いた場合）。
   // 初回（アカウント0件）は onclose 未指定で戻る先が無いため非表示。
@@ -43,7 +44,7 @@
   <div class="head">
     <h2>アカウントを追加</h2>
     {#if onclose}
-      <button class="close" onclick={onclose} title="戻る">✕</button>
+      <button class="close" onclick={onclose} title="戻る"><X size={16} /></button>
     {/if}
   </div>
   {#if !sessionId}
@@ -90,11 +91,11 @@
     font-size: 1.1rem;
   }
   .close {
+    display: inline-flex;
     border: none;
     background: transparent;
     color: var(--text-dim);
     cursor: pointer;
-    font-size: 0.9rem;
     padding: 2px 6px;
     width: auto;
   }

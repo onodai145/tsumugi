@@ -4,6 +4,7 @@
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { ImagePlus } from "@lucide/svelte";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -105,7 +106,7 @@
   {/if}
 
   <VisibilitySelect bind:value={visibility} />
-  <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}>📎</button>
+  <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}><ImagePlus size={16} /></button>
   <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
   {#if err}<span class="err" title={err}>!</span>{/if}
 </div>
@@ -151,6 +152,7 @@
     font-size: 0.6rem;
   }
   .icon {
+    display: inline-flex;
     border: 1px solid var(--border);
     background: var(--surface-1);
     color: var(--text);
