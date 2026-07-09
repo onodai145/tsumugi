@@ -20,7 +20,7 @@
     try {
       const w = Math.min(720, Math.max(220, Math.round(width) || 300));
       width = w;
-      await app.setUiPrefs({ theme, defaultColumnWidth: w });
+      await app.setUiPrefs({ theme, defaultColumnWidth: w, keymap: app.ui.keymap });
       saved = true;
     } catch (e) {
       err = String(e);
