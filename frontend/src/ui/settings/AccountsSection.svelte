@@ -19,6 +19,15 @@
       busyId = null;
     }
   }
+
+  async function makeDefault(id: string) {
+    err = null;
+    try {
+      await app.setUiPrefs({ ...app.ui, defaultAccountId: id });
+    } catch (e) {
+      err = String(e);
+    }
+  }
 </script>
 
 <h3 class="title">アカウント</h3>
@@ -35,7 +44,7 @@
           <div class="avatar ph">{(a.displayName || a.username).charAt(0)}</div>
         {/if}
         <div class="meta">
-          <div class="name">{a.displayName || a.username}</div>
+          <div class="name">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge">既定</span>{/if}</div>
           <div class="handle">@{a.username}@{a.host}</div>
         </div>
         {#if confirmId === a.id}
@@ -47,6 +56,9 @@
             <button class="ghost" onclick={() => (confirmId = null)}>いいえ</button>
           </div>
         {:else}
+          {#if a.id !== app.defaultAccountId()}
+            <button class="ghost" onclick={() => makeDefault(a.id)}>既定に設定</button>
+          {/if}
           <button class="ghost" onclick={() => (confirmId = a.id)}>削除</button>
         {/if}
       </li>
@@ -117,6 +129,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .default-badge {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--accent);
+    font-size: 0.68rem;
+    font-weight: 600;
   }
   .confirm {
     display: flex;
