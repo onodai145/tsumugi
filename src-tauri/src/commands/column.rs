@@ -83,8 +83,12 @@ pub async fn add_column(
         kind,
         order: tab_order,
         filter,
-        notify_sound: false,
-        notify_desktop: false,
+        // 通知タブは従来どおり既定ON（オプトアウト方式）。それ以外のタブは新機能なので
+        // 既定OFF（オプトイン）にし、Global/Local 等の高頻度タブでの通知過多を避ける。
+        // 設定→通知のグローバルスイッチと両方ONのときのみ実際に発火する。
+        notify_sound: is_notif,
+        notify_desktop: is_notif,
+        notify_sound_choice: String::new(),
         group_id: group.id.clone(),
         title: None,
     };
@@ -338,6 +342,22 @@ pub async fn rename_column(
 ) -> Result<()> {
     let trimmed = title.as_deref().map(str::trim).filter(|s| !s.is_empty());
     state.settings.set_column_title(&column_id, trimmed)
+}
+
+/// タブごとの通知可否・通知音の選択を変更する。ストリームは張り直さない軽量操作。
+/// notify_sound_choice は空文字ならグローバル設定を継承する。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_column_notify(
+    state: State<'_, AppState>,
+    column_id: String,
+    notify_desktop: bool,
+    notify_sound: bool,
+    notify_sound_choice: String,
+) -> Result<()> {
+    state
+        .settings
+        .set_column_notify(&column_id, notify_desktop, notify_sound, &notify_sound_choice)
 }
 
 /// アンテナ一覧（Antenna タブ作成用）。

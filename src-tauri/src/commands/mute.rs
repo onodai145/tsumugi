@@ -9,6 +9,8 @@ use tauri::State;
 
 /// 背景画像として許容する最大サイズ（DB肥大化を防ぐ）。
 const MAX_BACKGROUND_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+/// 通知音として許容する最大サイズ（短い効果音程度を想定）。
+const MAX_NOTIFY_SOUND_BYTES: usize = 5 * 1024 * 1024;
 
 /// 現在の NG 設定を取得。
 #[tauri::command]
@@ -59,29 +61,40 @@ pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<
 #[tauri::command]
 #[specta::specta]
 pub async fn read_image_data_url(path: String) -> Result<String> {
-    let bytes = tokio::fs::read(&path)
+    read_file_as_data_url(&path, MAX_BACKGROUND_IMAGE_BYTES, guess_image_mime).await
+}
+
+/// ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_audio_data_url(path: String) -> Result<String> {
+    read_file_as_data_url(&path, MAX_NOTIFY_SOUND_BYTES, guess_audio_mime).await
+}
+
+/// ファイルを読み、上限サイズを検査して data URL(base64) にする共通処理。
+async fn read_file_as_data_url(
+    path: &str,
+    max_bytes: usize,
+    guess_mime: fn(&str) -> &'static str,
+) -> Result<String> {
+    let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?;
-    if bytes.len() > MAX_BACKGROUND_IMAGE_BYTES {
+    if bytes.len() > max_bytes {
         return Err(Error::Invalid(format!(
-            "画像が大きすぎます（{}MB超）。{}MB以下の画像を選んでください",
-            MAX_BACKGROUND_IMAGE_BYTES / 1024 / 1024,
-            MAX_BACKGROUND_IMAGE_BYTES / 1024 / 1024
+            "ファイルが大きすぎます（{}MB超）。{}MB以下のファイルを選んでください",
+            max_bytes / 1024 / 1024,
+            max_bytes / 1024 / 1024
         )));
     }
-    let mime = guess_image_mime(&path);
+    let mime = guess_mime(path);
     let b64 = STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{b64}"))
 }
 
 /// 拡張子から画像 MIME を推定する。不明な拡張子は octet-stream(ブラウザ側で概ね表示可)。
 fn guess_image_mime(path: &str) -> &'static str {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_lowercase)
-        .unwrap_or_default();
-    match ext.as_str() {
+    match extension_lower(path).as_str() {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -91,6 +104,28 @@ fn guess_image_mime(path: &str) -> &'static str {
         "svg" => "image/svg+xml",
         _ => "application/octet-stream",
     }
+}
+
+/// 拡張子から音声 MIME を推定する。不明な拡張子は octet-stream。
+fn guess_audio_mime(path: &str) -> &'static str {
+    match extension_lower(path).as_str() {
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "flac" => "audio/flac",
+        "webm" => "audio/webm",
+        _ => "application/octet-stream",
+    }
+}
+
+fn extension_lower(path: &str) -> String {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default()
 }
 
 /// サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。

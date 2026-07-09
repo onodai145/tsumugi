@@ -59,6 +59,11 @@ export const commands = {
 	/**  タブ名を変更する（空文字/None で自動生成名に戻す）。 */
 	renameColumn: (columnId: string, title: string | null) => typedError<null, Error>(__TAURI_INVOKE("rename_column", { columnId, title })),
 	/**
+	 *  タブごとの通知可否・通知音の選択を変更する。ストリームは張り直さない軽量操作。
+	 *  notify_sound_choice は空文字ならグローバル設定を継承する。
+	 */
+	setColumnNotify: (columnId: string, notifyDesktop: boolean, notifySound: boolean, notifySoundChoice: string) => typedError<null, Error>(__TAURI_INVOKE("set_column_notify", { columnId, notifyDesktop, notifySound, notifySoundChoice })),
+	/**
 	 *  既存タブのソース種別・フィルタ・名前を変更し、ストリームを張り直す。
 	 *  アカウントは変更しない。フィルタ変更でキャッシュが不整合になるためクリアして再取得する。
 	 */
@@ -94,6 +99,8 @@ export const commands = {
 	 *  UiPrefs.background_image に直接保存できる形にする。拡張子から MIME を推定する。
 	 */
 	readImageDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_image_data_url", { path })),
+	/**  ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。 */
+	readAudioDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_audio_data_url", { path })),
 	/**
 	 *  サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
@@ -137,6 +144,8 @@ export type Column = {
 	filter: FilterQuery,
 	notifySound: boolean,
 	notifyDesktop: boolean,
+	/**  このタブの通知音（プリセットIDまたはdata URL）。空文字なら設定→通知のグローバル選択を継承する。 */
+	notifySoundChoice: string,
 	/**  所属する視覚カラム(ColumnGroup)の id */
 	groupId: string,
 	/**  ユーザ設定のタブ名。None なら種別から自動生成した名前を使う。 */
@@ -342,6 +351,11 @@ export type NotifyConfig = {
 	desktop: boolean,
 	/**  通知音を鳴らす */
 	sound: boolean,
+	/**
+	 *  通知音の選択。プリセットID("beep"/"chime"/"ping"/"pop")か、data URL(カスタム音声ファイル)。
+	 *  空文字なら既定プリセット("beep")を使う。タブ側で個別指定が無い場合のフォールバック。
+	 */
+	soundChoice?: string,
 };
 
 /**  タブを開いた結果。所属グループも返す（新規グループの幅などをフロントへ）。 */

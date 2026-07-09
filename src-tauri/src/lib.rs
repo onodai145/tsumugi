@@ -45,6 +45,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::list_channels,
             commands::column::resolve_user_acct,
             commands::column::rename_column,
+            commands::column::set_column_notify,
             commands::column::update_column,
             commands::note::post_note,
             commands::note::renote,
@@ -60,6 +61,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::get_ui_prefs,
             commands::mute::set_ui_prefs,
             commands::mute::read_image_data_url,
+            commands::mute::read_audio_data_url,
             commands::mute::sync_server_mutes,
         ])
         .events(collect_events![
