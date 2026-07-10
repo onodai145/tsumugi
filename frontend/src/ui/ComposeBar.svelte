@@ -131,7 +131,19 @@
   }
 </script>
 
-<div class="composebox">
+<div class="composewrap">
+  <AccountSelect
+    bind:value={
+      () => accountId,
+      (v) => {
+        accountId = v;
+        accountTouched = true;
+      }
+    }
+    accounts={app.accounts}
+  />
+
+  <div class="composebox">
   {#if replyTo || quoteOf}
     <div class="context">
       <span class="context-text">
@@ -183,16 +195,6 @@
 
   <div class="toolbar">
     <div class="tools left">
-      <AccountSelect
-        bind:value={
-          () => accountId,
-          (v) => {
-            accountId = v;
-            accountTouched = true;
-          }
-        }
-        accounts={app.accounts}
-      />
       <VisibilitySelect bind:value={visibility} />
       <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}><ImagePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
@@ -204,9 +206,17 @@
       <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
     </div>
   </div>
+  </div>
 </div>
 
 <style>
+  .composewrap {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+  }
   .composebox {
     display: flex;
     flex-direction: column;
