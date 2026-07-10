@@ -54,6 +54,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::delete_note_cmd,
             commands::note::react,
             commands::note::unreact,
+            commands::note::vote_poll,
             commands::note::list_custom_emojis,
             commands::note::upload_file,
             commands::note::save_url_to_file,

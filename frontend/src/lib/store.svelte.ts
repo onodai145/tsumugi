@@ -610,6 +610,7 @@ class AppStore {
           break;
         }
         case "pollVoted":
+          if (isMine) break;
           if (n.poll && n.poll.choices[p.update.choice]) n.poll.choices[p.update.choice].votes += 1;
           break;
       }
@@ -1013,6 +1014,21 @@ class AppStore {
     }
   }
 
+  async votePoll(accountId: string, noteId: string, choice: number) {
+    const targets = this.#collectNotes(noteId).filter((n) => n.poll);
+    if (targets.length === 0) return;
+    const backups = targets.map((n) => snapshotPoll(n));
+    targets.forEach((n) => applyVote(n, choice));
+
+    try {
+      await unwrap(commands.votePoll(accountId, noteId, choice));
+      this.#log("success", "投票しました");
+    } catch (e) {
+      backups.forEach(restorePoll);
+      this.#fail(e);
+    }
+  }
+
   #collectNotes(noteId: string): Note[] {
     const out: Note[] = [];
     for (const t of this.#allTabs()) {
@@ -1049,6 +1065,21 @@ function restoreReaction(s: ReturnType<typeof snapshotReaction>) {
   s.n.reactions = s.reactions;
   s.n.myReaction = s.myReaction;
   s.n.reactionCount = s.count;
+}
+
+// ---- 投票のローカル操作（1ユーザにつき: multiple=false なら1票のみ、trueなら選択肢ごとに1票） ----
+
+function applyVote(n: Note, choice: number) {
+  const c = n.poll?.choices[choice];
+  if (!c) return;
+  c.isVoted = true;
+  c.votes += 1;
+}
+function snapshotPoll(n: Note) {
+  return { n, choices: n.poll!.choices.map((c) => ({ ...c })) };
+}
+function restorePoll(s: ReturnType<typeof snapshotPoll>) {
+  s.n.poll!.choices = s.choices;
 }
 
 // ---- NG 判定（Rust の filter::mute と同じ規則。表示中ノートの即時除去用） ----
