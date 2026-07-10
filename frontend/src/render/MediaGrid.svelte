@@ -9,19 +9,67 @@
   const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
   const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 6;
+  let zoom = $state(1);
+  let panX = $state(0);
+  let panY = $state(0);
+  let dragging = false;
+  let dragStart = { x: 0, y: 0, panX: 0, panY: 0 };
+
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
     return { destroy: () => node.remove() };
   }
 
+  function resetZoom() {
+    zoom = 1;
+    panX = 0;
+    panY = 0;
+  }
+
   function openLightbox(f: DriveFile) {
     lightbox = f;
+    resetZoom();
   }
   function closeLightbox() {
     lightbox = null;
   }
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") closeLightbox();
+  }
+
+  function onWheel(e: WheelEvent) {
+    e.preventDefault();
+    const next = zoom * (1 - e.deltaY * 0.001);
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    if (zoom === MIN_ZOOM) {
+      panX = 0;
+      panY = 0;
+    }
+  }
+
+  function onDblclick() {
+    if (zoom > MIN_ZOOM) {
+      resetZoom();
+    } else {
+      zoom = 2.5;
+    }
+  }
+
+  function onPointerdown(e: PointerEvent) {
+    if (zoom <= MIN_ZOOM) return;
+    dragging = true;
+    dragStart = { x: e.clientX, y: e.clientY, panX, panY };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onPointermove(e: PointerEvent) {
+    if (!dragging) return;
+    panX = dragStart.panX + (e.clientX - dragStart.x);
+    panY = dragStart.panY + (e.clientY - dragStart.y);
+  }
+  function onPointerup() {
+    dragging = false;
   }
 </script>
 
@@ -57,7 +105,23 @@
     onclick={closeLightbox}
     onkeydown={onKeydown}
   >
-    <img class="lightbox-img" src={lightbox.url} alt={fileName(lightbox)} />
+    <button class="lightbox-close" onclick={closeLightbox} aria-label="閉じる">✕</button>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <img
+      class="lightbox-img"
+      class:zoomed={zoom > MIN_ZOOM}
+      style="transform: translate({panX}px, {panY}px) scale({zoom})"
+      src={lightbox.url}
+      alt={fileName(lightbox)}
+      onclick={(e) => e.stopPropagation()}
+      onwheel={onWheel}
+      ondblclick={onDblclick}
+      onpointerdown={onPointerdown}
+      onpointermove={onPointermove}
+      onpointerup={onPointerup}
+      onpointercancel={onPointerup}
+    />
     <button
       class="lightbox-download"
       onclick={(e) => {
@@ -143,6 +207,24 @@
     max-width: 90vw;
     max-height: 85vh;
     object-fit: contain;
+    cursor: zoom-in;
+    touch-action: none;
+  }
+  .lightbox-img.zoomed {
+    cursor: grab;
+  }
+  .lightbox-close {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    border: none;
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 1.1rem;
+    cursor: pointer;
   }
   .lightbox-download {
     color: #fff;
