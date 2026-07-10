@@ -506,7 +506,7 @@
 
     {#if uiMode === "expert"}
       <div class="field">
-        <span>このカラムの通知</span>
+        <span>このタブの通知</span>
         <label class="check-row"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
         <label class="check-row"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
       </div>
