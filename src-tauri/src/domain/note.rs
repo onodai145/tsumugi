@@ -64,6 +64,9 @@ pub struct DriveFile {
     pub is_sensitive: bool,
     pub url: String,
     pub thumbnail_url: Option<String>,
+    /// 元のファイル名（メディア以外はダウンロードリンクの表示名に使う）
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]

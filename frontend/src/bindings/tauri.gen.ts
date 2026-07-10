@@ -222,6 +222,8 @@ export type DriveFile = {
 	isSensitive: boolean,
 	url: string,
 	thumbnailUrl: string | null,
+	/**  元のファイル名（メディア以外はダウンロードリンクの表示名に使う） */
+	name?: string,
 };
 
 /**
