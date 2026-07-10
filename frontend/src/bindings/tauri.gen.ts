@@ -118,6 +118,7 @@ export const commands = {
 /** Events */
 export const events = {
 	columnConnectionState: makeEvent<ColumnConnectionState>("column-connection-state"),
+	columnGapFill: makeEvent<ColumnGapFill>("column-gap-fill"),
 	columnNote: makeEvent<ColumnNote>("column-note"),
 	columnNoteUpdated: makeEvent<ColumnNoteUpdated>("column-note-updated"),
 	columnNotification: makeEvent<ColumnNotification>("column-notification"),
@@ -163,6 +164,12 @@ export type Column = {
 export type ColumnConnectionState = {
 	columnId: string,
 	state: ConnectionState,
+};
+
+/**  起動時のギャップ埋め結果をまとめて反映する（通知は鳴らさない・出入りの都度イベントにしない）。 */
+export type ColumnGapFill = {
+	columnId: string,
+	notes: Note[],
 };
 
 /**  視覚的なカラム（タブの集合）。幅と並び順を持つ。 */
@@ -440,6 +447,11 @@ export type UiPrefs = {
 	defaultAccountId?: string,
 	/**  Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。 */
 	emojiStyle?: string,
+	/**
+	 *  起動時、キャッシュに無い間(閉じていた間)のノートをRESTで遡って埋める件数の上限。
+	 *  0 なら無効（従来どおりキャッシュのみ表示）。
+	 */
+	gapFillLimit?: number,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

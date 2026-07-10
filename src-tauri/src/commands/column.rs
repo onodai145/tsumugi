@@ -13,10 +13,13 @@ use crate::filter::{ast, parser, sql, CompiledFilter};
 use crate::state::AppState;
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
+use tauri_specta::Event as _;
 
 const INITIAL_LIMIT: u32 = 20;
 const DEFAULT_WIDTH: i32 = 300;
+const GAP_FILL_PAGE_SIZE: u32 = 100;
+const GAP_FILL_MAX_PAGES: u32 = 10;
 
 /// タブを開いた結果。所属グループも返す（新規グループの幅などをフロントへ）。
 #[derive(Debug, Serialize, Type)]
@@ -190,9 +193,38 @@ pub async fn resume_column(
     let (fresh_notes, notifications) = if notes.is_empty() {
         open_stream_and_fetch(&app, &state, &column, resolved, host, token).await?
     } else {
-        // キャッシュがある: ストリームだけ張り直す
+        // キャッシュがある: まずキャッシュを即返して体感速度を維持し、閉じていた間のギャップ埋めは
+        // バックグラウンドで行って ColumnGapFill イベントでまとめて反映する（1件ずつ ColumnNote を
+        // 出すと新着通知/通知音が誤爆するため、専用イベントで通知ロジックを経由させない）。
         let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
+        let gap_limit = state
+            .settings
+            .load_ui()
+            .map(|p| p.gap_fill_limit)
+            .unwrap_or(0)
+            .max(0);
+        let newest_known_id = notes[0].id.clone(); // load_cached は created_at 降順（先頭が最新）
         open_streams_only(&app, &state, &column, &resolved, host, token);
+        if gap_limit > 0 {
+            let app2 = app.clone();
+            let column_id = column.id.clone();
+            let account_id = column.account_id.clone();
+            tauri::async_runtime::spawn(async move {
+                let Some(state) = app2.try_state::<AppState>() else { return };
+                let gap_notes = fill_gap(&state, &account_id, &resolved, &newest_known_id, gap_limit)
+                    .await
+                    .unwrap_or_default();
+                if gap_notes.is_empty() {
+                    return;
+                }
+                let _ = state.settings.cache_notes(&column_id, &gap_notes);
+                let _ = crate::events::ColumnGapFill {
+                    column_id,
+                    notes: gap_notes,
+                }
+                .emit(&app2);
+            });
+        }
         (notes, vec![])
     };
 
@@ -549,6 +581,69 @@ fn open_streams_only(
             );
         }
     }
+}
+
+/// 起動時のギャップ埋め: アプリを閉じていた間に流れたノートを、キャッシュの最新ノートid
+/// (`newest_known_id`)まで REST で遡って取得する。`limit` 件、または既知のノートに追いつく
+/// (取得ページの中に newest_known_id 以前のノートが現れる)まで、どちらか早い方で打ち切る。
+/// ページ数にも上限(GAP_FILL_MAX_PAGES)を設け、長期間閉じていた場合の暴走取得を防ぐ。
+async fn fill_gap(
+    state: &AppState,
+    account_id: &str,
+    resolved: &ResolvedSources,
+    newest_known_id: &str,
+    limit: i32,
+) -> Result<Vec<Note>> {
+    if resolved.kinds.is_empty() {
+        return Ok(vec![]);
+    }
+    let client = state.client_for(account_id)?;
+    let ctx = state.eval_context();
+    let mute = state.mute.lock().unwrap().clone();
+    let mut collected: Vec<Note> = Vec::new();
+    let mut until_id: Option<String> = None;
+
+    for _ in 0..GAP_FILL_MAX_PAGES {
+        let mut page: Vec<Note> = Vec::new();
+        for k in &resolved.kinds {
+            if let Some((endpoint, body)) = k.rest_request(GAP_FILL_PAGE_SIZE, until_id.as_deref()) {
+                if let Ok(raw) = fetch_notes(&client, endpoint, &body).await {
+                    page.extend(raw);
+                }
+            }
+        }
+        if page.is_empty() {
+            break;
+        }
+        page.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+        let oldest_this_page = page.last().map(|n| n.id.clone());
+        let mut reached_known = false;
+        for n in page {
+            if n.id.as_str() <= newest_known_id {
+                reached_known = true;
+                continue;
+            }
+            if resolved.filter.matches(&n, &ctx)
+                && !crate::filter::mute::is_muted(&n, &mute)
+                && !server_muted_note(state, account_id, &n)
+            {
+                collected.push(n);
+            }
+        }
+        if reached_known || collected.len() as i32 >= limit {
+            break;
+        }
+        match oldest_this_page {
+            Some(id) => until_id = Some(id),
+            None => break,
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    collected.retain(|n| seen.insert(n.id.clone()));
+    collected.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    collected.truncate(limit.max(0) as usize);
+    Ok(collected)
 }
 
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、

@@ -36,6 +36,10 @@ pub struct UiPrefs {
     /// Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。
     #[serde(default = "default_emoji_style")]
     pub emoji_style: String,
+    /// 起動時、キャッシュに無い間(閉じていた間)のノートをRESTで遡って埋める件数の上限。
+    /// 0 なら無効（従来どおりキャッシュのみ表示）。
+    #[serde(default = "default_gap_fill_limit")]
+    pub gap_fill_limit: i32,
 }
 
 fn default_column_opacity() -> i32 {
@@ -44,6 +48,10 @@ fn default_column_opacity() -> i32 {
 
 fn default_emoji_style() -> String {
     "twemoji".into()
+}
+
+fn default_gap_fill_limit() -> i32 {
+    200
 }
 
 impl Default for UiPrefs {
@@ -59,6 +67,7 @@ impl Default for UiPrefs {
             column_opacity: default_column_opacity(),
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
+            gap_fill_limit: default_gap_fill_limit(),
         }
     }
 }
@@ -84,6 +93,7 @@ mod tests {
         assert_eq!(v.column_opacity, 100);
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
         assert_eq!(v.emoji_style, "twemoji");
+        assert_eq!(v.gap_fill_limit, 200);
     }
 
     #[test]
@@ -101,6 +111,7 @@ mod tests {
             column_opacity: 85,
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),
+            gap_fill_limit: 500,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();

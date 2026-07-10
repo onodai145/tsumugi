@@ -10,6 +10,7 @@
   let backgroundBlur = $state(app.ui.backgroundBlur ?? 0);
   let columnOpacity = $state(app.ui.columnOpacity ?? 100);
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
+  let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let pickingImage = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -62,6 +63,8 @@
     try {
       const w = Math.min(720, Math.max(220, Math.round(width) || 300));
       width = w;
+      const gapLimit = Math.min(1000, Math.max(0, Math.round(gapFillLimit) || 0));
+      gapFillLimit = gapLimit;
       // このセクションが編集しないフィールド(既定アカウント等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
@@ -74,6 +77,7 @@
         backgroundBlur,
         columnOpacity,
         emojiStyle,
+        gapFillLimit: gapLimit,
       });
       saved = true;
     } catch (e) {
@@ -100,6 +104,15 @@
   <input type="number" min="220" max="720" step="10" bind:value={width} />
 </label>
 <p class="hint">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
+
+<label class="field">
+  <span>起動時のギャップ埋め（件, 0〜1000。0で無効）</span>
+  <input type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
+</label>
+<p class="hint">
+  アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
+  0にすると従来どおりキャッシュのみ表示します。
+</p>
 
 <div class="field">
   <span>絵文字のスタイル</span>
