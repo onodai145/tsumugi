@@ -223,10 +223,10 @@
   .composebox {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     flex: 1;
     min-width: 0;
-    padding: 8px;
+    padding: 6px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface-1);
@@ -240,7 +240,7 @@
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 3px 6px;
   }
   .context-text {
     flex: 1;
@@ -261,7 +261,7 @@
   .content {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     height: 80px;
   }
   .text {
@@ -269,7 +269,7 @@
     min-height: 0;
     width: 100%;
     resize: none;
-    padding: 8px 10px;
+    padding: 6px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface-2);
