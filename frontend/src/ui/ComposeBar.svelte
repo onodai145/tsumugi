@@ -262,7 +262,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    height: 120px;
+    height: 80px;
   }
   .text {
     flex: 1;
