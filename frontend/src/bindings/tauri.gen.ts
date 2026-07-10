@@ -85,6 +85,8 @@ export const commands = {
 	react: (accountId: string, noteId: string, reaction: string) => typedError<null, Error>(__TAURI_INVOKE("react", { accountId, noteId, reaction })),
 	/**  リアクション解除。 */
 	unreact: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unreact", { accountId, noteId })),
+	/**  アンケートに投票する（choice は 0-based index）。 */
+	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
 	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
 	/**  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。 */

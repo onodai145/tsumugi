@@ -5,6 +5,7 @@
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
@@ -74,6 +75,22 @@
   function react(reaction: string) {
     app.reactPickerNoteId = null;
     if (accountId) app.toggleReaction(accountId, inner.id, reaction);
+  }
+
+  // 投票済み(multiple=falseは1択でもう投票不可)・期限切れなら投票不可。
+  const pollExpired = $derived(!!inner.poll?.expiresAt && inner.poll.expiresAt * 1000 < Date.now());
+  const pollAlreadyVoted = $derived(!inner.poll?.multiple && !!inner.poll?.choices.some((c) => c.isVoted));
+  // 投票は取り消せない(Misskeyに取消APIが無い)ので、必ず確認してから送信する。
+  let confirmChoice = $state<number | null>(null);
+  function requestVote(choice: number) {
+    if (!accountId || !inner.poll) return;
+    if (pollExpired || pollAlreadyVoted || inner.poll.choices[choice].isVoted) return;
+    confirmChoice = choice;
+  }
+  function confirmVote() {
+    if (confirmChoice === null || !accountId) return;
+    app.votePoll(accountId, inner.id, confirmChoice);
+    confirmChoice = null;
   }
   function doRenote() {
     if (accountId) app.renote(accountId, inner.id);
@@ -158,13 +175,30 @@
         {/if}
         {#if inner.poll}
           <div class="poll">
-            {#each inner.poll.choices as choice}
-              <div class="poll-choice" class:voted={choice.isVoted}>
+            {#each inner.poll.choices as choice, i}
+              <button
+                class="poll-choice"
+                class:voted={choice.isVoted}
+                disabled={!accountId || pollExpired || pollAlreadyVoted || choice.isVoted}
+                onclick={() => requestVote(i)}
+              >
                 <span class="poll-text">{choice.text}</span>
                 <span class="poll-votes">{choice.votes}</span>
-              </div>
+              </button>
             {/each}
           </div>
+          {#if pollExpired}
+            <p class="poll-hint">投票は締め切られました</p>
+          {/if}
+          {#if confirmChoice !== null}
+            <ConfirmDialog
+              title="投票の確認"
+              message={`「${inner.poll.choices[confirmChoice].text}」に投票します。取り消せません。よろしいですか？`}
+              confirmLabel="投票する"
+              onConfirm={confirmVote}
+              onCancel={() => (confirmChoice = null)}
+            />
+          {/if}
         {/if}
         <!-- 引用Renote: 本文ありで renote 先がある場合、中身をネスト表示 -->
         {#if inner.text && inner.renote}
@@ -338,13 +372,30 @@
   .poll-choice {
     display: flex;
     justify-content: space-between;
+    width: 100%;
     padding: 5px 8px;
+    border: none;
     background: var(--surface-2);
+    color: var(--text);
     border-radius: 6px;
     font-size: 0.88rem;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .poll-choice:hover:not(:disabled) {
+    background: var(--surface-3);
+  }
+  .poll-choice:disabled {
+    cursor: default;
   }
   .poll-choice.voted {
     outline: 1px solid var(--accent);
+  }
+  .poll-hint {
+    margin: 4px 0 0;
+    font-size: 0.78rem;
+    color: var(--text-dim);
   }
   .reactions {
     display: flex;

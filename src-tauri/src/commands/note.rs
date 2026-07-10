@@ -3,8 +3,8 @@
 use crate::api::drive::upload_file as api_upload_file;
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
-    create_note, create_reaction, delete_note, delete_reaction, renote as api_renote, NoteDraft,
-    VisibilityInput,
+    create_note, create_reaction, delete_note, delete_reaction, renote as api_renote, vote_poll as api_vote_poll,
+    NoteDraft, VisibilityInput,
 };
 use crate::domain::{DriveFile, EmojiDef, Note};
 use crate::error::{Error, Result};
@@ -71,6 +71,19 @@ pub async fn unreact(
 ) -> Result<()> {
     let client = state.client_for(&account_id)?;
     delete_reaction(&client, &note_id).await
+}
+
+/// アンケートに投票する（choice は 0-based index）。
+#[tauri::command]
+#[specta::specta]
+pub async fn vote_poll(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+    choice: u32,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    api_vote_poll(&client, &note_id, choice).await
 }
 
 /// ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。

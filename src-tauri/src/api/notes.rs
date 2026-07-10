@@ -125,6 +125,14 @@ pub async fn delete_reaction(client: &MisskeyClient, note_id: &str) -> Result<()
     Ok(())
 }
 
+/// 投票（choice は 0-based index）。
+pub async fn vote_poll(client: &MisskeyClient, note_id: &str, choice: u32) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("notes/polls/vote", &json!({ "noteId": note_id, "choice": choice }))
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
