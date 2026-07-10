@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { ask } from "@tauri-apps/plugin-dialog";
   import type { Note } from "../bindings/tauri.gen";
   import Mfm from "../render/Mfm.svelte";
   import MediaGrid from "../render/MediaGrid.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
@@ -80,23 +80,17 @@
   // 投票済み(multiple=falseは1択でもう投票不可)・期限切れなら投票不可。
   const pollExpired = $derived(!!inner.poll?.expiresAt && inner.poll.expiresAt * 1000 < Date.now());
   const pollAlreadyVoted = $derived(!inner.poll?.multiple && !!inner.poll?.choices.some((c) => c.isVoted));
-  async function vote(choice: number) {
+  // 投票は取り消せない(Misskeyに取消APIが無い)ので、必ず確認してから送信する。
+  let confirmChoice = $state<number | null>(null);
+  function requestVote(choice: number) {
     if (!accountId || !inner.poll) return;
     if (pollExpired || pollAlreadyVoted || inner.poll.choices[choice].isVoted) return;
-    // 投票は取り消せない(Misskeyに取消APIが無い)ので、必ず確認してから送信する。
-    const text = inner.poll.choices[choice].text;
-    let yes: boolean;
-    try {
-      yes = await ask(`「${text}」に投票します。取り消せません。よろしいですか？`, {
-        title: "投票の確認",
-        kind: "warning",
-      });
-    } catch (e) {
-      app.reportError(e);
-      return;
-    }
-    if (!yes) return;
-    app.votePoll(accountId, inner.id, choice);
+    confirmChoice = choice;
+  }
+  function confirmVote() {
+    if (confirmChoice === null || !accountId) return;
+    app.votePoll(accountId, inner.id, confirmChoice);
+    confirmChoice = null;
   }
   function doRenote() {
     if (accountId) app.renote(accountId, inner.id);
@@ -186,7 +180,7 @@
                 class="poll-choice"
                 class:voted={choice.isVoted}
                 disabled={!accountId || pollExpired || pollAlreadyVoted || choice.isVoted}
-                onclick={() => vote(i)}
+                onclick={() => requestVote(i)}
               >
                 <span class="poll-text">{choice.text}</span>
                 <span class="poll-votes">{choice.votes}</span>
@@ -195,6 +189,15 @@
           </div>
           {#if pollExpired}
             <p class="poll-hint">投票は締め切られました</p>
+          {/if}
+          {#if confirmChoice !== null}
+            <ConfirmDialog
+              title="投票の確認"
+              message={`「${inner.poll.choices[confirmChoice].text}」に投票します。取り消せません。よろしいですか？`}
+              confirmLabel="投票する"
+              onConfirm={confirmVote}
+              onCancel={() => (confirmChoice = null)}
+            />
           {/if}
         {/if}
         <!-- 引用Renote: 本文ありで renote 先がある場合、中身をネスト表示 -->

@@ -13,7 +13,6 @@
     },
     "dialog:allow-open",
     "dialog:allow-save",
-    "dialog:allow-ask",
     "notification:default"
   ]
 }
