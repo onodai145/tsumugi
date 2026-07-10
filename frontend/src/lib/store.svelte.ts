@@ -114,6 +114,11 @@ class AppStore {
   #logSeq = 0;
 
   #unlisten: UnlistenFn[] = [];
+  // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
+  // ColumnConnectionState イベントを取りこぼさないための記録(タブがまだ groups に
+  // 挿入されておらず #findTab が見つけられない一瞬の間に Connected が来て捨てられる、
+  // という起動時レースが実際にあった)。#makeTab がタブ生成時にここから初期状態を拾う。
+  #connState = new Map<string, ConnectionState>();
 
   /// Tauri イベント購読をすべて解除する。dev の HMR で古いインスタンスの
   /// リスナーが残り通知が多重化するのを防ぐために使う（本番では未使用）。
@@ -182,7 +187,7 @@ class AppStore {
       notifySoundChoice: opened.column.notifySoundChoice,
       notes: opened.notes,
       notifications: opened.notifications,
-      state: "connecting",
+      state: this.#connState.get(opened.column.id) ?? "connecting",
       loadingMore: false,
       selectedNoteId: null,
     };
@@ -505,6 +510,9 @@ class AppStore {
       await events.columnNote.listen((e) => {
         const tab = this.#findTab(e.payload.columnId);
         if (!tab) return;
+        // ライブでノートを受信できている = 接続は生きている証拠。ConnectionState イベントの
+        // 取りこぼし(順序/タイミングの問題等)があっても、ここで自己修復する。
+        if (tab.state !== "connected") tab.state = "connected";
         if (tab.notes.some((n) => n.id === e.payload.note.id)) return;
         tab.notes = [e.payload.note, ...tab.notes].slice(0, MAX_NOTES);
         // 通知カラム以外でも「このタブに新着ノートが届いたら」通知できる（タブごとの設定次第）。
@@ -537,6 +545,9 @@ class AppStore {
     );
     this.#unlisten.push(
       await events.columnConnectionState.listen((e) => {
+        // タブがまだ #insertTab 前でも(resumeColumn/addColumn の await 解決前に
+        // Connected が届くことがある)状態を取りこぼさないよう、まず記録する。
+        this.#connState.set(e.payload.columnId, e.payload.state);
         const tab = this.#findTab(e.payload.columnId);
         if (!tab) return;
         const prev = tab.state;
@@ -918,6 +929,7 @@ class AppStore {
   /// タブを閉じる。グループが空になったらグループも消す。
   async closeTab(tabId: string) {
     await unwrap(commands.closeColumn(tabId));
+    this.#connState.delete(tabId);
     for (const g of this.groups) {
       if (!g.tabs.some((t) => t.id === tabId)) continue;
       g.tabs = g.tabs.filter((t) => t.id !== tabId);
