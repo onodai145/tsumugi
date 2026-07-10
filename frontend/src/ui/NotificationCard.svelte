@@ -44,7 +44,7 @@
     renote: "がRenote",
     quote: "が引用",
     reaction: "がリアクション",
-    pollEnded: "の投票が終了",
+    pollEnded: "投票が終了",
     receiveFollowRequest: "からフォローリクエスト",
     followRequestAccepted: "がフォローを承認",
     achievementEarned: "実績を獲得",
