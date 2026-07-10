@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ask } from "@tauri-apps/plugin-dialog";
   import type { Note } from "../bindings/tauri.gen";
   import Mfm from "../render/Mfm.svelte";
   import MediaGrid from "../render/MediaGrid.svelte";
@@ -79,9 +80,22 @@
   // 投票済み(multiple=falseは1択でもう投票不可)・期限切れなら投票不可。
   const pollExpired = $derived(!!inner.poll?.expiresAt && inner.poll.expiresAt * 1000 < Date.now());
   const pollAlreadyVoted = $derived(!inner.poll?.multiple && !!inner.poll?.choices.some((c) => c.isVoted));
-  function vote(choice: number) {
+  async function vote(choice: number) {
     if (!accountId || !inner.poll) return;
     if (pollExpired || pollAlreadyVoted || inner.poll.choices[choice].isVoted) return;
+    // 投票は取り消せない(Misskeyに取消APIが無い)ので、必ず確認してから送信する。
+    const text = inner.poll.choices[choice].text;
+    let yes: boolean;
+    try {
+      yes = await ask(`「${text}」に投票します。取り消せません。よろしいですか？`, {
+        title: "投票の確認",
+        kind: "warning",
+      });
+    } catch (e) {
+      app.reportError(e);
+      return;
+    }
+    if (!yes) return;
     app.votePoll(accountId, inner.id, choice);
   }
   function doRenote() {
