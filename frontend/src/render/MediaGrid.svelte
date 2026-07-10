@@ -41,8 +41,22 @@
 
   function onWheel(e: WheelEvent) {
     e.preventDefault();
-    const next = zoom * (1 - e.deltaY * 0.001);
-    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    const oldZoom = zoom;
+    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, oldZoom * (1 - e.deltaY * 0.001)));
+    if (newZoom === oldZoom) return;
+    // カーソル位置を基準にズームする: transform は translate(pan) scale(zoom) で
+    // transform-origin は要素中心(既定)なので、要素の現在の中心(rect中心)から見た
+    // カーソルのオフセットは zoom に対して不変(v = (mouse-中心)/zoom)。
+    // 同じ v が同じ画面位置に留まるように新しい pan を逆算する。
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    const factor = 1 - newZoom / oldZoom;
+    panX = panX + dx * factor;
+    panY = panY + dy * factor;
+    zoom = newZoom;
     if (zoom === MIN_ZOOM) {
       panX = 0;
       panY = 0;
@@ -59,6 +73,8 @@
 
   function onPointerdown(e: PointerEvent) {
     if (zoom <= MIN_ZOOM) return;
+    e.preventDefault(); // ブラウザ既定の画像ドラッグ(ゴースト画像)を止める。これが有効だと
+    // 自前のポインタベースのパンと衝突し、パンできたりできなかったりする。
     dragging = true;
     dragStart = { x: e.clientX, y: e.clientY, panX, panY };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -114,6 +130,8 @@
       style="transform: translate({panX}px, {panY}px) scale({zoom})"
       src={lightbox.url}
       alt={fileName(lightbox)}
+      draggable="false"
+      ondragstart={(e) => e.preventDefault()}
       onclick={(e) => e.stopPropagation()}
       onwheel={onWheel}
       ondblclick={onDblclick}
@@ -209,6 +227,8 @@
     object-fit: contain;
     cursor: zoom-in;
     touch-action: none;
+    -webkit-user-drag: none;
+    user-select: none;
   }
   .lightbox-img.zoomed {
     cursor: grab;
