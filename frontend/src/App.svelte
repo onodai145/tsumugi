@@ -7,7 +7,6 @@
   import AddColumnModal from "./ui/AddColumnModal.svelte";
   import ColumnSettings from "./ui/ColumnSettings.svelte";
   import ComposeBar from "./ui/ComposeBar.svelte";
-  import Compose from "./ui/Compose.svelte";
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
   import { buildKeymap, eventToChord } from "./lib/keymap";
@@ -71,7 +70,7 @@
       return;
     }
     // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
-    if (showAdd || showAddColumn || showSettings || app.compose) return;
+    if (showAdd || showAddColumn || showSettings) return;
     const action = keymap.get(eventToChord(e));
     if (!action) return;
     e.preventDefault();
@@ -129,9 +128,6 @@
     <Backstage />
   {/if}
 
-  {#if app.compose}
-    <Compose />
-  {/if}
   {#if showAddColumn}
     <AddColumnModal
       groupId={addTabGroupId}
@@ -160,7 +156,7 @@
   }
   .appbar {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     padding: 6px 10px;
     background: var(--surface-2);
