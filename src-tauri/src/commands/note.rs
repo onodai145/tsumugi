@@ -7,7 +7,7 @@ use crate::api::notes::{
     VisibilityInput,
 };
 use crate::domain::{DriveFile, EmojiDef, Note};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::state::AppState;
 use tauri::State;
 
@@ -83,6 +83,37 @@ pub async fn upload_file(
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
     api_upload_file(&state.http, &host, &token, &path).await
+}
+
+/// 添付ファイル(画像/動画等)を上限サイズまで超えていないか調べつつダウンロードし、
+/// 指定パスへ保存する（メディアビューワーの「保存」ボタン用）。
+/// ドライブの添付URLは公開直リンクのため、認証トークンは不要。
+const MAX_SAVE_FILE_BYTES: u64 = 200 * 1024 * 1024;
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: String) -> Result<()> {
+    let resp = state.http.get(&url).send().await?;
+    if !resp.status().is_success() {
+        return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
+    }
+    if resp.content_length().is_some_and(|len| len > MAX_SAVE_FILE_BYTES) {
+        return Err(Error::Invalid(format!(
+            "ファイルが大きすぎます（{}MB超）",
+            MAX_SAVE_FILE_BYTES / 1024 / 1024
+        )));
+    }
+    let bytes = resp.bytes().await?;
+    if bytes.len() as u64 > MAX_SAVE_FILE_BYTES {
+        return Err(Error::Invalid(format!(
+            "ファイルが大きすぎます（{}MB超）",
+            MAX_SAVE_FILE_BYTES / 1024 / 1024
+        )));
+    }
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| Error::Invalid(format!("cannot write file {path}: {e}")))?;
+    Ok(())
 }
 
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。

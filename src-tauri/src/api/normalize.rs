@@ -94,6 +94,8 @@ pub struct RawFile {
     pub url: String,
     #[serde(default)]
     pub thumbnail_url: Option<String>,
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -189,6 +191,7 @@ impl From<RawFile> for DriveFile {
             is_sensitive: f.is_sensitive,
             url: f.url,
             thumbnail_url: f.thumbnail_url,
+            name: f.name,
         }
     }
 }

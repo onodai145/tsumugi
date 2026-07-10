@@ -252,6 +252,7 @@ mod tests {
                 is_sensitive: false,
                 url: "http://x/f1".into(),
                 thumbnail_url: None,
+                name: "f1.png".into(),
             }],
             poll: None,
             tags: vec!["rust".into()],

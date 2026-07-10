@@ -94,6 +94,7 @@ mod tests {
                     is_sensitive: false,
                     url: "u".into(),
                     thumbnail_url: None,
+                    name: format!("{i}.png"),
                 })
                 .collect(),
             poll: None,
