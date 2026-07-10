@@ -947,13 +947,9 @@ class AppStore {
   openCompose(accountId: string, opts: { replyTo?: Note; quoteOf?: Note } = {}) {
     this.compose = { accountId, ...opts };
   }
-  closeCompose() {
-    this.compose = null;
-  }
 
   async postNote(accountId: string, draft: NoteDraft) {
     await unwrap(commands.postNote(accountId, draft));
-    this.compose = null;
     this.#log("success", "投稿しました");
   }
 
