@@ -131,7 +131,7 @@
   }
 </script>
 
-<div class="composebar">
+<div class="composebox">
   {#if replyTo || quoteOf}
     <div class="context">
       <span class="context-text">
@@ -141,39 +141,17 @@
     </div>
   {/if}
 
-  <div class="row">
-    <AccountSelect
-      bind:value={
-        () => accountId,
-        (v) => {
-          accountId = v;
-          accountTouched = true;
-        }
-      }
-      accounts={app.accounts}
-    />
-
-    <textarea
-      class="text"
-      rows="1"
-      placeholder="いまどうしてる？（Ctrl+Enter で投稿）"
-      bind:value={text}
-      bind:this={textarea}
-      onkeydown={onKey}
-    ></textarea>
-
-    <VisibilitySelect bind:value={visibility} />
-    <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}><ImagePlus size={16} /></button>
-    <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
-    <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
-    <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
-    <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
-    {#if err}<span class="err" title={err}>!</span>{/if}
-  </div>
-
   {#if useCw}
     <input class="cw-input" placeholder="内容警告 (CW)" bind:value={cw} />
   {/if}
+
+  <textarea
+    class="text"
+    placeholder="いまどうしてる？（Ctrl+Enter で投稿）"
+    bind:value={text}
+    bind:this={textarea}
+    onkeydown={onKey}
+  ></textarea>
 
   {#if attached.length > 0 || uploading}
     <div class="thumbs">
@@ -202,21 +180,43 @@
       </div>
     </div>
   {/if}
+
+  <div class="toolbar">
+    <div class="tools left">
+      <AccountSelect
+        bind:value={
+          () => accountId,
+          (v) => {
+            accountId = v;
+            accountTouched = true;
+          }
+        }
+        accounts={app.accounts}
+      />
+      <VisibilitySelect bind:value={visibility} />
+      <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}><ImagePlus size={16} /></button>
+      <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
+      <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
+      <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
+      {#if err}<span class="err" title={err}>!</span>{/if}
+    </div>
+    <div class="tools right">
+      <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
+    </div>
+  </div>
 </div>
 
 <style>
-  .composebar {
+  .composebox {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
     flex: 1;
     min-width: 0;
-    padding: 2px 0;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-1);
   }
   .context {
     display: flex;
@@ -224,7 +224,7 @@
     gap: 6px;
     font-size: 0.78rem;
     color: var(--text-dim);
-    background: var(--surface-1);
+    background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 4px 8px;
@@ -245,18 +245,18 @@
     cursor: pointer;
   }
   .text {
-    flex: 1;
-    min-width: 60px;
-    resize: none;
-    padding: 5px 8px;
+    width: 100%;
+    resize: vertical;
+    padding: 8px 10px;
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 6px;
     background: var(--surface-2);
     color: var(--text);
     font-family: inherit;
     font-size: 0.86rem;
-    line-height: 1.3;
-    max-height: 84px;
+    line-height: 1.4;
+    min-height: 90px;
+    box-sizing: border-box;
   }
   .cw-input,
   .poll-choice {
@@ -268,6 +268,7 @@
     color: var(--text);
     font-family: inherit;
     font-size: 0.84rem;
+    box-sizing: border-box;
   }
   .poll {
     display: flex;
@@ -322,6 +323,25 @@
     height: 14px;
     cursor: pointer;
   }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .tools.left {
+    flex: 1;
+    min-width: 0;
+  }
+  .tools.right {
+    flex: none;
+  }
   .icon {
     display: inline-flex;
     border: 1px solid var(--border);
@@ -363,8 +383,8 @@
     background: var(--accent);
     color: #fff;
     font-weight: 600;
-    border-radius: 4px;
-    padding: 5px 14px;
+    border-radius: 6px;
+    padding: 7px 20px;
     cursor: pointer;
     flex: none;
   }
