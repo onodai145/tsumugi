@@ -226,10 +226,6 @@
     gap: 4px;
     flex: 1;
     min-width: 0;
-    padding: 6px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-1);
   }
   .context {
     display: flex;
