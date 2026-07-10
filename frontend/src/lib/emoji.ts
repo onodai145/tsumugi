@@ -9,6 +9,18 @@ export function reactionEmoji(
   return { name: local, url: emojiMap[raw] ?? emojiMap[local] };
 }
 
+// 自インスタンスに存在しないカスタム絵文字のリアクション（:name@host: 形式でホストが
+// ローカルでないもの）か判定する。Unicode絵文字・自インスタンスの絵文字（:name:/:name@.:）は false。
+// 自インスタンスに無い絵文字は notes/reactions/create がエラーになるため、押せないようにする判定に使う。
+export function isRemoteCustomEmoji(key: string): boolean {
+  if (!key.startsWith(":")) return false;
+  const raw = key.replace(/^:|:$/g, "");
+  const at = raw.lastIndexOf("@");
+  if (at === -1) return false;
+  const host = raw.slice(at + 1);
+  return host !== "" && host !== ".";
+}
+
 // Unicode絵文字を画像化するファイル名部分。本家 packages/frontend-shared/js/emoji-base.ts を移植。
 // 画像自体は本家と同じ @misskey-dev/emoji-assets をビルド時に public/twemoji, public/fluent-emoji へ
 // 同梱しているため、インスタンスへの通信もCDNも使わずアプリ単体で解決できる。
