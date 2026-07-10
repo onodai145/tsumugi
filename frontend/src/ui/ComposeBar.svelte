@@ -20,9 +20,11 @@
   let useCw = $state(false);
   let visibility = $state<VisibilityInput>("public");
   let localOnly = $state(false);
+  const MAX_POLL_CHOICES = 10;
   let usePoll = $state(false);
   let pollChoices = $state<string[]>(["", ""]);
   let pollMultiple = $state(false);
+  let pollExpiresAt = $state(""); // datetime-local文字列。空="無期限"
   let attached = $state<DriveFile[]>([]);
   let uploading = $state(false);
   let busy = $state(false);
@@ -95,7 +97,14 @@
       cw: useCw && cw.trim() ? cw.trim() : null,
       visibility,
       fileIds: attached.map((f) => f.id),
-      poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt: null } : null,
+      poll:
+        usePoll && choices.length >= 2
+          ? {
+              choices,
+              multiple: pollMultiple,
+              expiresAt: pollExpiresAt ? new Date(pollExpiresAt).getTime() : null,
+            }
+          : null,
       replyId: replyTo?.id ?? null,
       renoteId: quoteOf?.id ?? null,
       localOnly,
@@ -109,6 +118,7 @@
       usePoll = false;
       pollChoices = ["", ""];
       pollMultiple = false;
+      pollExpiresAt = "";
       localOnly = false;
       attached = [];
       replyTo = undefined;
@@ -187,11 +197,31 @@
   {#if usePoll}
     <div class="poll">
       {#each pollChoices as _, i}
-        <input class="poll-choice" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
+        <div class="poll-choice-row">
+          <input class="poll-choice" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
+          <button
+            class="poll-choice-x"
+            title="この選択肢を削除"
+            disabled={pollChoices.length <= 2}
+            onclick={() => (pollChoices = pollChoices.filter((_, j) => j !== i))}
+          >
+            <X size={12} />
+          </button>
+        </div>
       {/each}
       <div class="poll-actions">
-        <button class="mini" onclick={() => (pollChoices = [...pollChoices, ""])}>＋選択肢</button>
+        <button
+          class="mini"
+          disabled={pollChoices.length >= MAX_POLL_CHOICES}
+          onclick={() => (pollChoices = [...pollChoices, ""])}
+        >
+          ＋選択肢
+        </button>
         <label><input type="checkbox" bind:checked={pollMultiple} /> 複数選択</label>
+        <label class="expires">
+          期限:
+          <input type="datetime-local" bind:value={pollExpiresAt} class="poll-expires" />
+        </label>
       </div>
     </div>
   {/if}
@@ -295,12 +325,54 @@
     flex-direction: column;
     gap: 5px;
   }
+  .poll-choice-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .poll-choice-row .poll-choice {
+    flex: 1;
+  }
+  .poll-choice-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 4px;
+  }
+  .poll-choice-x:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
   .poll-actions {
     display: flex;
     gap: 12px;
     align-items: center;
+    flex-wrap: wrap;
     font-size: 0.8rem;
     color: var(--text-dim);
+  }
+  .poll-actions .mini:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .expires {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .poll-expires {
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.78rem;
   }
   .thumbs {
     display: flex;
