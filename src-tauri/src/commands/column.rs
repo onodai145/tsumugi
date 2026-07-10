@@ -601,41 +601,54 @@ async fn fill_gap(
     let ctx = state.eval_context();
     let mute = state.mute.lock().unwrap().clone();
     let mut collected: Vec<Note> = Vec::new();
-    let mut until_id: Option<String> = None;
+
+    // ソースごとに独立した until_id カーソルと「既知ノートに追いついた/枯渇した」フラグを持つ。
+    // 複数ソースを1本の until_id で回すと、疎なソースの古い1件に引きずられて密なソース側の
+    // 途中が埋まらないまま打ち切られてしまうため、ソース単位で打ち切りを判定する。
+    let mut cursors: Vec<Option<String>> = vec![None; resolved.kinds.len()];
+    let mut done: Vec<bool> = vec![false; resolved.kinds.len()];
 
     for _ in 0..GAP_FILL_MAX_PAGES {
-        let mut page: Vec<Note> = Vec::new();
-        for k in &resolved.kinds {
-            if let Some((endpoint, body)) = k.rest_request(GAP_FILL_PAGE_SIZE, until_id.as_deref()) {
-                if let Ok(raw) = fetch_notes(&client, endpoint, &body).await {
-                    page.extend(raw);
-                }
-            }
-        }
-        if page.is_empty() {
+        if done.iter().all(|d| *d) || collected.len() as i32 >= limit {
             break;
         }
-        page.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-        let oldest_this_page = page.last().map(|n| n.id.clone());
-        let mut reached_known = false;
-        for n in page {
-            if n.id.as_str() <= newest_known_id {
-                reached_known = true;
+        let mut any_fetched = false;
+        for (i, k) in resolved.kinds.iter().enumerate() {
+            if done[i] {
                 continue;
             }
-            if resolved.filter.matches(&n, &ctx)
-                && !crate::filter::mute::is_muted(&n, &mute)
-                && !server_muted_note(state, account_id, &n)
-            {
-                collected.push(n);
+            let Some((endpoint, body)) = k.rest_request(GAP_FILL_PAGE_SIZE, cursors[i].as_deref())
+            else {
+                done[i] = true;
+                continue;
+            };
+            let Ok(mut page) = fetch_notes(&client, endpoint, &body).await else {
+                done[i] = true;
+                continue;
+            };
+            if page.is_empty() {
+                done[i] = true;
+                continue;
             }
+            any_fetched = true;
+            page.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+            let oldest_this_page = page.last().map(|n| n.id.clone());
+            for n in page {
+                if n.id.as_str() <= newest_known_id {
+                    done[i] = true;
+                    continue;
+                }
+                if resolved.filter.matches(&n, &ctx)
+                    && !crate::filter::mute::is_muted(&n, &mute)
+                    && !server_muted_note(state, account_id, &n)
+                {
+                    collected.push(n);
+                }
+            }
+            cursors[i] = oldest_this_page;
         }
-        if reached_known || collected.len() as i32 >= limit {
+        if !any_fetched {
             break;
-        }
-        match oldest_this_page {
-            Some(id) => until_id = Some(id),
-            None => break,
         }
     }
 
