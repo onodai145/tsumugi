@@ -72,6 +72,7 @@
   }
   .modal {
     width: min(640px, 94vw);
+    max-height: 84vh;
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -96,7 +97,8 @@
   }
   .body {
     display: flex;
-    min-height: 320px;
+    flex: 1;
+    min-height: 0;
   }
   .side {
     flex: none;
