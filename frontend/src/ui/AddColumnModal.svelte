@@ -185,6 +185,57 @@
       : { kind: "keywords", value: [] };
   }
 
+  // TQL文字列リテラル用エスケープ（\ と " のみ。本家パーサの読み方に合わせる）
+  function tqlStr(s: string): string {
+    return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+
+  // 現在の「簡単」モードの選択(ソース+フィルタ)から from/where 全文を組み立てる。
+  // notifications は from 節に対応ソースが無いため null（エキスパートモードでは表現できない）。
+  function sourceDsl(): string | null {
+    switch (sourceType) {
+      case "notifications":
+        return null;
+      case "list":
+        return listId ? `list(${tqlStr(listId)})` : null;
+      case "antenna":
+        return antennaId ? `antenna(${tqlStr(antennaId)})` : null;
+      case "channel":
+        return channelId ? `channel(${tqlStr(channelId)})` : null;
+      case "user": {
+        const acct = userAcct.trim() || editUserId;
+        return acct ? `user(${tqlStr(acct)})` : null;
+      }
+      case "tag": {
+        const t = tagText.trim().replace(/^#/, "");
+        return t ? `tag(${tqlStr(t)})` : null;
+      }
+      case "search":
+        return searchQuery.trim() ? `search(${tqlStr(searchQuery.trim())})` : null;
+      default:
+        return sourceType; // home/local/hybrid/global
+    }
+  }
+
+  function guidedToTql(): string {
+    const src = sourceDsl();
+    if (!src) return "";
+    return filterText.trim() ? `from ${src} where ${filterText.trim()}` : `from ${src}`;
+  }
+
+  // 簡単→エキスパートへ切替た時、まだ何も書いていなければ今の選択内容を反映する
+  // (ユーザが既にエキスパート欄へ書きかけている場合は上書きしない)。
+  function switchToExpert() {
+    uiMode = "expert";
+    if (!tqlText.trim()) {
+      const seeded = guidedToTql();
+      if (seeded) {
+        tqlText = seeded;
+        void onTqlInput();
+      }
+    }
+  }
+
   async function onFilterInput() {
     submitErr = null;
     if (!filterText.trim()) {
@@ -304,7 +355,7 @@
           type="button"
           class="seg-btn"
           class:active={uiMode === "expert"}
-          onclick={() => (uiMode = "expert")}
+          onclick={switchToExpert}
         >エキスパート(TQL)</button>
       </div>
     </div>
