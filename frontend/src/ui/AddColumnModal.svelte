@@ -44,6 +44,20 @@
   ];
 
   const k = edit?.kind;
+  // エキスパートモード: from/where全文を自分で書く(複数ソース対応)。ソース選択等のガイド付き
+  // フィールドは全て隠し、1つのテキストエリアのみ表示する。
+  let uiMode = $state<"guided" | "expert">(k?.type === "tql" ? "expert" : "guided");
+  let tqlText = $state(k?.type === "tql" && edit?.filter.kind === "tql" ? edit.filter.value : "");
+  let tqlErr = $state<string | null>(null);
+  async function onTqlInput() {
+    submitErr = null;
+    if (!tqlText.trim()) {
+      tqlErr = null;
+      return;
+    }
+    tqlErr = await app.validateTqlQuery(tqlText);
+  }
+
   let accountId = $state(edit?.accountId ?? app.defaultAccountId());
   let sourceType = $state<SrcType>((k?.type as SrcType) ?? "home");
   let searchQuery = $state(k?.type === "search" ? k.query : "");
@@ -195,6 +209,37 @@
       submitErr = "アカウントを選択してください";
       return;
     }
+    if (uiMode === "expert") {
+      if (tqlErr) return;
+      if (!tqlText.trim()) {
+        submitErr = "from ... where ... の形でクエリを入力してください";
+        return;
+      }
+      busy = true;
+      try {
+        const kind: ColumnKind = { type: "tql" };
+        const filter: FilterQuery = { kind: "tql", value: tqlText.trim() };
+        if (isEdit && edit) {
+          await app.updateColumn(edit.id, kind, filter, name);
+          await app.setColumnNotify(edit.id, notifyDesktop, notifySound, notifySoundChoice);
+        } else {
+          const tab = await app.addColumn(accountId, kind, filter, groupId ?? undefined, name);
+          if (
+            notifyDesktop !== tab.notifyDesktop ||
+            notifySound !== tab.notifySound ||
+            notifySoundChoice !== tab.notifySoundChoice
+          ) {
+            await app.setColumnNotify(tab.id, notifyDesktop, notifySound, notifySoundChoice);
+          }
+        }
+        onclose();
+      } catch (e) {
+        submitErr = String(e);
+      } finally {
+        busy = false;
+      }
+      return;
+    }
     if (filterErr) return;
     busy = true;
     try {
@@ -247,6 +292,24 @@
     </header>
 
     <div class="field">
+      <span>入力方法</span>
+      <div class="seg">
+        <button
+          type="button"
+          class="seg-btn"
+          class:active={uiMode === "guided"}
+          onclick={() => (uiMode = "guided")}
+        >簡単</button>
+        <button
+          type="button"
+          class="seg-btn"
+          class:active={uiMode === "expert"}
+          onclick={() => (uiMode = "expert")}
+        >エキスパート(TQL)</button>
+      </div>
+    </div>
+
+    <div class="field">
       <span>アカウント{isEdit ? "（変更不可）" : ""}</span>
       <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel disabled={isEdit} />
     </div>
@@ -256,6 +319,28 @@
       <input placeholder={edit?.title ?? "自動でつけます"} bind:value={name} />
     </label>
 
+    {#if uiMode === "expert"}
+      <label class="field">
+        <span>from ... where ...（複数ソースはカンマ区切り。例: from home, list("id") where has_files）</span>
+        <textarea
+          class="tql-input"
+          rows="4"
+          placeholder={'from home, list("...") where has_files && !cw'}
+          bind:value={tqlText}
+          oninput={onTqlInput}
+          class:invalid={!!tqlErr}
+        ></textarea>
+      </label>
+      {#if tqlErr}<p class="err">TQLエラー: {tqlErr}</p>{/if}
+      <p class="hint">
+        ソース: <code>home</code> / <code>local</code> / <code>hybrid</code> / <code>global</code> /
+        <code>list("id")</code> / <code>antenna("id")</code> / <code>channel("id")</code> /
+        <code>user("@acct")</code> / <code>tag("name")</code> / <code>search("q")</code> /
+        <code>cache</code>（ローカルキャッシュ検索）。list/antenna/channel は生IDが必要です。
+      </p>
+    {/if}
+
+    {#if uiMode === "guided"}
     <div class="field">
       <span>ソース</span>
       <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} />
@@ -366,9 +451,37 @@
       </p>
       {#if filterErr}<p class="err">TQLエラー: {filterErr}</p>{/if}
     {/if}
+    {/if}
+
+    {#if uiMode === "expert"}
+      <div class="field">
+        <span>このカラムの通知</span>
+        <label class="check-row"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
+        <label class="check-row"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
+      </div>
+      {#if notifySound}
+        <div class="field">
+          <span>通知音の種類</span>
+          <Dropdown bind:value={soundMode} options={soundModeOptions} />
+          {#if soundMode === "custom"}
+            <div class="bg-row">
+              <button type="button" class="mini-btn" disabled={pickingSound} onclick={pickSound}>
+                {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
+              </button>
+              {#if notifySoundChoice.startsWith("data:")}
+                <button type="button" class="mini-btn" onclick={() => playNotifySound(notifySoundChoice)}>試聴</button>
+              {/if}
+            </div>
+          {:else if soundMode !== "inherit"}
+            <button type="button" class="mini-btn" onclick={() => playNotifySound(soundMode)}>試聴</button>
+          {/if}
+        </div>
+      {/if}
+      <p class="hint">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
+    {/if}
 
     <div class="actions">
-      <button class="submit" disabled={busy || !!filterErr} onclick={submit}>
+      <button class="submit" disabled={busy || !!filterErr || !!tqlErr} onclick={submit}>
         {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
       </button>
     </div>
@@ -432,6 +545,42 @@
     font-family: inherit;
   }
   input.invalid {
+    border-color: #ef4444;
+  }
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    width: fit-content;
+  }
+  .seg-btn {
+    padding: 6px 14px;
+    border: none;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.82rem;
+    border-right: 1px solid var(--border);
+  }
+  .seg-btn:last-child {
+    border-right: none;
+  }
+  .seg-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  .tql-input {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", monospace;
+    font-size: 0.82rem;
+    resize: vertical;
+  }
+  .tql-input.invalid {
     border-color: #ef4444;
   }
   .hint {

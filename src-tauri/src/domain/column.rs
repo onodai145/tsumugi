@@ -63,6 +63,9 @@ pub enum ColumnKind {
     Tag {
         tag: String,
     },
+    /// エキスパートモード: TQL の `from <sources> where <expr>` 全文で複数ソースを合成する。
+    /// 実ソースは filter(FilterQuery::Tql の全文)を都度パースして得る（kind 自体に持たない）。
+    Tql,
 }
 
 impl ColumnKind {
@@ -119,7 +122,7 @@ impl ColumnKind {
                 body["tag"] = json!(tag);
                 ("notes/search-by-tag", body)
             }
-            ColumnKind::Notifications => return None,
+            ColumnKind::Notifications | ColumnKind::Tql => return None,
         })
     }
 }

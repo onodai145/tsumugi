@@ -9,7 +9,7 @@ use crate::domain::{
     Column, ColumnGroup, ColumnKind, FilterQuery, Note, Notification, SourceItem, User, UserList,
 };
 use crate::error::{Error, Result};
-use crate::filter::CompiledFilter;
+use crate::filter::{ast, parser, sql, CompiledFilter};
 use crate::state::AppState;
 use serde::Serialize;
 use specta::Type;
@@ -41,10 +41,11 @@ pub async fn add_column(
 ) -> Result<OpenedColumn> {
     let (host, token) = state.host_token(&account_id)?;
     let is_notif = matches!(kind, ColumnKind::Notifications);
-    if !is_notif && kind.rest_request(1, None).is_none() {
-        return Err(Error::Invalid("このソースはまだ未対応です".into()));
-    }
-    let compiled = CompiledFilter::compile(&filter).map_err(Error::Invalid)?;
+    let resolved = if is_notif {
+        None
+    } else {
+        Some(resolve_sources(&state, &account_id, &kind, &filter).await?)
+    };
 
     // 所属グループを決める（既存 or 新規）
     let (group, tab_order) = match group_id {
@@ -95,7 +96,7 @@ pub async fn add_column(
     };
     state.settings.upsert_column(&column)?;
 
-    let (notes, notifications) = open_stream_and_fetch(&app, &state, &column, compiled, host, token).await?;
+    let (notes, notifications) = open_stream_and_fetch(&app, &state, &column, resolved, host, token).await?;
     Ok(OpenedColumn {
         column,
         group,
@@ -118,10 +119,11 @@ pub async fn update_column(
 ) -> Result<OpenedColumn> {
     let mut column = load_column(&state, &column_id)?;
     let is_notif = matches!(kind, ColumnKind::Notifications);
-    if !is_notif && kind.rest_request(1, None).is_none() {
-        return Err(Error::Invalid("このソースはまだ未対応です".into()));
-    }
-    let compiled = CompiledFilter::compile(&filter).map_err(Error::Invalid)?;
+    let resolved = if is_notif {
+        None
+    } else {
+        Some(resolve_sources(&state, &column.account_id, &kind, &filter).await?)
+    };
 
     column.kind = kind;
     column.filter = filter;
@@ -144,7 +146,7 @@ pub async fn update_column(
         .ok_or_else(|| Error::Invalid(format!("unknown group: {}", column.group_id)))?;
     let (host, token) = state.host_token(&column.account_id)?;
     let (notes, notifications) =
-        open_stream_and_fetch(&app, &state, &column, compiled, host, token).await?;
+        open_stream_and_fetch(&app, &state, &column, resolved, host, token).await?;
 
     Ok(OpenedColumn {
         column,
@@ -170,10 +172,15 @@ pub async fn resume_column(
         .find(|g| g.id == column.group_id)
         .ok_or_else(|| Error::Invalid(format!("unknown group: {}", column.group_id)))?;
     let (host, token) = state.host_token(&column.account_id)?;
-    let compiled = CompiledFilter::compile(&column.filter).map_err(Error::Invalid)?;
+    let is_notif = matches!(column.kind, ColumnKind::Notifications);
+    let resolved = if is_notif {
+        None
+    } else {
+        Some(resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?)
+    };
 
     // 通知以外はキャッシュ優先で即時表示（空なら REST）
-    let notes = if matches!(column.kind, ColumnKind::Notifications) {
+    let notes = if is_notif {
         vec![]
     } else {
         let cached = state.settings.load_cached(&column.id, INITIAL_LIMIT)?;
@@ -181,22 +188,11 @@ pub async fn resume_column(
     };
 
     let (fresh_notes, notifications) = if notes.is_empty() {
-        open_stream_and_fetch(&app, &state, &column, compiled, host, token).await?
+        open_stream_and_fetch(&app, &state, &column, resolved, host, token).await?
     } else {
         // キャッシュがある: ストリームだけ張り直す
-        if let Some((channel, params)) = column.kind.stream_request() {
-            state.connections.open_channel(
-                app,
-                column.id.clone(),
-                column.account_id.clone(),
-                host,
-                token,
-                channel,
-                params,
-                compiled,
-                state.eval_context(),
-            );
-        }
+        let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
+        open_streams_only(&app, &state, &column, &resolved, host, token);
         (notes, vec![])
     };
 
@@ -231,8 +227,8 @@ pub async fn fetch_backfill(
     until_id: String,
 ) -> Result<Vec<Note>> {
     let column = load_column(&state, &column_id)?;
-    let compiled = CompiledFilter::compile(&column.filter).map_err(Error::Invalid)?;
-    let notes = fetch_and_filter(&state, &column.account_id, &column, &compiled, Some(&until_id)).await?;
+    let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
+    let notes = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
     state.settings.cache_notes(&column.id, &notes)?;
     Ok(notes)
 }
@@ -329,6 +325,18 @@ pub async fn validate_filter(filter: FilterQuery) -> Result<()> {
     CompiledFilter::compile(&filter).map(|_| ()).map_err(Error::Invalid)
 }
 
+/// エキスパートモード用: `from <sources> where <expr>` 全文の構文検証のみ行う。
+/// list/antenna/channel の id 存在確認や user acct 解決は行わない（実際の解決はカラム作成時）。
+#[tauri::command]
+#[specta::specta]
+pub async fn validate_tql_query(text: String) -> Result<()> {
+    let q = parser::parse(&text).map_err(Error::Invalid)?;
+    if q.sources.is_empty() {
+        return Err(Error::Invalid("from 節に1つ以上ソースが必要です".into()));
+    }
+    Ok(())
+}
+
 /// ユーザリスト一覧（List タブ作成用）。
 #[tauri::command]
 #[specta::specta]
@@ -413,12 +421,84 @@ fn load_column(state: &AppState, column_id: &str) -> Result<Column> {
         .ok_or_else(|| Error::Invalid(format!("unknown column: {column_id}")))
 }
 
+/// カラムの実ソース群。単一ソースのカラムは kinds に1件、TQLエキスパートモードの
+/// カラムは `from` 節に列挙されたソース数だけ入る（cache は kinds に含めず use_cache で表す）。
+struct ResolvedSources {
+    kinds: Vec<ColumnKind>,
+    use_cache: bool,
+    filter: CompiledFilter,
+}
+
+/// kind/filter からこのカラムの実ソース群を解決する。単一ソースのカラムは従来どおり
+/// `CompiledFilter::compile`(where述語のみ)。`ColumnKind::Tql` は filter 全文
+/// (`from <sources> where <expr>`)をパースし、各ソースを解決する（User は acct→userId 解決の
+/// ため非同期）。
+async fn resolve_sources(
+    state: &AppState,
+    account_id: &str,
+    kind: &ColumnKind,
+    filter: &FilterQuery,
+) -> Result<ResolvedSources> {
+    if !matches!(kind, ColumnKind::Tql) {
+        if kind.rest_request(1, None).is_none() {
+            return Err(Error::Invalid("このソースはまだ未対応です".into()));
+        }
+        let compiled = CompiledFilter::compile(filter).map_err(Error::Invalid)?;
+        return Ok(ResolvedSources {
+            kinds: vec![kind.clone()],
+            use_cache: false,
+            filter: compiled,
+        });
+    }
+
+    let FilterQuery::Tql(text) = filter else {
+        return Err(Error::Invalid("TQLカラムには from 節を含むクエリが必要です".into()));
+    };
+    let q = parser::parse(text).map_err(Error::Invalid)?;
+    if q.sources.is_empty() {
+        return Err(Error::Invalid("from 節に1つ以上ソースが必要です".into()));
+    }
+
+    let mut kinds = Vec::new();
+    let mut use_cache = false;
+    for s in &q.sources {
+        match s {
+            ast::Source::Cache => use_cache = true,
+            ast::Source::Mentions => {
+                return Err(Error::Invalid("mentions ソースは現在未対応です".into()))
+            }
+            ast::Source::User(acct) => {
+                let client = state.client_for(account_id)?;
+                let u = resolve_user(&client, acct).await?;
+                kinds.push(ColumnKind::User { user_id: u.id });
+            }
+            ast::Source::Home => kinds.push(ColumnKind::Home),
+            ast::Source::Local => kinds.push(ColumnKind::Local),
+            ast::Source::Hybrid => kinds.push(ColumnKind::Hybrid),
+            ast::Source::Global => kinds.push(ColumnKind::Global),
+            ast::Source::List(id) => kinds.push(ColumnKind::List { list_id: id.clone() }),
+            ast::Source::Antenna(id) => kinds.push(ColumnKind::Antenna { antenna_id: id.clone() }),
+            ast::Source::Channel(id) => kinds.push(ColumnKind::Channel { channel_id: id.clone() }),
+            ast::Source::Tag(t) => kinds.push(ColumnKind::Tag { tag: t.clone() }),
+            ast::Source::Search(query) => kinds.push(ColumnKind::Search { query: query.clone() }),
+        }
+    }
+    if kinds.is_empty() && !use_cache {
+        return Err(Error::Invalid("有効なソースがありません".into()));
+    }
+    let filter = match q.predicate {
+        Some(expr) => CompiledFilter::Tql(expr),
+        None => CompiledFilter::PassAll,
+    };
+    Ok(ResolvedSources { kinds, use_cache, filter })
+}
+
 /// タブのストリームを開き、初期ページ(ノート or 通知)を取得する。
 async fn open_stream_and_fetch(
     app: &AppHandle,
     state: &AppState,
     column: &Column,
-    compiled: CompiledFilter,
+    resolved: Option<ResolvedSources>,
     host: String,
     token: String,
 ) -> Result<(Vec<Note>, Vec<Notification>)> {
@@ -436,47 +516,98 @@ async fn open_stream_and_fetch(
         return Ok((vec![], notifications));
     }
 
-    let notes = fetch_and_filter(state, &column.account_id, column, &compiled, None).await?;
+    let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
+    let notes = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
     state.settings.cache_notes(&column.id, &notes)?;
-    if let Some((channel, params)) = column.kind.stream_request() {
-        state.connections.open_channel(
-            app.clone(),
-            column.id.clone(),
-            column.account_id.clone(),
-            host,
-            token,
-            channel,
-            params,
-            compiled,
-            state.eval_context(),
-        );
-    }
+    open_streams_only(app, state, column, &resolved, host, token);
     Ok((notes, vec![]))
 }
 
-async fn fetch_and_filter(
+/// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
+/// 複数ソースは column_id を共有しつつ sub_key を分けて同一カラムへ多重購読させる。
+fn open_streams_only(
+    app: &AppHandle,
+    state: &AppState,
+    column: &Column,
+    resolved: &ResolvedSources,
+    host: String,
+    token: String,
+) {
+    for (i, k) in resolved.kinds.iter().enumerate() {
+        if let Some((channel, params)) = k.stream_request() {
+            state.connections.open_channel(
+                app.clone(),
+                format!("{}#{}", column.id, i),
+                column.id.clone(),
+                column.account_id.clone(),
+                host.clone(),
+                token.clone(),
+                channel,
+                params,
+                resolved.filter.clone(),
+                state.eval_context(),
+            );
+        }
+    }
+}
+
+/// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
+/// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
+/// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
+async fn fetch_and_filter_multi(
     state: &AppState,
     account_id: &str,
-    column: &Column,
-    compiled: &CompiledFilter,
+    resolved: &ResolvedSources,
     until_id: Option<&str>,
 ) -> Result<Vec<Note>> {
-    let (endpoint, body) = column
-        .kind
-        .rest_request(INITIAL_LIMIT, until_id)
-        .ok_or_else(|| Error::Invalid("このソースはまだ未対応です".into()))?;
-    let client = state.client_for(account_id)?;
-    let raw = fetch_notes(&client, endpoint, &body).await?;
+    let mut all: Vec<Note> = Vec::new();
+
+    if !resolved.kinds.is_empty() {
+        let client = state.client_for(account_id)?;
+        for k in &resolved.kinds {
+            if let Some((endpoint, body)) = k.rest_request(INITIAL_LIMIT, until_id) {
+                if let Ok(raw) = fetch_notes(&client, endpoint, &body).await {
+                    all.extend(raw);
+                }
+            }
+        }
+    }
+
+    if resolved.use_cache {
+        let sql_ctx = sql::SqlCtx {
+            my_ids: state.eval_context().my_user_ids.into_iter().collect(),
+            following_ids: None,
+        };
+        let expr = match &resolved.filter {
+            CompiledFilter::Tql(e) => Some(e),
+            _ => None,
+        };
+        let where_sql = match expr {
+            Some(e) => sql::build_where(e, &sql_ctx).map_err(Error::Invalid)?,
+            None => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
+        };
+        if let Ok(cached) = state.settings.search_cache(&where_sql, until_id, INITIAL_LIMIT) {
+            all.extend(cached);
+        }
+    }
+
     let ctx = state.eval_context();
     let mute = state.mute.lock().unwrap().clone();
-    Ok(raw
+    let mut filtered: Vec<Note> = all
         .into_iter()
         .filter(|n| {
-            compiled.matches(n, &ctx)
+            resolved.filter.matches(n, &ctx)
                 && !crate::filter::mute::is_muted(n, &mute)
                 && !server_muted_note(state, account_id, n)
         })
-        .collect())
+        .collect();
+
+    // 複数ソースに同じノートが跨る場合の重複除去 + created_at 降順ソート + limit へ切り詰め
+    let mut seen = std::collections::HashSet::new();
+    filtered.retain(|n| seen.insert(n.id.clone()));
+    filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    filtered.truncate(INITIAL_LIMIT as usize);
+    Ok(filtered)
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。

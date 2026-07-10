@@ -50,6 +50,11 @@ export const commands = {
 	uncaptureNotes: (columnId: string, noteIds: string[]) => typedError<null, Error>(__TAURI_INVOKE("uncapture_notes", { columnId, noteIds })),
 	/**  フィルタ（TQL/キーワード）の妥当性検証。 */
 	validateFilter: (filter: FilterQuery) => typedError<null, Error>(__TAURI_INVOKE("validate_filter", { filter })),
+	/**
+	 *  エキスパートモード用: `from <sources> where <expr>` 全文の構文検証のみ行う。
+	 *  list/antenna/channel の id 存在確認や user acct 解決は行わない（実際の解決はカラム作成時）。
+	 */
+	validateTqlQuery: (text: string) => typedError<null, Error>(__TAURI_INVOKE("validate_tql_query", { text })),
 	/**  ユーザリスト一覧（List タブ作成用）。 */
 	listUserLists: (accountId: string) => typedError<UserList[], Error>(__TAURI_INVOKE("list_user_lists", { accountId })),
 	/**  アンテナ一覧（Antenna タブ作成用）。 */
@@ -170,7 +175,12 @@ export type ColumnGroup = {
 };
 
 /**  設計書§8.2 の MVP スコープ。Antenna/Channel/User/Tag/Cache は将来拡張（TQL §2）。 */
-export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; listId: string } | { type: "search"; query: string } | { type: "antenna"; antennaId: string } | { type: "channel"; channelId: string } | { type: "user"; userId: string } | { type: "tag"; tag: string };
+export type ColumnKind = { type: "home" } | { type: "local" } | { type: "global" } | { type: "hybrid" } | { type: "notifications" } | { type: "list"; listId: string } | { type: "search"; query: string } | { type: "antenna"; antennaId: string } | { type: "channel"; channelId: string } | { type: "user"; userId: string } | { type: "tag"; tag: string } | 
+/**
+ *  エキスパートモード: TQL の `from <sources> where <expr>` 全文で複数ソースを合成する。
+ *  実ソースは filter(FilterQuery::Tql の全文)を都度パースして得る（kind 自体に持たない）。
+ */
+{ type: "tql" };
 
 /**  カラムに新規ノートを追加する（フィルタ通過済み）。 */
 export type ColumnNote = {

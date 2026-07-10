@@ -16,7 +16,8 @@ pub use column::{
     add_column, capture_notes, close_column, fetch_backfill, fetch_notifications_backfill,
     list_antennas, list_channels, list_columns, list_groups, list_user_lists, move_tab,
     rename_column, reorder_groups, resolve_user_acct, resume_column, set_group_auto,
-    set_group_width, uncapture_notes, update_column, validate_filter, OpenedColumn,
+    set_group_width, uncapture_notes, update_column, validate_filter, validate_tql_query,
+    OpenedColumn,
 };
 #[allow(unused_imports)]
 pub use note::{

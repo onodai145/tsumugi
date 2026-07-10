@@ -693,6 +693,13 @@ class AppStore {
     return r.status === "ok" ? null : formatError(r.error);
   }
 
+  /// エキスパートモード(TQL複数ソース)の `from ... where ...` 全文の構文検証のみ。
+  /// list/antenna/channel の id 存在確認や user acct 解決は行わない。
+  async validateTqlQuery(text: string): Promise<string | null> {
+    const r = await commands.validateTqlQuery(text);
+    return r.status === "ok" ? null : formatError(r.error);
+  }
+
   async fetchUserLists(accountId: string) {
     return await unwrap(commands.listUserLists(accountId));
   }
@@ -1151,5 +1158,7 @@ export function kindLabel(kind: ColumnKind): string {
       return "User";
     case "tag":
       return `#${kind.tag}`;
+    case "tql":
+      return "TQL";
   }
 }

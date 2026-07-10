@@ -62,14 +62,17 @@ impl StreamMode {
 
 /// アカウント接続タスクへ外から送る指示。
 enum AccountCommand {
-    /// チャンネル(カラム)を購読に加える。同じ column_id があれば張り替える。
+    /// チャンネルを購読に加える。同じ sub_key があれば張り替える。
+    /// sub_key は1カラム内で複数チャンネルを同時購読する(TQL複数ソース)ための識別子。
+    /// 単一ソースのカラムは sub_key == column_id を渡す。
     AddChannel {
+        sub_key: String,
         column_id: String,
         channel: String,
         params: Value,
         mode: StreamMode,
     },
-    /// チャンネル(カラム)を購読から外す。
+    /// そのカラムに属する購読を全て外す。
     RemoveChannel { column_id: String },
     /// 表示中ノートをキャプチャ購読する。
     Capture {
@@ -98,12 +101,14 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
-    /// ノートを流すチャンネル(カラム)を開く（フィルタ適用）。
-    /// 同じ account の WebSocket が無ければ張り、あれば相乗りする。
+    /// ノートを流すチャンネルを開く（フィルタ適用）。同じ account の WebSocket が無ければ
+    /// 張り、あれば相乗りする。`sub_key` は1カラム内の複数チャンネル購読(TQL複数ソース)を
+    /// 区別する識別子。単一ソースのカラムは `sub_key == column_id` を渡せばよい。
     #[allow(clippy::too_many_arguments)]
     pub fn open_channel(
         &self,
         app: AppHandle,
+        sub_key: String,
         column_id: String,
         account_id: String,
         host: String,
@@ -120,6 +125,7 @@ impl ConnectionManager {
         };
         self.add_channel(
             app,
+            sub_key,
             column_id,
             account_id,
             host,
@@ -144,6 +150,7 @@ impl ConnectionManager {
         };
         self.add_channel(
             app,
+            column_id.clone(),
             column_id,
             account_id,
             host,
@@ -158,6 +165,7 @@ impl ConnectionManager {
     fn add_channel(
         &self,
         app: AppHandle,
+        sub_key: String,
         column_id: String,
         account_id: String,
         host: String,
@@ -176,6 +184,7 @@ impl ConnectionManager {
             spawn_account(app, account_id.clone(), host, token)
         });
         let _ = ctl.cmd.try_send(AccountCommand::AddChannel {
+            sub_key,
             column_id,
             channel,
             params,
@@ -267,6 +276,8 @@ fn spawn_account(
 /// 購読中の 1 チャンネル(=1カラム)。sub_id は接続ごとに振り直す。
 struct ChannelSub {
     sub_id: String,
+    /// このチャンネル購読が属するカラム（TQL複数ソースでは複数の ChannelSub が同じ column_id を持つ）
+    column_id: String,
     channel: String,
     params: Value,
     mode: StreamMode,
@@ -385,8 +396,8 @@ async fn run_account(
     mut cancel: watch::Receiver<bool>,
     mut cmd_rx: mpsc::Receiver<AccountCommand>,
 ) {
-    let mut subs: HashMap<String, ChannelSub> = HashMap::new();
-    let mut sub_index: HashMap<String, String> = HashMap::new(); // sub_id -> column_id
+    let mut subs: HashMap<String, ChannelSub> = HashMap::new(); // sub_key -> ChannelSub
+    let mut sub_index: HashMap<String, String> = HashMap::new(); // sub_id -> sub_key
     let mut captures = CaptureSet::new(CAPTURE_CAP);
     let mut backoff = BACKOFF_START;
 
@@ -465,9 +476,9 @@ async fn connect_and_run(
 
     // 全チャンネルを（新しい sub_id で）再購読する。
     sub_index.clear();
-    for (column_id, sub) in subs.iter_mut() {
+    for (sub_key, sub) in subs.iter_mut() {
         sub.sub_id = uuid::Uuid::new_v4().to_string();
-        sub_index.insert(sub.sub_id.clone(), column_id.clone());
+        sub_index.insert(sub.sub_id.clone(), sub_key.clone());
         if write
             .send(Message::Text(
                 protocol::connect(&sub.channel, &sub.sub_id, sub.params.clone()).into(),
@@ -497,21 +508,19 @@ async fn connect_and_run(
             }
             cmd = cmd_rx.recv() => {
                 match cmd {
-                    Some(AccountCommand::AddChannel { column_id, channel, params, mode }) => {
-                        // 既存を張り替える場合は先に外す
-                        if let Some(old) = subs.remove(&column_id) {
+                    Some(AccountCommand::AddChannel { sub_key, column_id, channel, params, mode }) => {
+                        // 既存を張り替える場合は先に外す（同じ sub_key のみ。他ソースには影響しない）
+                        if let Some(old) = subs.remove(&sub_key) {
                             sub_index.remove(&old.sub_id);
                             let _ = write.send(Message::Text(protocol::disconnect(&old.sub_id).into())).await;
-                            for nid in captures.remove_column(&column_id) {
-                                let _ = write.send(Message::Text(protocol::unsub_note(&nid).into())).await;
-                            }
                         }
                         // 送信前に subs へ登録しておく: send が失敗しても reconnect ループが
                         // subs を走査して再購読するので、このカラムを失わずに済む。
                         let sub_id = uuid::Uuid::new_v4().to_string();
-                        sub_index.insert(sub_id.clone(), column_id.clone());
-                        subs.insert(column_id.clone(), ChannelSub {
+                        sub_index.insert(sub_id.clone(), sub_key.clone());
+                        subs.insert(sub_key, ChannelSub {
                             sub_id: sub_id.clone(),
+                            column_id: column_id.clone(),
                             channel: channel.clone(),
                             params: params.clone(),
                             mode,
@@ -527,12 +536,20 @@ async fn connect_and_run(
                         emit_state(app, &column_id, ConnectionState::Connected);
                     }
                     Some(AccountCommand::RemoveChannel { column_id }) => {
-                        if let Some(sub) = subs.remove(&column_id) {
-                            sub_index.remove(&sub.sub_id);
-                            let _ = write.send(Message::Text(protocol::disconnect(&sub.sub_id).into())).await;
-                            for nid in captures.remove_column(&column_id) {
-                                let _ = write.send(Message::Text(protocol::unsub_note(&nid).into())).await;
+                        // そのカラムに属する購読(TQL複数ソースなら複数)を全て外す
+                        let dead: Vec<String> = subs
+                            .iter()
+                            .filter(|(_, s)| s.column_id == column_id)
+                            .map(|(k, _)| k.clone())
+                            .collect();
+                        for key in dead {
+                            if let Some(sub) = subs.remove(&key) {
+                                sub_index.remove(&sub.sub_id);
+                                let _ = write.send(Message::Text(protocol::disconnect(&sub.sub_id).into())).await;
                             }
+                        }
+                        for nid in captures.remove_column(&column_id) {
+                            let _ = write.send(Message::Text(protocol::unsub_note(&nid).into())).await;
                         }
                     }
                     Some(AccountCommand::Capture { column_id, note_ids }) => {
@@ -610,12 +627,13 @@ fn handle_text(
 ) -> HandleResult {
     match protocol::parse_incoming(text) {
         Incoming::ChannelNote { channel_id, note } => {
-            let Some(column_id) = sub_index.get(&channel_id) else {
+            let Some(sub_key) = sub_index.get(&channel_id) else {
                 return HandleResult::None;
             };
-            let Some(sub) = subs.get_mut(column_id) else {
+            let Some(sub) = subs.get_mut(sub_key) else {
                 return HandleResult::None;
             };
+            let column_id = sub.column_id.clone();
             let StreamMode::Notes { account_id, filter, ctx } = &sub.mode else {
                 return HandleResult::None;
             };
@@ -635,7 +653,7 @@ fn handle_text(
                 if is_server_muted_note(&state, account_id, &normalized) {
                     return HandleResult::None;
                 }
-                let _ = state.settings.cache_note(column_id, &normalized);
+                let _ = state.settings.cache_note(&column_id, &normalized);
             }
             let _ = ColumnNote {
                 column_id: column_id.clone(),
@@ -643,17 +661,18 @@ fn handle_text(
             }
             .emit(app);
             HandleResult::CaptureNote {
-                column_id: column_id.clone(),
+                column_id,
                 note_id: id,
             }
         }
         Incoming::ChannelNotification { channel_id, notification } => {
-            let Some(column_id) = sub_index.get(&channel_id) else {
+            let Some(sub_key) = sub_index.get(&channel_id) else {
                 return HandleResult::None;
             };
-            let Some(sub) = subs.get_mut(column_id) else {
+            let Some(sub) = subs.get_mut(sub_key) else {
                 return HandleResult::None;
             };
+            let column_id = sub.column_id.clone();
             if !sub.dedup.accept(&notification.id) {
                 return HandleResult::None;
             }
@@ -732,8 +751,12 @@ fn map_note_update(kind: &str, body: &Value) -> Option<(NoteUpdate, Option<Strin
 
 /// 指定アカウントの全カラムへ接続状態を通知する。
 fn emit_state_all(app: &AppHandle, subs: &HashMap<String, ChannelSub>, state: ConnectionState) {
-    for column_id in subs.keys() {
-        emit_state(app, column_id, state);
+    // TQL複数ソースでは複数の ChannelSub が同じ column_id を持つため重複排除する
+    let mut seen = HashSet::new();
+    for sub in subs.values() {
+        if seen.insert(sub.column_id.as_str()) {
+            emit_state(app, &sub.column_id, state);
+        }
     }
 }
 
