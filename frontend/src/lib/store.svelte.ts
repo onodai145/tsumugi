@@ -220,6 +220,10 @@ class AppStore {
   clearLogs() {
     this.logs = [];
   }
+  /// store の非同期フロー外(単発の子コンポーネント操作等)から失敗を報告する共通口。
+  reportError(e: unknown) {
+    this.#fail(e);
+  }
 
   #allTabs(): TabView[] {
     return this.groups.flatMap((g) => g.tabs);

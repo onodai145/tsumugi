@@ -12,6 +12,7 @@
       "allow": [{ "url": "https://*" }, { "url": "http://*" }]
     },
     "dialog:allow-open",
+    "dialog:allow-save",
     "notification:default"
   ]
 }
