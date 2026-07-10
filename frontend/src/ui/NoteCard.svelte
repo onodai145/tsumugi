@@ -9,7 +9,7 @@
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
-  import { reactionEmoji } from "../lib/emoji";
+  import { reactionEmoji, isRemoteCustomEmoji } from "../lib/emoji";
   import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail } from "@lucide/svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
@@ -212,7 +212,8 @@
             <button
               class="reaction"
               class:mine={inner.myReaction === key}
-              disabled={!accountId}
+              disabled={!accountId || isRemoteCustomEmoji(key)}
+              title={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
               onclick={() => react(key)}
             >
               {#if key.startsWith(":")}
@@ -417,6 +418,7 @@
   }
   .reaction:disabled {
     cursor: default;
+    opacity: 0.6;
   }
   .reaction.mine {
     border-color: var(--accent);
