@@ -3,18 +3,21 @@
 
   // showLabel: トリガーにハンドル文字列も出すか（既定はアイコンのみ）。
   // showHost: ハンドルを出す場合に @host まで含めるか。
+  // large: トリガーのアイコン・文字サイズを2倍にする（投稿窓横など目立たせたい箇所向け）。
   let {
     value = $bindable(),
     accounts,
     showLabel = false,
     showHost = true,
     disabled = false,
+    large = false,
   }: {
     value: string;
     accounts: Account[];
     showLabel?: boolean;
     showHost?: boolean;
     disabled?: boolean;
+    large?: boolean;
   } = $props();
 
   const selected = $derived(accounts.find((a) => a.id === value) ?? accounts[0]);
@@ -55,6 +58,7 @@
 <button
   class="trigger"
   class:full={showLabel}
+  class:large
   bind:this={trigger}
   onclick={toggle}
   {disabled}
@@ -134,6 +138,22 @@
   }
   .trigger.full .caret {
     margin-left: auto;
+  }
+  .trigger.large {
+    padding: 10px 14px;
+    gap: 10px;
+    font-size: 1.1rem;
+  }
+  .trigger.large .avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 9px;
+  }
+  .trigger.large .avatar.ph {
+    font-size: 1.2rem;
+  }
+  .trigger.large .caret {
+    font-size: 1.1rem;
   }
   .avatar {
     width: 22px;

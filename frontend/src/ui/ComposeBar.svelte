@@ -141,6 +141,7 @@
       }
     }
     accounts={app.accounts}
+    large
   />
 
   <div class="composebox">
