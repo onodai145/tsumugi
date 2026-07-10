@@ -14,6 +14,14 @@ pub struct ColumnNote {
     pub note: Note,
 }
 
+/// 起動時のギャップ埋め結果をまとめて反映する（通知は鳴らさない・出入りの都度イベントにしない）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnGapFill {
+    pub column_id: String,
+    pub notes: Vec<Note>,
+}
+
 /// 通知カラムに新規通知を追加する。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 #[serde(rename_all = "camelCase")]

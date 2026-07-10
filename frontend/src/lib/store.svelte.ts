@@ -104,6 +104,7 @@ class AppStore {
     columnOpacity: 100,
     defaultAccountId: "",
     emojiStyle: "twemoji",
+    gapFillLimit: 200,
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -139,6 +140,7 @@ class AppStore {
         columnOpacity: ui.columnOpacity ?? 100,
         defaultAccountId: ui.defaultAccountId ?? "",
         emojiStyle: ui.emojiStyle ?? "twemoji",
+        gapFillLimit: ui.gapFillLimit ?? 200,
       };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
@@ -515,6 +517,21 @@ class AppStore {
       }),
     );
     this.#unlisten.push(
+      await events.columnGapFill.listen((e) => {
+        const tab = this.#findTab(e.payload.columnId);
+        if (!tab) return;
+        // 起動時のギャップ埋め結果をまとめて反映する。1件ずつの新着とは違い、
+        // 新着通知/通知音は鳴らさない（不在中に溜まったノートで誤爆しないため）。
+        const known = new Set(tab.notes.map((n) => n.id));
+        const merged = [...tab.notes];
+        for (const n of e.payload.notes) {
+          if (!known.has(n.id)) merged.push(n);
+        }
+        merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+        tab.notes = merged.slice(0, MAX_NOTES);
+      }),
+    );
+    this.#unlisten.push(
       await events.columnConnectionState.listen((e) => {
         const tab = this.#findTab(e.payload.columnId);
         if (!tab) return;
@@ -741,6 +758,7 @@ class AppStore {
       columnOpacity: prefs.columnOpacity ?? 100,
       defaultAccountId: prefs.defaultAccountId ?? "",
       emojiStyle: prefs.emojiStyle ?? "twemoji",
+      gapFillLimit: prefs.gapFillLimit ?? 200,
     };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");
