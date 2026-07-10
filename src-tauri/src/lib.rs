@@ -41,6 +41,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::capture_notes,
             commands::column::uncapture_notes,
             commands::column::validate_filter,
+            commands::column::validate_tql_query,
             commands::column::list_user_lists,
             commands::column::list_antennas,
             commands::column::list_channels,

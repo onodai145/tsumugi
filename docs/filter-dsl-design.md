@@ -52,7 +52,7 @@ account  := "@" IDENT               (* 自分のアカウント参照。Krileの
 | `local` | localTimeline channel | （新規） |
 | `hybrid` / `social` | hybridTimeline channel | （新規） |
 | `global` | globalTimeline channel | （新規） |
-| `mentions` | main channel の mention / notes/mentions | FilterMentions |
+| `mentions` | **未実装（非推奨）**。main channel の mention 専用配線が必要でHome等の既存ColumnKind変換の枠に収まらないため実装コストに見合わないと判断。代わりに任意のソースへ `where to_me` を付ける形で代替可能（例: `from home, local where to_me`） | FilterMentions |
 | `list("<id>")` | userList channel | FilterList |
 | `antenna("<id>")` | antenna channel | （新規） |
 | `channel("<id>")` | channel タイムライン | （新規） |
@@ -169,8 +169,8 @@ from home, local where text -> "Rust" && remote
 # 👍 か ❤ が付いたノート（リアクション絵文字集合に含まれる）
 from home where "👍" <- reactions || "❤" <- reactions
 
-# メンションで自分宛、未リアクション
-from mentions where to_me && !reacted
+# メンションで自分宛、未リアクション（mentionsソースは未実装。to_me で代替）
+from home, local where to_me && !reacted
 
 # キャッシュ検索：過去ログから正規表現一致
 from cache where text match "(?i)misskey|fediverse"

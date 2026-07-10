@@ -79,6 +79,48 @@ impl SettingsStore {
         conn.execute("DELETE FROM column_note WHERE column_id = ?1", params![column_id])?;
         Ok(())
     }
+
+    /// TQL `cache` ソース: ローカルSQLiteキャッシュ全体を where 句で検索する（受信せず検索のみ）。
+    /// until_id は作成順の境界（id 自体は sortable なので created_at の代わりに使える）。
+    pub fn search_cache(
+        &self,
+        where_sql: &crate::filter::sql::SqlWhere,
+        until_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Note>> {
+        use crate::filter::sql::SqlParam;
+
+        let mut sql = String::from(
+            "SELECT n.payload FROM note n JOIN user u ON u.id = n.user_id WHERE (",
+        );
+        sql.push_str(&where_sql.sql);
+        sql.push(')');
+        if until_id.is_some() {
+            sql.push_str(" AND n.id < ?");
+        }
+        sql.push_str(" ORDER BY n.created_at DESC, n.id DESC LIMIT ?");
+
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&sql)?;
+        let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        for p in &where_sql.params {
+            binds.push(match p {
+                SqlParam::Text(s) => Box::new(s.clone()),
+                SqlParam::Real(x) => Box::new(*x),
+            });
+        }
+        if let Some(u) = until_id {
+            binds.push(Box::new(u.to_string()));
+        }
+        binds.push(Box::new(limit));
+        let params_ref: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt.query_map(params_ref.as_slice(), |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for payload in rows {
+            out.push(serde_json::from_str::<Note>(&payload?)?);
+        }
+        Ok(out)
+    }
 }
 
 /// note + user + 関連テーブルを upsert する。関連は入れ替え（DELETE→INSERT）。
@@ -241,6 +283,26 @@ mod tests {
         assert_eq!(got[0].files[0].mime_type, "image/png");
         assert_eq!(got[0].tags, vec!["rust".to_string()]);
         assert_eq!(got[0].my_reaction.as_deref(), Some("👍"));
+    }
+
+    #[test]
+    fn search_cache_applies_predicate_and_until_id_boundary() {
+        use crate::filter::{parser, sql};
+        let s = store();
+        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)]).unwrap();
+
+        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+
+        // 述語(has_files)は全件trueなので until_id 境界のみで絞られる
+        let expr = parser::parse_predicate("has_files").unwrap();
+        let w = sql::build_where(&expr, &ctx).unwrap();
+        let got = s.search_cache(&w, Some("a3"), 10).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);
+
+        // 述語が全件falseなら空
+        let expr2 = parser::parse_predicate("cw").unwrap();
+        let w2 = sql::build_where(&expr2, &ctx).unwrap();
+        assert!(s.search_cache(&w2, None, 10).unwrap().is_empty());
     }
 
     #[test]
