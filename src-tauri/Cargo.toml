@@ -14,6 +14,13 @@ rust-version = "1.77.2"
 name = "tsumugi_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# フロントエンド一式をバイナリに埋め込みビルドさせる標準機能。cargo tauri dev/build は
+# 内部でこのフラグを付け外ししてくれるが、素の `cargo build --release` でも本番動作に
+# なるようデフォルトで有効化しておく(無いと devUrl に接続しにいき「接続が拒否されました」になる)。
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.1", features = [] }
 
