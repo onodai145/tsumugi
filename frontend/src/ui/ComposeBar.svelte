@@ -2,6 +2,7 @@
   import { app } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
   import VisibilitySelect from "./VisibilitySelect.svelte";
+  import Dropdown from "./Dropdown.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import { ImagePlus, X } from "@lucide/svelte";
@@ -20,9 +21,31 @@
   let useCw = $state(false);
   let visibility = $state<VisibilityInput>("public");
   let localOnly = $state(false);
+  const MAX_POLL_CHOICES = 10;
   let usePoll = $state(false);
   let pollChoices = $state<string[]>(["", ""]);
   let pollMultiple = $state(false);
+  type PollExpiryMode = "none" | "at" | "after";
+  let pollExpiryMode = $state<PollExpiryMode>("none");
+  let pollExpiresAt = $state(""); // datetime-local文字列(mode="at"用)
+  let pollAfterAmount = $state(1); // mode="after"用の数量
+  type PollAfterUnit = "minute" | "hour" | "day";
+  let pollAfterUnit = $state<PollAfterUnit>("hour");
+  const POLL_AFTER_UNIT_MS: Record<PollAfterUnit, number> = {
+    minute: 60_000,
+    hour: 3_600_000,
+    day: 86_400_000,
+  };
+  const pollExpiryModes: { value: PollExpiryMode; label: string }[] = [
+    { value: "none", label: "無期限" },
+    { value: "at", label: "日時を指定" },
+    { value: "after", label: "期間を指定" },
+  ];
+  const pollAfterUnits: { value: PollAfterUnit; label: string }[] = [
+    { value: "minute", label: "分後" },
+    { value: "hour", label: "時間後" },
+    { value: "day", label: "日後" },
+  ];
   let attached = $state<DriveFile[]>([]);
   let uploading = $state(false);
   let busy = $state(false);
@@ -90,12 +113,18 @@
     }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
     if (!text.trim() && !quoteOf && choices.length === 0 && attached.length === 0) return;
+    let expiresAt: number | null = null;
+    if (pollExpiryMode === "at" && pollExpiresAt) {
+      expiresAt = new Date(pollExpiresAt).getTime();
+    } else if (pollExpiryMode === "after") {
+      expiresAt = Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
+    }
     const draft: NoteDraft = {
       text: text.trim() || null,
       cw: useCw && cw.trim() ? cw.trim() : null,
       visibility,
       fileIds: attached.map((f) => f.id),
-      poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt: null } : null,
+      poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt } : null,
       replyId: replyTo?.id ?? null,
       renoteId: quoteOf?.id ?? null,
       localOnly,
@@ -109,6 +138,10 @@
       usePoll = false;
       pollChoices = ["", ""];
       pollMultiple = false;
+      pollExpiryMode = "none";
+      pollExpiresAt = "";
+      pollAfterAmount = 1;
+      pollAfterUnit = "hour";
       localOnly = false;
       attached = [];
       replyTo = undefined;
@@ -187,11 +220,52 @@
   {#if usePoll}
     <div class="poll">
       {#each pollChoices as _, i}
-        <input class="poll-choice" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
+        <div class="poll-choice-row">
+          <input class="poll-choice" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
+          <button
+            class="poll-choice-x"
+            title="この選択肢を削除"
+            disabled={pollChoices.length <= 2}
+            onclick={() => (pollChoices = pollChoices.filter((_, j) => j !== i))}
+          >
+            <X size={12} />
+          </button>
+        </div>
       {/each}
       <div class="poll-actions">
-        <button class="mini" onclick={() => (pollChoices = [...pollChoices, ""])}>＋選択肢</button>
+        <button
+          class="mini"
+          disabled={pollChoices.length >= MAX_POLL_CHOICES}
+          onclick={() => (pollChoices = [...pollChoices, ""])}
+        >
+          ＋選択肢
+        </button>
         <label><input type="checkbox" bind:checked={pollMultiple} /> 複数選択</label>
+      </div>
+      <div class="poll-expiry">
+        <span class="expiry-label">期限:</span>
+        {#each pollExpiryModes as m (m.value)}
+          <button
+            class="mini"
+            class:active={pollExpiryMode === m.value}
+            onclick={() => (pollExpiryMode = m.value)}
+          >
+            {m.label}
+          </button>
+        {/each}
+        {#if pollExpiryMode === "at"}
+          <input type="datetime-local" bind:value={pollExpiresAt} class="poll-expires" />
+        {:else if pollExpiryMode === "after"}
+          <input
+            type="number"
+            min="1"
+            class="poll-after-amount"
+            bind:value={pollAfterAmount}
+          />
+          <div class="poll-after-unit">
+            <Dropdown bind:value={pollAfterUnit} options={pollAfterUnits} />
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -295,12 +369,73 @@
     flex-direction: column;
     gap: 5px;
   }
+  .poll-choice-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .poll-choice-row .poll-choice {
+    flex: 1;
+  }
+  .poll-choice-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 4px;
+  }
+  .poll-choice-x:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
   .poll-actions {
     display: flex;
     gap: 12px;
     align-items: center;
+    flex-wrap: wrap;
     font-size: 0.8rem;
     color: var(--text-dim);
+  }
+  .poll-actions .mini:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .poll-expiry {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .expiry-label {
+    flex: none;
+  }
+  .poll-expires {
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.78rem;
+  }
+  .poll-after-amount {
+    width: 60px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.78rem;
+  }
+  .poll-after-unit {
+    width: 90px;
   }
   .thumbs {
     display: flex;
