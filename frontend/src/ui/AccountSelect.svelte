@@ -73,7 +73,7 @@
     {/if}
     {#if showLabel}<span class="label">{handle(selected)}</span>{/if}
   {/if}
-  <span class="caret">▾</span>
+  {#if !large}<span class="caret">▾</span>{/if}
 </button>
 
 {#if open && pos}
@@ -151,9 +151,6 @@
   }
   .trigger.large .avatar.ph {
     font-size: 1.2rem;
-  }
-  .trigger.large .caret {
-    font-size: 1.1rem;
   }
   .avatar {
     width: 22px;
