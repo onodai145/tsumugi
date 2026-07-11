@@ -112,6 +112,11 @@ class AppStore {
   // Backstage: 操作ログ・エラー（新しいものが先頭）
   logs = $state<LogEntry[]>([]);
   #logSeq = 0;
+  // Backstage右下のステータス表示用（Krile風: DB件数/流速/起動からの経過）
+  bootedAt = $state(Date.now());
+  noteCount = $state(0);
+  noteRatePerMin = $state(0);
+  #statsTimer: ReturnType<typeof setInterval> | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -125,10 +130,15 @@ class AppStore {
   teardown() {
     for (const u of this.#unlisten) u();
     this.#unlisten = [];
+    if (this.#statsTimer !== null) {
+      clearInterval(this.#statsTimer);
+      this.#statsTimer = null;
+    }
   }
 
   async boot() {
     this.booting = true;
+    this.bootedAt = Date.now();
     try {
       this.accounts = await unwrap(commands.listAccounts());
       this.mute = await unwrap(commands.getMute());
@@ -170,6 +180,26 @@ class AppStore {
       this.#fail(e);
     } finally {
       this.booting = false;
+    }
+    await this.#pollStats();
+    if (this.#statsTimer !== null) clearInterval(this.#statsTimer);
+    this.#statsTimer = setInterval(() => void this.#pollStats(), 10_000);
+  }
+
+  /// DBキャッシュ済みノート総数と、直近1分に「投稿された」(created_at基準)ノート件数を取得する。
+  /// DBへのINSERT時刻ではなく実際の投稿時刻で数えることで、起動時ギャップ埋めや上スクロールでの
+  /// 過去取得時に古いノートをまとめてupsertしても流速が誤って跳ね上がらないようにしている。
+  async #pollStats() {
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const [count, recent] = await Promise.all([
+        unwrap(commands.noteCount()),
+        unwrap(commands.notesSince(nowSec - 60)),
+      ]);
+      this.noteCount = count;
+      this.noteRatePerMin = recent;
+    } catch {
+      // ステータス表示用の補助情報なので、失敗してもログには出さず静かに諦める
     }
   }
 

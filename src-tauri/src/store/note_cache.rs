@@ -80,6 +80,29 @@ impl SettingsStore {
         Ok(())
     }
 
+    /// キャッシュ済みノートの総数。Backstageのステータス表示用。
+    /// specta が i64 の直接エクスポートを禁止するため i32 で返す(ローカルキャッシュ件数が
+    /// 21億件を超えることは実運用上ない)。
+    pub fn note_count(&self) -> Result<i32> {
+        let conn = self.conn.lock().unwrap();
+        let count: i32 = conn.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
+        Ok(count)
+    }
+
+    /// 投稿日時(created_at, epoch秒)が since_epoch_secs 以降のノート件数。
+    /// 流速表示用: DBへのINSERT件数ではなく実際の投稿時刻で数えるため、起動時ギャップ埋めや
+    /// 上スクロールでの過去取得(古いcreated_atのノートをまとめてupsertする)による誤った
+    /// 跳ね上がりが起きない。idx_note_created を使う。
+    pub fn notes_since(&self, since_epoch_secs: i32) -> Result<i32> {
+        let conn = self.conn.lock().unwrap();
+        let count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM note WHERE created_at >= ?1",
+            params![since_epoch_secs],
+            |r| r.get(0),
+        )?;
+        Ok(count)
+    }
+
     /// TQL `cache` ソース: ローカルSQLiteキャッシュ全体を where 句で検索する（受信せず検索のみ）。
     /// until_id は作成順の境界（id 自体は sortable なので created_at の代わりに使える）。
     pub fn search_cache(
