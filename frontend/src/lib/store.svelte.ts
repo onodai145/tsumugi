@@ -112,6 +112,12 @@ class AppStore {
   // Backstage: 操作ログ・エラー（新しいものが先頭）
   logs = $state<LogEntry[]>([]);
   #logSeq = 0;
+  // Backstage右下のステータス表示用（Krile風: DB件数/流速/起動からの経過）
+  bootedAt = $state(Date.now());
+  noteCount = $state(0);
+  noteRatePerMin = $state(0);
+  #statsTimer: ReturnType<typeof setInterval> | null = null;
+  #lastStatsSample: { count: number; at: number } | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -125,10 +131,15 @@ class AppStore {
   teardown() {
     for (const u of this.#unlisten) u();
     this.#unlisten = [];
+    if (this.#statsTimer !== null) {
+      clearInterval(this.#statsTimer);
+      this.#statsTimer = null;
+    }
   }
 
   async boot() {
     this.booting = true;
+    this.bootedAt = Date.now();
     try {
       this.accounts = await unwrap(commands.listAccounts());
       this.mute = await unwrap(commands.getMute());
@@ -170,6 +181,25 @@ class AppStore {
       this.#fail(e);
     } finally {
       this.booting = false;
+    }
+    await this.#pollStats();
+    this.#statsTimer = setInterval(() => void this.#pollStats(), 10_000);
+  }
+
+  /// DBキャッシュ済みノート件数を取得し、前回サンプルとの差分から流速(件/分)を算出する。
+  async #pollStats() {
+    try {
+      const count = await unwrap(commands.noteCount());
+      const now = Date.now();
+      const last = this.#lastStatsSample;
+      if (last) {
+        const deltaSec = (now - last.at) / 1000;
+        this.noteRatePerMin = deltaSec > 0 ? Math.max(0, Math.round(((count - last.count) / deltaSec) * 60)) : 0;
+      }
+      this.noteCount = count;
+      this.#lastStatsSample = { count, at: now };
+    } catch {
+      // ステータス表示用の補助情報なので、失敗してもログには出さず静かに諦める
     }
   }
 

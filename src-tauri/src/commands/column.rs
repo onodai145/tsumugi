@@ -250,6 +250,13 @@ pub async fn list_columns(state: State<'_, AppState>) -> Result<Vec<Column>> {
     state.settings.load_columns()
 }
 
+/// ローカルDBにキャッシュ済みのノート総数。Backstageのステータス表示用。
+#[tauri::command]
+#[specta::specta]
+pub async fn note_count(state: State<'_, AppState>) -> Result<i32> {
+    state.settings.note_count()
+}
+
 /// 過去ページ（上スクロール）。
 #[tauri::command]
 #[specta::specta]

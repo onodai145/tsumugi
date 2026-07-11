@@ -27,6 +27,8 @@ export const commands = {
 	listGroups: () => typedError<ColumnGroup[], Error>(__TAURI_INVOKE("list_groups")),
 	/**  永続化済みタブ一覧。 */
 	listColumns: () => typedError<Column[], Error>(__TAURI_INVOKE("list_columns")),
+	/**  ローカルDBにキャッシュ済みのノート総数。Backstageのステータス表示用。 */
+	noteCount: () => typedError<number, Error>(__TAURI_INVOKE("note_count")),
 	/**  過去ページ（上スクロール）。 */
 	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
 	/**  通知カラムの過去ページ。 */

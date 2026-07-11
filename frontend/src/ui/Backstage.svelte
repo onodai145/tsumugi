@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { app } from "../lib/store.svelte";
   import type { LogLevel } from "../lib/store.svelte";
   import type { Component } from "svelte";
-  import { Circle, Check, TriangleAlert, X, ChevronUp, ChevronDown } from "@lucide/svelte";
+  import { Circle, Check, TriangleAlert, X, ChevronUp, ChevronDown, Database, Activity, Clock } from "@lucide/svelte";
 
   let open = $state(false);
 
@@ -22,6 +23,21 @@
   }
 
   const errorCount = $derived(app.logs.filter((l) => l.level === "error").length);
+
+  // 起動からの経過時間（右下ステータス用）。1秒ごとに再計算するだけのローカル時計。
+  let now = $state(Date.now());
+  onMount(() => {
+    const id = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(id);
+  });
+  const elapsed = $derived.by(() => {
+    const sec = Math.max(0, Math.floor((now - app.bootedAt) / 1000));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${p(h)}:${p(m)}:${p(s)}`;
+  });
 </script>
 
 <div class="backstage" class:open>
@@ -60,6 +76,11 @@
     {#if open && app.logs.length > 0}
       <button class="clear" onclick={() => app.clearLogs()}>クリア</button>
     {/if}
+    <div class="stats" title="DB件数 / 流速(件・分) / 起動からの経過時間">
+      <span class="stat"><Database size={12} />{app.noteCount.toLocaleString()}件</span>
+      <span class="stat"><Activity size={12} />{app.noteRatePerMin}件/分</span>
+      <span class="stat"><Clock size={12} />{elapsed}</span>
+    </div>
   </div>
 </div>
 
@@ -133,6 +154,20 @@
   }
   .clear:hover {
     color: var(--accent);
+  }
+  .stats {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
   }
   .log-panel {
     height: min(38vh, 320px);
