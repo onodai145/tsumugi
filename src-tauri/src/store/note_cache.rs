@@ -265,6 +265,7 @@ mod tests {
                 followers_count: 5,
                 following_count: 3,
                 notes_count: 42,
+                emojis: std::collections::HashMap::new(),
             },
             reply_id: None,
             renote_id: None,

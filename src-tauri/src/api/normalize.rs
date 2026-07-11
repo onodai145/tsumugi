@@ -27,6 +27,9 @@ pub struct RawUser {
     pub following_count: u32,
     #[serde(default)]
     pub notes_count: u32,
+    /// 表示名(`name`)中のカスタム絵文字 {name: url}。
+    #[serde(default)]
+    pub emojis: HashMap<String, String>,
 }
 
 impl From<RawUser> for User {
@@ -42,6 +45,7 @@ impl From<RawUser> for User {
             followers_count: r.followers_count,
             following_count: r.following_count,
             notes_count: r.notes_count,
+            emojis: r.emojis,
         }
     }
 }
@@ -282,6 +286,18 @@ mod tests {
         assert_eq!(n.files[0].mime_type, "image/png");
         assert_eq!(n.emojis.get("blobcat").map(String::as_str), Some("http://x/e.png"));
         assert_eq!(n.tags, vec!["rust".to_string()]);
+    }
+
+    #[test]
+    fn parses_user_emojis_for_display_name() {
+        let raw: RawUser = serde_json::from_str(
+            r#"{"id":"u1","username":"alice","name":"Alice :blobcat:",
+                "emojis":{"blobcat":"http://x/e.png"}}"#,
+        )
+        .unwrap();
+        let u: User = raw.into();
+        assert_eq!(u.name.as_deref(), Some("Alice :blobcat:"));
+        assert_eq!(u.emojis.get("blobcat").map(String::as_str), Some("http://x/e.png"));
     }
 
     #[test]

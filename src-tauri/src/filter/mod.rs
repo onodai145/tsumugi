@@ -83,6 +83,7 @@ mod tests {
                 followers_count: 0,
                 following_count: 0,
                 notes_count: 0,
+                emojis: std::collections::HashMap::new(),
             },
             reply_id: None,
             renote_id: None,

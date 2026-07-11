@@ -135,7 +135,9 @@
   onclick={tabId ? () => app.selectNote(tabId, note.id) : undefined}
 >
   {#if isPureRenote}
-    <div class="renote-banner"><Repeat2 size={13} /> {displayName(note.user)} がRenote</div>
+    <div class="renote-banner">
+      <Repeat2 size={13} /> <Mfm text={displayName(note.user)} emojis={note.user.emojis} simple /> がRenote
+    </div>
   {/if}
 
   <div class="row">
@@ -146,7 +148,7 @@
     {/if}
     <div class="body">
       <header class="head">
-        <span class="name">{displayName(inner.user)}</span>
+        <span class="name"><Mfm text={displayName(inner.user)} emojis={inner.user.emojis} simple /></span>
         <span class="acct">{acct(inner.user)}</span>
         <span class="time" title={new Date(inner.createdAt * 1000).toLocaleString()}>
           {relativeTime(inner.createdAt)}

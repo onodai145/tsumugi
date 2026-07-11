@@ -4,6 +4,7 @@
   import NoteCard from "./NoteCard.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
+  import Mfm from "../render/Mfm.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji } from "../lib/emoji";
@@ -72,7 +73,7 @@
       <img class="avatar" src={n.user.avatarUrl} alt="" loading="lazy" />
     {/if}
     <span class="text">
-      {#if actor}<b>{actor}</b>{/if}
+      {#if actor}<b><Mfm text={actor} emojis={n.user?.emojis ?? {}} simple /></b>{/if}
       {labels[n.type] ?? n.type}
       {#if n.type === "reaction" && n.reaction}
         <span class="reaction">
