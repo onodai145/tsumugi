@@ -177,7 +177,7 @@
     display: flex;
     align-items: stretch;
     gap: 1px;
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     border-bottom: 1px solid var(--border);
     border-top: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
     overflow-x: auto;
