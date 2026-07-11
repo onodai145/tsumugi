@@ -3,7 +3,7 @@
   import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import { PRESETS, THEME_VAR_KEYS } from "../../lib/theme";
   import type { CustomTheme, ThemeColors } from "../../bindings/tauri.gen";
-  import { X, Check } from "@lucide/svelte";
+  import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
 
   let theme = $state(app.ui.theme);
   let width = $state(app.ui.defaultColumnWidth);
@@ -207,13 +207,13 @@
           </span>
         </button>
         <div class="theme-card-actions">
-          <button class="mini-btn" onclick={() => startEditTheme(t)}>編集</button>
-          <button class="mini-btn" onclick={() => removeCustomTheme(t.id)}>削除</button>
+          <button class="icon-btn" title="編集" onclick={() => startEditTheme(t)}><Pencil size={13} /></button>
+          <button class="icon-btn" title="削除" onclick={() => removeCustomTheme(t.id)}><Trash2 size={13} /></button>
         </div>
       </div>
     {/each}
-    <button class="mini-btn add-theme" onclick={startCreateTheme}>＋新規作成</button>
   </div>
+  <button class="mini-btn add-theme" onclick={startCreateTheme}><Plus size={13} /> 新規作成</button>
 
   {#if editingTheme}
     <div class="theme-editor">
@@ -499,14 +499,27 @@
     display: flex;
     gap: 4px;
   }
-  .theme-card-actions .mini-btn {
+  .icon-btn {
     flex: 1;
-    padding: 4px 6px;
-    font-size: 0.74rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .icon-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .add-theme {
-    align-self: stretch;
-    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
   }
   .theme-editor {
     margin-top: 10px;
