@@ -1,6 +1,9 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
   import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
+  import { PRESETS, THEME_VAR_KEYS } from "../../lib/theme";
+  import type { CustomTheme, ThemeColors } from "../../bindings/tauri.gen";
+  import { X } from "@lucide/svelte";
 
   let theme = $state(app.ui.theme);
   let width = $state(app.ui.defaultColumnWidth);
@@ -21,6 +24,73 @@
     { id: "light", label: "ライト" },
     { id: "dark", label: "ダーク" },
   ];
+
+  // ---- カスタムテーマ(プリセット + ユーザー作成) ----
+  const customThemes = $derived(app.ui.customThemes ?? []);
+  const colorLabels: Record<keyof ThemeColors, string> = {
+    surface1: "背景1",
+    surface2: "背景2",
+    surface3: "背景3",
+    border: "枠線",
+    text: "文字",
+    textDim: "文字(淡)",
+    accent: "アクセント",
+  };
+  const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+  function blankColors(): ThemeColors {
+    return {
+      surface1: "#1a1a1a",
+      surface2: "#242424",
+      surface3: "#2e2e2e",
+      border: "#3a3a3a",
+      text: "#eeeeee",
+      textDim: "#999999",
+      accent: "#7c5cff",
+    };
+  }
+  let editingTheme = $state<CustomTheme | null>(null);
+  let editErr = $state<string | null>(null);
+
+  function startCreateTheme() {
+    editingTheme = { id: crypto.randomUUID(), name: "", colors: blankColors() };
+    editErr = null;
+  }
+  function startEditTheme(t: CustomTheme) {
+    editingTheme = { id: t.id, name: t.name, colors: { ...t.colors } };
+    editErr = null;
+  }
+  function cancelEditTheme() {
+    editingTheme = null;
+    editErr = null;
+  }
+  async function saveCustomTheme() {
+    if (!editingTheme) return;
+    if (!editingTheme.name.trim()) {
+      editErr = "名前を入力してください";
+      return;
+    }
+    for (const { key } of THEME_VAR_KEYS) {
+      if (!HEX_RE.test(editingTheme.colors[key])) {
+        editErr = `${colorLabels[key]}は #rrggbb 形式で入力してください`;
+        return;
+      }
+    }
+    const exists = customThemes.some((t) => t.id === editingTheme!.id);
+    const next = exists
+      ? customThemes.map((t) => (t.id === editingTheme!.id ? editingTheme! : t))
+      : [...customThemes, editingTheme];
+    await app.setUiPrefs({ ...app.ui, customThemes: next });
+    editingTheme = null;
+    editErr = null;
+  }
+  async function removeCustomTheme(id: string) {
+    const next = customThemes.filter((t) => t.id !== id);
+    // 削除対象が選択中のテーマなら、この1回の保存でthemeもautoへ戻す。
+    // (theme はそのままにすると #applyTheme のフォールバックが二重保存を起こすため)
+    const clearing = theme === `custom:${id}`;
+    await app.setUiPrefs({ ...app.ui, customThemes: next, theme: clearing ? "auto" : app.ui.theme });
+    if (clearing) theme = "auto";
+  }
 
   const emojiStyles: { id: EmojiStyle; label: string }[] = [
     { id: "twemoji", label: "Twemoji" },
@@ -97,6 +167,65 @@
       <button class="seg-btn" class:active={theme === t.id} onclick={() => (theme = t.id)}>{t.label}</button>
     {/each}
   </div>
+</div>
+
+<div class="field">
+  <span>プリセットテーマ</span>
+  <div class="theme-grid">
+    {#each PRESETS as p (p.id)}
+      <button class="theme-card" class:active={theme === `preset:${p.id}`} onclick={() => (theme = `preset:${p.id}`)}>
+        <span class="swatch-strip">
+          <span class="sw" style={`background:${p.colors.surface1}`}></span>
+          <span class="sw" style={`background:${p.colors.surface2}`}></span>
+          <span class="sw" style={`background:${p.colors.accent}`}></span>
+        </span>
+        {p.name}
+      </button>
+    {/each}
+  </div>
+</div>
+
+<div class="field">
+  <span>カスタムテーマ</span>
+  <div class="theme-grid">
+    {#each customThemes as t (t.id)}
+      <div class="theme-card-wrap">
+        <button
+          class="theme-card"
+          class:active={theme === `custom:${t.id}`}
+          onclick={() => (theme = `custom:${t.id}`)}
+        >
+          <span class="swatch-strip">
+            <span class="sw" style={`background:${t.colors.surface1}`}></span>
+            <span class="sw" style={`background:${t.colors.surface2}`}></span>
+            <span class="sw" style={`background:${t.colors.accent}`}></span>
+          </span>
+          {t.name}
+        </button>
+        <button class="mini-btn" onclick={() => startEditTheme(t)}>編集</button>
+        <button class="mini-btn" onclick={() => removeCustomTheme(t.id)}>削除</button>
+      </div>
+    {/each}
+    <button class="mini-btn" onclick={startCreateTheme}>＋新規作成</button>
+  </div>
+
+  {#if editingTheme}
+    <div class="theme-editor">
+      <input type="text" class="theme-name-input" placeholder="テーマ名" bind:value={editingTheme.name} />
+      {#each THEME_VAR_KEYS as v (v.key)}
+        <div class="color-row">
+          <span class="color-label">{colorLabels[v.key]}</span>
+          <span class="swatch" style={`background:${editingTheme.colors[v.key]}`}></span>
+          <input type="text" class="hex-input" bind:value={editingTheme.colors[v.key]} />
+        </div>
+      {/each}
+      {#if editErr}<p class="err">{editErr}</p>{/if}
+      <div class="editor-actions">
+        <button class="mini-btn" onclick={cancelEditTheme}><X size={13} /> キャンセル</button>
+        <button class="save" onclick={saveCustomTheme}>このテーマを保存</button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <label class="field">
@@ -307,6 +436,97 @@
   .mini-btn:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .theme-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .theme-card-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .theme-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .theme-card:hover {
+    border-color: var(--accent);
+  }
+  .theme-card.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .swatch-strip {
+    display: inline-flex;
+    border-radius: 4px;
+    overflow: hidden;
+    flex: none;
+  }
+  .sw {
+    width: 12px;
+    height: 16px;
+  }
+  .theme-editor {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .theme-name-input {
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-1);
+    color: var(--text);
+    font-family: inherit;
+  }
+  .color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .color-label {
+    width: 80px;
+    flex: none;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    flex: none;
+  }
+  .hex-input {
+    width: 100px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-1);
+    color: var(--text);
+    font-family: ui-monospace, monospace;
+    font-size: 0.82rem;
+  }
+  .editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
   }
   input[type="range"] {
     accent-color: var(--accent);

@@ -27,6 +27,7 @@ import type {
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
+import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 
@@ -105,6 +106,7 @@ class AppStore {
     defaultAccountId: "",
     emojiStyle: "twemoji",
     gapFillLimit: 200,
+    customThemes: [],
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -156,6 +158,7 @@ class AppStore {
         defaultAccountId: ui.defaultAccountId ?? "",
         emojiStyle: ui.emojiStyle ?? "twemoji",
         gapFillLimit: ui.gapFillLimit ?? 200,
+        customThemes: ui.customThemes ?? [],
       };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
@@ -806,6 +809,7 @@ class AppStore {
       defaultAccountId: prefs.defaultAccountId ?? "",
       emojiStyle: prefs.emojiStyle ?? "twemoji",
       gapFillLimit: prefs.gapFillLimit ?? 200,
+      customThemes: prefs.customThemes ?? [],
     };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");
@@ -843,7 +847,7 @@ class AppStore {
     this.#log("info", "キー割り当てを更新しました");
   }
 
-  /// data-theme を <html> に反映。auto は属性を外して OS 設定に追従させる。
+  /// data-theme(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
   #applyTheme(theme: string) {
     const root = document.documentElement;
     if (theme === "light" || theme === "dark") {
@@ -851,6 +855,25 @@ class AppStore {
     } else {
       delete root.dataset.theme;
     }
+
+    const presetId = parseThemeRef(theme, "preset:");
+    const customId = parseThemeRef(theme, "custom:");
+    if (presetId) {
+      applyThemeColors(findPreset(presetId)?.colors ?? null);
+      return;
+    }
+    if (customId) {
+      const found = (this.ui.customThemes ?? []).find((t) => t.id === customId);
+      if (found) {
+        applyThemeColors(found.colors);
+      } else {
+        // 選択中のカスタムテーマが削除済み: auto にフォールバックして保存し直す
+        applyThemeColors(null);
+        void this.setUiPrefs({ ...this.ui, theme: "auto" });
+      }
+      return;
+    }
+    applyThemeColors(null);
   }
 
   /// --font-family を <html> に反映（CSS font-family 値をそのまま渡す）。
