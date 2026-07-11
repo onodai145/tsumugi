@@ -53,6 +53,18 @@
   let replyTo = $state<Note | undefined>(undefined);
   let quoteOf = $state<Note | undefined>(undefined);
   let textarea = $state<HTMLTextAreaElement | undefined>(undefined);
+  let focused = $state(false);
+  // フォーカスが無く、かつ何も入力/添付/展開していない時だけコンパクト表示にする
+  // (未送信の内容がある間は縮めない)。
+  const compact = $derived(
+    !focused &&
+      !text.trim() &&
+      !cw.trim() &&
+      attached.length === 0 &&
+      !usePoll &&
+      !replyTo &&
+      !quoteOf,
+  );
 
   // アカウントが後から読まれた場合／既定アカウントが変更された場合の追従（手動選択後は止める）
   $effect(() => {
@@ -193,10 +205,14 @@
 
   <textarea
     class="text"
+    class:compact
+    rows="1"
     placeholder="いまどうしてる？（Ctrl+Enter で投稿）"
     bind:value={text}
     bind:this={textarea}
     onkeydown={onKey}
+    onfocus={() => (focused = true)}
+    onblur={() => (focused = false)}
   ></textarea>
 
   {#if attached.length > 0 || uploading}
@@ -338,6 +354,12 @@
     line-height: 1.4;
     min-height: 80px;
     box-sizing: border-box;
+    transition: min-height 0.12s ease;
+  }
+  /* フォーカスが無く未入力の時はコンパクトに(フォーカス/入力があれば通常サイズへ戻す) */
+  .text.compact {
+    min-height: 34px;
+    resize: none;
   }
   .cw-input,
   .poll-choice {
