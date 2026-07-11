@@ -12,6 +12,7 @@
   let revealed = $state<Record<string, boolean>>({});
   const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
   const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
+  const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
   const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
   let gridEl = $state<HTMLDivElement | undefined>();
@@ -81,6 +82,12 @@
           <button class="video-save" onclick={() => saveToDisk(f.url, fileName(f))} aria-label="保存">
             💾
           </button>
+        {:else if isAudio(f)}
+          <!-- svelte-ignore a11y_media_has_caption -->
+          <audio src={f.url} controls preload="metadata"></audio>
+          <button class="video-save" onclick={() => saveToDisk(f.url, fileName(f))} aria-label="保存">
+            💾
+          </button>
         {:else}
           <button class="file-link" onclick={() => openUrl(f.url)}>📄 {fileName(f)}</button>
         {/if}
@@ -115,6 +122,9 @@
     height: 100%;
     object-fit: cover;
     cursor: zoom-in;
+  }
+  .media-cell audio {
+    width: calc(100% - 16px);
   }
   .sensitive-cover {
     width: 100%;
