@@ -222,6 +222,13 @@ export type ColumnNotification = {
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";
 
+/**  ユーザーが作成したカスタムテーマ。 */
+export type CustomTheme = {
+	id: string,
+	name: string,
+	colors: ThemeColors,
+};
+
 export type DriveFile = {
 	id: string,
 	/**  "image/png" 等。file_types はここから category 化 */
@@ -428,9 +435,20 @@ export type SourceItem = {
 	name: string,
 };
 
+/**  テーマ1個分の配色（app.css の CSS変数7個に対応）。 */
+export type ThemeColors = {
+	surface1: string,
+	surface2: string,
+	surface3: string,
+	border: string,
+	text: string,
+	textDim: string,
+	accent: string,
+};
+
 /**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。 */
 export type UiPrefs = {
-	/**  "auto" | "light" | "dark" */
+	/**  "auto" | "light" | "dark" | "preset:<id>"(フロント側定義) | "custom:<CustomTheme.id>" */
 	theme: string,
 	/**  新規カラム（グループ）作成時の既定幅（px） */
 	defaultColumnWidth: number,
@@ -461,6 +479,8 @@ export type UiPrefs = {
 	 *  0 なら無効（従来どおりキャッシュのみ表示）。
 	 */
 	gapFillLimit?: number,
+	/**  ユーザーが作成したカスタムテーマの一覧。 */
+	customThemes?: CustomTheme[],
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

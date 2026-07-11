@@ -2,11 +2,33 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
+/// テーマ1個分の配色（app.css の CSS変数7個に対応）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeColors {
+    pub surface1: String,
+    pub surface2: String,
+    pub surface3: String,
+    pub border: String,
+    pub text: String,
+    pub text_dim: String,
+    pub accent: String,
+}
+
+/// ユーザーが作成したカスタムテーマ。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomTheme {
+    pub id: String,
+    pub name: String,
+    pub colors: ThemeColors,
+}
+
 /// 表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UiPrefs {
-    /// "auto" | "light" | "dark"
+    /// "auto" | "light" | "dark" | "preset:<id>"(フロント側定義) | "custom:<CustomTheme.id>"
     pub theme: String,
     /// 新規カラム（グループ）作成時の既定幅（px）
     pub default_column_width: i32,
@@ -40,6 +62,9 @@ pub struct UiPrefs {
     /// 0 なら無効（従来どおりキャッシュのみ表示）。
     #[serde(default = "default_gap_fill_limit")]
     pub gap_fill_limit: i32,
+    /// ユーザーが作成したカスタムテーマの一覧。
+    #[serde(default)]
+    pub custom_themes: Vec<CustomTheme>,
 }
 
 fn default_column_opacity() -> i32 {
@@ -68,6 +93,7 @@ impl Default for UiPrefs {
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
+            custom_themes: Vec::new(),
         }
     }
 }
@@ -112,9 +138,29 @@ mod tests {
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),
             gap_fill_limit: 500,
+            custom_themes: vec![CustomTheme {
+                id: "t1".into(),
+                name: "My Theme".into(),
+                colors: ThemeColors {
+                    surface1: "#111111".into(),
+                    surface2: "#222222".into(),
+                    surface3: "#333333".into(),
+                    border: "#444444".into(),
+                    text: "#eeeeee".into(),
+                    text_dim: "#999999".into(),
+                    accent: "#ff8800".into(),
+                },
+            }],
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn custom_themes_defaults_to_empty_for_legacy_json() {
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert!(v.custom_themes.is_empty());
     }
 }
