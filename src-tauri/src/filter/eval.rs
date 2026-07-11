@@ -291,6 +291,7 @@ mod tests {
                 followers_count: 100,
                 following_count: 10,
                 notes_count: 5,
+                emojis: HashMap::new(),
             },
             reply_id: None,
             renote_id: None,

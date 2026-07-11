@@ -503,6 +503,11 @@ export type User = {
 	followersCount: number,
 	followingCount: number,
 	notesCount: number,
+	/**
+	 *  表示名(`name`)中のカスタム絵文字ショートコード解決用 {name: url}。
+	 *  既存キャッシュ済みJSON(このフィールド追加前に保存されたもの)との後方互換のため default。
+	 */
+	emojis?: { [key in string]: string },
 };
 
 /**  ユーザリスト（List カラムのソース選択用）。 */
