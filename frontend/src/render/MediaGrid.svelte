@@ -104,7 +104,7 @@
   .media-cell {
     position: relative;
     aspect-ratio: 16 / 10;
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -120,7 +120,7 @@
     width: 100%;
     height: 100%;
     border: none;
-    background: var(--surface-3);
+    background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
     color: var(--text-dim);
     cursor: pointer;
     font-size: 0.85rem;

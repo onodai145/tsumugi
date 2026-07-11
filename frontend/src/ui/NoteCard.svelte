@@ -312,7 +312,7 @@
     flex: none;
   }
   .avatar.placeholder {
-    background: var(--surface-3);
+    background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   }
   .body {
     min-width: 0;
@@ -358,7 +358,7 @@
     margin-left: 8px;
     font-size: 0.8rem;
     border: 1px solid var(--border);
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     color: var(--text);
     border-radius: 6px;
     padding: 1px 8px;
@@ -376,7 +376,7 @@
     width: 100%;
     padding: 5px 8px;
     border: none;
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     color: var(--text);
     border-radius: 6px;
     font-size: 0.88rem;
@@ -385,7 +385,7 @@
     text-align: left;
   }
   .poll-choice:hover:not(:disabled) {
-    background: var(--surface-3);
+    background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   }
   .poll-choice:disabled {
     cursor: default;
@@ -409,7 +409,9 @@
     align-items: center;
     gap: 3px;
     padding: 1px 7px;
-    background: var(--surface-2);
+    /* カラムと同じ不透明度を適用(背景画像設定時にカラムだけ透けてリアクションだけ
+       不透明のまま浮いて見えるのを防ぐ)。既定100%なら見た目は従来どおり不透明。 */
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     border: 1px solid var(--border);
     border-radius:  3px;
     font-size: 0.85rem;
@@ -450,7 +452,7 @@
   .actions button:hover,
   .actions button.on {
     color: var(--accent);
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
   }
   .react-wrap {
     position: relative;

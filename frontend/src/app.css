@@ -118,14 +118,14 @@ a:hover {
   color: var(--text-dim);
 }
 .mfm-code {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   border-radius: 4px;
   padding: 1px 4px;
   font-family: ui-monospace, monospace;
   font-size: 0.9em;
 }
 .mfm-codeblock {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   border-radius: 8px;
   padding: 10px;
   overflow-x: auto;
