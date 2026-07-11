@@ -3,7 +3,7 @@
   import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import { PRESETS, THEME_VAR_KEYS } from "../../lib/theme";
   import type { CustomTheme, ThemeColors } from "../../bindings/tauri.gen";
-  import { X } from "@lucide/svelte";
+  import { X, Check } from "@lucide/svelte";
 
   let theme = $state(app.ui.theme);
   let width = $state(app.ui.defaultColumnWidth);
@@ -169,17 +169,25 @@
   </div>
 </div>
 
+{#snippet swatchStrip(colors: ThemeColors)}
+  <span class="swatch-strip">
+    {#each THEME_VAR_KEYS as v (v.key)}
+      <span class="sw" style={`background:${colors[v.key]}`}></span>
+    {/each}
+  </span>
+{/snippet}
+
 <div class="field">
   <span>プリセットテーマ</span>
   <div class="theme-grid">
     {#each PRESETS as p (p.id)}
-      <button class="theme-card" class:active={theme === `preset:${p.id}`} onclick={() => (theme = `preset:${p.id}`)}>
-        <span class="swatch-strip">
-          <span class="sw" style={`background:${p.colors.surface1}`}></span>
-          <span class="sw" style={`background:${p.colors.surface2}`}></span>
-          <span class="sw" style={`background:${p.colors.accent}`}></span>
+      {@const isActive = theme === `preset:${p.id}`}
+      <button class="theme-card" class:active={isActive} onclick={() => (theme = `preset:${p.id}`)}>
+        {@render swatchStrip(p.colors)}
+        <span class="theme-card-name">
+          {p.name}
+          {#if isActive}<Check size={13} class="theme-card-check" />{/if}
         </span>
-        {p.name}
       </button>
     {/each}
   </div>
@@ -189,24 +197,22 @@
   <span>カスタムテーマ</span>
   <div class="theme-grid">
     {#each customThemes as t (t.id)}
+      {@const isActive = theme === `custom:${t.id}`}
       <div class="theme-card-wrap">
-        <button
-          class="theme-card"
-          class:active={theme === `custom:${t.id}`}
-          onclick={() => (theme = `custom:${t.id}`)}
-        >
-          <span class="swatch-strip">
-            <span class="sw" style={`background:${t.colors.surface1}`}></span>
-            <span class="sw" style={`background:${t.colors.surface2}`}></span>
-            <span class="sw" style={`background:${t.colors.accent}`}></span>
+        <button class="theme-card" class:active={isActive} onclick={() => (theme = `custom:${t.id}`)}>
+          {@render swatchStrip(t.colors)}
+          <span class="theme-card-name">
+            {t.name}
+            {#if isActive}<Check size={13} class="theme-card-check" />{/if}
           </span>
-          {t.name}
         </button>
-        <button class="mini-btn" onclick={() => startEditTheme(t)}>編集</button>
-        <button class="mini-btn" onclick={() => removeCustomTheme(t.id)}>削除</button>
+        <div class="theme-card-actions">
+          <button class="mini-btn" onclick={() => startEditTheme(t)}>編集</button>
+          <button class="mini-btn" onclick={() => removeCustomTheme(t.id)}>削除</button>
+        </div>
       </div>
     {/each}
-    <button class="mini-btn" onclick={startCreateTheme}>＋新規作成</button>
+    <button class="mini-btn add-theme" onclick={startCreateTheme}>＋新規作成</button>
   </div>
 
   {#if editingTheme}
@@ -438,26 +444,28 @@
     cursor: default;
   }
   .theme-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 10px;
   }
   .theme-card-wrap {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 4px;
   }
   .theme-card {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 0;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--surface-2);
     color: var(--text);
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-align: left;
   }
   .theme-card:hover {
     border-color: var(--accent);
@@ -467,14 +475,38 @@
     box-shadow: 0 0 0 1px var(--accent);
   }
   .swatch-strip {
-    display: inline-flex;
-    border-radius: 4px;
-    overflow: hidden;
+    display: flex;
+    width: 100%;
+    height: 30px;
     flex: none;
   }
   .sw {
-    width: 12px;
-    height: 16px;
+    flex: 1;
+    height: 100%;
+  }
+  .theme-card-name {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 7px 9px;
+  }
+  .theme-card-name :global(.theme-card-check) {
+    flex: none;
+    color: var(--accent);
+  }
+  .theme-card-actions {
+    display: flex;
+    gap: 4px;
+  }
+  .theme-card-actions .mini-btn {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 0.74rem;
+  }
+  .add-theme {
+    align-self: stretch;
+    height: 100%;
   }
   .theme-editor {
     margin-top: 10px;
