@@ -165,6 +165,7 @@ class AppStore {
           this.#fail(e);
         }
       }
+      this.#log("success", "起動完了");
     } catch (e) {
       this.#fail(e);
     } finally {
