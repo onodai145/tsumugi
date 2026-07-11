@@ -4,9 +4,10 @@
   import DisplaySection from "./settings/DisplaySection.svelte";
   import AccountsSection from "./settings/AccountsSection.svelte";
   import KeysSection from "./settings/KeysSection.svelte";
+  import AboutSection from "./settings/AboutSection.svelte";
   import { X } from "@lucide/svelte";
 
-  type Section = "accounts" | "display" | "notify" | "mute" | "keys";
+  type Section = "accounts" | "display" | "notify" | "mute" | "keys" | "about";
 
   let {
     onclose,
@@ -20,6 +21,7 @@
     { id: "notify", label: "通知" },
     { id: "mute", label: "NG（ミュート）" },
     { id: "keys", label: "キー操作" },
+    { id: "about", label: "Tsumugiについて" },
   ];
 
   // initial は開いた時点の初期タブのみ。モーダルは開くたび再生成されるので初期値参照でよい。
@@ -54,6 +56,8 @@
           <MuteSection />
         {:else if active === "keys"}
           <KeysSection />
+        {:else if active === "about"}
+          <AboutSection />
         {/if}
       </section>
     </div>

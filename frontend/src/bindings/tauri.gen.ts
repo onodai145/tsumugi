@@ -5,6 +5,11 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+	/**
+	 *  ビルド時の短縮gitコミットハッシュ（`build.rs` が `TSUMUGI_GIT_HASH` として埋め込む）。
+	 *  `.git` が無い環境(tarball等)からのビルドでは "unknown" になる。
+	 */
+	gitCommitHash: () => __TAURI_INVOKE<string>("git_commit_hash"),
 	/**  MiAuth を開始し、認可URLと session_id を返す。 */
 	startMiauth: (host: string) => typedError<MiAuthSession, Error>(__TAURI_INVOKE("start_miauth", { host })),
 	/**  ブラウザでの認可完了後に呼ぶ。token を keyring に保存し、Account を返す。 */
