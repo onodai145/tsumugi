@@ -409,7 +409,9 @@
     align-items: center;
     gap: 3px;
     padding: 1px 7px;
-    background: var(--surface-2);
+    /* カラムと同じ不透明度を適用(背景画像設定時にカラムだけ透けてリアクションだけ
+       不透明のまま浮いて見えるのを防ぐ)。既定100%なら見た目は従来どおり不透明。 */
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     border: 1px solid var(--border);
     border-radius:  3px;
     font-size: 0.85rem;
