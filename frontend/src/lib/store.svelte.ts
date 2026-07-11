@@ -183,6 +183,7 @@ class AppStore {
       this.booting = false;
     }
     await this.#pollStats();
+    if (this.#statsTimer !== null) clearInterval(this.#statsTimer);
     this.#statsTimer = setInterval(() => void this.#pollStats(), 10_000);
   }
 
