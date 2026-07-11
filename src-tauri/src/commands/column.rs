@@ -257,6 +257,13 @@ pub async fn note_count(state: State<'_, AppState>) -> Result<i32> {
     state.settings.note_count()
 }
 
+/// 投稿日時(epoch秒)が since_epoch_secs 以降のノート件数。Backstageの流速表示用。
+#[tauri::command]
+#[specta::specta]
+pub async fn notes_since(state: State<'_, AppState>, since_epoch_secs: i32) -> Result<i32> {
+    state.settings.notes_since(since_epoch_secs)
+}
+
 /// 過去ページ（上スクロール）。
 #[tauri::command]
 #[specta::specta]

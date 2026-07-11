@@ -29,6 +29,8 @@ export const commands = {
 	listColumns: () => typedError<Column[], Error>(__TAURI_INVOKE("list_columns")),
 	/**  ローカルDBにキャッシュ済みのノート総数。Backstageのステータス表示用。 */
 	noteCount: () => typedError<number, Error>(__TAURI_INVOKE("note_count")),
+	/**  投稿日時(epoch秒)が since_epoch_secs 以降のノート件数。Backstageの流速表示用。 */
+	notesSince: (sinceEpochSecs: number) => typedError<number, Error>(__TAURI_INVOKE("notes_since", { sinceEpochSecs })),
 	/**  過去ページ（上スクロール）。 */
 	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
 	/**  通知カラムの過去ページ。 */

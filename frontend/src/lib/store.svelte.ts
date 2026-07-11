@@ -117,7 +117,6 @@ class AppStore {
   noteCount = $state(0);
   noteRatePerMin = $state(0);
   #statsTimer: ReturnType<typeof setInterval> | null = null;
-  #lastStatsSample: { count: number; at: number } | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -187,18 +186,18 @@ class AppStore {
     this.#statsTimer = setInterval(() => void this.#pollStats(), 10_000);
   }
 
-  /// DBキャッシュ済みノート件数を取得し、前回サンプルとの差分から流速(件/分)を算出する。
+  /// DBキャッシュ済みノート総数と、直近1分に「投稿された」(created_at基準)ノート件数を取得する。
+  /// DBへのINSERT時刻ではなく実際の投稿時刻で数えることで、起動時ギャップ埋めや上スクロールでの
+  /// 過去取得時に古いノートをまとめてupsertしても流速が誤って跳ね上がらないようにしている。
   async #pollStats() {
     try {
-      const count = await unwrap(commands.noteCount());
-      const now = Date.now();
-      const last = this.#lastStatsSample;
-      if (last) {
-        const deltaSec = (now - last.at) / 1000;
-        this.noteRatePerMin = deltaSec > 0 ? Math.max(0, Math.round(((count - last.count) / deltaSec) * 60)) : 0;
-      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      const [count, recent] = await Promise.all([
+        unwrap(commands.noteCount()),
+        unwrap(commands.notesSince(nowSec - 60)),
+      ]);
       this.noteCount = count;
-      this.#lastStatsSample = { count, at: now };
+      this.noteRatePerMin = recent;
     } catch {
       // ステータス表示用の補助情報なので、失敗してもログには出さず静かに諦める
     }
