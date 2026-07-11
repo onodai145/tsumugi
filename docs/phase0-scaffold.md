@@ -24,7 +24,7 @@ tsumugi/
 ├─ src-tauri/                                 # Rust Core = Krile の Model層
 │  ├─ Cargo.toml
 │  ├─ tauri.conf.json
-│  ├─ build.rs                                # progenitor で api-doc.json → Rust 生成（§6.1）
+│  ├─ build.rs                                # tauri_build::build() のみ（progenitorは不採用。§6.1）
 │  ├─ openapi/
 │  │  └─ misskey-api-doc.json                 # 対象バージョンの OpenAPI スナップショット（固定）
 │  └─ src/
@@ -42,7 +42,7 @@ tsumugi/
 │     │
 │     ├─ api/                                 # REST クライアント（薄い型付きラッパ）
 │     │  ├─ mod.rs
-│     │  ├─ generated.rs                      # progenitor 生成物の再エクスポート（build.rs出力）
+│     │  ├─ (generated.rs は未採用)            # progenitor不採用のため生成物なし。全て手書きラッパ
 │     │  ├─ client.rs                         # 全 POST・`i` 同梱の共通処理を1箇所に集約
 │     │  ├─ notes.rs                          # timeline / create / delete / reactions ラッパ
 │     │  ├─ meta.rs                           # i / meta / emojis（カスタム絵文字取得）
@@ -495,8 +495,11 @@ sequenceDiagram
 - [x] データフロー（Streaming/capture/起動時復元）
 
 **Phase 1 着手前の未確定（設計書§12 から Phase 0 に関わる分）**
-- `progenitor` が Misskey `api-doc.json` を処理できるか（実機検証）→ Phase 1 冒頭で `build.rs` を試す
+- ~~`progenitor` が Misskey `api-doc.json` を処理できるか（実機検証）~~ → **【解決済み】** Phase 1で検証済み。OpenAPI 3.1.0非対応のため不採用、手書き型付きラッパ（`src-tauri/src/api/`）で実装（設計書§6.1参照）。`generated.rs`（progenitor生成物の再エクスポート）は採用していない。
 - `Account.user_id` を MiAuth 完了時に i/me で確定させる導線（session/miauth）
 - keyring キーの導出規則（`store/secrets`。account_id ベース）
 
-**推奨する次の一手**: `misskey-client-prompts.md` Phase 1（認証とAPIクライアント）。まず `src-tauri` を Tauri v2 で scaffold し、`openapi/misskey-api-doc.json` を投入して `progenitor` 生成の可否を検証する。
+**推奨する次の一手（Phase 0 時点）**: `misskey-client-prompts.md` Phase 1（認証とAPIクライアント）。まず `src-tauri` を Tauri v2 で scaffold し、`openapi/misskey-api-doc.json` を投入して `progenitor` 生成の可否を検証する。
+（その後の実施結果: progenitorはOpenAPI 3.1.0非対応と判明し不採用、手書きラッパで実装済み。§6.1参照）
+
+> ※本書はPhase 0時点の設計スナップショット。上記のprogenitor関連を除き、§1のディレクトリツリー等はPhase 0時点の想定であり、その後の実装で変化した箇所がある（最新の構成は[README.md](../README.md)を参照）。
