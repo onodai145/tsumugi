@@ -73,3 +73,22 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # Windows は既定で MSI/NSIS インストーラのみが生成されるため、
+      # インストーラ無しでそのまま実行できるポータブル版exeを別途リリース資産へ追加する。
+      - name: Prepare portable exe (Windows only)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: Copy-Item src-tauri/target/release/tsumugi.exe "tsumugi-$env:REF_NAME-portable-windows-x64.exe"
+
+      - name: Upload portable exe to release (Windows only)
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: tsumugi-${{ env.REF_NAME }}-portable-windows-x64.exe
