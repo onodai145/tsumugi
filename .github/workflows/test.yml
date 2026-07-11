@@ -34,6 +34,24 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm install
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # cargo test は tauri::generate_context!() をコンパイル時に評価するため、
+      # tauri.conf.json の frontendDist(../frontend/dist) が実在している必要がある。
+      - name: pnpm build (frontendDist生成)
+        working-directory: frontend
+        run: pnpm build
+
       - name: cargo test
         working-directory: src-tauri
         run: cargo test
