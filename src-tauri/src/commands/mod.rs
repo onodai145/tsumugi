@@ -1,6 +1,7 @@
 //! Tauri command ハンドラ（invoke 対象）。
 
 pub mod account;
+pub mod app;
 pub mod column;
 pub mod mute;
 pub mod note;

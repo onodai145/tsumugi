@@ -20,6 +20,7 @@ use tauri_specta::{collect_commands, collect_events, Builder};
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
+            commands::app::git_commit_hash,
             commands::account::start_miauth,
             commands::account::complete_miauth,
             commands::account::list_accounts,
