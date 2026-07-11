@@ -54,6 +54,18 @@ cd src-tauri && cargo test           # Rust（実 Misskey 疎通テストは #[i
 cd frontend  && pnpm exec svelte-check
 ```
 
+## バージョニング / リリース
+
+SemVer（`MAJOR.MINOR.PATCH`）を採用。`v1.0.0` 未満は `MINOR` 更新でも破壊的変更を許容する。
+バージョンは `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `frontend/package.json` の3箇所を揃えて更新する。
+
+CHANGELOG は [git-cliff](https://git-cliff.org/) で Conventional Commits（`feat:` / `fix:` / `docs:` 等）から自動生成する（設定: [`cliff.toml`](cliff.toml)）。
+
+```sh
+git tag vX.Y.Z
+git-cliff -o CHANGELOG.md   # 全タグ分を再生成
+```
+
 ## ライセンス
 
 [MIT License](LICENSE)
