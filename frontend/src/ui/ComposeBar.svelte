@@ -187,19 +187,17 @@
     </div>
   {/if}
 
-  <div class="content">
-    {#if useCw}
-      <input class="cw-input" placeholder="内容警告 (CW)" bind:value={cw} />
-    {/if}
+  {#if useCw}
+    <input class="cw-input" placeholder="内容警告 (CW)" bind:value={cw} />
+  {/if}
 
-    <textarea
-      class="text"
-      placeholder="いまどうしてる？（Ctrl+Enter で投稿）"
-      bind:value={text}
-      bind:this={textarea}
-      onkeydown={onKey}
-    ></textarea>
-  </div>
+  <textarea
+    class="text"
+    placeholder="いまどうしてる？（Ctrl+Enter で投稿）"
+    bind:value={text}
+    bind:this={textarea}
+    onkeydown={onKey}
+  ></textarea>
 
   {#if attached.length > 0 || uploading}
     <div class="thumbs">
@@ -327,18 +325,9 @@
     color: var(--text-dim);
     cursor: pointer;
   }
-  /* CWの有無に関わらずこの領域の高さは固定。CW欄が出る分だけテキスト欄が縮む(枠全体は動かない) */
-  .content {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    height: 80px;
-  }
   .text {
-    flex: 1;
-    min-height: 0;
     width: 100%;
-    resize: none;
+    resize: vertical;
     padding: 6px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -347,10 +336,8 @@
     font-family: inherit;
     font-size: 0.86rem;
     line-height: 1.4;
+    min-height: 80px;
     box-sizing: border-box;
-  }
-  .content .cw-input {
-    flex: none;
   }
   .cw-input,
   .poll-choice {
