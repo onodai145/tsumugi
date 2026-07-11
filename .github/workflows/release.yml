@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install system dependencies (Tauri v2 Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
+      # resolves the current stable Rust release, so it is left unpinned by design.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm install
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "tsumugi ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
