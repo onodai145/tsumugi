@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-07-12
+
+### 🚀 Features
+
+- 設定をJSON化しノートキャッシュを別SQLiteに分離
+
+### ⚙️ Miscellaneous Tasks
+
+- Windowsポータブル版をexe単体からDLL同梱zipに変更
+
+### ◀️ Revert
+
+- Windowsポータブル版をexe単体に戻す(MSVCではWebView2Loader.dll不要のため)
 ## [0.1.0] - 2026-07-11
 
 ### 🚀 Features
@@ -127,6 +140,7 @@ All notable changes to this project will be documented in this file.
 - READMEの構成説明にdomainディレクトリを追記
 - Progenitor不採用の実装結果をdocsに反映
 - リポジトリ用CLAUDE.mdを新規作成
+- V0.1.0のCHANGELOGを生成
 
 ### 🎨 Styling
 
@@ -151,6 +165,7 @@ All notable changes to this project will be documented in this file.
 - Git-cliffによるCHANGELOG自動生成を導入しバージョニング方針を明文化
 - テストCIとクロスプラットフォームリリースビルドCIを追加
 - Gitleaksのpre-commitフックを追加
+- Windows向けにインストーラー無しのポータブルexeもリリース資産へ追加
 
 ### ◀️ Revert
 
