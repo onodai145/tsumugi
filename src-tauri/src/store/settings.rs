@@ -1,198 +1,163 @@
 //! 設定データ（Account / Column）の永続化。token は含めない（keyring 管轄）。
+//! プレーンテキスト(JSON)で1ファイルに保存する。変更のたびに全体を書き出す
+//! （書き込み頻度は低いため、SQLiteのようなインクリメンタル更新は不要）。
+//! 書き込みは一時ファイル→rename で行い、途中でクラッシュしても壊れないようにする。
 
 use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::Result;
-use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const MUTE_KEY: &str = "mute";
-const NOTIFY_KEY: &str = "notify";
-const UI_KEY: &str = "ui";
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SettingsData {
+    #[serde(default)]
+    accounts: Vec<Account>,
+    #[serde(default)]
+    groups: Vec<ColumnGroup>,
+    #[serde(default)]
+    columns: Vec<Column>,
+    #[serde(default)]
+    mute: MuteConfig,
+    #[serde(default)]
+    notify: NotifyConfig,
+    #[serde(default)]
+    ui: UiPrefs,
+}
+
+/// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
+enum Backing {
+    File(PathBuf),
+    #[cfg(test)]
+    Memory,
+}
 
 pub struct SettingsStore {
-    // note_cache.rs（同 crate の別モジュール）からも使うため pub(crate)
-    pub(crate) conn: Mutex<Connection>,
+    backing: Backing,
+    data: Mutex<SettingsData>,
 }
 
 impl SettingsStore {
-    pub fn new(conn: Connection) -> Self {
+    /// 指定パスの設定ファイル(JSON)を読み込む。存在しなければ空の設定から始める。
+    pub fn new(path: PathBuf) -> Result<Self> {
+        let data = load_json_or_default(&path)?;
+        Ok(Self {
+            backing: Backing::File(path),
+            data: Mutex::new(data),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_in_memory() -> Self {
         Self {
-            conn: Mutex::new(conn),
+            backing: Backing::Memory,
+            data: Mutex::new(SettingsData::default()),
         }
+    }
+
+    // release ビルドでは Backing::Memory(テスト専用)が存在せず if let が irrefutable になるため許容する。
+    #[allow(irrefutable_let_patterns)]
+    fn save(&self, data: &SettingsData) -> Result<()> {
+        if let Backing::File(path) = &self.backing {
+            let json = serde_json::to_string_pretty(data)?;
+            let tmp_path = path.with_extension("json.tmp");
+            std::fs::write(&tmp_path, json)?;
+            std::fs::rename(&tmp_path, path)?;
+        }
+        Ok(())
     }
 
     // ---- Account ----
 
     pub fn load_accounts(&self) -> Result<Vec<Account>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, host, username, user_id, display_name, avatar_url FROM account ORDER BY rowid",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(Account {
-                id: r.get(0)?,
-                host: r.get(1)?,
-                username: r.get(2)?,
-                user_id: r.get(3)?,
-                display_name: r.get(4)?,
-                avatar_url: r.get(5)?,
-            })
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        Ok(self.data.lock().unwrap().accounts.clone())
     }
 
     pub fn upsert_account(&self, a: &Account) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO account (id, host, username, user_id, display_name, avatar_url)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(id) DO UPDATE SET
-               host=excluded.host, username=excluded.username, user_id=excluded.user_id,
-               display_name=excluded.display_name, avatar_url=excluded.avatar_url",
-            params![a.id, a.host, a.username, a.user_id, a.display_name, a.avatar_url],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        match guard.accounts.iter_mut().find(|x| x.id == a.id) {
+            Some(existing) => *existing = a.clone(),
+            None => guard.accounts.push(a.clone()),
+        }
+        self.save(&guard)
     }
 
     /// アカウント削除。紐づくカラムも消す。
     pub fn delete_account(&self, account_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM column_def WHERE account_id = ?1", params![account_id])?;
-        conn.execute("DELETE FROM account WHERE id = ?1", params![account_id])?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        guard.accounts.retain(|a| a.id != account_id);
+        guard.columns.retain(|c| c.account_id != account_id);
+        self.save(&guard)
     }
 
     // ---- ColumnGroup（視覚カラム） ----
 
     pub fn load_groups(&self) -> Result<Vec<ColumnGroup>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT id, ord, width, auto FROM column_group ORDER BY ord, rowid")?;
-        let rows = stmt.query_map([], |r| {
-            Ok(ColumnGroup {
-                id: r.get(0)?,
-                order: r.get(1)?,
-                width: r.get(2)?,
-                auto: r.get::<_, i64>(3)? != 0,
-            })
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut list = self.data.lock().unwrap().groups.clone();
+        list.sort_by_key(|g| g.order);
+        Ok(list)
     }
 
     pub fn upsert_group(&self, g: &ColumnGroup) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO column_group (id, ord, width, auto) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(id) DO UPDATE SET ord=excluded.ord, width=excluded.width, auto=excluded.auto",
-            params![g.id, g.order, g.width, g.auto as i64],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        match guard.groups.iter_mut().find(|x| x.id == g.id) {
+            Some(existing) => *existing = g.clone(),
+            None => guard.groups.push(g.clone()),
+        }
+        self.save(&guard)
     }
 
     pub fn set_group_width(&self, group_id: &str, width: i32) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE column_group SET width = ?1 WHERE id = ?2",
-            params![width, group_id],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        if let Some(g) = guard.groups.iter_mut().find(|x| x.id == group_id) {
+            g.width = width;
+        }
+        self.save(&guard)
     }
 
     pub fn set_group_auto(&self, group_id: &str, auto: bool) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE column_group SET auto = ?1 WHERE id = ?2",
-            params![auto as i64, group_id],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        if let Some(g) = guard.groups.iter_mut().find(|x| x.id == group_id) {
+            g.auto = auto;
+        }
+        self.save(&guard)
     }
 
     /// グループの並び順を id 順に振り直す。
     pub fn reorder_groups(&self, ordered_ids: &[String]) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
+        let mut guard = self.data.lock().unwrap();
         for (i, id) in ordered_ids.iter().enumerate() {
-            tx.execute(
-                "UPDATE column_group SET ord = ?1 WHERE id = ?2",
-                params![i as i32, id],
-            )?;
+            if let Some(g) = guard.groups.iter_mut().find(|x| &x.id == id) {
+                g.order = i as i32;
+            }
         }
-        tx.commit()?;
-        Ok(())
+        self.save(&guard)
     }
 
     /// 空になったグループを削除する（タブが 0 のもの）。
     pub fn delete_empty_groups(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM column_group WHERE id NOT IN (SELECT DISTINCT group_id FROM column_def WHERE group_id IS NOT NULL)",
-            [],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        let used: std::collections::HashSet<String> =
+            guard.columns.iter().map(|c| c.group_id.clone()).collect();
+        guard.groups.retain(|g| used.contains(&g.id));
+        self.save(&guard)
     }
 
     // ---- Column（タブ） ----
 
     pub fn load_columns(&self) -> Result<Vec<Column>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, account_id, kind, ord, filter, notify_sound, notify_desktop,
-                    group_id, title, notify_sound_choice
-             FROM column_def ORDER BY ord, rowid",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?, // kind json
-                r.get::<_, i32>(3)?,
-                r.get::<_, String>(4)?, // filter json
-                r.get::<_, i64>(5)? != 0,
-                r.get::<_, i64>(6)? != 0,
-                r.get::<_, Option<String>>(7)?.unwrap_or_default(),
-                r.get::<_, Option<String>>(8)?,
-                r.get::<_, Option<String>>(9)?.unwrap_or_default(),
-            ))
-        })?;
-
-        let mut out = Vec::new();
-        for row in rows {
-            let (
-                id,
-                account_id,
-                kind_json,
-                ord,
-                filter_json,
-                notify_sound,
-                notify_desktop,
-                group_id,
-                title,
-                notify_sound_choice,
-            ) = row?;
-            out.push(Column {
-                id,
-                account_id,
-                kind: serde_json::from_str(&kind_json)?,
-                order: ord,
-                filter: serde_json::from_str(&filter_json)?,
-                notify_sound,
-                notify_desktop,
-                notify_sound_choice,
-                group_id,
-                title,
-            });
-        }
-        Ok(out)
+        let mut list = self.data.lock().unwrap().columns.clone();
+        list.sort_by_key(|c| c.order);
+        Ok(list)
     }
 
     /// タブのカスタム名を設定/解除（None で自動生成名に戻す）。
     pub fn set_column_title(&self, column_id: &str, title: Option<&str>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE column_def SET title = ?1 WHERE id = ?2",
-            params![title, column_id],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        if let Some(c) = guard.columns.iter_mut().find(|x| x.id == column_id) {
+            c.title = title.map(|s| s.to_string());
+        }
+        self.save(&guard)
     }
 
     /// タブごとの通知可否（デスクトップ/音/通知音の選択）を更新する。
@@ -204,135 +169,193 @@ impl SettingsStore {
         notify_sound: bool,
         notify_sound_choice: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE column_def SET notify_desktop = ?1, notify_sound = ?2, notify_sound_choice = ?3
-             WHERE id = ?4",
-            params![notify_desktop, notify_sound, notify_sound_choice, column_id],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        if let Some(c) = guard.columns.iter_mut().find(|x| x.id == column_id) {
+            c.notify_desktop = notify_desktop;
+            c.notify_sound = notify_sound;
+            c.notify_sound_choice = notify_sound_choice.to_string();
+        }
+        self.save(&guard)
     }
 
     pub fn upsert_column(&self, c: &Column) -> Result<()> {
-        let kind_json = serde_json::to_string(&c.kind)?;
-        let filter_json = serde_json::to_string(&c.filter)?;
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO column_def (id, account_id, kind, ord, width, filter, notify_sound, notify_desktop, group_id, title, notify_sound_choice)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10)
-             ON CONFLICT(id) DO UPDATE SET
-               account_id=excluded.account_id, kind=excluded.kind, ord=excluded.ord,
-               filter=excluded.filter, notify_sound=excluded.notify_sound,
-               notify_desktop=excluded.notify_desktop, group_id=excluded.group_id,
-               title=excluded.title, notify_sound_choice=excluded.notify_sound_choice",
-            params![
-                c.id,
-                c.account_id,
-                kind_json,
-                c.order,
-                filter_json,
-                c.notify_sound as i64,
-                c.notify_desktop as i64,
-                c.group_id,
-                c.title,
-                c.notify_sound_choice,
-            ],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        match guard.columns.iter_mut().find(|x| x.id == c.id) {
+            Some(existing) => *existing = c.clone(),
+            None => guard.columns.push(c.clone()),
+        }
+        self.save(&guard)
     }
 
     pub fn delete_column(&self, column_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM column_def WHERE id = ?1", params![column_id])?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        guard.columns.retain(|c| c.id != column_id);
+        self.save(&guard)
     }
 
     // ---- NG（ミュート）設定 ----
 
     pub fn load_mute(&self) -> Result<MuteConfig> {
-        let conn = self.conn.lock().unwrap();
-        let json: Option<String> = conn
-            .query_row(
-                "SELECT value FROM app_setting WHERE key = ?1",
-                params![MUTE_KEY],
-                |r| r.get(0),
-            )
-            .ok();
-        match json {
-            Some(s) => Ok(serde_json::from_str(&s)?),
-            None => Ok(MuteConfig::default()),
-        }
+        Ok(self.data.lock().unwrap().mute.clone())
     }
 
     pub fn save_mute(&self, cfg: &MuteConfig) -> Result<()> {
-        self.set_kv(MUTE_KEY, &serde_json::to_string(cfg)?)
+        let mut guard = self.data.lock().unwrap();
+        guard.mute = cfg.clone();
+        self.save(&guard)
     }
 
     pub fn load_notify(&self) -> Result<NotifyConfig> {
-        match self.get_kv(NOTIFY_KEY)? {
-            Some(s) => Ok(serde_json::from_str(&s)?),
-            None => Ok(NotifyConfig::default()),
-        }
+        Ok(self.data.lock().unwrap().notify.clone())
     }
 
     pub fn save_notify(&self, cfg: &NotifyConfig) -> Result<()> {
-        self.set_kv(NOTIFY_KEY, &serde_json::to_string(cfg)?)
+        let mut guard = self.data.lock().unwrap();
+        guard.notify = cfg.clone();
+        self.save(&guard)
     }
 
     pub fn load_ui(&self) -> Result<UiPrefs> {
-        match self.get_kv(UI_KEY)? {
-            Some(s) => Ok(serde_json::from_str(&s)?),
-            None => Ok(UiPrefs::default()),
-        }
+        Ok(self.data.lock().unwrap().ui.clone())
     }
 
     pub fn save_ui(&self, prefs: &UiPrefs) -> Result<()> {
-        self.set_kv(UI_KEY, &serde_json::to_string(prefs)?)
-    }
-
-    fn get_kv(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
-        Ok(conn
-            .query_row("SELECT value FROM app_setting WHERE key = ?1", params![key], |r| r.get(0))
-            .ok())
-    }
-    fn set_kv(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO app_setting (key, value) VALUES (?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![key, value],
-        )?;
-        Ok(())
+        let mut guard = self.data.lock().unwrap();
+        guard.ui = prefs.clone();
+        self.save(&guard)
     }
 
     /// タブを別グループへ移動し、そのグループ内での順序を id 順に振り直す。
     pub fn move_tab(&self, tab_id: &str, group_id: &str, ordered_tab_ids: &[String]) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-        tx.execute(
-            "UPDATE column_def SET group_id = ?1 WHERE id = ?2",
-            params![group_id, tab_id],
-        )?;
-        for (i, id) in ordered_tab_ids.iter().enumerate() {
-            tx.execute(
-                "UPDATE column_def SET ord = ?1 WHERE id = ?2",
-                params![i as i32, id],
-            )?;
+        let mut guard = self.data.lock().unwrap();
+        if let Some(c) = guard.columns.iter_mut().find(|x| x.id == tab_id) {
+            c.group_id = group_id.to_string();
         }
-        tx.commit()?;
-        Ok(())
+        for (i, id) in ordered_tab_ids.iter().enumerate() {
+            if let Some(c) = guard.columns.iter_mut().find(|x| &x.id == id) {
+                c.order = i as i32;
+            }
+        }
+        self.save(&guard)
     }
+}
+
+fn load_json_or_default(path: &Path) -> Result<SettingsData> {
+    if !path.exists() {
+        return Ok(SettingsData::default());
+    }
+    let s = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&s)?)
+}
+
+/// 旧バージョン(SQLite一体型 tsumugi.db)からの一回限りの移行。
+/// 既存の `db::open_settings`(スキーマ適用＋旧マイグレーション込み)で開いた接続から
+/// 設定4テーブルを読み出し、新しい JSON ストアへ書き出す。
+pub fn migrate_from_legacy_sqlite(
+    json_path: &Path,
+    legacy_conn: &rusqlite::Connection,
+) -> Result<SettingsStore> {
+    use rusqlite::params;
+
+    let mut stmt = legacy_conn.prepare(
+        "SELECT id, host, username, user_id, display_name, avatar_url FROM account ORDER BY rowid",
+    )?;
+    let accounts = stmt
+        .query_map([], |r| {
+            Ok(Account {
+                id: r.get(0)?,
+                host: r.get(1)?,
+                username: r.get(2)?,
+                user_id: r.get(3)?,
+                display_name: r.get(4)?,
+                avatar_url: r.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut stmt =
+        legacy_conn.prepare("SELECT id, ord, width, auto FROM column_group ORDER BY ord, rowid")?;
+    let groups = stmt
+        .query_map([], |r| {
+            Ok(ColumnGroup {
+                id: r.get(0)?,
+                order: r.get(1)?,
+                width: r.get(2)?,
+                auto: r.get::<_, i64>(3)? != 0,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut stmt = legacy_conn.prepare(
+        "SELECT id, account_id, kind, ord, filter, notify_sound, notify_desktop,
+                group_id, title, notify_sound_choice
+         FROM column_def ORDER BY ord, rowid",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i32>(3)?,
+            r.get::<_, String>(4)?,
+            r.get::<_, i64>(5)? != 0,
+            r.get::<_, i64>(6)? != 0,
+            r.get::<_, Option<String>>(7)?.unwrap_or_default(),
+            r.get::<_, Option<String>>(8)?,
+            r.get::<_, Option<String>>(9)?.unwrap_or_default(),
+        ))
+    })?;
+    let mut columns = Vec::new();
+    for row in rows {
+        let (id, account_id, kind_json, ord, filter_json, notify_sound, notify_desktop, group_id, title, notify_sound_choice) =
+            row?;
+        columns.push(Column {
+            id,
+            account_id,
+            kind: serde_json::from_str(&kind_json)?,
+            order: ord,
+            filter: serde_json::from_str(&filter_json)?,
+            notify_sound,
+            notify_desktop,
+            notify_sound_choice,
+            group_id,
+            title,
+        });
+    }
+
+    let get_kv = |key: &str| -> Result<Option<String>> {
+        Ok(legacy_conn
+            .query_row("SELECT value FROM app_setting WHERE key = ?1", params![key], |r| r.get(0))
+            .ok())
+    };
+    let mute = get_kv("mute")?
+        .map(|s| serde_json::from_str(&s))
+        .transpose()?
+        .unwrap_or_default();
+    let notify = get_kv("notify")?
+        .map(|s| serde_json::from_str(&s))
+        .transpose()?
+        .unwrap_or_default();
+    let ui = get_kv("ui")?
+        .map(|s| serde_json::from_str(&s))
+        .transpose()?
+        .unwrap_or_default();
+
+    let store = SettingsStore {
+        backing: Backing::File(json_path.to_path_buf()),
+        data: Mutex::new(SettingsData { accounts, groups, columns, mute, notify, ui }),
+    };
+    store.save(&store.data.lock().unwrap())?;
+    Ok(store)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{ColumnKind, FilterQuery};
-    use crate::store::db::open_in_memory;
 
     fn store() -> SettingsStore {
-        SettingsStore::new(open_in_memory().unwrap())
+        SettingsStore::new_in_memory()
     }
 
     fn account(id: &str) -> Account {
@@ -452,5 +475,82 @@ mod tests {
         s.set_group_auto("g2", true).unwrap();
         let groups = s.load_groups().unwrap();
         assert!(groups.iter().find(|g| g.id == "g2").unwrap().auto);
+    }
+
+    /// JSONファイルへの実書き込み・再読み込みを検証（Memoryバッキングでは検証できない部分）。
+    #[test]
+    fn persists_to_plain_text_json_file_and_reloads() {
+        let path = std::env::temp_dir().join(format!("tsumugi-settings-test-{}.json", uuid::Uuid::new_v4()));
+        {
+            let s = SettingsStore::new(path.clone()).unwrap();
+            s.upsert_account(&account("a1")).unwrap();
+            s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+            s.upsert_column(&column("c1", "a1", 0)).unwrap();
+        }
+
+        // ファイルはプレーンテキスト(JSON)であること
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"a1\""));
+        assert!(serde_json::from_str::<serde_json::Value>(&raw).is_ok());
+
+        // 再読み込みでデータが復元される
+        let reloaded = SettingsStore::new(path.clone()).unwrap();
+        assert_eq!(reloaded.load_accounts().unwrap().len(), 1);
+        assert_eq!(reloaded.load_columns().unwrap().len(), 1);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// 旧バージョン(SQLite一体型 tsumugi.db)からの移行: 実際に使う
+    /// `db::open_settings`(スキーマ+旧マイグレーション適用)経由で開いた接続から、
+    /// account/column/column_group/app_setting が新しいJSON設定へ正しく移ることを検証する。
+    #[test]
+    fn migrates_from_legacy_sqlite_to_json() {
+        let legacy_path =
+            std::env::temp_dir().join(format!("tsumugi-legacy-migrate-{}.db", uuid::Uuid::new_v4()));
+        let json_path =
+            std::env::temp_dir().join(format!("tsumugi-migrated-settings-{}.json", uuid::Uuid::new_v4()));
+
+        let legacy_conn = crate::store::db::open_settings(&legacy_path).unwrap();
+        legacy_conn
+            .execute(
+                "INSERT INTO account (id, host, username, user_id, display_name, avatar_url)
+                 VALUES ('acc1', 'misskey.io', 'me', 'u1', 'Me', NULL)",
+                [],
+            )
+            .unwrap();
+        legacy_conn
+            .execute("INSERT INTO column_group (id, ord, width, auto) VALUES ('g1', 0, 300, 0)", [])
+            .unwrap();
+        legacy_conn
+            .execute(
+                "INSERT INTO column_def (id, account_id, kind, ord, width, filter, notify_sound, notify_desktop, group_id)
+                 VALUES ('c1', 'acc1', '{\"type\":\"home\"}', 0, 300, '{\"kind\":\"keywords\",\"value\":[]}', 0, 1, 'g1')",
+                [],
+            )
+            .unwrap();
+        legacy_conn
+            .execute(
+                "INSERT INTO app_setting (key, value) VALUES ('mute', '{\"ngWords\":[\"spam\"],\"ngUsers\":[],\"ngInstances\":[]}')",
+                [],
+            )
+            .unwrap();
+
+        let migrated = migrate_from_legacy_sqlite(&json_path, &legacy_conn).unwrap();
+        drop(legacy_conn);
+
+        assert_eq!(migrated.load_accounts().unwrap().len(), 1);
+        assert_eq!(migrated.load_accounts().unwrap()[0].id, "acc1");
+        assert_eq!(migrated.load_columns().unwrap().len(), 1);
+        assert_eq!(migrated.load_groups().unwrap().len(), 1);
+        assert_eq!(migrated.load_mute().unwrap().ng_words, vec!["spam".to_string()]);
+
+        // JSONファイルとして実際に書き出されている(プレーンテキスト)ことも確認
+        let raw = std::fs::read_to_string(&json_path).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&raw).is_ok());
+        assert!(raw.contains("acc1"));
+
+        std::fs::remove_file(&legacy_path).ok();
+        std::fs::remove_file(&json_path).ok();
     }
 }

@@ -1,12 +1,13 @@
-//! SQLite 接続とスキーマ初期化。設定（Account/Column）とノートキャッシュを永続化する。
+//! SQLite 接続とスキーマ初期化。設定（Account/Column）とノートキャッシュは別ファイルに分離し、
+//! それぞれ `open_settings` / `open_cache` で開く（バックアップ対象を小さな設定ファイルに絞るため）。
 //! ノートキャッシュは TQL§9 の正規化スキーマ（SQL 射影の前提）＋表示復元用の payload(JSON)。
 
 use crate::error::Result;
 use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
 
-/// 現行スキーマ。将来の移行は `user_version` で管理する。
-const SCHEMA: &str = r#"
+/// 設定スキーマ（Account/Column/汎用設定）。将来の移行は `migrate()` で管理する。
+const SETTINGS_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS account (
     id            TEXT PRIMARY KEY,
     host          TEXT NOT NULL,
@@ -45,8 +46,11 @@ CREATE TABLE IF NOT EXISTS app_setting (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+"#;
 
--- ノートキャッシュ（TQL§9）。SQL 射影用の正規化カラム＋表示復元用 payload。
+/// ノートキャッシュスキーマ（TQL§9）。SQL 射影用の正規化カラム＋表示復元用 payload。
+/// 破棄しても再取得で復元できるため、設定と異なりマイグレーションは持たない。
+const CACHE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS note (
     id            TEXT PRIMARY KEY,
     created_at    INTEGER NOT NULL,
@@ -106,13 +110,22 @@ CREATE TABLE IF NOT EXISTS column_note (
 CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id);
 "#;
 
-/// DB を開き（無ければ作成し）、スキーマを適用してマイグレーションを行う。
-pub fn open(path: &Path) -> Result<Connection> {
+/// 設定DBを開き（無ければ作成し）、スキーマを適用してマイグレーションを行う。
+pub fn open_settings(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    conn.execute_batch(SCHEMA)?;
+    conn.execute_batch(SETTINGS_SCHEMA)?;
     migrate(&conn)?;
+    Ok(conn)
+}
+
+/// ノートキャッシュDBを開き（無ければ作成し）、スキーマを適用する。
+pub fn open_cache(path: &Path) -> Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.execute_batch(CACHE_SCHEMA)?;
     Ok(conn)
 }
 
@@ -194,12 +207,11 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(false)
 }
 
-/// インメモリ DB（テスト用）。
+/// インメモリキャッシュDB（テスト用）。
 #[cfg(test)]
-pub fn open_in_memory() -> Result<Connection> {
+pub fn open_cache_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
-    conn.execute_batch(SCHEMA)?;
-    migrate(&conn)?;
+    conn.execute_batch(CACHE_SCHEMA)?;
     Ok(conn)
 }
 
@@ -220,7 +232,7 @@ mod tests {
         )
         .unwrap();
         // 新スキーマ適用（column_def は IF NOT EXISTS で維持、column_group は作成）＋移行
-        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(SETTINGS_SCHEMA).unwrap();
         migrate(&conn).unwrap();
 
         // タブに group_id が付与され、グループが作られている
@@ -260,7 +272,7 @@ mod tests {
              INSERT INTO column_def VALUES('c2','a1','{\"type\":\"home\"}',1,300,'{}',0,0);",
         )
         .unwrap();
-        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(SETTINGS_SCHEMA).unwrap();
         migrate(&conn).unwrap();
 
         // 通知カラム(c1)は旧「常にfalse」から一度だけ true へ移行

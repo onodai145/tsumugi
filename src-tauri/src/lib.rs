@@ -11,7 +11,7 @@ mod stream;
 
 use session::KeyringStore;
 use state::AppState;
-use store::{db, SettingsStore};
+use store::{db, NoteCacheStore, SettingsStore};
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
 
@@ -104,15 +104,48 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
-            // 設定 DB を app data dir に開く（無ければ作成）
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("no app data dir");
-            std::fs::create_dir_all(&data_dir).expect("failed to create app data dir");
-            let conn = db::open(&data_dir.join("tsumugi.db")).expect("failed to open settings db");
-            let settings = SettingsStore::new(conn);
-            app.manage(AppState::new(Box::new(KeyringStore), settings));
+            // 設定はプレーンテキスト(JSON)で app_config_dir に、ノートキャッシュは
+            // SQLite で app_cache_dir に、それぞれ分けて置く（設定はバックアップしやすく
+            // 人が読める形に、キャッシュは破棄しても再取得で復元できるので分離する）。
+            let config_dir = app.path().app_config_dir().expect("no app config dir");
+            std::fs::create_dir_all(&config_dir).expect("failed to create app config dir");
+            let cache_dir = app.path().app_cache_dir().expect("no app cache dir");
+            std::fs::create_dir_all(&cache_dir).expect("failed to create app cache dir");
+
+            let settings_path = config_dir.join("settings.json");
+            let settings = if settings_path.exists() {
+                SettingsStore::new(settings_path).expect("failed to open settings file")
+            } else {
+                // 旧バージョン(設定+キャッシュがSQLite一体型 tsumugi.db)からの一回限りの移行。
+                // 新設定ファイルがまだ無く、旧 app_data_dir/tsumugi.db が存在する場合のみ実行する。
+                let legacy_path = app.path().app_data_dir().ok().map(|d| d.join("tsumugi.db"));
+                match legacy_path.filter(|p| p.exists()) {
+                    Some(legacy_path) => {
+                        let legacy_conn = db::open_settings(&legacy_path)
+                            .expect("failed to open legacy settings db");
+                        let settings =
+                            store::settings::migrate_from_legacy_sqlite(&settings_path, &legacy_conn)
+                                .expect("failed to migrate legacy settings");
+                        drop(legacy_conn);
+                        let backup_path = legacy_path.with_extension("db.bak");
+                        std::fs::rename(&legacy_path, &backup_path)
+                            .expect("failed to back up legacy db");
+                        log::info!(
+                            "migrated legacy settings from {} to {} (backed up old db to {})",
+                            legacy_path.display(),
+                            settings_path.display(),
+                            backup_path.display()
+                        );
+                        settings
+                    }
+                    None => SettingsStore::new(settings_path).expect("failed to create settings file"),
+                }
+            };
+
+            let cache_conn =
+                db::open_cache(&cache_dir.join("cache.db")).expect("failed to open cache db");
+            let cache = NoteCacheStore::new(cache_conn);
+            app.manage(AppState::new(Box::new(KeyringStore), settings, cache));
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(

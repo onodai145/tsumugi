@@ -653,7 +653,7 @@ fn handle_text(
                 if is_server_muted_note(&state, account_id, &normalized) {
                     return HandleResult::None;
                 }
-                let _ = state.settings.cache_note(&column_id, &normalized);
+                let _ = state.cache.cache_note(&column_id, &normalized);
             }
             let _ = ColumnNote {
                 column_id: column_id.clone(),

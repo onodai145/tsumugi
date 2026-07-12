@@ -1,10 +1,24 @@
 //! ノートキャッシュの読み書き（TQL§9 の正規化テーブル + 表示復元用 payload）。
-//! `SettingsStore`（= ローカル DB アクセス層）に対する inherent impl として実装する。
+//! 設定(`SettingsStore`)とは別ファイル・別接続で持つ（バックアップ対象を小さな設定DBに絞るため）。
 
-use super::settings::SettingsStore;
 use crate::domain::{Note, Visibility};
 use crate::error::Result;
 use rusqlite::{params, Connection};
+use std::sync::Mutex;
+
+/// ノートキャッシュ専用のSQLite接続。`SettingsStore`とは別ファイル(cache.db)を持つ。
+/// 破棄しても再取得で復元できるため、設定ほど重要ではない。
+pub struct NoteCacheStore {
+    conn: Mutex<Connection>,
+}
+
+impl NoteCacheStore {
+    pub fn new(conn: Connection) -> Self {
+        Self {
+            conn: Mutex::new(conn),
+        }
+    }
+}
 
 fn now_epoch() -> i64 {
     std::time::SystemTime::now()
@@ -30,7 +44,7 @@ fn has_url(text: &str) -> bool {
     text.contains("http://") || text.contains("https://")
 }
 
-impl SettingsStore {
+impl NoteCacheStore {
     /// ノート群をキャッシュへ upsert し、カラム所属を記録する（1トランザクション）。
     pub fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()> {
         if notes.is_empty() {
@@ -239,11 +253,11 @@ fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
 mod tests {
     use super::*;
     use crate::domain::{DriveFile, User};
-    use crate::store::db::open_in_memory;
+    use crate::store::db::open_cache_in_memory;
     use std::collections::HashMap;
 
-    fn store() -> SettingsStore {
-        SettingsStore::new(open_in_memory().unwrap())
+    fn store() -> NoteCacheStore {
+        NoteCacheStore::new(open_cache_in_memory().unwrap())
     }
 
     fn note(id: &str, created_at: i64) -> Note {

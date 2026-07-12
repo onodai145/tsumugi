@@ -2,7 +2,7 @@
 
 use crate::domain::{EmojiDef, MuteConfig};
 use crate::session::{AccountManager, SecretStore};
-use crate::store::SettingsStore;
+use crate::store::{NoteCacheStore, SettingsStore};
 use crate::stream::ConnectionManager;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -33,11 +33,12 @@ pub struct AppState {
     /// 起動時/アカウント追加時に同期し、受信ノート・通知の抑制に使う（Krile MuteBlockManager 相当）。
     pub server_mutes: Mutex<HashMap<String, HashSet<String>>>,
     pub settings: SettingsStore,
+    pub cache: NoteCacheStore,
 }
 
 impl AppState {
     /// 永続化済みアカウントを読み込んで初期化する。
-    pub fn new(secrets: Box<dyn SecretStore>, settings: SettingsStore) -> Self {
+    pub fn new(secrets: Box<dyn SecretStore>, settings: SettingsStore, cache: NoteCacheStore) -> Self {
         let accounts = settings.load_accounts().unwrap_or_else(|e| {
             log::error!("failed to load accounts: {e}");
             Vec::new()
@@ -56,6 +57,7 @@ impl AppState {
             mute: Mutex::new(mute),
             server_mutes: Mutex::new(HashMap::new()),
             settings,
+            cache,
         }
     }
 
@@ -79,7 +81,8 @@ impl AppState {
     #[cfg(test)]
     /// テスト用: keyring を使わずインメモリ DB で構築する。
     fn new_for_test(settings: SettingsStore) -> Self {
-        Self::new(Box::new(crate::session::MemoryStore::default()), settings)
+        let cache = NoteCacheStore::new(crate::store::db::open_cache_in_memory().unwrap());
+        Self::new(Box::new(crate::session::MemoryStore::default()), settings, cache)
     }
 
     /// account_id から (host, token) を引く。未登録なら Invalid、token 欠落なら Unauthorized。
@@ -131,11 +134,10 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::domain::Account;
-    use crate::store::db::open_in_memory;
 
     #[test]
     fn restores_persisted_accounts_on_construction() {
-        let settings = SettingsStore::new(open_in_memory().unwrap());
+        let settings = SettingsStore::new_in_memory();
         settings
             .upsert_account(&Account {
                 id: "acc1".into(),
