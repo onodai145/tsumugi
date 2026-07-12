@@ -4,4 +4,5 @@ pub mod db;
 pub mod note_cache;
 pub mod settings;
 
+pub use note_cache::NoteCacheStore;
 pub use settings::SettingsStore;

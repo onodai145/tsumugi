@@ -69,3 +69,10 @@ impl From<rusqlite::Error> for Error {
         Error::Db(e.to_string())
     }
 }
+
+/// 設定ファイル(JSON)の読み書き失敗。DBエラーと同種のローカル永続化失敗として扱う。
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::Db(e.to_string())
+    }
+}

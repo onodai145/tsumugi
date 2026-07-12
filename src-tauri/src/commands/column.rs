@@ -139,7 +139,7 @@ pub async fn update_column(
 
     // 既存ストリームを閉じ、旧フィルタで貯めたキャッシュを捨てる
     state.connections.close(&column_id);
-    state.settings.clear_column_notes(&column_id)?;
+    state.cache.clear_column_notes(&column_id)?;
 
     let group = state
         .settings
@@ -186,7 +186,7 @@ pub async fn resume_column(
     let notes = if is_notif {
         vec![]
     } else {
-        let cached = state.settings.load_cached(&column.id, INITIAL_LIMIT)?;
+        let cached = state.cache.load_cached(&column.id, INITIAL_LIMIT)?;
         if cached.is_empty() { vec![] } else { cached }
     };
 
@@ -217,7 +217,7 @@ pub async fn resume_column(
                 if gap_notes.is_empty() {
                     return;
                 }
-                let _ = state.settings.cache_notes(&column_id, &gap_notes);
+                let _ = state.cache.cache_notes(&column_id, &gap_notes);
                 let _ = crate::events::ColumnGapFill {
                     column_id,
                     notes: gap_notes,
@@ -254,14 +254,14 @@ pub async fn list_columns(state: State<'_, AppState>) -> Result<Vec<Column>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn note_count(state: State<'_, AppState>) -> Result<i32> {
-    state.settings.note_count()
+    state.cache.note_count()
 }
 
 /// 投稿日時(epoch秒)が since_epoch_secs 以降のノート件数。Backstageの流速表示用。
 #[tauri::command]
 #[specta::specta]
 pub async fn notes_since(state: State<'_, AppState>, since_epoch_secs: i32) -> Result<i32> {
-    state.settings.notes_since(since_epoch_secs)
+    state.cache.notes_since(since_epoch_secs)
 }
 
 /// 過去ページ（上スクロール）。
@@ -275,7 +275,7 @@ pub async fn fetch_backfill(
     let column = load_column(&state, &column_id)?;
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
     let notes = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    state.settings.cache_notes(&column.id, &notes)?;
+    state.cache.cache_notes(&column.id, &notes)?;
     Ok(notes)
 }
 
@@ -335,7 +335,7 @@ pub async fn move_tab(
 pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Result<()> {
     state.connections.close(&column_id);
     state.settings.delete_column(&column_id)?;
-    state.settings.clear_column_notes(&column_id)?;
+    state.cache.clear_column_notes(&column_id)?;
     state.settings.delete_empty_groups()?;
     Ok(())
 }
@@ -564,7 +564,7 @@ async fn open_stream_and_fetch(
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let notes = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    state.settings.cache_notes(&column.id, &notes)?;
+    state.cache.cache_notes(&column.id, &notes)?;
     open_streams_only(app, state, column, &resolved, host, token);
     Ok((notes, vec![]))
 }
@@ -708,7 +708,7 @@ async fn fetch_and_filter_multi(
             Some(e) => sql::build_where(e, &sql_ctx).map_err(Error::Invalid)?,
             None => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
         };
-        if let Ok(cached) = state.settings.search_cache(&where_sql, until_id, INITIAL_LIMIT) {
+        if let Ok(cached) = state.cache.search_cache(&where_sql, until_id, INITIAL_LIMIT) {
             all.extend(cached);
         }
     }
