@@ -75,22 +75,18 @@ jobs:
           args: ${{ matrix.args }}
 
       # Windows は既定で MSI/NSIS インストーラのみが生成されるため、
-      # インストーラ無しでそのまま実行できるポータブル版も別途リリース資産へ追加する。
-      # tauri(wry)は WebView2 を静的リンクしていないため、実行時に WebView2Loader.dll 等が
-      # 必要になりうる。exe単体ではなく target/release 直下の *.dll を含めてzipにする。
-      - name: Prepare portable zip (Windows only)
+      # インストーラ無しでそのまま実行できるポータブル版exeを別途リリース資産へ追加する。
+      # x86_64-pc-windows-msvc(windows-latestランナーの既定ターゲット)では
+      # webview2-com-sys が WebView2LoaderStatic.lib を静的リンクするため、
+      # WebView2Loader.dll 等の同梱は不要（*-pc-windows-gnu クロスコンパイル時のみ必要）。
+      - name: Prepare portable exe (Windows only)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         env:
           REF_NAME: ${{ github.ref_name }}
-        run: |
-          $dest = "portable"
-          New-Item -ItemType Directory -Path $dest | Out-Null
-          Copy-Item src-tauri/target/release/tsumugi.exe $dest/
-          Get-ChildItem src-tauri/target/release/*.dll -ErrorAction SilentlyContinue | Copy-Item -Destination $dest/
-          Compress-Archive -Path "$dest/*" -DestinationPath "tsumugi-$env:REF_NAME-portable-windows-x64.zip"
+        run: Copy-Item src-tauri/target/release/tsumugi.exe "tsumugi-$env:REF_NAME-portable-windows-x64.exe"
 
-      - name: Upload portable zip to release (Windows only)
+      - name: Upload portable exe to release (Windows only)
         if: matrix.platform == 'windows-latest'
         uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
         env:
@@ -98,4 +94,4 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         with:
           tag_name: ${{ github.ref_name }}
-          files: tsumugi-${{ env.REF_NAME }}-portable-windows-x64.zip
+          files: tsumugi-${{ env.REF_NAME }}-portable-windows-x64.exe
