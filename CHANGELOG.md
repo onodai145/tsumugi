@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-07-13
+
+### 🚀 Features
+
+- Android向けビルドをTauri mobileで有効化
+- Android向けkeyring-core移行とモバイル投稿UIを追加
+
+### ⚙️ Miscellaneous Tasks
+
+- GitHub ActionsでAndroidビルド検証とリリース署名を追加
 ## [0.2.0] - 2026-07-12
 
 ### 🚀 Features
