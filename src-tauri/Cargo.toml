@@ -58,7 +58,10 @@ base64 = "0.22.1"
 tauri-plugin-os = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-apple-native-keyring-store = "1.0.1"
+# "keychain"(コード署名なしのCLI/デスクトップアプリ向け)を選択。
+# "protected"はprovisioning profileでコード署名されたアプリ向け(iCloud同期/生体認証対応)で、
+# このアプリの配布形態(未署名の cargo tauri build)には合わない。
+apple-native-keyring-store = { version = "1.0.1", features = ["keychain"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store = "1.1.0"

@@ -102,6 +102,18 @@ jobs:
           ndk-version: r27c
           local-cache: true
 
+      # setup-ndk が展開する toolchain 内のシンボリックリンクは相対パスのままで、
+      # 展開先ディレクトリが変わるとリンク切れになる(clang ラッパーが exit 127 で失敗する)。
+      # tauri-apps/tauri の公式CIワークフローと同じ手当てで絶対パスに直す。
+      - name: Restore Android NDK symlinks
+        run: |
+          directory="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          find "$directory" -type l | while read -r link; do
+              current_target=$(readlink "$link")
+              new_target="$directory/$(basename "$current_target")"
+              ln -sf "$new_target" "$link"
+          done
+
       # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
       # resolves the current stable Rust release, so it is left unpinned by design.
       - uses: dtolnay/rust-toolchain@stable
