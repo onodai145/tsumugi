@@ -82,6 +82,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
 
 /// TS 生成の設定。i64 の扱いはフィールド単位で `#[specta(type = specta_typescript::Number)]`
 /// を付けて JS `number` へ（epoch 秒は 2^53 に十分収まるため精度損失なし。domain/note.rs 参照）。
+#[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
 fn ts_config() -> specta_typescript::Typescript {
     specta_typescript::Typescript::default()
 }
@@ -90,8 +91,10 @@ fn ts_config() -> specta_typescript::Typescript {
 pub fn run() {
     let builder = specta_builder();
 
-    // 開発ビルド時のみ、Rust→TS 型・invoke ラッパをフロントへ生成（二重管理回避）
-    #[cfg(debug_assertions)]
+    // 開発ビルド時のみ、Rust→TS 型・invoke ラッパをフロントへ生成（二重管理回避）。
+    // モバイルはアプリサンドボックス内で動くため ../frontend という相対パスが存在せず、
+    // デスクトップ限定の処理とする（Android debugビルドでの起動時クラッシュを防ぐ）。
+    #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
     builder
         .export(ts_config(), "../frontend/src/bindings/tauri.gen.ts")
         .expect("failed to export typescript bindings");
