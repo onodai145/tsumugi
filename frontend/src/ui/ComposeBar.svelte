@@ -13,6 +13,10 @@
     Note,
   } from "../bindings/tauri.gen";
 
+  // expanded: モバイルの投稿モーダルなど、常に複数行分の入力欄を確保したい文脈向け
+  // (コンパクト表示への収縮を無効化する)。
+  let { onPosted, expanded = false }: { onPosted?: () => void; expanded?: boolean } = $props();
+
   let accountId = $state(app.defaultAccountId());
   // ユーザが手動でアカウントを切り替えたら、以後は設定→アカウントの既定変更に追従しない
   let accountTouched = $state(false);
@@ -57,7 +61,8 @@
   // フォーカスが無く、かつ何も入力/添付/展開していない時だけコンパクト表示にする
   // (未送信の内容がある間は縮めない)。
   const compact = $derived(
-    !focused &&
+    !expanded &&
+      !focused &&
       !text.trim() &&
       !cw.trim() &&
       attached.length === 0 &&
@@ -158,6 +163,7 @@
       attached = [];
       replyTo = undefined;
       quoteOf = undefined;
+      onPosted?.();
     } catch (e) {
       err = String(e);
     } finally {
@@ -186,7 +192,7 @@
       }
     }
     accounts={app.accounts}
-    large
+    large={!expanded}
   />
 
   <div class="composebox">
@@ -206,7 +212,8 @@
   <textarea
     class="text"
     class:compact
-    rows="1"
+    class:expanded
+    rows={expanded ? 4 : 1}
     placeholder="いまどうしてる？（Ctrl+Enter で投稿）"
     bind:value={text}
     bind:this={textarea}
@@ -360,6 +367,10 @@
   .text.compact {
     min-height: 34px;
     resize: none;
+  }
+  /* モバイル投稿モーダルなど: 常に4行分の高さを確保する */
+  .text.expanded {
+    min-height: 96px;
   }
   .cw-input,
   .poll-choice {

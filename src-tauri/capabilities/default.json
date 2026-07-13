@@ -13,6 +13,7 @@
     },
     "dialog:allow-open",
     "dialog:allow-save",
-    "notification:default"
+    "notification:default",
+    "os:allow-platform"
   ]
 }
