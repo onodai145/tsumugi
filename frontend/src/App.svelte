@@ -10,7 +10,8 @@
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
   import { buildKeymap, eventToChord } from "./lib/keymap";
-  import { Settings as SettingsIcon } from "@lucide/svelte";
+  import { isMobilePlatform } from "./lib/platform";
+  import { Settings as SettingsIcon, Pencil } from "@lucide/svelte";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
@@ -23,6 +24,8 @@
   let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);
   let columnSettingsGroupId = $state<string | null>(null);
+  // スマホでは投稿欄を常時表示せず、右下のFABから投稿モーダルを開く操作にする
+  let showComposeModal = $state(false);
 
   function openSettings(section: SettingsSection) {
     settingsInitial = section;
@@ -61,16 +64,19 @@
     ) {
       return;
     }
-    // Esc: 開いているリアクションピッカーを閉じる
+    // Esc: 開いているリアクションピッカー/投稿モーダルを閉じる
     if (e.key === "Escape") {
       if (app.reactPickerNoteId) {
         app.reactPickerNoteId = null;
+        e.preventDefault();
+      } else if (showComposeModal) {
+        showComposeModal = false;
         e.preventDefault();
       }
       return;
     }
     // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
-    if (showAdd || showAddColumn || showSettings) return;
+    if (showAdd || showAddColumn || showSettings || showComposeModal) return;
     const action = keymap.get(eventToChord(e));
     if (!action) return;
     e.preventDefault();
@@ -85,9 +91,9 @@
 </script>
 
 <div class="app">
-  <!-- 上部: 投稿バー + カラム/アカウント追加 -->
+  <!-- 上部: 投稿バー(スマホでは非表示) + カラム/アカウント追加 -->
   <header class="appbar">
-    {#if app.accounts.length > 0}
+    {#if app.accounts.length > 0 && !isMobilePlatform}
       <ComposeBar />
     {:else}
       <div class="spacer"></div>
@@ -126,6 +132,26 @@
 
   {#if app.accounts.length > 0 && !app.booting}
     <Backstage />
+  {/if}
+
+  {#if isMobilePlatform && app.accounts.length > 0 && !app.booting}
+    <button class="compose-fab" onclick={() => (showComposeModal = true)} title="投稿">
+      <Pencil size={20} />
+    </button>
+  {/if}
+
+  {#if showComposeModal}
+    <div
+      class="compose-overlay"
+      onclick={() => (showComposeModal = false)}
+      onkeydown={(e) => e.key === "Escape" && (showComposeModal = false)}
+      role="presentation"
+    >
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="compose-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
+        <ComposeBar onPosted={() => (showComposeModal = false)} expanded />
+      </div>
+    </div>
   {/if}
 
   {#if showAddColumn}
@@ -197,6 +223,42 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
+  }
+  .compose-fab {
+    display: grid;
+    place-items: center;
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    width: 56px;
+    height: 56px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    z-index: 40;
+  }
+  .compose-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: grid;
+    align-items: start;
+    justify-items: stretch;
+    padding-top: max(6vh, env(safe-area-inset-top));
+    z-index: 50;
+  }
+  .compose-modal {
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px;
   }
   .columns {
     display: flex;
