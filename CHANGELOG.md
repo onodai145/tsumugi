@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-07-13
+
+### 🐛 Bug Fixes
+
+- MacOS keychainビルドとAndroid NDKシンボリックリンクのCI失敗を修正
 ## [0.3.0] - 2026-07-13
 
 ### 🚀 Features
