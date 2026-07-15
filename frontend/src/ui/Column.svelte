@@ -190,7 +190,10 @@
   .grip {
     display: flex;
     align-items: center;
-    padding: 0 4px;
+    justify-content: center;
+    /* 幅をタブバーの高さに合わせ、正方形のタップ/クリック領域にする(横に細長いと押しづらい) */
+    width: 26px;
+    flex: none;
     color: var(--text-dim);
     cursor: grab;
     user-select: none;
