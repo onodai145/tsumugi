@@ -159,6 +159,23 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の
+            // 未確定文字列インライン表示)を無効化しているため、明示的に再度有効化する。
+            // 無効化されたままだと fcitx5 等が候補ウィンドウをカーソル位置にアンカー
+            // 表示する前提になるが、環境によってはその代替表示も出ず、変換中の文字列が
+            // どこにも見えなくなる(Issue #10)。
+            #[cfg(target_os = "linux")]
+            if let Some(webview) = app.get_webview_window("main") {
+                let _ = webview.with_webview(|w| {
+                    use webkit2gtk::WebViewExt;
+                    if let Some(input_context) = w.inner().input_method_context() {
+                        use webkit2gtk::InputMethodContextExt;
+                        input_context.set_enable_preedit(true);
+                    }
+                });
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
