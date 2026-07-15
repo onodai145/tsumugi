@@ -3,7 +3,7 @@
   import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
-  import { X } from "@lucide/svelte";
+  import { X, GripVertical } from "@lucide/svelte";
 
   let {
     group,
@@ -83,7 +83,7 @@
       ondragend={() => app.endDragGroup()}
       ondblclick={() => onEditGroup(group.id)}
       title="ドラッグでカラムを並べ替え（ダブルクリックでカラム設定）"
-    >⋮⋮</span>
+    ><GripVertical size={14} /></span>
 
     {#each group.tabs as t (t.id)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -197,8 +197,6 @@
     color: var(--text-dim);
     cursor: grab;
     user-select: none;
-    font-size: 0.7rem;
-    letter-spacing: -2px;
   }
   .grip:active {
     cursor: grabbing;
