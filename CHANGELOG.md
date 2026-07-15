@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-07-15
+
+### 🐛 Bug Fixes
+
+- AndroidリリースからAABアップロードを除去
+- Android背景画像/通知音選択でcontent:// URIが読めない不具合を修正
+- Androidのステータスバー/ナビゲーションバーにUIが隠れる不具合を修正
 ## [0.3.1] - 2026-07-13
 
 ### 🐛 Bug Fixes
