@@ -96,7 +96,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 3px 8px;
+    padding: 3px max(8px, env(safe-area-inset-right)) max(3px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
     min-height: 24px;
     font-size: 0.76rem;
   }
