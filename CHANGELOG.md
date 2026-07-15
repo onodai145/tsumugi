@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-07-15
+
+### 🐛 Bug Fixes
+
+- カラム設定ボタン(grip)を正方形のタップ領域に修正
+- Gripの文字表示をアイコンに置き換え
+- Linux版でIME未確定文字列が表示されない問題を修正
 ## [0.3.2] - 2026-07-15
 
 ### 🐛 Bug Fixes
