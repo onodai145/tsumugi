@@ -56,6 +56,9 @@ regex = "1.12.4"
 tauri-plugin-notification = "2"
 base64 = "0.22.1"
 tauri-plugin-os = "2"
+# Android の SAF (content:// URI) で選ばれたファイルを読むために使う。
+# デスクトップでは std::fs 相当のまま(read_image_data_url 側で target_os 分岐)。
+tauri-plugin-fs = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # "keychain"(コード署名なしのCLI/デスクトップアプリ向け)を選択。

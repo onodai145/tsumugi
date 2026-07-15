@@ -5,7 +5,9 @@ use crate::domain::{MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use tauri::State;
+use tauri::{AppHandle, State};
+#[cfg(target_os = "android")]
+use tauri_plugin_fs::FsExt;
 
 /// 背景画像として許容する最大サイズ（DB肥大化を防ぐ）。
 const MAX_BACKGROUND_IMAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -60,23 +62,40 @@ pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<
 /// UiPrefs.background_image に直接保存できる形にする。拡張子から MIME を推定する。
 #[tauri::command]
 #[specta::specta]
-pub async fn read_image_data_url(path: String) -> Result<String> {
-    read_file_as_data_url(&path, MAX_BACKGROUND_IMAGE_BYTES, guess_image_mime).await
+pub async fn read_image_data_url(app: AppHandle, path: String) -> Result<String> {
+    read_file_as_data_url(&app, &path, MAX_BACKGROUND_IMAGE_BYTES, guess_image_mime).await
 }
 
 /// ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。
 #[tauri::command]
 #[specta::specta]
-pub async fn read_audio_data_url(path: String) -> Result<String> {
-    read_file_as_data_url(&path, MAX_NOTIFY_SOUND_BYTES, guess_audio_mime).await
+pub async fn read_audio_data_url(app: AppHandle, path: String) -> Result<String> {
+    read_file_as_data_url(&app, &path, MAX_NOTIFY_SOUND_BYTES, guess_audio_mime).await
 }
 
 /// ファイルを読み、上限サイズを検査して data URL(base64) にする共通処理。
+///
+/// Android は SAF のファイルピッカーが `content://` URI を返し、通常のファイルシステム
+/// パスとして開けない（`std::fs`/`tokio::fs` では ENOENT になる）ため、
+/// `tauri-plugin-fs` 経由でネイティブの ContentResolver ブリッジを使って読む。
 async fn read_file_as_data_url(
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: &AppHandle,
     path: &str,
     max_bytes: usize,
     guess_mime: fn(&str) -> &'static str,
 ) -> Result<String> {
+    #[cfg(target_os = "android")]
+    let bytes = {
+        let app = app.clone();
+        // "content://..." は Url、それ以外は通常のファイルパスとして解釈される
+        // (`FilePath::from_str` は `Infallible` を返すため unwrap で安全)。
+        let file_path: tauri_plugin_fs::FilePath = path.parse().unwrap();
+        tauri::async_runtime::spawn_blocking(move || app.fs().read(file_path))
+            .await
+            .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?
+            .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?
+    };
+    #[cfg(not(target_os = "android"))]
     let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?;
