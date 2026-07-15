@@ -75,5 +75,11 @@ zbus-secret-service-keyring-store = { version = "1.0.0", features = ["crypto-rus
 [target.'cfg(target_os = "android")'.dependencies]
 android-native-keyring-store = "1.0.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# wry が内部で無効化している IME preedit(未確定文字列インライン表示)を明示的に
+# 再度有効化するために使う(lib.rs 参照)。wry-0.55.1 が依存する webkit2gtk と同じ
+# バージョンに固定する。
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

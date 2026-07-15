@@ -5143,6 +5143,7 @@ dependencies = [
  "tokio-tungstenite",
  "url",
  "uuid",
+ "webkit2gtk",
  "windows-native-keyring-store",
  "zbus-secret-service-keyring-store",
 ]
