@@ -184,7 +184,8 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    padding: 6px 10px;
+    padding: max(6px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 6px
+      max(10px, env(safe-area-inset-left));
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
     flex: none;
@@ -228,8 +229,8 @@
     display: grid;
     place-items: center;
     position: fixed;
-    right: 20px;
-    bottom: 20px;
+    right: calc(20px + env(safe-area-inset-right));
+    bottom: calc(20px + env(safe-area-inset-bottom));
     width: 56px;
     height: 56px;
     border: none;
