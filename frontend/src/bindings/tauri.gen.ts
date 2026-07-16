@@ -10,6 +10,15 @@ export const commands = {
 	 *  `.git` が無い環境(tarball等)からのビルドでは "unknown" になる。
 	 */
 	gitCommitHash: () => __TAURI_INVOKE<string>("git_commit_hash"),
+	/**
+	 *  GitHub Releases から最新版を確認する（Issue #4）。新しいバージョンがあれば返し、
+	 *  最新か取得に失敗した場合は None（呼び出し側を静かに無視させ、オフライン時等に
+	 *  エラー扱いでBackstageを騒がせないようにする）。
+	 */
+	checkLatestRelease: () => typedError<{
+	version: string,
+	url: string,
+} | null, Error>(__TAURI_INVOKE("check_latest_release")),
 	/**  MiAuth を開始し、認可URLと session_id を返す。 */
 	startMiauth: (host: string) => typedError<MiAuthSession, Error>(__TAURI_INVOKE("start_miauth", { host })),
 	/**  ブラウザでの認可完了後に呼ぶ。token を keyring に保存し、Account を返す。 */
@@ -286,6 +295,11 @@ export type FilterQuery =
 { kind: "keywords"; value: string[] } | 
 /**  Phase 4: TQL クエリ文字列（保存形）。 */
 { kind: "tql"; value: string };
+
+export type LatestRelease = {
+	version: string,
+	url: string,
+};
 
 /**  `start_miauth` の戻り値。フロントは `url` をブラウザで開く。 */
 export type MiAuthSession = {
