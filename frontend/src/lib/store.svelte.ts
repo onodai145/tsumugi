@@ -111,7 +111,9 @@ class AppStore {
     gapFillLimit: 200,
     customThemes: [],
     mediaThumbnailHeight: 200,
-    noteCacheLimit: 5000,
+    noteCacheLimit: 10000,
+    noteCacheMaxAgeDays: 0,
+    noteCacheMaxSizeMb: 0,
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -184,7 +186,9 @@ class AppStore {
         gapFillLimit: ui.gapFillLimit ?? 200,
         customThemes: ui.customThemes ?? [],
         mediaThumbnailHeight: ui.mediaThumbnailHeight ?? 200,
-        noteCacheLimit: ui.noteCacheLimit ?? 5000,
+        noteCacheLimit: ui.noteCacheLimit ?? 10000,
+        noteCacheMaxAgeDays: ui.noteCacheMaxAgeDays ?? 0,
+        noteCacheMaxSizeMb: ui.noteCacheMaxSizeMb ?? 0,
       };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
@@ -881,7 +885,9 @@ class AppStore {
       gapFillLimit: prefs.gapFillLimit ?? 200,
       customThemes: prefs.customThemes ?? [],
       mediaThumbnailHeight: prefs.mediaThumbnailHeight ?? 200,
-      noteCacheLimit: prefs.noteCacheLimit ?? 5000,
+      noteCacheLimit: prefs.noteCacheLimit ?? 10000,
+      noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
+      noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
     };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");

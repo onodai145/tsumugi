@@ -515,6 +515,13 @@ export type UiPrefs = {
 	 *  （Issue #6: 無制限に溜まり続けないようにする）。0 なら無制限。
 	 */
 	noteCacheLimit?: number,
+	/**
+	 *  ローカルキャッシュに保持するノートの経過日数上限。created_at がこれより古いノートは
+	 *  削除する。0 なら無制限。
+	 */
+	noteCacheMaxAgeDays?: number,
+	/**  ローカルキャッシュDBのサイズ上限（MB）。超えている間は古い順に削除し続ける。0 なら無制限。 */
+	noteCacheMaxSizeMb?: number,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

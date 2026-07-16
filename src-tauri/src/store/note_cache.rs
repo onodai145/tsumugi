@@ -103,36 +103,42 @@ impl NoteCacheStore {
         Ok(count)
     }
 
-    /// キャッシュを `keep` 件まで古いノートから削除する（Issue #6: 無制限に溜まり続けないようにする）。
-    /// `keep <= 0` は無制限（何もしない）。created_at の古い順に超過分だけ削除し、
-    /// 関連テーブル（note_reaction 等）と column_note も一緒に消す（FK制約は張っていないため手動）。
-    /// 戻り値は実際に削除した件数。
-    pub fn prune(&self, keep: i32) -> Result<usize> {
-        if keep <= 0 {
-            return Ok(0);
-        }
+    /// キャッシュを間引く（Issue #6: 無制限に溜まり続けないようにする）。3つの上限を順に適用する:
+    /// 1. `max_age_days` 日より古いノートを削除
+    /// 2. 件数が `keep` を超えていれば古い順に削除
+    /// 3. DBサイズが `max_size_mb` を超えていれば古い順に削除（incremental_vacuumで実サイズへ反映）
+    ///
+    /// 各上限は `<= 0` で無効（無制限）。戻り値は実際に削除した件数の合計。
+    pub fn prune(&self, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
         let mut guard = self.conn.lock().unwrap();
-        let tx = guard.transaction()?;
-        let total: i64 = tx.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
-        let overflow = total - keep as i64;
-        if overflow <= 0 {
-            return Ok(0);
+        let mut deleted: i64 = 0;
+        {
+            let tx = guard.transaction()?;
+            if max_age_days > 0 {
+                let cutoff = now_epoch() - max_age_days as i64 * 86_400;
+                deleted += delete_matching(
+                    &tx,
+                    "SELECT id FROM note WHERE created_at < ?1",
+                    params![cutoff],
+                )?;
+            }
+            if keep > 0 {
+                let total: i64 = tx.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
+                let overflow = total - keep as i64;
+                if overflow > 0 {
+                    deleted += delete_matching(
+                        &tx,
+                        "SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?1",
+                        params![overflow],
+                    )?;
+                }
+            }
+            tx.commit()?;
         }
-        tx.execute(
-            "CREATE TEMP TABLE prune_ids AS
-             SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?1",
-            params![overflow],
-        )?;
-        tx.execute("DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)", [])?;
-        for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
-            tx.execute(
-                &format!("DELETE FROM {table} WHERE note_id IN (SELECT id FROM prune_ids)"),
-                [],
-            )?;
+        if max_size_mb > 0 {
+            deleted += shrink_to_size(&guard, max_size_mb as i64 * 1024 * 1024)?;
         }
-        tx.execute("DROP TABLE prune_ids", [])?;
-        tx.commit()?;
-        Ok(overflow as usize)
+        Ok(deleted as usize)
     }
 
     /// 投稿日時(created_at, epoch秒)が since_epoch_secs 以降のノート件数。
@@ -190,6 +196,57 @@ impl NoteCacheStore {
         }
         Ok(out)
     }
+}
+
+/// `select_sql`（`SELECT id FROM note ...` 形式）にマッチするノートと、その関連テーブル
+/// （note_reaction 等）・column_note を削除する（FK制約は張っていないため手動カスケード）。
+/// 戻り値は削除したノート件数。
+fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<i64> {
+    conn.execute(&format!("CREATE TEMP TABLE prune_ids AS {select_sql}"), params)?;
+    let deleted = conn.execute("DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)", [])? as i64;
+    for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE note_id IN (SELECT id FROM prune_ids)"),
+            [],
+        )?;
+    }
+    conn.execute("DROP TABLE prune_ids", [])?;
+    Ok(deleted)
+}
+
+/// `page_count * page_size` からDBの論理サイズ(バイト)を求める。
+fn db_size_bytes(conn: &Connection) -> Result<i64> {
+    let page_count: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+    let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+    Ok(page_count * page_size)
+}
+
+/// DBサイズが `budget_bytes` を下回るまで、古いノートから削除して incremental_vacuum で
+/// 実サイズへ反映する。DELETEだけでは解放ページがファイル内に留まり縮まらないため
+/// （`open_cache` で auto_vacuum=INCREMENTAL を有効化している前提）。
+/// 削除見積もりが外れても収束するよう最大3ラウンドまでとする。
+fn shrink_to_size(conn: &Connection, budget_bytes: i64) -> Result<i64> {
+    let mut deleted = 0i64;
+    for _ in 0..3 {
+        conn.execute_batch("PRAGMA incremental_vacuum")?;
+        let size = db_size_bytes(conn)?;
+        if size <= budget_bytes {
+            break;
+        }
+        let total: i64 = conn.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
+        if total == 0 {
+            break;
+        }
+        let over_ratio = (size - budget_bytes) as f64 / size as f64;
+        let to_delete = ((total as f64) * over_ratio).ceil() as i64;
+        let to_delete = to_delete.clamp(1, total);
+        deleted += delete_matching(
+            conn,
+            "SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?1",
+            params![to_delete],
+        )?;
+    }
+    Ok(deleted)
 }
 
 /// note + user + 関連テーブルを upsert する。関連は入れ替え（DELETE→INSERT）。
@@ -407,7 +464,7 @@ mod tests {
     fn prune_removes_oldest_beyond_keep_and_related_rows() {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
-        let deleted = s.prune(2).unwrap();
+        let deleted = s.prune(2, 0, 0).unwrap();
         assert_eq!(deleted, 1);
         assert_eq!(s.note_count().unwrap(), 2);
         // 最古(n1)が消え、残りは新しい2件
@@ -429,9 +486,58 @@ mod tests {
     fn prune_is_noop_when_under_or_unlimited() {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).unwrap();
-        assert_eq!(s.prune(10).unwrap(), 0); // 上限未満
-        assert_eq!(s.prune(0).unwrap(), 0); // 0 = 無制限
+        assert_eq!(s.prune(10, 0, 0).unwrap(), 0); // 上限未満
+        assert_eq!(s.prune(0, 0, 0).unwrap(), 0); // 全て無制限
         assert_eq!(s.note_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn prune_removes_notes_older_than_max_age_days() {
+        let s = store();
+        let now = now_epoch();
+        let one_day = 86_400;
+        s.cache_notes(
+            "col1",
+            &[
+                note("old", now - 40 * one_day),
+                note("recent", now - 1 * one_day),
+            ],
+        )
+        .unwrap();
+        let deleted = s.prune(0, 30, 0).unwrap();
+        assert_eq!(deleted, 1);
+        let got = s.load_cached("col1", 10).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["recent"]);
+    }
+
+    #[test]
+    fn prune_shrinks_db_below_max_size_mb() {
+        let s = store();
+        // 十分な件数×サイズを入れて 1MB を確実に超えさせ、上限指定で
+        // 実際に削除・縮小(incremental_vacuum)が働くことを確認する。
+        let notes: Vec<Note> = (0..1000)
+            .map(|i| {
+                let mut n = note(&format!("n{i}"), 100 + i as i64);
+                n.text = Some("x".repeat(2000));
+                n
+            })
+            .collect();
+        s.cache_notes("col1", &notes).unwrap();
+        let before_count = s.note_count().unwrap();
+        let before_size = {
+            let conn = s.conn.lock().unwrap();
+            db_size_bytes(&conn).unwrap()
+        };
+        assert!(before_size > 1024 * 1024, "test setup should exceed 1MB, got {before_size}");
+
+        let deleted = s.prune(0, 0, 1).unwrap();
+        assert!(deleted > 0);
+        assert!(s.note_count().unwrap() < before_count);
+        let after_size = {
+            let conn = s.conn.lock().unwrap();
+            db_size_bytes(&conn).unwrap()
+        };
+        assert!(after_size < before_size);
     }
 
     #[test]

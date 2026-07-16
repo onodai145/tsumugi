@@ -15,7 +15,9 @@
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
-  let noteCacheLimit = $state(app.ui.noteCacheLimit ?? 5000);
+  let noteCacheLimit = $state(app.ui.noteCacheLimit ?? 10000);
+  let noteCacheMaxAgeDays = $state(app.ui.noteCacheMaxAgeDays ?? 0);
+  let noteCacheMaxSizeMb = $state(app.ui.noteCacheMaxSizeMb ?? 0);
   let pickingImage = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -141,6 +143,10 @@
       mediaThumbnailHeight = thumbHeight;
       const cacheLimit = Math.min(100000, Math.max(0, Math.round(noteCacheLimit) || 0));
       noteCacheLimit = cacheLimit;
+      const cacheMaxAge = Math.min(3650, Math.max(0, Math.round(noteCacheMaxAgeDays) || 0));
+      noteCacheMaxAgeDays = cacheMaxAge;
+      const cacheMaxSize = Math.min(10000, Math.max(0, Math.round(noteCacheMaxSizeMb) || 0));
+      noteCacheMaxSizeMb = cacheMaxSize;
       // このセクションが編集しないフィールド(既定アカウント等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
@@ -156,6 +162,8 @@
         gapFillLimit: gapLimit,
         mediaThumbnailHeight: thumbHeight,
         noteCacheLimit: cacheLimit,
+        noteCacheMaxAgeDays: cacheMaxAge,
+        noteCacheMaxSizeMb: cacheMaxSize,
       });
       saved = true;
     } catch (e) {
@@ -270,9 +278,18 @@
   <span>ノートキャッシュの保持件数上限（件, 0〜100000。0で無制限）</span>
   <input type="number" min="0" max="100000" step="500" bind:value={noteCacheLimit} />
 </label>
+<label class="field">
+  <span>ノートキャッシュの保持日数上限（日, 0〜3650。0で無制限）</span>
+  <input type="number" min="0" max="3650" step="1" bind:value={noteCacheMaxAgeDays} />
+</label>
+<label class="field">
+  <span>ノートキャッシュのサイズ上限（MB, 0〜10000。0で無制限）</span>
+  <input type="number" min="0" max="10000" step="50" bind:value={noteCacheMaxSizeMb} />
+</label>
 <p class="hint">
-  ローカルDBに保持するノート件数の上限です。超えた分は古い順に自動で削除されます。
-  0にすると無制限に溜め続けます（ディスク容量を圧迫する可能性があります）。
+  ローカルDBに保持するノートの上限です。件数・投稿からの経過日数・DBファイルサイズのいずれかを
+  超えた分は古い順に自動で削除されます。すべて0にすると無制限に溜め続けます
+  （ディスク容量を圧迫する可能性があります）。
 </p>
 
 <div class="field">
