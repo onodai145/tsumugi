@@ -21,6 +21,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::app::git_commit_hash,
+            commands::app::check_latest_release,
             commands::account::start_miauth,
             commands::account::complete_miauth,
             commands::account::list_accounts,

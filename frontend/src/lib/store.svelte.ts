@@ -23,6 +23,7 @@ import type {
   MuteConfig,
   NotifyConfig,
   UiPrefs,
+  LatestRelease,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -30,6 +31,7 @@ import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
 
 /// タブ = 1タイムライン。
 export interface TabView {
@@ -120,6 +122,10 @@ class AppStore {
   noteCount = $state(0);
   noteRatePerMin = $state(0);
   #statsTimer: ReturnType<typeof setInterval> | null = null;
+  // 新バージョン通知（Issue #4）。起動時/「Tsumugiについて」表示時/数時間おきに確認する。
+  updateAvailable = $state<LatestRelease | null>(null);
+  #updateCheckTimer: ReturnType<typeof setInterval> | null = null;
+  #loggedUpdateVersion: string | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -141,6 +147,10 @@ class AppStore {
     if (this.#statsTimer !== null) {
       clearInterval(this.#statsTimer);
       this.#statsTimer = null;
+    }
+    if (this.#updateCheckTimer !== null) {
+      clearInterval(this.#updateCheckTimer);
+      this.#updateCheckTimer = null;
     }
   }
 
@@ -195,6 +205,26 @@ class AppStore {
     await this.#pollStats();
     if (this.#statsTimer !== null) clearInterval(this.#statsTimer);
     this.#statsTimer = setInterval(() => void this.#pollStats(), 10_000);
+
+    void this.checkForUpdate();
+    if (this.#updateCheckTimer !== null) clearInterval(this.#updateCheckTimer);
+    this.#updateCheckTimer = setInterval(() => void this.checkForUpdate(), UPDATE_CHECK_INTERVAL_MS);
+  }
+
+  /// GitHub Releases を確認し、新しいバージョンがあれば updateAvailable にセットして
+  /// Backstage へ記録する（Issue #4）。起動時・「Tsumugiについて」表示時・数時間おきに呼ばれる。
+  /// 同じバージョンを複数回ログに出さないよう、ログは初回検知時だけに絞る。
+  async checkForUpdate() {
+    try {
+      const latest = await unwrap(commands.checkLatestRelease());
+      this.updateAvailable = latest;
+      if (latest && this.#loggedUpdateVersion !== latest.version) {
+        this.#loggedUpdateVersion = latest.version;
+        this.#log("info", `新しいバージョン v${latest.version} が公開されています`);
+      }
+    } catch {
+      // オフライン等での失敗は静かに無視する（バックグラウンドの補助チェックのため）
+    }
   }
 
   /// DBキャッシュ済みノート総数と、直近1分に「投稿された」(created_at基準)ノート件数を取得する。
