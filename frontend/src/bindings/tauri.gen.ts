@@ -486,6 +486,11 @@ export type UiPrefs = {
 	gapFillLimit?: number,
 	/**  ユーザーが作成したカスタムテーマの一覧。 */
 	customThemes?: CustomTheme[],
+	/**
+	 *  メディア添付ノートのサムネイル高さ上限（px）。ノートを詰めたい人は小さく、
+	 *  大きく見たい人は大きくできるようにする。
+	 */
+	mediaThumbnailHeight?: number,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
