@@ -113,7 +113,7 @@
     aspect-ratio: 16 / 10;
     /* 幅広カラムでは aspect-ratio のままだと高さも際限なく伸びてしまう
        (Issue #8) ため、高さの上限を設ける。object-fit: cover で見た目は保たれる。 */
-    max-height: 260px;
+    max-height: 200px;
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     display: flex;
     align-items: center;
