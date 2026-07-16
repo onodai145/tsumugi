@@ -634,6 +634,27 @@
   .tql-input.invalid {
     border-color: #ef4444;
   }
+  .bg-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .mini-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .mini-btn:hover {
+    border-color: var(--accent);
+  }
+  .mini-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .hint {
     font-size: 0.75rem;
     color: var(--text-dim);
