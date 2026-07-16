@@ -89,9 +89,18 @@
     }
     replyTo = c.replyTo;
     quoteOf = c.quoteOf;
+    // 返信先の @acct を本文へ自動挿入する（本家Misskeyクライアント準拠）。
+    // 未入力の時だけ差し込み、既に何か書きかけている場合は上書きしない。
+    if (c.replyTo && !text.trim()) {
+      text = `${acctOf(c.replyTo.user)} `;
+    }
     app.compose = null;
     textarea?.focus();
   });
+
+  function acctOf(u: Note["user"]): string {
+    return u.host ? `@${u.username}@${u.host}` : `@${u.username}`;
+  }
 
   function cancelContext() {
     replyTo = undefined;
