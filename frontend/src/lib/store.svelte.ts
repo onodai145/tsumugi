@@ -126,6 +126,11 @@ class AppStore {
   // 挿入されておらず #findTab が見つけられない一瞬の間に Connected が来て捨てられる、
   // という起動時レースが実際にあった)。#makeTab がタブ生成時にここから初期状態を拾う。
   #connState = new Map<string, ConnectionState>();
+  // 直近に reconnecting を経由した columnId の集合。「再接続しました」ログを、
+  // 起動時の connecting→connected ではなく実際の再接続時にだけ出すための判定に使う
+  // (reconnecting→connecting→connected と必ず connecting を経由するため、
+  // 直前状態が connecting かどうかでは区別できない)。
+  #wasReconnecting = new Set<string>();
 
   /// Tauri イベント購読をすべて解除する。dev の HMR で古いインスタンスの
   /// リスナーが残り通知が多重化するのを防ぐために使う（本番では未使用）。
@@ -584,14 +589,16 @@ class AppStore {
         this.#connState.set(e.payload.columnId, e.payload.state);
         const tab = this.#findTab(e.payload.columnId);
         if (!tab) return;
-        const prev = tab.state;
         tab.state = e.payload.state;
         // 状態遷移を Backstage に記録（起動時の connecting→connected は除外）
         const name = tab.title;
         if (e.payload.state === "error") this.#log("error", `接続エラー: ${name}`);
-        else if (e.payload.state === "reconnecting") this.#log("warn", `再接続中: ${name}`);
-        else if (e.payload.state === "connected" && prev !== "connecting")
+        else if (e.payload.state === "reconnecting") {
+          this.#wasReconnecting.add(e.payload.columnId);
+          this.#log("warn", `再接続中: ${name}`);
+        } else if (e.payload.state === "connected" && this.#wasReconnecting.delete(e.payload.columnId)) {
           this.#log("success", `再接続しました: ${name}`);
+        }
       }),
     );
     this.#unlisten.push(
@@ -989,6 +996,7 @@ class AppStore {
   async closeTab(tabId: string) {
     await unwrap(commands.closeColumn(tabId));
     this.#connState.delete(tabId);
+    this.#wasReconnecting.delete(tabId);
     for (const g of this.groups) {
       if (!g.tabs.some((t) => t.id === tabId)) continue;
       g.tabs = g.tabs.filter((t) => t.id !== tabId);
