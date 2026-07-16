@@ -112,8 +112,9 @@
     position: relative;
     aspect-ratio: 16 / 10;
     /* 幅広カラムでは aspect-ratio のままだと高さも際限なく伸びてしまう
-       (Issue #8) ため、高さの上限を設ける。object-fit: cover で見た目は保たれる。 */
-    max-height: 200px;
+       (Issue #8) ため、高さの上限を設ける。object-fit: cover で見た目は保たれる。
+       設定→表示 で調整可能（--media-thumbnail-height, 既定200px）。 */
+    max-height: var(--media-thumbnail-height, 200px);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     display: flex;
     align-items: center;

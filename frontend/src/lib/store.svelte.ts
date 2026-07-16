@@ -107,6 +107,7 @@ class AppStore {
     emojiStyle: "twemoji",
     gapFillLimit: 200,
     customThemes: [],
+    mediaThumbnailHeight: 200,
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -164,10 +165,12 @@ class AppStore {
         emojiStyle: ui.emojiStyle ?? "twemoji",
         gapFillLimit: ui.gapFillLimit ?? 200,
         customThemes: ui.customThemes ?? [],
+        mediaThumbnailHeight: ui.mediaThumbnailHeight ?? 200,
       };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
       this.#applyBackground(this.ui);
+      this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
       await this.#subscribe();
@@ -822,10 +825,12 @@ class AppStore {
       emojiStyle: prefs.emojiStyle ?? "twemoji",
       gapFillLimit: prefs.gapFillLimit ?? 200,
       customThemes: prefs.customThemes ?? [],
+      mediaThumbnailHeight: prefs.mediaThumbnailHeight ?? 200,
     };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");
     this.#applyBackground(this.ui);
+    this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
     this.#log("info", "表示設定を保存しました");
   }
 
@@ -911,6 +916,12 @@ class AppStore {
     root.style.setProperty("--bg-dim", String((prefs.backgroundDim ?? 0) / 100));
     root.style.setProperty("--bg-blur", `${prefs.backgroundBlur ?? 0}px`);
     root.style.setProperty("--column-opacity", `${prefs.columnOpacity ?? 100}%`);
+  }
+
+  /// メディアサムネイルの高さ上限を <html> に反映する（ノートを詰めたい人は小さく、
+  /// 大きく見たい人は大きくできるように設定可能にしてある）。
+  #applyMediaThumbnailHeight(px: number) {
+    document.documentElement.style.setProperty("--media-thumbnail-height", `${px}px`);
   }
 
   // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。

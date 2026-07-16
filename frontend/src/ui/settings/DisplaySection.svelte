@@ -14,6 +14,7 @@
   let columnOpacity = $state(app.ui.columnOpacity ?? 100);
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
+  let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
   let pickingImage = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -135,6 +136,8 @@
       width = w;
       const gapLimit = Math.min(1000, Math.max(0, Math.round(gapFillLimit) || 0));
       gapFillLimit = gapLimit;
+      const thumbHeight = Math.min(600, Math.max(80, Math.round(mediaThumbnailHeight) || 200));
+      mediaThumbnailHeight = thumbHeight;
       // このセクションが編集しないフィールド(既定アカウント等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
@@ -148,6 +151,7 @@
         columnOpacity,
         emojiStyle,
         gapFillLimit: gapLimit,
+        mediaThumbnailHeight: thumbHeight,
       });
       saved = true;
     } catch (e) {
@@ -247,6 +251,15 @@
 <p class="hint">
   アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
   0にすると従来どおりキャッシュのみ表示します。
+</p>
+
+<label class="field">
+  <span>メディアサムネイルの高さ上限（px, 80〜600）</span>
+  <input type="number" min="80" max="600" step="20" bind:value={mediaThumbnailHeight} />
+</label>
+<p class="hint">
+  ノートに添付された画像/動画のサムネイル最大高さです。小さくするとノートを詰めて表示でき、
+  大きくすると画像を大きく見られます。
 </p>
 
 <div class="field">

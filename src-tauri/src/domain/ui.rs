@@ -65,6 +65,10 @@ pub struct UiPrefs {
     /// ユーザーが作成したカスタムテーマの一覧。
     #[serde(default)]
     pub custom_themes: Vec<CustomTheme>,
+    /// メディア添付ノートのサムネイル高さ上限（px）。ノートを詰めたい人は小さく、
+    /// 大きく見たい人は大きくできるようにする。
+    #[serde(default = "default_media_thumbnail_height")]
+    pub media_thumbnail_height: i32,
 }
 
 fn default_column_opacity() -> i32 {
@@ -76,6 +80,10 @@ fn default_emoji_style() -> String {
 }
 
 fn default_gap_fill_limit() -> i32 {
+    200
+}
+
+fn default_media_thumbnail_height() -> i32 {
     200
 }
 
@@ -94,6 +102,7 @@ impl Default for UiPrefs {
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
             custom_themes: Vec::new(),
+            media_thumbnail_height: default_media_thumbnail_height(),
         }
     }
 }
@@ -120,6 +129,7 @@ mod tests {
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
         assert_eq!(v.emoji_style, "twemoji");
         assert_eq!(v.gap_fill_limit, 200);
+        assert_eq!(v.media_thumbnail_height, 200);
     }
 
     #[test]
@@ -151,6 +161,7 @@ mod tests {
                     accent: "#ff8800".into(),
                 },
             }],
+            media_thumbnail_height: 320,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
