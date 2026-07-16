@@ -971,7 +971,12 @@ class AppStore {
         const oldest = tab.notes[tab.notes.length - 1].id;
         const older = await unwrap(commands.fetchBackfill(tab.id, oldest));
         const known = new Set(tab.notes.map((n) => n.id));
-        tab.notes = [...tab.notes, ...older.filter((n) => !known.has(n.id))].slice(0, MAX_NOTES);
+        const fresh = older.filter((n) => !known.has(n.id));
+        tab.notes = [...tab.notes, ...fresh].slice(0, MAX_NOTES);
+        // captureInitial 同様に subNote 購読しないと、この先そのノートへの
+        // リアクション追加/削除が noteUpdated イベントとして届かず反映されない
+        // （Issue #3: リアクションが表示されたりされなかったりする）。
+        this.#captureInitial(tab.id, fresh);
       }
     } catch (e) {
       this.#fail(e);

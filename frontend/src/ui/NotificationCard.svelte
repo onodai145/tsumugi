@@ -32,9 +32,10 @@
     ...(n.note?.emojis ?? {}),
   });
   // カスタム絵文字（:name:）のみ解決。Unicode 絵文字はそのまま表示する。
+  const instanceHost = $derived(accountId ? app.accounts.find((a) => a.id === accountId)?.host : undefined);
   const reaction = $derived(
     n.type === "reaction" && n.reaction?.startsWith(":")
-      ? reactionEmoji(n.reaction, emojiMap)
+      ? reactionEmoji(n.reaction, emojiMap, instanceHost)
       : null,
   );
 

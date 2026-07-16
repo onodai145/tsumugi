@@ -1,12 +1,25 @@
 // リアクション絵文字の解決。キーは :name: / :name@.:（ローカル）/ :name@host:（リモート）。
 // ローカルの `@.` はローカル絵文字マップ（キー=name）に合わせて剥がす。
+//
+// emojiMap（note.emojis）はノート取得時点のスナップショットのため、取得後に付いた
+// リアクション（noteUpdated の reacted イベントには emoji の URL が含まれない）は
+// map に無いことがある。その場合、Misskey が任意の絵文字を name(@host) から解決できる
+// `/emoji/:name(@host).webp` プロキシへ instanceHost 経由でフォールバックする
+// （本家クライアントも同じ仕組みでリアクション絵文字を解決している）。
 export function reactionEmoji(
   key: string,
   emojiMap: Record<string, string>,
+  instanceHost?: string,
 ): { name: string; url?: string } {
   const raw = key.replace(/^:|:$/g, "");
   const local = raw.endsWith("@.") ? raw.slice(0, -2) : raw;
-  return { name: local, url: emojiMap[raw] ?? emojiMap[local] };
+  const known = emojiMap[raw] ?? emojiMap[local];
+  if (known) return { name: local, url: known };
+  if (!instanceHost) return { name: local };
+  const at = raw.lastIndexOf("@");
+  const remoteHost = at === -1 ? undefined : raw.slice(at + 1);
+  const proxyName = remoteHost && remoteHost !== "." ? raw : local;
+  return { name: local, url: `https://${instanceHost}/emoji/${proxyName}.webp` };
 }
 
 // 自インスタンスに存在しないカスタム絵文字のリアクション（:name@host: 形式でホストが

@@ -48,6 +48,9 @@
   const emojiMap = $derived(
     emojiAcct ? { ...app.localEmojiUrls(emojiAcct), ...inner.emojis } : inner.emojis,
   );
+  const instanceHost = $derived(
+    emojiAcct ? app.accounts.find((a) => a.id === emojiAcct)?.host : undefined,
+  );
 
   // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）
   const showPicker = $derived(app.reactPickerNoteId === inner.id);
@@ -219,7 +222,7 @@
               onclick={() => react(key)}
             >
               {#if key.startsWith(":")}
-                {@const e = reactionEmoji(key, emojiMap)}
+                {@const e = reactionEmoji(key, emojiMap, instanceHost)}
                 <CustomEmoji name={e.name} url={e.url} />
               {:else}
                 <UnicodeEmoji char={key} />
