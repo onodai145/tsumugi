@@ -7,6 +7,9 @@
   --text: #191523;
   --text-dim: #6b7280;
   --accent: #7c5cff;
+  /* 意味づけ色（例: Renoteバナー=success, リプライバナー=info）。テーマで上書き可能。 */
+  --success: #22c55e;
+  --info: #3b82f6;
   --font-family-default: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN",
     "Noto Sans JP", sans-serif;
 

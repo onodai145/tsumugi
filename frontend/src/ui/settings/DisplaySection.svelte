@@ -36,6 +36,8 @@
     text: "文字",
     textDim: "文字(淡)",
     accent: "アクセント",
+    success: "成功色(Renoteバナー等)",
+    info: "情報色(リプライバナー等)",
   };
   const HEX_RE = /^#[0-9a-fA-F]{6}$/;
   function blankColors(): ThemeColors {
@@ -47,6 +49,8 @@
       text: "#eeeeee",
       textDim: "#999999",
       accent: "#7c5cff",
+      success: "#22c55e",
+      info: "#3b82f6",
     };
   }
   let editingTheme = $state<CustomTheme | null>(null);
@@ -57,7 +61,9 @@
     editErr = null;
   }
   function startEditTheme(t: CustomTheme) {
-    editingTheme = { id: t.id, name: t.name, colors: { ...t.colors } };
+    // success/info 追加前に作られたカスタムテーマは colors に無いことがあるため、
+    // 既定値で埋めてから編集フォームへ渡す(undefinedのまま渡すとhex入力欄が空になる)。
+    editingTheme = { id: t.id, name: t.name, colors: { ...blankColors(), ...t.colors } };
     editErr = null;
   }
   function cancelEditTheme() {
@@ -71,7 +77,7 @@
       return;
     }
     for (const { key } of THEME_VAR_KEYS) {
-      if (!HEX_RE.test(editingTheme.colors[key])) {
+      if (!HEX_RE.test(editingTheme.colors[key] ?? "")) {
         editErr = `${colorLabels[key]}は #rrggbb 形式で入力してください`;
         return;
       }

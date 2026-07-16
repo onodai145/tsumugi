@@ -307,7 +307,7 @@
     align-items: center;
     gap: 4px;
     font-size: 0.74rem;
-    color: #22c55e;
+    color: var(--success);
     margin-bottom: 2px;
   }
   .reply-banner {
@@ -315,7 +315,7 @@
     align-items: center;
     gap: 4px;
     font-size: 0.74rem;
-    color: #3b82f6;
+    color: var(--info);
     margin-bottom: 2px;
   }
   .row {

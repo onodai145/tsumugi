@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
-/// テーマ1個分の配色（app.css の CSS変数7個に対応）。
+/// テーマ1個分の配色（app.css の CSS変数9個に対応）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeColors {
@@ -13,6 +13,20 @@ pub struct ThemeColors {
     pub text: String,
     pub text_dim: String,
     pub accent: String,
+    /// 成功/肯定的な意味の強調色（例: Renoteバナー）。追加前のカスタムテーマ読み込み用に既定値を持つ。
+    #[serde(default = "default_success_color")]
+    pub success: String,
+    /// 情報的な意味の強調色（例: リプライバナー）。追加前のカスタムテーマ読み込み用に既定値を持つ。
+    #[serde(default = "default_info_color")]
+    pub info: String,
+}
+
+fn default_success_color() -> String {
+    "#22c55e".into()
+}
+
+fn default_info_color() -> String {
+    "#3b82f6".into()
 }
 
 /// ユーザーが作成したカスタムテーマ。
@@ -154,6 +168,18 @@ mod tests {
     }
 
     #[test]
+    fn theme_colors_deserializes_legacy_json_without_success_info() {
+        // success/info 追加前に保存されたカスタムテーマも読めること（#[serde(default)]）
+        let v: ThemeColors = serde_json::from_str(
+            r##"{"surface1":"#111","surface2":"#222","surface3":"#333","border":"#444",
+                "text":"#eee","textDim":"#999","accent":"#ff8800"}"##,
+        )
+        .unwrap();
+        assert_eq!(v.success, "#22c55e");
+        assert_eq!(v.info, "#3b82f6");
+    }
+
+    #[test]
     fn roundtrips_keymap() {
         let mut km = HashMap::new();
         km.insert("note.next".to_string(), "down".to_string());
@@ -180,6 +206,8 @@ mod tests {
                     text: "#eeeeee".into(),
                     text_dim: "#999999".into(),
                     accent: "#ff8800".into(),
+                    success: "#16a34a".into(),
+                    info: "#2563eb".into(),
                 },
             }],
             media_thumbnail_height: 320,

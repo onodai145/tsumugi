@@ -18,6 +18,8 @@ export const THEME_VAR_KEYS: { css: string; key: keyof ThemeColors }[] = [
   { css: "--text", key: "text" },
   { css: "--text-dim", key: "textDim" },
   { css: "--accent", key: "accent" },
+  { css: "--success", key: "success" },
+  { css: "--info", key: "info" },
 ];
 
 // 著名なエディタ/ターミナル配色を移植したプリセット(各テーマの公式パレットを参考に7トークンへ写像)。
@@ -41,6 +43,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#c0caf5",
       textDim: "#565f89",
       accent: "#7aa2f7",
+      success: "#9ece6a",
+      info: "#7dcfff",
     },
   },
   {
@@ -54,6 +58,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#c0caf5",
       textDim: "#565f89",
       accent: "#7aa2f7",
+      success: "#9ece6a",
+      info: "#7dcfff",
     },
   },
   {
@@ -67,6 +73,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#3760bf",
       textDim: "#848cb5",
       accent: "#2e7de9",
+      success: "#587539",
+      info: "#007197",
     },
   },
   {
@@ -80,6 +88,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#f8f8f2",
       textDim: "#6272a4",
       accent: "#bd93f9",
+      success: "#50fa7b",
+      info: "#8be9fd",
     },
   },
   {
@@ -93,6 +103,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#14192b",
       textDim: "#8a8a8a",
       accent: "#644ac9",
+      success: "#1a8f4e",
+      info: "#1c8db0",
     },
   },
   {
@@ -106,6 +118,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#eceff4",
       textDim: "#d8dee9",
       accent: "#88c0d0",
+      success: "#a3be8c",
+      info: "#81a1c1",
     },
   },
   {
@@ -119,6 +133,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#2e3440",
       textDim: "#4c566a",
       accent: "#5e81ac",
+      success: "#4c7031",
+      info: "#5e81ac",
     },
   },
   {
@@ -132,6 +148,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#eceff4",
       textDim: "#d8dee9",
       accent: "#5e81ac",
+      success: "#a3be8c",
+      info: "#81a1c1",
     },
   },
   {
@@ -145,6 +163,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#eceff4",
       textDim: "#d8dee9",
       accent: "#b48ead",
+      success: "#a3be8c",
+      info: "#81a1c1",
     },
   },
   {
@@ -158,6 +178,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#cdd6f4",
       textDim: "#a6adc8",
       accent: "#cba6f7",
+      success: "#a6e3a1",
+      info: "#89b4fa",
     },
   },
   {
@@ -171,6 +193,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#4c4f69",
       textDim: "#6c6f85",
       accent: "#8839ef",
+      success: "#40a02b",
+      info: "#1e66f5",
     },
   },
   {
@@ -184,6 +208,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#c6d0f5",
       textDim: "#a5adce",
       accent: "#ca9ee6",
+      success: "#a6d189",
+      info: "#8caaee",
     },
   },
   {
@@ -197,6 +223,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#cad3f5",
       textDim: "#a5adcb",
       accent: "#c6a0f6",
+      success: "#a6da95",
+      info: "#8aadf4",
     },
   },
   {
@@ -210,6 +238,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#839496",
       textDim: "#93a1a1",
       accent: "#268bd2",
+      success: "#859900",
+      info: "#2aa198",
     },
   },
   {
@@ -223,6 +253,8 @@ export const PRESETS: ThemePreset[] = [
       text: "#657b83",
       textDim: "#586e75",
       accent: "#268bd2",
+      success: "#859900",
+      info: "#2aa198",
     },
   },
 ];
@@ -240,7 +272,10 @@ export function parseThemeRef(theme: string, prefix: "preset:" | "custom:"): str
 export function applyThemeColors(colors: ThemeColors | null) {
   const root = document.documentElement;
   for (const { css, key } of THEME_VAR_KEYS) {
-    if (colors) root.style.setProperty(css, colors[key]);
+    const value = colors?.[key];
+    // success/info は追加前のプリセット/カスタムテーマでは未定義のことがあるため、
+    // その場合は inline指定を外して app.css の既定色(--success/--info)へフォールバックさせる。
+    if (value) root.style.setProperty(css, value);
     else root.style.removeProperty(css);
   }
 }
