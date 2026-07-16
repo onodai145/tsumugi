@@ -610,6 +610,11 @@ class AppStore {
         if (!tab) return;
         if (tab.notifications.some((n) => n.id === e.payload.notification.id)) return;
         tab.notifications = [e.payload.notification, ...tab.notifications].slice(0, MAX_NOTES);
+        // 通知の到着タイミングを Backstage に残す。接続断→再接続のログと突き合わせれば
+        // 「通知が謎のタイミングで届く」系の問題を後から追いやすくなる。
+        const n = e.payload.notification;
+        const who = n.user ? `@${n.user.username}` : "";
+        this.#log("info", `通知を受信: ${n.type}${who ? ` ${who}` : ""} (${tabName(tab)})`);
         // 発火条件は「設定→通知のグローバルスイッチ」と「このタブの通知設定」の両方がON。
         // デスクトップ通知 / 音は「通知IDでグローバルに1回だけ」。通知カラムが複数あると
         // 同じ通知が各カラムに届くため、ここで重複を弾く（このタブが望まない場合は
