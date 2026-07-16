@@ -126,7 +126,22 @@ pub fn open_cache(path: &Path) -> Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.execute_batch(CACHE_SCHEMA)?;
+    enable_incremental_vacuum(&conn)?;
     Ok(conn)
+}
+
+/// サイズ上限による間引き(Issue #6)は DELETE だけでは解放ページがファイル内に残ってしまい
+/// 実際のファイルサイズが縮まらないため、incremental_vacuum で明示的に回収できるモードへ
+/// 切り替えておく。新規DBは即座に反映されるが、既に非空のDBでは一度 VACUUM しないと
+/// auto_vacuum の変更が反映されないため、未設定の場合だけ実行する（初回のみの一過性コスト）。
+fn enable_incremental_vacuum(conn: &Connection) -> Result<()> {
+    let mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |r| r.get(0))?;
+    const INCREMENTAL: i64 = 2;
+    if mode != INCREMENTAL {
+        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
+        conn.execute_batch("VACUUM")?;
+    }
+    Ok(())
 }
 
 /// 旧スキーマ（group_id 無し）からの移行。既存カラムを各自 1 グループへ割り当てる。
@@ -212,6 +227,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 pub fn open_cache_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
     conn.execute_batch(CACHE_SCHEMA)?;
+    enable_incremental_vacuum(&conn)?;
     Ok(conn)
 }
 

@@ -32,6 +32,7 @@ import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
+const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // ノートキャッシュ間引きの間隔（6時間）
 
 /// タブ = 1タイムライン。
 export interface TabView {
@@ -110,6 +111,9 @@ class AppStore {
     gapFillLimit: 200,
     customThemes: [],
     mediaThumbnailHeight: 200,
+    noteCacheLimit: 10000,
+    noteCacheMaxAgeDays: 0,
+    noteCacheMaxSizeMb: 0,
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -126,6 +130,8 @@ class AppStore {
   updateAvailable = $state<LatestRelease | null>(null);
   #updateCheckTimer: ReturnType<typeof setInterval> | null = null;
   #loggedUpdateVersion: string | null = null;
+  // ノートキャッシュの間引き（Issue #6）。起動時と数時間おきに実行する。
+  #pruneTimer: ReturnType<typeof setInterval> | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -147,6 +153,10 @@ class AppStore {
     if (this.#statsTimer !== null) {
       clearInterval(this.#statsTimer);
       this.#statsTimer = null;
+    }
+    if (this.#pruneTimer !== null) {
+      clearInterval(this.#pruneTimer);
+      this.#pruneTimer = null;
     }
     if (this.#updateCheckTimer !== null) {
       clearInterval(this.#updateCheckTimer);
@@ -176,6 +186,9 @@ class AppStore {
         gapFillLimit: ui.gapFillLimit ?? 200,
         customThemes: ui.customThemes ?? [],
         mediaThumbnailHeight: ui.mediaThumbnailHeight ?? 200,
+        noteCacheLimit: ui.noteCacheLimit ?? 10000,
+        noteCacheMaxAgeDays: ui.noteCacheMaxAgeDays ?? 0,
+        noteCacheMaxSizeMb: ui.noteCacheMaxSizeMb ?? 0,
       };
       this.#applyTheme(this.ui.theme);
       this.#applyFont(this.ui.fontFamily ?? "");
@@ -209,6 +222,22 @@ class AppStore {
     void this.checkForUpdate();
     if (this.#updateCheckTimer !== null) clearInterval(this.#updateCheckTimer);
     this.#updateCheckTimer = setInterval(() => void this.checkForUpdate(), UPDATE_CHECK_INTERVAL_MS);
+
+    void this.#pruneNoteCache();
+    if (this.#pruneTimer !== null) clearInterval(this.#pruneTimer);
+    this.#pruneTimer = setInterval(() => void this.#pruneNoteCache(), PRUNE_INTERVAL_MS);
+  }
+
+  /// 設定の上限に従ってノートキャッシュから古いノートを削除する（Issue #6）。失敗しても
+  /// 致命的でないのでログのみ（削除件数が0件超の時だけBackstageに記録し、
+  /// 通常運用では静かにしておく）。他の定期同期処理（#syncServerMutes）とログ文言を揃えている。
+  async #pruneNoteCache() {
+    try {
+      const deleted = await unwrap(commands.pruneNoteCache());
+      if (deleted > 0) this.#log("info", `ノートキャッシュを削除: ${deleted}件`);
+    } catch (e) {
+      this.#log("warn", `ノートキャッシュ削除に失敗: ${String(e)}`);
+    }
   }
 
   /// GitHub Releases を確認し、新しいバージョンがあれば updateAvailable にセットして
@@ -856,6 +885,9 @@ class AppStore {
       gapFillLimit: prefs.gapFillLimit ?? 200,
       customThemes: prefs.customThemes ?? [],
       mediaThumbnailHeight: prefs.mediaThumbnailHeight ?? 200,
+      noteCacheLimit: prefs.noteCacheLimit ?? 10000,
+      noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
+      noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
     };
     this.#applyTheme(prefs.theme);
     this.#applyFont(prefs.fontFamily ?? "");

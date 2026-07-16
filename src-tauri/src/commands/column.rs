@@ -264,6 +264,18 @@ pub async fn notes_since(state: State<'_, AppState>, since_epoch_secs: i32) -> R
     state.cache.notes_since(since_epoch_secs)
 }
 
+/// 設定（表示→ノートキャッシュの上限）に従ってキャッシュから古いノートを削除する（Issue #6）。
+/// 上限0なら無制限で何もしない。実際に削除した件数を返す。
+#[tauri::command]
+#[specta::specta]
+pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
+    let ui = state.settings.load_ui()?;
+    Ok(state
+        .cache
+        .prune(ui.note_cache_limit, ui.note_cache_max_age_days, ui.note_cache_max_size_mb)?
+        as i32)
+}
+
 /// 過去ページ（上スクロール）。
 #[tauri::command]
 #[specta::specta]

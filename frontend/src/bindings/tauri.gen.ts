@@ -45,6 +45,11 @@ export const commands = {
 	noteCount: () => typedError<number, Error>(__TAURI_INVOKE("note_count")),
 	/**  投稿日時(epoch秒)が since_epoch_secs 以降のノート件数。Backstageの流速表示用。 */
 	notesSince: (sinceEpochSecs: number) => typedError<number, Error>(__TAURI_INVOKE("notes_since", { sinceEpochSecs })),
+	/**
+	 *  設定（表示→ノートキャッシュの上限）に従ってキャッシュから古いノートを削除する（Issue #6）。
+	 *  上限0なら無制限で何もしない。実際に削除した件数を返す。
+	 */
+	pruneNoteCache: () => typedError<number, Error>(__TAURI_INVOKE("prune_note_cache")),
 	/**  過去ページ（上スクロール）。 */
 	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
 	/**  通知カラムの過去ページ。 */
@@ -505,6 +510,18 @@ export type UiPrefs = {
 	 *  大きく見たい人は大きくできるようにする。
 	 */
 	mediaThumbnailHeight?: number,
+	/**
+	 *  ローカルキャッシュに保持するノート件数の上限。超えた分は古い順に削除する
+	 *  （Issue #6: 無制限に溜まり続けないようにする）。0 なら無制限。
+	 */
+	noteCacheLimit?: number,
+	/**
+	 *  ローカルキャッシュに保持するノートの経過日数上限。created_at がこれより古いノートは
+	 *  削除する。0 なら無制限。
+	 */
+	noteCacheMaxAgeDays?: number,
+	/**  ローカルキャッシュDBのサイズ上限（MB）。超えている間は古い順に削除し続ける。0 なら無制限。 */
+	noteCacheMaxSizeMb?: number,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
