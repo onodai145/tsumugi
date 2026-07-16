@@ -103,38 +103,6 @@ impl NoteCacheStore {
         Ok(count)
     }
 
-    /// キャッシュを `keep` 件まで古いノートから削除する（Issue #6: 無制限に溜まり続けないようにする）。
-    /// `keep <= 0` は無制限（何もしない）。created_at の古い順に超過分だけ削除し、
-    /// 関連テーブル（note_reaction 等）と column_note も一緒に消す（FK制約は張っていないため手動）。
-    /// 戻り値は実際に削除した件数。
-    pub fn prune(&self, keep: i32) -> Result<usize> {
-        if keep <= 0 {
-            return Ok(0);
-        }
-        let mut guard = self.conn.lock().unwrap();
-        let tx = guard.transaction()?;
-        let total: i64 = tx.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
-        let overflow = total - keep as i64;
-        if overflow <= 0 {
-            return Ok(0);
-        }
-        tx.execute(
-            "CREATE TEMP TABLE prune_ids AS
-             SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?1",
-            params![overflow],
-        )?;
-        tx.execute("DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)", [])?;
-        for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
-            tx.execute(
-                &format!("DELETE FROM {table} WHERE note_id IN (SELECT id FROM prune_ids)"),
-                [],
-            )?;
-        }
-        tx.execute("DROP TABLE prune_ids", [])?;
-        tx.commit()?;
-        Ok(overflow as usize)
-    }
-
     /// 投稿日時(created_at, epoch秒)が since_epoch_secs 以降のノート件数。
     /// 流速表示用: DBへのINSERT件数ではなく実際の投稿時刻で数えるため、起動時ギャップ埋めや
     /// 上スクロールでの過去取得(古いcreated_atのノートをまとめてupsertする)による誤った
@@ -401,37 +369,6 @@ mod tests {
         s.clear_column_notes("colA").unwrap();
         assert_eq!(s.load_cached("colA", 10).unwrap().len(), 0);
         assert_eq!(s.load_cached("colB", 10).unwrap().len(), 1); // 他カラムは残る
-    }
-
-    #[test]
-    fn prune_removes_oldest_beyond_keep_and_related_rows() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
-        let deleted = s.prune(2).unwrap();
-        assert_eq!(deleted, 1);
-        assert_eq!(s.note_count().unwrap(), 2);
-        // 最古(n1)が消え、残りは新しい2件
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n2"]);
-        // 関連テーブル・column_note も一緒に消えていること
-        let conn = s.conn.lock().unwrap();
-        let rc: i64 = conn
-            .query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(rc, 0);
-        let cn: i64 = conn
-            .query_row("SELECT COUNT(*) FROM column_note WHERE note_id='n1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(cn, 0);
-    }
-
-    #[test]
-    fn prune_is_noop_when_under_or_unlimited() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).unwrap();
-        assert_eq!(s.prune(10).unwrap(), 0); // 上限未満
-        assert_eq!(s.prune(0).unwrap(), 0); // 0 = 無制限
-        assert_eq!(s.note_count().unwrap(), 2);
     }
 
     #[test]

@@ -69,10 +69,6 @@ pub struct UiPrefs {
     /// 大きく見たい人は大きくできるようにする。
     #[serde(default = "default_media_thumbnail_height")]
     pub media_thumbnail_height: i32,
-    /// ローカルキャッシュに保持するノート件数の上限。超えた分は古い順に削除する
-    /// （Issue #6: 無制限に溜まり続けないようにする）。0 なら無制限。
-    #[serde(default = "default_note_cache_limit")]
-    pub note_cache_limit: i32,
 }
 
 fn default_column_opacity() -> i32 {
@@ -91,10 +87,6 @@ fn default_media_thumbnail_height() -> i32 {
     200
 }
 
-fn default_note_cache_limit() -> i32 {
-    5000
-}
-
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -111,7 +103,6 @@ impl Default for UiPrefs {
             gap_fill_limit: default_gap_fill_limit(),
             custom_themes: Vec::new(),
             media_thumbnail_height: default_media_thumbnail_height(),
-            note_cache_limit: default_note_cache_limit(),
         }
     }
 }
@@ -139,7 +130,6 @@ mod tests {
         assert_eq!(v.emoji_style, "twemoji");
         assert_eq!(v.gap_fill_limit, 200);
         assert_eq!(v.media_thumbnail_height, 200);
-        assert_eq!(v.note_cache_limit, 5000);
     }
 
     #[test]
@@ -172,7 +162,6 @@ mod tests {
                 },
             }],
             media_thumbnail_height: 320,
-            note_cache_limit: 8000,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
