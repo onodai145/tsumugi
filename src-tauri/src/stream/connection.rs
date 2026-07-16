@@ -37,6 +37,12 @@ const DEDUP_CAPACITY: usize = 512;
 const CAPTURE_CAP: usize = 512; // 1接続(=1アカウント)で subNote 購読するノート上限
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
+// クライアント側からも Ping を送り、一定時間何も受信できなければ切断とみなして
+// 再接続する。TCP が応答なく死ぬケース（スリープ復帰・回線切替等）は FIN/RST が
+// 来ないため read.next() が無限に待ち続けてしまい、通知が「謎のタイミングで」
+// 遅れて届く原因になっていた（Issue #12）。
+const PING_INTERVAL: Duration = Duration::from_secs(25);
+const READ_TIMEOUT: Duration = Duration::from_secs(65);
 
 /// ストリームの扱い方。Notes はフィルタ適用してノートを流し、Notifications は通知を流す。
 #[derive(Clone)]
@@ -407,6 +413,7 @@ async fn run_account(
         }
         emit_state_all(&app, &subs, ConnectionState::Connecting);
 
+        let mut connected = false;
         let outcome = connect_and_run(
             &app,
             &account_id,
@@ -417,8 +424,16 @@ async fn run_account(
             &mut captures,
             &mut cancel,
             &mut cmd_rx,
+            &mut connected,
         )
         .await;
+
+        // 一度でも接続確立していれば、次の切断はネットワークの一過性の問題である
+        // 可能性が高いのでバックオフを初期値へ戻す（そうしないと長時間安定接続した
+        // 後の再接続まで無関係に長い待ち時間を引きずってしまう）。
+        if connected {
+            backoff = BACKOFF_START;
+        }
 
         match outcome {
             RunOutcome::Cancelled => return,
@@ -447,6 +462,7 @@ async fn connect_and_run(
     captures: &mut CaptureSet,
     cancel: &mut watch::Receiver<bool>,
     cmd_rx: &mut mpsc::Receiver<AccountCommand>,
+    connected: &mut bool,
 ) -> RunOutcome {
     let url = format!("wss://{host}/streaming?i={token}");
     // ハンドシェイクに User-Agent を付ける（既定では送られないため）。
@@ -494,6 +510,11 @@ async fn connect_and_run(
         let _ = write.send(Message::Text(protocol::sub_note(id).into())).await;
     }
     emit_state_all(app, subs, ConnectionState::Connected);
+    *connected = true;
+
+    let mut ping_tick = tokio::time::interval(PING_INTERVAL);
+    ping_tick.tick().await; // 直後に即発火する最初のtickは消費するだけ
+    let mut last_rx = tokio::time::Instant::now();
 
     loop {
         tokio::select! {
@@ -504,6 +525,15 @@ async fn connect_and_run(
                     }
                     let _ = write.close().await;
                     return RunOutcome::Cancelled;
+                }
+            }
+            _ = ping_tick.tick() => {
+                if last_rx.elapsed() > READ_TIMEOUT {
+                    log::warn!("[{account_id}] ws idle timeout, reconnecting");
+                    return RunOutcome::Disconnected;
+                }
+                if write.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    return RunOutcome::Disconnected;
                 }
             }
             cmd = cmd_rx.recv() => {
@@ -568,6 +598,7 @@ async fn connect_and_run(
                 }
             }
             msg = read.next() => {
+                last_rx = tokio::time::Instant::now();
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let HandleResult::CaptureNote { column_id, note_id } =
