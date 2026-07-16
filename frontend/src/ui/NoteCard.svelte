@@ -142,6 +142,11 @@
       <Repeat2 size={13} /> <Mfm text={displayName(note.user)} emojis={note.user.emojis} simple /> がRenote
     </div>
   {/if}
+  {#if inner.replyId}
+    <div class="reply-banner">
+      <Reply size={13} /> 返信
+    </div>
+  {/if}
 
   <div class="row">
     {#if inner.user.avatarUrl}
@@ -302,7 +307,15 @@
     align-items: center;
     gap: 4px;
     font-size: 0.74rem;
-    color: var(--text-dim);
+    color: var(--success);
+    margin-bottom: 2px;
+  }
+  .reply-banner {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.74rem;
+    color: var(--info);
     margin-bottom: 2px;
   }
   .row {

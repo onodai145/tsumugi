@@ -459,7 +459,7 @@ export type SourceItem = {
 	name: string,
 };
 
-/**  テーマ1個分の配色（app.css の CSS変数7個に対応）。 */
+/**  テーマ1個分の配色（app.css の CSS変数9個に対応）。 */
 export type ThemeColors = {
 	surface1: string,
 	surface2: string,
@@ -468,6 +468,10 @@ export type ThemeColors = {
 	text: string,
 	textDim: string,
 	accent: string,
+	/**  成功/肯定的な意味の強調色（例: Renoteバナー）。追加前のカスタムテーマ読み込み用に既定値を持つ。 */
+	success?: string,
+	/**  情報的な意味の強調色（例: リプライバナー）。追加前のカスタムテーマ読み込み用に既定値を持つ。 */
+	info?: string,
 };
 
 /**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。 */
