@@ -15,6 +15,7 @@
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
+  let noteCacheLimit = $state(app.ui.noteCacheLimit ?? 5000);
   let pickingImage = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -138,6 +139,8 @@
       gapFillLimit = gapLimit;
       const thumbHeight = Math.min(600, Math.max(80, Math.round(mediaThumbnailHeight) || 200));
       mediaThumbnailHeight = thumbHeight;
+      const cacheLimit = Math.min(100000, Math.max(0, Math.round(noteCacheLimit) || 0));
+      noteCacheLimit = cacheLimit;
       // このセクションが編集しないフィールド(既定アカウント等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
@@ -152,6 +155,7 @@
         emojiStyle,
         gapFillLimit: gapLimit,
         mediaThumbnailHeight: thumbHeight,
+        noteCacheLimit: cacheLimit,
       });
       saved = true;
     } catch (e) {
@@ -260,6 +264,15 @@
 <p class="hint">
   ノートに添付された画像/動画のサムネイル最大高さです。小さくするとノートを詰めて表示でき、
   大きくすると画像を大きく見られます。
+</p>
+
+<label class="field">
+  <span>ノートキャッシュの保持件数上限（件, 0〜100000。0で無制限）</span>
+  <input type="number" min="0" max="100000" step="500" bind:value={noteCacheLimit} />
+</label>
+<p class="hint">
+  ローカルDBに保持するノート件数の上限です。超えた分は古い順に自動で削除されます。
+  0にすると無制限に溜め続けます（ディスク容量を圧迫する可能性があります）。
 </p>
 
 <div class="field">
