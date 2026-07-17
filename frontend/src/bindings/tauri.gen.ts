@@ -500,6 +500,11 @@ export type UiPrefs = {
 	columnOpacity?: number,
 	/**  背景画像の配置方法。"cover" | "contain" | "fill" | "tile"（Issue #45）。 */
 	backgroundFitMode?: string,
+	/**
+	 *  リアクションピッカーのピン留め絵文字（Issue #19）。Unicode絵文字はそのまま、
+	 *  カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
+	 */
+	pinnedEmojis?: string[],
 	/**  既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。 */
 	defaultAccountId?: string,
 	/**  Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。 */

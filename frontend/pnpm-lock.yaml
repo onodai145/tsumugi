@@ -14,6 +14,9 @@ importers:
       '@misskey-dev/emoji-assets':
         specifier: ^17.0.6
         version: 17.0.6
+      '@misskey-dev/emoji-data':
+        specifier: ^17.0.6
+        version: 17.0.6
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -242,6 +245,9 @@ packages:
 
   '@misskey-dev/emoji-data@17.0.0':
     resolution: {integrity: sha512-grMnsmTm7VSah5heS1fIfOfoQmIpzo6ZU5AV5yRxCy7ivtWhFU3fpMfXZyKsH9G9/HZiLRsClKtyjHKMlxjt7g==}
+
+  '@misskey-dev/emoji-data@17.0.6':
+    resolution: {integrity: sha512-7evACr455rA46gu20uXGubdjjNqIbcNNTYjlJ9cxAQbrGs9Yp88LbDgWMp3hq78UpXpW3GZ9q3yOqW5C8UQS1A==}
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     resolution: {integrity: sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg==}
@@ -727,6 +733,8 @@ snapshots:
   '@misskey-dev/emoji-assets@17.0.6': {}
 
   '@misskey-dev/emoji-data@17.0.0': {}
+
+  '@misskey-dev/emoji-data@17.0.6': {}
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true
