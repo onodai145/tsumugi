@@ -28,6 +28,7 @@ import type {
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
+import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
 import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
@@ -106,6 +107,7 @@ class AppStore {
     backgroundDim: 0,
     backgroundBlur: 0,
     columnOpacity: 100,
+    backgroundFitMode: "cover",
     defaultAccountId: "",
     emojiStyle: "twemoji",
     gapFillLimit: 200,
@@ -967,7 +969,12 @@ class AppStore {
   }
 
   /// 背景画像/オーバーレイ/カラム不透明度を <html> に反映する。
-  #applyBackground(prefs: Pick<UiPrefs, "backgroundImage" | "backgroundDim" | "backgroundBlur" | "columnOpacity">) {
+  #applyBackground(
+    prefs: Pick<
+      UiPrefs,
+      "backgroundImage" | "backgroundDim" | "backgroundBlur" | "columnOpacity" | "backgroundFitMode"
+    >,
+  ) {
     const root = document.documentElement;
     const img = prefs.backgroundImage ?? "";
     if (img) {
@@ -978,6 +985,10 @@ class AppStore {
     root.style.setProperty("--bg-dim", String((prefs.backgroundDim ?? 0) / 100));
     root.style.setProperty("--bg-blur", `${prefs.backgroundBlur ?? 0}px`);
     root.style.setProperty("--column-opacity", `${prefs.columnOpacity ?? 100}%`);
+    const [bgSize, bgRepeat] = BACKGROUND_FIT_MODE_CSS[prefs.backgroundFitMode ?? "cover"] ??
+      BACKGROUND_FIT_MODE_CSS.cover;
+    root.style.setProperty("--bg-size", bgSize);
+    root.style.setProperty("--bg-repeat", bgRepeat);
   }
 
   /// メディアサムネイルの高さ上限を <html> に反映する（ノートを詰めたい人は小さく、
