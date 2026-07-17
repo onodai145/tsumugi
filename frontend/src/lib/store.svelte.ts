@@ -931,13 +931,11 @@ class AppStore {
     this.#log("info", "キー割り当てを更新しました");
   }
 
-  /// リアクションピッカーのピン留め絵文字を追加/削除する（Issue #19）。
+  /// リアクションピッカーのピン留め絵文字リストを丸ごと差し替える（Issue #19、設定→リアクションで編集）。
   /// key は Unicode絵文字はそのまま、カスタム絵文字は ":name:" 形式。
-  async togglePinnedEmoji(key: string) {
-    const current = this.ui.pinnedEmojis ?? [];
-    const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
-    await unwrap(commands.setUiPrefs({ ...this.ui, pinnedEmojis: next }));
-    this.ui = { ...this.ui, pinnedEmojis: next };
+  async setPinnedEmojis(list: string[]) {
+    await unwrap(commands.setUiPrefs({ ...this.ui, pinnedEmojis: list }));
+    this.ui = { ...this.ui, pinnedEmojis: list };
   }
 
   /// data-theme(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。

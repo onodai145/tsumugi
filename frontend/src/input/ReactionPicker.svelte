@@ -3,29 +3,31 @@
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import type { EmojiDef } from "../bindings/tauri.gen";
   import { UNICODE_EMOJIS, UNICODE_EMOJI_CATEGORIES, DEFAULT_PINNED_EMOJIS } from "../lib/unicodeEmojiList";
-  import { Pin, PinOff, Pencil } from "@lucide/svelte";
+  import { isCustomEmojiKey, customEmojiNameFromKey, customEmojiKey } from "../lib/emojiKey";
 
-  let { accountId, onpick }: { accountId: string; onpick: (reaction: string) => void } = $props();
+  // showPinned=false は「ピン留め絵文字を選ぶための絵文字選択」用途(設定画面の追加ボタンから)。
+  // 本家 Misskey の pickEmoji({ showPinned: false }) 相当。
+  let {
+    accountId,
+    onpick,
+    showPinned = true,
+  }: { accountId: string; onpick: (reaction: string) => void; showPinned?: boolean } = $props();
 
   // "pinned" | "custom" | カテゴリ index
   type Tab = "pinned" | "custom" | number;
 
   let query = $state("");
   let customEmojis = $state<EmojiDef[]>([]);
-  let tab = $state<Tab>("pinned");
-  let editMode = $state(false);
+  // showPinned はピッカーを開いた時点の呼び出し方（通常のリアクション用か、設定画面での
+  // ピン留め追加用か）で固定され、生存期間中に変わらない。初期タブ選択にのみ使う。
+  // svelte-ignore state_referenced_locally
+  let tab = $state<Tab>(showPinned ? "pinned" : 0);
 
   $effect(() => {
     app.loadEmojis(accountId).then((list) => (customEmojis = list)).catch(() => {});
   });
 
-  // 空配列は「ユーザーが全部ピン解除した」正当な状態なので、既定8種へフォールバックしない
-  // (フォールバックすると解除操作がすぐ復活して見え、次のクリックが誤って追加になる)。
   const pinned = $derived(app.ui.pinnedEmojis ?? DEFAULT_PINNED_EMOJIS);
-
-  function isCustomKey(key: string): boolean {
-    return key.startsWith(":") && key.endsWith(":");
-  }
 
   function customEmojiByName(name: string): EmojiDef | undefined {
     return customEmojis.find((e) => e.name === name);
@@ -36,8 +38,8 @@
   const pinnedEntries = $derived(
     pinned
       .map((key) => {
-        if (isCustomKey(key)) {
-          const def = customEmojiByName(key.slice(1, -1));
+        if (isCustomEmojiKey(key)) {
+          const def = customEmojiByName(customEmojiNameFromKey(key));
           return def ? { key, custom: def } : null;
         }
         return { key, custom: null as EmojiDef | null };
@@ -64,63 +66,42 @@
         ? customEmojis
         : [],
   );
-
-  function handlePick(key: string) {
-    if (editMode) {
-      void app.togglePinnedEmoji(key);
-      return;
-    }
-    onpick(key);
-  }
 </script>
 
 <div class="picker">
   <div class="tabs">
-    <button class="tab-btn" class:active={tab === "pinned"} onclick={() => (tab = "pinned")}>ピン留め</button>
+    {#if showPinned}
+      <button class="tab-btn" class:active={tab === "pinned"} onclick={() => (tab = "pinned")}>ピン留め</button>
+    {/if}
     {#each UNICODE_EMOJI_CATEGORIES as c (c.index)}
       <button class="tab-btn" class:active={tab === c.index} onclick={() => (tab = c.index)}>{c.label}</button>
     {/each}
     <button class="tab-btn" class:active={tab === "custom"} onclick={() => (tab = "custom")}>カスタム</button>
-    <button
-      class="edit-btn"
-      class:active={editMode}
-      title={editMode ? "編集モードを終了" : "ピン留めを編集"}
-      onclick={() => (editMode = !editMode)}
-    >
-      <Pencil size={14} />
-    </button>
   </div>
   <input class="search" placeholder="絵文字を検索…" bind:value={query} />
   <div class="grid">
     {#if !queryLower && tab === "pinned"}
       {#each pinnedEntries as e (e.key)}
-        <button class="emoji-btn" title={e.key} onclick={() => handlePick(e.key)}>
+        <button class="emoji-btn" title={e.key} onclick={() => onpick(e.key)}>
           {#if e.custom}
             <img src={e.custom.url} alt={e.key} loading="lazy" />
           {:else}
             <UnicodeEmoji char={e.key} />
           {/if}
-          {#if editMode}<PinOff class="pin-badge" size={10} />{/if}
         </button>
       {/each}
       {#if pinnedEntries.length === 0}
-        <span class="none">ピン留めした絵文字がありません</span>
+        <span class="none">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
       {/if}
     {:else}
       {#each unicodeMatches as e (e.char)}
-        <button class="emoji-btn" title={`:${e.name}:`} onclick={() => handlePick(e.char)}>
+        <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
           <UnicodeEmoji char={e.char} />
-          {#if editMode}
-            {#if pinned.includes(e.char)}<Pin class="pin-badge" size={10} />{/if}
-          {/if}
         </button>
       {/each}
       {#each customMatches as e (e.name)}
-        <button class="emoji-btn" title={`:${e.name}:`} onclick={() => handlePick(`:${e.name}:`)}>
+        <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
           <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
-          {#if editMode}
-            {#if pinned.includes(`:${e.name}:`)}<Pin class="pin-badge" size={10} />{/if}
-          {/if}
         </button>
       {/each}
       {#if unicodeMatches.length === 0 && customMatches.length === 0}
@@ -128,9 +109,6 @@
       {/if}
     {/if}
   </div>
-  {#if editMode}
-    <p class="hint">絵文字をクリックでピン留めの追加/削除</p>
-  {/if}
 </div>
 
 <style>
@@ -148,7 +126,6 @@
     gap: 2px;
     overflow-x: auto;
     margin-bottom: 6px;
-    align-items: center;
   }
   .tab-btn {
     flex: none;
@@ -168,24 +145,6 @@
     background: var(--surface-3);
     color: var(--text);
   }
-  .edit-btn {
-    flex: none;
-    margin-left: auto;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 6px;
-    display: flex;
-  }
-  .edit-btn:hover {
-    background: var(--surface-3);
-  }
-  .edit-btn.active {
-    color: var(--accent);
-    background: var(--surface-3);
-  }
   .search {
     width: 100%;
     padding: 6px 8px;
@@ -204,7 +163,6 @@
     overflow-y: auto;
   }
   .emoji-btn {
-    position: relative;
     border: none;
     background: transparent;
     cursor: pointer;
@@ -222,22 +180,9 @@
     object-fit: contain;
     display: block;
   }
-  .emoji-btn :global(.pin-badge) {
-    position: absolute;
-    top: 1px;
-    right: 1px;
-    color: var(--accent);
-    background: var(--surface-1);
-    border-radius: 50%;
-  }
   .none {
     color: var(--text-dim);
     font-size: 0.8rem;
     padding: 8px;
-  }
-  .hint {
-    margin: 6px 0 0;
-    font-size: 0.7rem;
-    color: var(--text-dim);
   }
 </style>
