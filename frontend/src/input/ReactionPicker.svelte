@@ -3,7 +3,7 @@
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import type { EmojiDef } from "../bindings/tauri.gen";
   import { UNICODE_EMOJIS, UNICODE_EMOJI_CATEGORIES, DEFAULT_PINNED_EMOJIS } from "../lib/unicodeEmojiList";
-  import { isCustomEmojiKey, customEmojiNameFromKey, customEmojiKey } from "../lib/emojiKey";
+  import { isCustomEmojiKey, customEmojiKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
 
   // showPinned=false は「ピン留め絵文字を選ぶための絵文字選択」用途(設定画面の追加ボタンから)。
   // 本家 Misskey の pickEmoji({ showPinned: false }) 相当。
@@ -28,23 +28,31 @@
   });
 
   const pinned = $derived(app.ui.pinnedEmojis ?? DEFAULT_PINNED_EMOJIS);
+  const accountHost = $derived(app.accounts.find((a) => a.id === accountId)?.host);
 
-  function customEmojiByName(name: string): EmojiDef | undefined {
-    return customEmojis.find((e) => e.name === name);
-  }
-
-  // ピン留めキー(Unicode文字 or ":name:")を描画用の {char} | {name,url} に解決する。
-  // カスタム絵文字が未取得/削除済みなら表示のみスキップする。
+  // ピン留めキー(Unicode文字 or ":name@host:")を描画用の {char} | {name,url} に解決する。
+  // カスタム絵文字はピン留め元インスタンス(host)が今開いているアカウントと一致する場合のみ解決する
+  // (複数インスタンスのアカウントを使っている場合、同名だが別絵文字を誤って出すのを防ぐ)。
+  // 未解決(host不一致・削除済み等)は表示から除外する。
   const pinnedEntries = $derived(
     pinned
       .map((key) => {
         if (isCustomEmojiKey(key)) {
-          const def = customEmojiByName(customEmojiNameFromKey(key));
+          const { name, host } = parseCustomEmojiPinKey(key);
+          if (host !== null && host !== accountHost) return null;
+          const def = customEmojis.find((e) => e.name === name);
           return def ? { key, custom: def } : null;
         }
         return { key, custom: null as EmojiDef | null };
       })
       .filter((e): e is { key: string; custom: EmojiDef | null } => e !== null),
+  );
+
+  // カスタム絵文字のカテゴリ一覧(サーバー管理者が自由記述するため件数不定。未分類は「その他」)。
+  const customCategories = $derived(
+    [...new Set(customEmojis.map((e) => e.category?.trim() || null))].sort((a, b) =>
+      (a ?? "￿").localeCompare(b ?? "￿"),
+    ),
   );
 
   const queryLower = $derived(query.trim().toLowerCase());
@@ -62,9 +70,17 @@
       ? customEmojis
           .filter((e) => e.name.toLowerCase().includes(queryLower) || e.aliases.some((a) => a.toLowerCase().includes(queryLower)))
           .slice(0, 100)
-      : tab === "custom"
-        ? customEmojis
-        : [],
+      : [],
+  );
+
+  // カスタムタブ・無検索時のみ使う: カテゴリごとに折りたたみ表示するためのグルーピング。
+  const customByCategory = $derived(
+    tab === "custom" && !queryLower
+      ? customCategories.map((cat) => ({
+          category: cat,
+          emojis: customEmojis.filter((e) => (e.category?.trim() || null) === cat),
+        }))
+      : [],
   );
 </script>
 
@@ -82,7 +98,9 @@
   <div class="grid">
     {#if !queryLower && tab === "pinned"}
       {#each pinnedEntries as e (e.key)}
-        <button class="emoji-btn" title={e.key} onclick={() => onpick(e.key)}>
+        <!-- リアクション送信は host@own-instance を含まない :name: 形式で行う必要がある
+             (pinned保存は衝突防止のため :name@host: だが、送信キーはブラウズタブと揃える)。 -->
+        <button class="emoji-btn" title={e.key} onclick={() => onpick(e.custom ? customEmojiKey(e.custom.name) : e.key)}>
           {#if e.custom}
             <img src={e.custom.url} alt={e.key} loading="lazy" />
           {:else}
@@ -92,6 +110,22 @@
       {/each}
       {#if pinnedEntries.length === 0}
         <span class="none">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
+      {/if}
+    {:else if !queryLower && tab === "custom"}
+      {#each customByCategory as group (group.category ?? "")}
+        <details class="category" open={customByCategory.length <= 1}>
+          <summary>{group.category ?? "その他"}（{group.emojis.length}）</summary>
+          <div class="category-grid">
+            {#each group.emojis as e (e.name)}
+              <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
+                <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
+              </button>
+            {/each}
+          </div>
+        </details>
+      {/each}
+      {#if customByCategory.length === 0}
+        <span class="none">カスタム絵文字がありません</span>
       {/if}
     {:else}
       {#each unicodeMatches as e (e.char)}
@@ -161,6 +195,20 @@
     gap: 2px;
     max-height: 220px;
     overflow-y: auto;
+  }
+  .category {
+    width: 100%;
+  }
+  .category summary {
+    cursor: pointer;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    padding: 4px 2px;
+  }
+  .category-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
   }
   .emoji-btn {
     border: none;

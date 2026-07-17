@@ -2,13 +2,19 @@
   import { app } from "../../lib/store.svelte";
   import ReactionPicker from "../../input/ReactionPicker.svelte";
   import UnicodeEmoji from "../../render/UnicodeEmoji.svelte";
-  import { isCustomEmojiKey, customEmojiNameFromKey } from "../../lib/emojiKey";
-  import { X, ArrowUp, ArrowDown, Plus } from "@lucide/svelte";
+  import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../../lib/emojiKey";
+  import { X, GripVertical, Plus } from "@lucide/svelte";
 
   const accountId = $derived(app.defaultAccountId());
+  const accountHost = $derived(app.accounts.find((a) => a.id === accountId)?.host);
   const pinned = $derived(app.ui.pinnedEmojis ?? []);
   let picking = $state(false);
   let err = $state<string | null>(null);
+
+  // ドラッグ中はローカルの並び順を先行して見せ、ドロップ確定時にまとめて永続化する。
+  let dragOrder = $state<string[] | null>(null);
+  let draggingIndex = $state<number | null>(null);
+  const displayOrder = $derived(dragOrder ?? pinned);
 
   $effect(() => {
     if (accountId) app.loadEmojis(accountId).catch(() => {});
@@ -31,44 +37,65 @@
     void apply(pinned.filter((_, i) => i !== index));
   }
 
-  function move(index: number, dir: -1 | 1) {
-    const to = index + dir;
-    if (to < 0 || to >= pinned.length) return;
-    const next = [...pinned];
-    [next[index], next[to]] = [next[to], next[index]];
-    void apply(next);
-  }
-
   function add(key: string) {
     picking = false;
-    if (pinned.includes(key)) return;
-    void apply([...pinned, key]);
+    // カスタム絵文字は追加元アカウントのインスタンス(host)を焼き込んで保存する。ピン留めは
+    // 全アカウント共通のグローバル設定のため、host無しだと複数インスタンス利用時に同名の
+    // 別絵文字と衝突しうる(lib/emojiKey.ts 参照)。
+    const stored = isCustomEmojiKey(key) && accountHost ? customEmojiPinKey(parseCustomEmojiPinKey(key).name, accountHost) : key;
+    if (pinned.includes(stored)) return;
+    void apply([...pinned, stored]);
+  }
+
+  function onDragStart(i: number) {
+    draggingIndex = i;
+    dragOrder = pinned;
+  }
+
+  function onDragOver(i: number, e: DragEvent) {
+    e.preventDefault();
+    if (draggingIndex === null || draggingIndex === i || !dragOrder) return;
+    const next = [...dragOrder];
+    const [moved] = next.splice(draggingIndex, 1);
+    next.splice(i, 0, moved);
+    dragOrder = next;
+    draggingIndex = i;
+  }
+
+  function onDragEnd() {
+    draggingIndex = null;
+    if (dragOrder) void apply(dragOrder);
+    dragOrder = null;
   }
 </script>
 
 <h3 class="title">リアクション</h3>
-<p class="hint">絵文字ピッカーの「ピン留め」タブに表示する絵文字を編集できます（本家Misskeyのピン留め絵文字に相当）。</p>
+<p class="hint">絵文字ピッカーの「ピン留め」タブに表示する絵文字を編集できます（本家Misskeyのピン留め絵文字に相当）。ドラッグで並べ替えられます。</p>
 
 <div class="list">
-  {#each pinned as key, i (key)}
-    {@const custom = isCustomEmojiKey(key) ? customEmojiByName(customEmojiNameFromKey(key)) : null}
-    <div class="chip">
+  {#each displayOrder as key, i (key)}
+    {@const custom = isCustomEmojiKey(key) ? customEmojiByName(parseCustomEmojiPinKey(key).name) : null}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="chip"
+      class:dragging={draggingIndex === i}
+      ondragover={(e) => onDragOver(i, e)}
+    >
+      <span class="grip" draggable="true" ondragstart={() => onDragStart(i)} ondragend={onDragEnd} title="ドラッグで並べ替え">
+        <GripVertical size={12} />
+      </span>
       <span class="glyph">
         {#if isCustomEmojiKey(key)}
           {#if custom}
             <img src={custom.url} alt={key} />
           {:else}
-            {key}
+            {parseCustomEmojiPinKey(key).name}
           {/if}
         {:else}
           <UnicodeEmoji char={key} />
         {/if}
       </span>
-      <div class="chip-actions">
-        <button class="icon-btn" disabled={i === 0} onclick={() => move(i, -1)} title="上へ"><ArrowUp size={12} /></button>
-        <button class="icon-btn" disabled={i === pinned.length - 1} onclick={() => move(i, 1)} title="下へ"><ArrowDown size={12} /></button>
-        <button class="icon-btn" onclick={() => remove(i)} title="削除"><X size={12} /></button>
-      </div>
+      <button class="icon-btn" onclick={() => remove(i)} title="削除"><X size={12} /></button>
     </div>
   {/each}
   <button class="add-btn" onclick={() => (picking = !picking)} title="ピン留めを追加">
@@ -112,6 +139,14 @@
     border-radius: 8px;
     background: var(--surface-2);
   }
+  .chip.dragging {
+    opacity: 0.4;
+  }
+  .grip {
+    display: flex;
+    color: var(--text-dim);
+    cursor: grab;
+  }
   .glyph {
     font-size: 1.2rem;
     line-height: 1;
@@ -121,10 +156,6 @@
     height: 1.3em;
     width: 1.3em;
     object-fit: contain;
-  }
-  .chip-actions {
-    display: flex;
-    gap: 2px;
   }
   .icon-btn {
     border: none;
@@ -138,10 +169,6 @@
   .icon-btn:hover {
     background: var(--surface-3);
     color: var(--text);
-  }
-  .icon-btn:disabled {
-    opacity: 0.3;
-    cursor: default;
   }
   .add-btn {
     display: flex;
