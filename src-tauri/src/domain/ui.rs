@@ -66,6 +66,9 @@ pub struct UiPrefs {
     /// カラム背景の不透明度（60〜100%）。背景画像を透けさせる。
     #[serde(default = "default_column_opacity")]
     pub column_opacity: i32,
+    /// 背景画像の配置方法。"cover" | "contain" | "fill" | "tile"（Issue #45）。
+    #[serde(default = "default_background_fit_mode")]
+    pub background_fit_mode: String,
     /// 既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。
     #[serde(default)]
     pub default_account_id: String,
@@ -100,6 +103,10 @@ fn default_column_opacity() -> i32 {
     100
 }
 
+fn default_background_fit_mode() -> String {
+    "cover".into()
+}
+
 fn default_emoji_style() -> String {
     "twemoji".into()
 }
@@ -127,6 +134,7 @@ impl Default for UiPrefs {
             background_dim: 0,
             background_blur: 0,
             column_opacity: default_column_opacity(),
+            background_fit_mode: default_background_fit_mode(),
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
@@ -158,6 +166,8 @@ mod tests {
         // column_opacity は #[serde(default = ...)] で 0 ではなく 100（不透明）にフォールバックすること。
         // 既存ユーザの見た目を壊さないための後方互換。
         assert_eq!(v.column_opacity, 100);
+        // background_fit_mode も同様に既定値(cover, 追加前の見た目)へフォールバックすること。
+        assert_eq!(v.background_fit_mode, "cover");
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
         assert_eq!(v.emoji_style, "twemoji");
         assert_eq!(v.gap_fill_limit, 200);
@@ -192,6 +202,7 @@ mod tests {
             background_dim: 40,
             background_blur: 8,
             column_opacity: 85,
+            background_fit_mode: "tile".into(),
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),
             gap_fill_limit: 500,

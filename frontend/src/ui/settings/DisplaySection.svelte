@@ -2,6 +2,7 @@
   import { app } from "../../lib/store.svelte";
   import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import { PRESETS, THEME_VAR_KEYS } from "../../lib/theme";
+  import { BACKGROUND_FIT_MODE_OPTIONS, type BackgroundFitMode } from "../../lib/backgroundFitMode";
   import type { CustomTheme, ThemeColors } from "../../bindings/tauri.gen";
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
 
@@ -12,6 +13,9 @@
   let backgroundDim = $state(app.ui.backgroundDim ?? 0);
   let backgroundBlur = $state(app.ui.backgroundBlur ?? 0);
   let columnOpacity = $state(app.ui.columnOpacity ?? 100);
+  let backgroundFitMode = $state<BackgroundFitMode>(
+    (app.ui.backgroundFitMode as BackgroundFitMode) ?? "cover",
+  );
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
@@ -155,6 +159,7 @@
         backgroundDim,
         backgroundBlur,
         columnOpacity,
+        backgroundFitMode,
         emojiStyle,
         gapFillLimit: gapLimit,
         mediaThumbnailHeight: thumbHeight,
@@ -332,6 +337,20 @@
 </div>
 
 {#if backgroundImage}
+  <div class="field">
+    <span>背景画像の配置方法</span>
+    <div class="seg">
+      {#each BACKGROUND_FIT_MODE_OPTIONS as m (m.value)}
+        <button
+          class="seg-btn"
+          class:active={backgroundFitMode === m.value}
+          onclick={() => (backgroundFitMode = m.value)}
+        >
+          {m.label}
+        </button>
+      {/each}
+    </div>
+  </div>
   <label class="field">
     <span>背景の暗さ（{backgroundDim}%）</span>
     <input type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
