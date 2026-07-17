@@ -101,7 +101,21 @@ pub fn run() {
         .export(ts_config(), "../frontend/src/bindings/tauri.gen.ts")
         .expect("failed to export typescript bindings");
 
-    tauri::Builder::default()
+    let tauri_builder = tauri::Builder::default();
+
+    // 多重起動防止(Issue #53)。ノートキャッシュを SQLite に保存しており、複数プロセスが
+    // 同時に起動すると DB 書き込みが競合しうるため、二重起動時は既存ウィンドウへフォーカスする。
+    #[cfg(desktop)]
+    let tauri_builder =
+        tauri_builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+
+    tauri_builder
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

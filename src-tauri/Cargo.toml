@@ -60,6 +60,11 @@ tauri-plugin-os = "2"
 # デスクトップでは std::fs 相当のまま(read_image_data_url 側で target_os 分岐)。
 tauri-plugin-fs = "2"
 
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# 多重起動防止(Issue #53)。ノートキャッシュを SQLite に保存しており、複数プロセスが
+# 同時に書き込むと SQLITE_BUSY 等の競合を起こしうるため。モバイルには存在しないプラグイン。
+tauri-plugin-single-instance = "2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # "keychain"(コード署名なしのCLI/デスクトップアプリ向け)を選択。
 # "protected"はprovisioning profileでコード署名されたアプリ向け(iCloud同期/生体認証対応)で、
