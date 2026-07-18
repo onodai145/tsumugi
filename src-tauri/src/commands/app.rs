@@ -6,6 +6,21 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::State;
 
+/// 開発用にDevToolsを開く。Issue #7 で右クリックの「検証」メニューを隠したため、代わりの
+/// 開き口としてフロント側でF12キー押下時にこのコマンドを呼ぶ(F12はTsumugi独自のキー操作
+/// 一覧 frontend/src/lib/keymap.ts には無く、ユーザーが再割り当てできる対象にも含めない)。
+/// `WebviewWindow::open_devtools` 自体が Tauri 側で
+/// `#[cfg(any(debug_assertions, feature = "devtools"))]` 限定のため、
+/// リリースビルド(devtools featureも未使用)ではこの分岐がコンパイルされず何もしない。
+#[tauri::command]
+#[specta::specta]
+pub fn open_devtools(window: tauri::WebviewWindow) {
+    #[cfg(debug_assertions)]
+    window.open_devtools();
+    #[cfg(not(debug_assertions))]
+    let _ = window;
+}
+
 /// ビルド時の短縮gitコミットハッシュ（`build.rs` が `TSUMUGI_GIT_HASH` として埋め込む）。
 /// `.git` が無い環境(tarball等)からのビルドでは "unknown" になる。
 #[tauri::command]
