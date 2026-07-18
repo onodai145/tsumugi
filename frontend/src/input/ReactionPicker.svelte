@@ -13,15 +13,8 @@
     showPinned = true,
   }: { accountId: string; onpick: (reaction: string) => void; showPinned?: boolean } = $props();
 
-  // "pinned" | "custom" | カテゴリ index
-  type Tab = "pinned" | "custom" | number;
-
   let query = $state("");
   let customEmojis = $state<EmojiDef[]>([]);
-  // showPinned はピッカーを開いた時点の呼び出し方（通常のリアクション用か、設定画面での
-  // ピン留め追加用か）で固定され、生存期間中に変わらない。初期タブ選択にのみ使う。
-  // svelte-ignore state_referenced_locally
-  let tab = $state<Tab>(showPinned ? "pinned" : 0);
 
   $effect(() => {
     app.loadEmojis(accountId).then((list) => (customEmojis = list)).catch(() => {});
@@ -49,20 +42,19 @@
   );
 
   // カスタム絵文字のカテゴリ一覧(サーバー管理者が自由記述するため件数不定。未分類は「その他」)。
-  const customCategories = $derived(
-    [...new Set(customEmojis.map((e) => e.category?.trim() || null))].sort((a, b) =>
-      (a ?? "￿").localeCompare(b ?? "￿"),
-    ),
+  const customByCategory = $derived(
+    [...new Set(customEmojis.map((e) => e.category?.trim() || null))]
+      .sort((a, b) => (a ?? "￿").localeCompare(b ?? "￿"))
+      .map((cat) => ({
+        category: cat,
+        emojis: customEmojis.filter((e) => (e.category?.trim() || null) === cat),
+      })),
   );
 
   const queryLower = $derived(query.trim().toLowerCase());
 
   const unicodeMatches = $derived(
-    queryLower
-      ? UNICODE_EMOJIS.filter((e) => e.name.includes(queryLower)).slice(0, 200)
-      : typeof tab === "number"
-        ? UNICODE_EMOJIS.filter((e) => e.category === tab)
-        : [],
+    queryLower ? UNICODE_EMOJIS.filter((e) => e.name.includes(queryLower)).slice(0, 200) : [],
   );
 
   const customMatches = $derived(
@@ -73,74 +65,87 @@
       : [],
   );
 
-  // カスタムタブ・無検索時のみ使う: カテゴリごとに折りたたみ表示するためのグルーピング。
-  const customByCategory = $derived(
-    tab === "custom" && !queryLower
-      ? customCategories.map((cat) => ({
-          category: cat,
-          emojis: customEmojis.filter((e) => (e.category?.trim() || null) === cat),
-        }))
-      : [],
-  );
+  function reactionKeyOf(e: { key: string; custom: EmojiDef | null }): string {
+    // リアクション送信は host@own-instance を含まない :name: 形式で行う必要がある
+    // (pinned保存は衝突防止のため :name@host: だが、送信キーは通常の絵文字と揃える)。
+    return e.custom ? customEmojiKey(e.custom.name) : e.key;
+  }
 </script>
 
 <div class="picker">
-  <div class="tabs">
-    {#if showPinned}
-      <button class="tab-btn" class:active={tab === "pinned"} onclick={() => (tab = "pinned")}>ピン留め</button>
-    {/if}
-    {#each UNICODE_EMOJI_CATEGORIES as c (c.index)}
-      <button class="tab-btn" class:active={tab === c.index} onclick={() => (tab = c.index)}>{c.label}</button>
-    {/each}
-    <button class="tab-btn" class:active={tab === "custom"} onclick={() => (tab = "custom")}>カスタム</button>
-  </div>
   <input class="search" placeholder="絵文字を検索…" bind:value={query} />
-  <div class="grid">
-    {#if !queryLower && tab === "pinned"}
-      {#each pinnedEntries as e (e.key)}
-        <!-- リアクション送信は host@own-instance を含まない :name: 形式で行う必要がある
-             (pinned保存は衝突防止のため :name@host: だが、送信キーはブラウズタブと揃える)。 -->
-        <button class="emoji-btn" title={e.key} onclick={() => onpick(e.custom ? customEmojiKey(e.custom.name) : e.key)}>
-          {#if e.custom}
-            <img src={e.custom.url} alt={e.key} loading="lazy" />
-          {:else}
-            <UnicodeEmoji char={e.key} />
-          {/if}
-        </button>
-      {/each}
-      {#if pinnedEntries.length === 0}
-        <span class="none">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
-      {/if}
-    {:else if !queryLower && tab === "custom"}
-      {#each customByCategory as group (group.category ?? "")}
-        <details class="category" open={customByCategory.length <= 1}>
-          <summary>{group.category ?? "その他"}（{group.emojis.length}）</summary>
-          <div class="category-grid">
-            {#each group.emojis as e (e.name)}
-              <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
-                <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
+  <div class="scroll">
+    {#if queryLower}
+      <div class="flat-grid">
+        {#each customMatches as e (e.name)}
+          <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
+            <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
+          </button>
+        {/each}
+        {#each unicodeMatches as e (e.char)}
+          <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
+            <UnicodeEmoji char={e.char} />
+          </button>
+        {/each}
+        {#if unicodeMatches.length === 0 && customMatches.length === 0}
+          <span class="none">絵文字がありません</span>
+        {/if}
+      </div>
+    {:else}
+      {#if showPinned}
+        <section class="section">
+          <h4 class="section-title">ピン留め</h4>
+          <div class="flat-grid">
+            {#each pinnedEntries as e (e.key)}
+              <button class="emoji-btn" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
+                {#if e.custom}
+                  <img src={e.custom.url} alt={e.key} loading="lazy" />
+                {:else}
+                  <UnicodeEmoji char={e.key} />
+                {/if}
               </button>
             {/each}
+            {#if pinnedEntries.length === 0}
+              <span class="none">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
+            {/if}
           </div>
-        </details>
-      {/each}
-      {#if customByCategory.length === 0}
-        <span class="none">カスタム絵文字がありません</span>
+        </section>
       {/if}
-    {:else}
-      {#each unicodeMatches as e (e.char)}
-        <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
-          <UnicodeEmoji char={e.char} />
-        </button>
-      {/each}
-      {#each customMatches as e (e.name)}
-        <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
-          <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
-        </button>
-      {/each}
-      {#if unicodeMatches.length === 0 && customMatches.length === 0}
-        <span class="none">絵文字がありません</span>
-      {/if}
+
+      <section class="section">
+        <h4 class="section-title">カスタム絵文字</h4>
+        {#each customByCategory as group (group.category ?? "")}
+          <details class="category" open={customByCategory.length <= 1}>
+            <summary>{group.category ?? "その他"}（{group.emojis.length}）</summary>
+            <div class="flat-grid">
+              {#each group.emojis as e (e.name)}
+                <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
+                  <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
+                </button>
+              {/each}
+            </div>
+          </details>
+        {/each}
+        {#if customByCategory.length === 0}
+          <span class="none">カスタム絵文字がありません</span>
+        {/if}
+      </section>
+
+      <section class="section">
+        <h4 class="section-title">絵文字</h4>
+        {#each UNICODE_EMOJI_CATEGORIES as c (c.index)}
+          <details class="category">
+            <summary>{c.label}</summary>
+            <div class="flat-grid">
+              {#each UNICODE_EMOJIS.filter((e) => e.category === c.index) as e (e.char)}
+                <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
+                  <UnicodeEmoji char={e.char} />
+                </button>
+              {/each}
+            </div>
+          </details>
+        {/each}
+      </section>
     {/if}
   </div>
 </div>
@@ -154,31 +159,6 @@
     border-radius: 10px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   }
-  .tabs {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 2px;
-    overflow-x: auto;
-    margin-bottom: 6px;
-  }
-  .tab-btn {
-    flex: none;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 3px 7px;
-    border-radius: 6px;
-    font-size: 0.72rem;
-    white-space: nowrap;
-  }
-  .tab-btn:hover {
-    background: var(--surface-3);
-  }
-  .tab-btn.active {
-    background: var(--surface-3);
-    color: var(--text);
-  }
   .search {
     width: 100%;
     padding: 6px 8px;
@@ -189,15 +169,19 @@
     margin-bottom: 6px;
     box-sizing: border-box;
   }
-  .grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    max-height: 220px;
+  .scroll {
+    max-height: 320px;
     overflow-y: auto;
+    overflow-x: hidden;
   }
-  .category {
-    width: 100%;
+  .section {
+    margin-bottom: 4px;
+  }
+  .section-title {
+    margin: 6px 0 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-dim);
   }
   .category summary {
     cursor: pointer;
@@ -205,7 +189,7 @@
     color: var(--text-dim);
     padding: 4px 2px;
   }
-  .category-grid {
+  .flat-grid {
     display: flex;
     flex-wrap: wrap;
     gap: 2px;

@@ -47,19 +47,27 @@
     void apply([...pinned, stored]);
   }
 
-  function onDragStart(i: number) {
+  function onDragStart(i: number, e: DragEvent) {
+    // dataTransfer.setData を呼ばないと WebKitGTK 等一部環境でドラッグ自体が開始しない。
+    e.dataTransfer?.setData("text/plain", String(i));
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
     draggingIndex = i;
     dragOrder = pinned;
   }
 
   function onDragOver(i: number, e: DragEvent) {
     e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     if (draggingIndex === null || draggingIndex === i || !dragOrder) return;
     const next = [...dragOrder];
     const [moved] = next.splice(draggingIndex, 1);
     next.splice(i, 0, moved);
     dragOrder = next;
     draggingIndex = i;
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
   }
 
   function onDragEnd() {
@@ -80,8 +88,15 @@
       class="chip"
       class:dragging={draggingIndex === i}
       ondragover={(e) => onDragOver(i, e)}
+      ondrop={onDrop}
     >
-      <span class="grip" draggable="true" ondragstart={() => onDragStart(i)} ondragend={onDragEnd} title="ドラッグで並べ替え">
+      <span
+        class="grip"
+        draggable="true"
+        ondragstart={(e) => onDragStart(i, e)}
+        ondragend={onDragEnd}
+        title="ドラッグで並べ替え"
+      >
         <GripVertical size={12} />
       </span>
       <span class="glyph">
