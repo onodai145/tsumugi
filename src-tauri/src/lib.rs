@@ -63,6 +63,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::vote_poll,
             commands::note::list_custom_emojis,
             commands::note::upload_file,
+            commands::note::upload_bytes,
             commands::note::save_url_to_file,
             commands::mute::get_mute,
             commands::mute::set_mute,

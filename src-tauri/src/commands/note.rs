@@ -1,6 +1,6 @@
 //! 投稿・リアクション系 command（Phase 3）。
 
-use crate::api::drive::upload_file as api_upload_file;
+use crate::api::drive::{upload_bytes as api_upload_bytes, upload_file as api_upload_file};
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
     create_note, create_reaction, delete_note, delete_reaction, renote as api_renote, vote_poll as api_vote_poll,
@@ -96,6 +96,19 @@ pub async fn upload_file(
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
     api_upload_file(&state.http, &host, &token, &path).await
+}
+
+/// クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。
+#[tauri::command]
+#[specta::specta]
+pub async fn upload_bytes(
+    state: State<'_, AppState>,
+    account_id: String,
+    filename: String,
+    bytes: Vec<u8>,
+) -> Result<DriveFile> {
+    let (host, token) = state.host_token(&account_id)?;
+    api_upload_bytes(&state.http, &host, &token, bytes, filename).await
 }
 
 /// 添付ファイル(画像/動画等)を上限サイズまで超えていないか調べつつダウンロードし、
