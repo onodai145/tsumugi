@@ -31,6 +31,7 @@ import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
+import { isMobilePlatform } from "./platform";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
@@ -96,6 +97,9 @@ class AppStore {
   booting = $state(true);
   error = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
+  // スマホでは投稿欄を常時表示せず、モーダルとして開く(Issue #34/#35)。
+  // openCompose() から一元的に開閉するので、返信/引用/新規投稿のどの経路でも自動で開く。
+  showComposeModal = $state(false);
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false, soundChoice: "" });
@@ -1112,6 +1116,9 @@ class AppStore {
 
   openCompose(accountId: string, opts: { replyTo?: Note; quoteOf?: Note } = {}) {
     this.compose = { accountId, ...opts };
+    // スマホは投稿欄がモーダル内にしか無いため、シグナルを消費できるよう先に開いておく
+    // (デスクトップは常時表示なので不要)。
+    if (isMobilePlatform) this.showComposeModal = true;
   }
 
   async postNote(accountId: string, draft: NoteDraft) {
