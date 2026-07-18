@@ -2,13 +2,14 @@
   import NotifySection from "./settings/NotifySection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
   import DisplaySection from "./settings/DisplaySection.svelte";
+  import ReactionSection from "./settings/ReactionSection.svelte";
   import DataSection from "./settings/DataSection.svelte";
   import AccountsSection from "./settings/AccountsSection.svelte";
   import KeysSection from "./settings/KeysSection.svelte";
   import AboutSection from "./settings/AboutSection.svelte";
   import { X } from "@lucide/svelte";
 
-  type Section = "accounts" | "display" | "data" | "notify" | "mute" | "keys" | "about";
+  type Section = "accounts" | "display" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
 
   let {
     onclose,
@@ -19,6 +20,7 @@
   const nav: { id: Section; label: string }[] = [
     { id: "accounts", label: "アカウント" },
     { id: "display", label: "表示" },
+    { id: "reaction", label: "リアクション" },
     { id: "data", label: "データ" },
     { id: "notify", label: "通知" },
     { id: "mute", label: "NG（ミュート）" },
@@ -52,6 +54,8 @@
           <AccountsSection {onAddAccount} />
         {:else if active === "display"}
           <DisplaySection />
+        {:else if active === "reaction"}
+          <ReactionSection />
         {:else if active === "data"}
           <DataSection />
         {:else if active === "notify"}

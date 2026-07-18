@@ -69,6 +69,10 @@ pub struct UiPrefs {
     /// 背景画像の配置方法。"cover" | "contain" | "fill" | "tile"（Issue #45）。
     #[serde(default = "default_background_fit_mode")]
     pub background_fit_mode: String,
+    /// リアクションピッカーのピン留め絵文字（Issue #19）。Unicode絵文字はそのまま、
+    /// カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
+    #[serde(default = "default_pinned_emojis")]
+    pub pinned_emojis: Vec<String>,
     /// 既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。
     #[serde(default)]
     pub default_account_id: String,
@@ -107,6 +111,13 @@ fn default_background_fit_mode() -> String {
     "cover".into()
 }
 
+fn default_pinned_emojis() -> Vec<String> {
+    ["👍", "❤️", "😆", "🎉", "🤔", "😢", "😮", "🙏"]
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
 fn default_emoji_style() -> String {
     "twemoji".into()
 }
@@ -135,6 +146,7 @@ impl Default for UiPrefs {
             background_blur: 0,
             column_opacity: default_column_opacity(),
             background_fit_mode: default_background_fit_mode(),
+            pinned_emojis: default_pinned_emojis(),
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
@@ -168,6 +180,11 @@ mod tests {
         assert_eq!(v.column_opacity, 100);
         // background_fit_mode も同様に既定値(cover, 追加前の見た目)へフォールバックすること。
         assert_eq!(v.background_fit_mode, "cover");
+        // pinned_emojis も同様に既定値(追加前のハードコード8種)へフォールバックすること。
+        assert_eq!(
+            v.pinned_emojis,
+            vec!["👍", "❤️", "😆", "🎉", "🤔", "😢", "😮", "🙏"]
+        );
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
         assert_eq!(v.emoji_style, "twemoji");
         assert_eq!(v.gap_fill_limit, 200);
@@ -203,6 +220,7 @@ mod tests {
             background_blur: 8,
             column_opacity: 85,
             background_fit_mode: "tile".into(),
+            pinned_emojis: vec!["👍".into(), ":blob_cat:".into()],
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),
             gap_fill_limit: 500,

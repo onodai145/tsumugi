@@ -26,6 +26,7 @@
   "dependencies": {
     "@lucide/svelte": "^1.23.0",
     "@misskey-dev/emoji-assets": "^17.0.6",
+    "@misskey-dev/emoji-data": "^17.0.6",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",

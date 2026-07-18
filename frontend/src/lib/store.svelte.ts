@@ -29,6 +29,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
+import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
@@ -108,6 +109,7 @@ class AppStore {
     backgroundBlur: 0,
     columnOpacity: 100,
     backgroundFitMode: "cover",
+    pinnedEmojis: DEFAULT_PINNED_EMOJIS,
     defaultAccountId: "",
     emojiStyle: "twemoji",
     gapFillLimit: 200,
@@ -882,6 +884,7 @@ class AppStore {
       backgroundDim: prefs.backgroundDim ?? 0,
       backgroundBlur: prefs.backgroundBlur ?? 0,
       columnOpacity: prefs.columnOpacity ?? 100,
+      pinnedEmojis: prefs.pinnedEmojis ?? DEFAULT_PINNED_EMOJIS,
       defaultAccountId: prefs.defaultAccountId ?? "",
       emojiStyle: prefs.emojiStyle ?? "twemoji",
       gapFillLimit: prefs.gapFillLimit ?? 200,
@@ -926,6 +929,13 @@ class AppStore {
     await unwrap(commands.setUiPrefs({ ...this.ui, keymap: overrides }));
     this.ui = { ...this.ui, keymap: overrides };
     this.#log("info", "キー割り当てを更新しました");
+  }
+
+  /// リアクションピッカーのピン留め絵文字リストを丸ごと差し替える（Issue #19、設定→リアクションで編集）。
+  /// key は Unicode絵文字はそのまま、カスタム絵文字は ":name:" 形式。
+  async setPinnedEmojis(list: string[]) {
+    await unwrap(commands.setUiPrefs({ ...this.ui, pinnedEmojis: list }));
+    this.ui = { ...this.ui, pinnedEmojis: list };
   }
 
   /// data-theme(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
