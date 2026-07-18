@@ -97,6 +97,9 @@ class AppStore {
   booting = $state(true);
   error = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
+  // スマホでは投稿欄を常時表示せず、モーダルとして開く(Issue #34/#35)。
+  // openCompose() から一元的に開閉するので、返信/引用/新規投稿のどの経路でも自動で開く。
+  showComposeModal = $state(false);
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false, soundChoice: "" });
@@ -1122,6 +1125,10 @@ class AppStore {
 
   openCompose(accountId: string, opts: { replyTo?: Note; quoteOf?: Note } = {}) {
     this.compose = { accountId, ...opts };
+    // モバイル版UIは投稿欄がモーダル内にしか無いため、シグナルを消費できるよう先に開いておく
+    // (PC版は常時表示なので不要)。isMobilePlatform(OS生判定)ではなく実効UIモード
+    // (設定→表示のuiModeで上書き可能。Issue #51)で判定する。
+    if (this.useMobileUi()) this.showComposeModal = true;
   }
 
   async postNote(accountId: string, draft: NoteDraft) {

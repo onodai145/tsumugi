@@ -25,8 +25,6 @@
   let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);
   let columnSettingsGroupId = $state<string | null>(null);
-  // スマホでは投稿欄を常時表示せず、右下のFABから投稿モーダルを開く操作にする
-  let showComposeModal = $state(false);
 
   function openSettings(section: SettingsSection) {
     settingsInitial = section;
@@ -70,14 +68,14 @@
       if (app.reactPickerNoteId) {
         app.reactPickerNoteId = null;
         e.preventDefault();
-      } else if (showComposeModal) {
-        showComposeModal = false;
+      } else if (app.showComposeModal) {
+        app.showComposeModal = false;
         e.preventDefault();
       }
       return;
     }
     // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
-    if (showAdd || showAddColumn || showSettings || showComposeModal) return;
+    if (showAdd || showAddColumn || showSettings || app.showComposeModal) return;
     const action = keymap.get(eventToChord(e));
     if (!action) return;
     e.preventDefault();
@@ -136,21 +134,21 @@
   {/if}
 
   {#if useMobileUi && app.accounts.length > 0 && !app.booting}
-    <button class="compose-fab" onclick={() => (showComposeModal = true)} title="投稿">
+    <button class="compose-fab" onclick={() => app.openCompose(app.defaultAccountId())} title="投稿">
       <Pencil size={20} />
     </button>
   {/if}
 
-  {#if showComposeModal}
+  {#if app.showComposeModal}
     <div
       class="compose-overlay"
-      onclick={() => (showComposeModal = false)}
-      onkeydown={(e) => e.key === "Escape" && (showComposeModal = false)}
+      onclick={() => (app.showComposeModal = false)}
+      onkeydown={(e) => e.key === "Escape" && (app.showComposeModal = false)}
       role="presentation"
     >
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="compose-modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
-        <ComposeBar onPosted={() => (showComposeModal = false)} expanded />
+        <ComposeBar onPosted={() => (app.showComposeModal = false)} expanded />
       </div>
     </div>
   {/if}
