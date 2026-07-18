@@ -17,6 +17,7 @@
     (app.ui.backgroundFitMode as BackgroundFitMode) ?? "cover",
   );
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
+  let uiMode = $state(app.ui.uiMode ?? "auto");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
   let pickingImage = $state(false);
@@ -28,6 +29,13 @@
     { id: "auto", label: "OSに合わせる" },
     { id: "light", label: "ライト" },
     { id: "dark", label: "ダーク" },
+  ];
+
+  // 投稿欄の見せ方(常時表示のPC版 or FAB+モーダルのモバイル版)を切り替える(Issue #51)。
+  const uiModes: { id: string; label: string }[] = [
+    { id: "auto", label: "OSに合わせる" },
+    { id: "desktop", label: "PC版" },
+    { id: "mobile", label: "モバイル版" },
   ];
 
   // ---- カスタムテーマ(プリセット + ユーザー作成) ----
@@ -160,6 +168,7 @@
         backgroundBlur,
         columnOpacity,
         backgroundFitMode,
+        uiMode,
         emojiStyle,
         gapFillLimit: gapLimit,
         mediaThumbnailHeight: thumbHeight,
@@ -174,6 +183,16 @@
 </script>
 
 <h3 class="title">表示</h3>
+
+<div class="field">
+  <span>UIモード</span>
+  <div class="seg">
+    {#each uiModes as m (m.id)}
+      <button class="seg-btn" class:active={uiMode === m.id} onclick={() => (uiMode = m.id)}>{m.label}</button>
+    {/each}
+  </div>
+  <p class="hint">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
+</div>
 
 <div class="field">
   <span>テーマ</span>

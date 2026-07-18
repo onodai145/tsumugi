@@ -114,6 +114,7 @@ class AppStore {
     columnOpacity: 100,
     backgroundFitMode: "cover",
     pinnedEmojis: DEFAULT_PINNED_EMOJIS,
+    uiMode: "auto",
     defaultAccountId: "",
     emojiStyle: "twemoji",
     gapFillLimit: 200,
@@ -912,6 +913,14 @@ class AppStore {
     return this.accounts[0]?.id ?? "";
   }
 
+  /// 実効UIモード(投稿モーダル+FABのモバイル版か、常時投稿欄のPC版か)。
+  /// 設定→表示のuiModeが"auto"ならOS判定(Android/iOS)、それ以外は強制切替する（Issue #51）。
+  useMobileUi(): boolean {
+    if (this.ui.uiMode === "mobile") return true;
+    if (this.ui.uiMode === "desktop") return false;
+    return isMobilePlatform;
+  }
+
   /// Unicode絵文字の画像URL（native設定時は null＝生テキストのまま表示）。
   /// 画像はアプリに同梱済み(@misskey-dev/emoji-assets)なのでインスタンス通信は発生しない。
   emojiImageUrl(char: string): string | null {
@@ -1116,9 +1125,10 @@ class AppStore {
 
   openCompose(accountId: string, opts: { replyTo?: Note; quoteOf?: Note } = {}) {
     this.compose = { accountId, ...opts };
-    // スマホは投稿欄がモーダル内にしか無いため、シグナルを消費できるよう先に開いておく
-    // (デスクトップは常時表示なので不要)。
-    if (isMobilePlatform) this.showComposeModal = true;
+    // モバイル版UIは投稿欄がモーダル内にしか無いため、シグナルを消費できるよう先に開いておく
+    // (PC版は常時表示なので不要)。isMobilePlatform(OS生判定)ではなく実効UIモード
+    // (設定→表示のuiModeで上書き可能。Issue #51)で判定する。
+    if (this.useMobileUi()) this.showComposeModal = true;
   }
 
   async postNote(accountId: string, draft: NoteDraft) {

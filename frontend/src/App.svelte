@@ -10,11 +10,12 @@
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
   import { buildKeymap, eventToChord } from "./lib/keymap";
-  import { isMobilePlatform } from "./lib/platform";
   import { Settings as SettingsIcon, Pencil } from "@lucide/svelte";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
+  // モバイル版UIかPC版UIか(設定→表示で上書き可能、既定はOS判定。Issue #51)
+  const useMobileUi = $derived(app.useMobileUi());
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
@@ -91,7 +92,7 @@
 <div class="app">
   <!-- 上部: 投稿バー(スマホでは非表示) + カラム/アカウント追加 -->
   <header class="appbar">
-    {#if app.accounts.length > 0 && !isMobilePlatform}
+    {#if app.accounts.length > 0 && !useMobileUi}
       <ComposeBar />
     {:else}
       <div class="spacer"></div>
@@ -132,7 +133,7 @@
     <Backstage />
   {/if}
 
-  {#if isMobilePlatform && app.accounts.length > 0 && !app.booting}
+  {#if useMobileUi && app.accounts.length > 0 && !app.booting}
     <button class="compose-fab" onclick={() => app.openCompose(app.defaultAccountId())} title="投稿">
       <Pencil size={20} />
     </button>
