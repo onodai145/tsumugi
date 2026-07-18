@@ -25,6 +25,7 @@
   let {
     note,
     quoted = false,
+    hideReactions = false,
     accountId,
     emojiAccountId,
     tabId,
@@ -32,6 +33,7 @@
   }: {
     note: Note;
     quoted?: boolean;
+    hideReactions?: boolean;
     accountId?: string;
     emojiAccountId?: string;
     tabId?: string;
@@ -216,7 +218,7 @@
         {/if}
       {/if}
 
-      {#if reactionList.length > 0}
+      {#if !hideReactions && reactionList.length > 0}
         <div class="reactions">
           {#each reactionList as [key, count]}
             <button

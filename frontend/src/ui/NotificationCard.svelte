@@ -88,7 +88,7 @@
   </div>
   {#if n.note}
     <div class="note-preview">
-      <NoteCard note={n.note} quoted={true} emojiAccountId={accountId} />
+      <NoteCard note={n.note} quoted={true} hideReactions emojiAccountId={accountId} />
     </div>
   {/if}
 </article>
