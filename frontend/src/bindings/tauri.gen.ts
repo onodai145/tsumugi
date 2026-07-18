@@ -19,6 +19,15 @@ export const commands = {
 	version: string,
 	url: string,
 } | null, Error>(__TAURI_INVOKE("check_latest_release")),
+	/**
+	 *  開発用にDevToolsを開く。Issue #7 で右クリックの「検証」メニューを隠したため、代わりの
+	 *  開き口としてフロント側でF12キー押下時にこのコマンドを呼ぶ(F12はTsumugi独自のキー操作
+	 *  一覧 frontend/src/lib/keymap.ts には無く、ユーザーが再割り当てできる対象にも含めない)。
+	 *  `WebviewWindow::open_devtools` 自体が Tauri 側で
+	 *  `#[cfg(any(debug_assertions, feature = "devtools"))]` 限定のため、
+	 *  リリースビルド(devtools featureも未使用)ではこの分岐がコンパイルされず何もしない。
+	 */
+	openDevtools: () => __TAURI_INVOKE<void>("open_devtools"),
 	/**  MiAuth を開始し、認可URLと session_id を返す。 */
 	startMiauth: (host: string) => typedError<MiAuthSession, Error>(__TAURI_INVOKE("start_miauth", { host })),
 	/**  ブラウザでの認可完了後に呼ぶ。token を keyring に保存し、Account を返す。 */
