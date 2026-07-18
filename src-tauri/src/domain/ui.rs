@@ -73,6 +73,10 @@ pub struct UiPrefs {
     /// カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
     #[serde(default = "default_pinned_emojis")]
     pub pinned_emojis: Vec<String>,
+    /// モバイル版UI(投稿モーダル+FAB)かPC版UI(常時投稿欄)かの表示切替（Issue #51）。
+    /// "auto"(OS判定に従う) | "desktop"(強制PC版) | "mobile"(強制モバイル版)。
+    #[serde(default = "default_ui_mode")]
+    pub ui_mode: String,
     /// 既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。
     #[serde(default)]
     pub default_account_id: String,
@@ -118,6 +122,10 @@ fn default_pinned_emojis() -> Vec<String> {
         .collect()
 }
 
+fn default_ui_mode() -> String {
+    "auto".into()
+}
+
 fn default_emoji_style() -> String {
     "twemoji".into()
 }
@@ -147,6 +155,7 @@ impl Default for UiPrefs {
             column_opacity: default_column_opacity(),
             background_fit_mode: default_background_fit_mode(),
             pinned_emojis: default_pinned_emojis(),
+            ui_mode: default_ui_mode(),
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
@@ -185,6 +194,8 @@ mod tests {
             v.pinned_emojis,
             vec!["👍", "❤️", "😆", "🎉", "🤔", "😢", "😮", "🙏"]
         );
+        // ui_mode も同様に既定値(auto, 追加前のOS判定のみの挙動)へフォールバックすること。
+        assert_eq!(v.ui_mode, "auto");
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
         assert_eq!(v.emoji_style, "twemoji");
         assert_eq!(v.gap_fill_limit, 200);
@@ -221,6 +232,7 @@ mod tests {
             column_opacity: 85,
             background_fit_mode: "tile".into(),
             pinned_emojis: vec!["👍".into(), ":blob_cat:".into()],
+            ui_mode: "mobile".into(),
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),
             gap_fill_limit: 500,

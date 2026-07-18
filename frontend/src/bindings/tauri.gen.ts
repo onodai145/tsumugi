@@ -514,6 +514,11 @@ export type UiPrefs = {
 	 *  カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
 	 */
 	pinnedEmojis?: string[],
+	/**
+	 *  モバイル版UI(投稿モーダル+FAB)かPC版UI(常時投稿欄)かの表示切替（Issue #51）。
+	 *  "auto"(OS判定に従う) | "desktop"(強制PC版) | "mobile"(強制モバイル版)。
+	 */
+	uiMode?: string,
 	/**  既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。 */
 	defaultAccountId?: string,
 	/**  Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。 */

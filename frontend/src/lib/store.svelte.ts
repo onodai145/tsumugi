@@ -31,6 +31,7 @@ import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
+import { isMobilePlatform } from "./platform";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
@@ -110,6 +111,7 @@ class AppStore {
     columnOpacity: 100,
     backgroundFitMode: "cover",
     pinnedEmojis: DEFAULT_PINNED_EMOJIS,
+    uiMode: "auto",
     defaultAccountId: "",
     emojiStyle: "twemoji",
     gapFillLimit: 200,
@@ -906,6 +908,14 @@ class AppStore {
     const id = this.ui.defaultAccountId;
     if (id && this.accounts.some((a) => a.id === id)) return id;
     return this.accounts[0]?.id ?? "";
+  }
+
+  /// 実効UIモード(投稿モーダル+FABのモバイル版か、常時投稿欄のPC版か)。
+  /// 設定→表示のuiModeが"auto"ならOS判定(Android/iOS)、それ以外は強制切替する（Issue #51）。
+  useMobileUi(): boolean {
+    if (this.ui.uiMode === "mobile") return true;
+    if (this.ui.uiMode === "desktop") return false;
+    return isMobilePlatform;
   }
 
   /// Unicode絵文字の画像URL（native設定時は null＝生テキストのまま表示）。
