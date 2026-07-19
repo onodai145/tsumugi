@@ -69,6 +69,11 @@ pub struct UiPrefs {
     /// 背景画像の配置方法。"cover" | "contain" | "fill" | "tile"（Issue #45）。
     #[serde(default = "default_background_fit_mode")]
     pub background_fit_mode: String,
+    /// 背景画像の基準点（background-position）。9点グリッドから選択（Issue #76）。
+    /// "top-left" | "top" | "top-right" | "left" | "center" | "right"
+    /// | "bottom-left" | "bottom" | "bottom-right"
+    #[serde(default = "default_background_position")]
+    pub background_position: String,
     /// リアクションピッカーのピン留め絵文字（Issue #19）。Unicode絵文字はそのまま、
     /// カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
     #[serde(default = "default_pinned_emojis")]
@@ -119,6 +124,10 @@ fn default_background_fit_mode() -> String {
     "cover".into()
 }
 
+fn default_background_position() -> String {
+    "center".into()
+}
+
 fn default_pinned_emojis() -> Vec<String> {
     ["👍", "❤️", "😆", "🎉", "🤔", "😢", "😮", "🙏"]
         .into_iter()
@@ -158,6 +167,7 @@ impl Default for UiPrefs {
             background_blur: 0,
             column_opacity: default_column_opacity(),
             background_fit_mode: default_background_fit_mode(),
+            background_position: default_background_position(),
             pinned_emojis: default_pinned_emojis(),
             ui_mode: default_ui_mode(),
             default_account_id: String::new(),
@@ -194,6 +204,8 @@ mod tests {
         assert_eq!(v.column_opacity, 100);
         // background_fit_mode も同様に既定値(cover, 追加前の見た目)へフォールバックすること。
         assert_eq!(v.background_fit_mode, "cover");
+        // background_position も同様に既定値(center, 追加前の見た目)へフォールバックすること。
+        assert_eq!(v.background_position, "center");
         // pinned_emojis も同様に既定値(追加前のハードコード8種)へフォールバックすること。
         assert_eq!(
             v.pinned_emojis,
@@ -237,6 +249,7 @@ mod tests {
             background_blur: 8,
             column_opacity: 85,
             background_fit_mode: "tile".into(),
+            background_position: "top-left".into(),
             pinned_emojis: vec!["👍".into(), ":blob_cat:".into()],
             ui_mode: "mobile".into(),
             default_account_id: "a1".into(),
