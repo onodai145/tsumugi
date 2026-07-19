@@ -368,6 +368,7 @@
       style={`left:${attachMenuPos.left}px;top:${attachMenuPos.top}px`}
       onclick={(e) => e.stopPropagation()}
       role="menu"
+      tabindex="-1"
     >
       <button class="attach-item" type="button" onclick={chooseLocalUpload}>ローカルから選択</button>
       <button
