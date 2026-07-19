@@ -517,6 +517,12 @@ export type UiPrefs = {
 	/**  背景画像の配置方法。"cover" | "contain" | "fill" | "tile"（Issue #45）。 */
 	backgroundFitMode?: string,
 	/**
+	 *  背景画像の基準点（background-position）。9点グリッドから選択（Issue #76）。
+	 *  "top-left" | "top" | "top-right" | "left" | "center" | "right"
+	 *  | "bottom-left" | "bottom" | "bottom-right"
+	 */
+	backgroundPosition?: string,
+	/**
 	 *  リアクションピッカーのピン留め絵文字（Issue #19）。Unicode絵文字はそのまま、
 	 *  カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
 	 */
