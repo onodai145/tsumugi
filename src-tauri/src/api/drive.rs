@@ -21,6 +21,18 @@ pub async fn upload_file(
         .map(|f| f.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".to_string());
 
+    upload_bytes(http, host, token, bytes, filename).await
+}
+
+/// バイト列を Misskey ドライブへアップロードし、DriveFile を返す
+/// （クリップボード貼り付けなど、ファイルパスを経由しない添付用）。
+pub async fn upload_bytes(
+    http: &reqwest::Client,
+    host: &str,
+    token: &str,
+    bytes: Vec<u8>,
+    filename: String,
+) -> Result<DriveFile> {
     let part = reqwest::multipart::Part::bytes(bytes).file_name(filename);
     let form = reqwest::multipart::Form::new()
         .text("i", token.to_string())

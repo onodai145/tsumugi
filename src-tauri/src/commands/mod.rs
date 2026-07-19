@@ -22,7 +22,7 @@ pub use column::{
 };
 #[allow(unused_imports)]
 pub use note::{
-    delete_note_cmd, list_custom_emojis, post_note, react, renote, unreact, upload_file,
+    delete_note_cmd, list_custom_emojis, post_note, react, renote, unreact, upload_bytes, upload_file,
 };
 #[allow(unused_imports)]
 pub use mute::{get_mute, get_notify, set_mute, set_notify};

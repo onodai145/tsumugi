@@ -123,6 +123,8 @@ export const commands = {
 	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
 	/**  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。 */
 	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
+	/**  クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。 */
+	uploadBytes: (accountId: string, filename: string, bytes: number[]) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_bytes", { accountId, filename, bytes })),
 	saveUrlToFile: (url: string, path: string) => typedError<null, Error>(__TAURI_INVOKE("save_url_to_file", { url, path })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
