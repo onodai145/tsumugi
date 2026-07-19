@@ -29,6 +29,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
+import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
 import { isMobilePlatform } from "./platform";
@@ -125,6 +126,7 @@ class AppStore {
     backgroundBlur: 0,
     columnOpacity: 100,
     backgroundFitMode: "cover",
+    backgroundPosition: "center",
     pinnedEmojis: DEFAULT_PINNED_EMOJIS,
     uiMode: "auto",
     defaultAccountId: "",
@@ -1029,7 +1031,12 @@ class AppStore {
   #applyBackground(
     prefs: Pick<
       UiPrefs,
-      "backgroundImage" | "backgroundDim" | "backgroundBlur" | "columnOpacity" | "backgroundFitMode"
+      | "backgroundImage"
+      | "backgroundDim"
+      | "backgroundBlur"
+      | "columnOpacity"
+      | "backgroundFitMode"
+      | "backgroundPosition"
     >,
   ) {
     const root = document.documentElement;
@@ -1046,6 +1053,9 @@ class AppStore {
       BACKGROUND_FIT_MODE_CSS.cover;
     root.style.setProperty("--bg-size", bgSize);
     root.style.setProperty("--bg-repeat", bgRepeat);
+    const bgPosition = BACKGROUND_POSITION_CSS[prefs.backgroundPosition ?? "center"] ??
+      BACKGROUND_POSITION_CSS.center;
+    root.style.setProperty("--bg-position", bgPosition);
   }
 
   /// メディアサムネイルの高さ上限を <html> に反映する（ノートを詰めたい人は小さく、

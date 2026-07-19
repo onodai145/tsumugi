@@ -83,7 +83,7 @@ body::before {
       rgba(0, 0, 0, var(--bg-dim, 0))
     ), var(--bg-image, none);
   background-size: var(--bg-size, cover);
-  background-position: center;
+  background-position: var(--bg-position, center);
   background-repeat: var(--bg-repeat, no-repeat);
   filter: blur(var(--bg-blur, 0px));
 }

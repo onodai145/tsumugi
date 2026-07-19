@@ -3,6 +3,7 @@
   import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import { PRESETS, THEME_VAR_KEYS } from "../../lib/theme";
   import { BACKGROUND_FIT_MODE_OPTIONS, type BackgroundFitMode } from "../../lib/backgroundFitMode";
+  import { BACKGROUND_POSITION_GRID, type BackgroundPosition } from "../../lib/backgroundPosition";
   import type { CustomTheme, ThemeColors } from "../../bindings/tauri.gen";
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
 
@@ -16,6 +17,9 @@
   let backgroundFitMode = $state<BackgroundFitMode>(
     (app.ui.backgroundFitMode as BackgroundFitMode) ?? "cover",
   );
+  let backgroundPosition = $state<BackgroundPosition>(
+    (app.ui.backgroundPosition as BackgroundPosition) ?? "center",
+  );
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let uiMode = $state(app.ui.uiMode ?? "auto");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
@@ -24,6 +28,19 @@
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
+
+  // 背景画像の基準点（9点グリッド、Issue #76）。position→アクセシブルラベル。
+  const positionLabels: Record<BackgroundPosition, string> = {
+    "top-left": "左上",
+    top: "上",
+    "top-right": "右上",
+    left: "左",
+    center: "中央",
+    right: "右",
+    "bottom-left": "左下",
+    bottom: "下",
+    "bottom-right": "右下",
+  };
 
   const themes: { id: string; label: string }[] = [
     { id: "auto", label: "OSに合わせる" },
@@ -168,6 +185,7 @@
         backgroundBlur,
         columnOpacity,
         backgroundFitMode,
+        backgroundPosition,
         uiMode,
         emojiStyle,
         gapFillLimit: gapLimit,
@@ -370,6 +388,22 @@
       {/each}
     </div>
   </div>
+  {#if backgroundFitMode !== "fill"}
+    <div class="field">
+      <span>基準点</span>
+      <div class="pos-grid">
+        {#each BACKGROUND_POSITION_GRID as p (p)}
+          <button
+            class="pos-btn"
+            class:active={backgroundPosition === p}
+            title={positionLabels[p]}
+            aria-label={positionLabels[p]}
+            onclick={() => (backgroundPosition = p)}
+          ></button>
+        {/each}
+      </div>
+    </div>
+  {/if}
   <label class="field">
     <span>背景の暗さ（{backgroundDim}%）</span>
     <input type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
@@ -429,6 +463,27 @@
   .seg-btn.active {
     background: var(--accent);
     color: #fff;
+  }
+  .pos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 28px);
+    grid-template-rows: repeat(3, 28px);
+    gap: 4px;
+    width: fit-content;
+  }
+  .pos-btn {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    cursor: pointer;
+    padding: 0;
+  }
+  .pos-btn:hover {
+    border-color: var(--accent);
+  }
+  .pos-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
   }
   input[type="number"] {
     padding: 7px 9px;
