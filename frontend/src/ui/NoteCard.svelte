@@ -54,10 +54,19 @@
     emojiAcct ? app.accounts.find((a) => a.id === emojiAcct)?.host : undefined,
   );
 
-  // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）
-  const showPicker = $derived(app.reactPickerNoteId === inner.id);
+  // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）。
+  // 同じノートがRenote直後の並列表示や複数カラムで重複して描画されうるため、
+  // noteId一致だけでなく自インスタンス固有トークン（マウス）/ tabId+selected（キーボード）
+  // でも一致を確認し、開いた側のインスタンスだけに表示する。
+  const myToken = { kind: "instance" as const, id: crypto.randomUUID() };
+  const showPicker = $derived.by(() => {
+    const p = app.reactPicker;
+    if (!p || p.noteId !== inner.id) return false;
+    if (p.token.kind === "instance") return p.token.id === myToken.id;
+    return tabId !== undefined && p.token.tabId === tabId && selected;
+  });
   function togglePicker() {
-    app.reactPickerNoteId = showPicker ? null : inner.id;
+    app.reactPicker = showPicker ? null : { noteId: inner.id, token: myToken };
   }
 
   // ピッカーは position:fixed でスクロール領域(.notes の overflow)を脱出させる。
@@ -78,7 +87,7 @@
   });
 
   function react(reaction: string) {
-    app.reactPickerNoteId = null;
+    app.reactPicker = null;
     if (accountId) app.toggleReaction(accountId, inner.id, reaction);
   }
 
@@ -265,7 +274,7 @@
             {#if showPicker && pickerPos}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="picker-overlay" use:portal onclick={() => (app.reactPickerNoteId = null)} role="presentation">
+              <div class="picker-overlay" use:portal onclick={() => (app.reactPicker = null)} role="presentation">
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
