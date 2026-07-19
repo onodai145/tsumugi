@@ -1,12 +1,12 @@
 //! 投稿・リアクション系 command（Phase 3）。
 
-use crate::api::drive::upload_file as api_upload_file;
+use crate::api::drive::{list_files as api_list_files, list_folders as api_list_folders, upload_file as api_upload_file};
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
     create_note, create_reaction, delete_note, delete_reaction, renote as api_renote, vote_poll as api_vote_poll,
     NoteDraft, VisibilityInput,
 };
-use crate::domain::{DriveFile, EmojiDef, Note};
+use crate::domain::{DriveFile, EmojiDef, Note, SourceItem};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use tauri::State;
@@ -96,6 +96,33 @@ pub async fn upload_file(
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
     api_upload_file(&state.http, &host, &token, &path).await
+}
+
+/// ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
+/// until_id は直前に取得した最後のファイルIDを渡してページングする。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_drive_files(
+    state: State<'_, AppState>,
+    account_id: String,
+    folder_id: Option<String>,
+    until_id: Option<String>,
+) -> Result<Vec<DriveFile>> {
+    let client = state.client_for(&account_id)?;
+    api_list_files(&client, folder_id.as_deref(), until_id.as_deref()).await
+}
+
+/// ドライブのフォルダ一覧（添付ピッカーのフォルダナビゲーション用）。
+/// folder_id: None はルート直下のフォルダ一覧。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_drive_folders(
+    state: State<'_, AppState>,
+    account_id: String,
+    folder_id: Option<String>,
+) -> Result<Vec<SourceItem>> {
+    let client = state.client_for(&account_id)?;
+    api_list_folders(&client, folder_id.as_deref()).await
 }
 
 /// 添付ファイル(画像/動画等)を上限サイズまで超えていないか調べつつダウンロードし、

@@ -130,6 +130,16 @@ export const commands = {
 	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
 	/**  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。 */
 	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
+	/**
+	 *  ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
+	 *  until_id は直前に取得した最後のファイルIDを渡してページングする。
+	 */
+	listDriveFiles: (accountId: string, folderId: string | null, untilId: string | null) => typedError<DriveFile[], Error>(__TAURI_INVOKE("list_drive_files", { accountId, folderId, untilId })),
+	/**
+	 *  ドライブのフォルダ一覧（添付ピッカーのフォルダナビゲーション用）。
+	 *  folder_id: None はルート直下のフォルダ一覧。
+	 */
+	listDriveFolders: (accountId: string, folderId: string | null) => typedError<SourceItem[], Error>(__TAURI_INVOKE("list_drive_folders", { accountId, folderId })),
 	saveUrlToFile: (url: string, path: string) => typedError<null, Error>(__TAURI_INVOKE("save_url_to_file", { url, path })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
