@@ -23,6 +23,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::git_commit_hash,
             commands::app::check_latest_release,
             commands::app::open_devtools,
+            commands::app::log_frontend_event,
             commands::account::start_miauth,
             commands::account::complete_miauth,
             commands::account::list_accounts,
@@ -164,18 +165,26 @@ pub fn run() {
                 }
             };
 
+            // 設定(UiPrefs.enable_file_logging)でON/OFFする(Issue #12: 「謎のタイミングで
+            // 通知が来る」の調査用に、リリースビルドでもWS再接続/pingタイムアウトのログを
+            // 残せるようにする)。既定ターゲット(Stdout + LogDir)のうち LogDir 側がアプリの
+            // ログディレクトリに永続化される。切替はプラグイン登録の性質上、次回起動から反映。
+            if settings.load_ui().unwrap_or_default().enable_file_logging {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        // フロントの"発火"系詳細ログ(commands::app::log_frontend_event)だけは
+                        // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
+                        // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
+                        .level_for("frontend", log::LevelFilter::Debug)
+                        .build(),
+                )?;
+            }
+
             let cache_conn =
                 db::open_cache(&cache_dir.join("cache.db")).expect("failed to open cache db");
             let cache = NoteCacheStore::new(cache_conn);
             app.manage(AppState::new(Box::new(KeyringStore), settings, cache));
-
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
 
             // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の
             // 未確定文字列インライン表示)を無効化しているため、明示的に再度有効化する。

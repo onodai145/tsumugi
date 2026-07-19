@@ -4,6 +4,7 @@
   let noteCacheLimit = $state(app.ui.noteCacheLimit ?? 10000);
   let noteCacheMaxAgeDays = $state(app.ui.noteCacheMaxAgeDays ?? 0);
   let noteCacheMaxSizeMb = $state(app.ui.noteCacheMaxSizeMb ?? 0);
+  let enableFileLogging = $state(app.ui.enableFileLogging ?? false);
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -26,6 +27,7 @@
         noteCacheLimit: cacheLimit,
         noteCacheMaxAgeDays: cacheMaxAge,
         noteCacheMaxSizeMb: cacheMaxSize,
+        enableFileLogging,
       });
       saved = true;
     } catch (e) {
@@ -54,6 +56,13 @@
   （ディスク容量を圧迫する可能性があります）。
 </p>
 
+<label class="row"><input type="checkbox" bind:checked={enableFileLogging} /> 動作ログをファイルに残す（デバッグ用）</label>
+<p class="hint">
+  WebSocket再接続やpingタイムアウトなどの内部ログを、アプリのログディレクトリにファイルとして
+  永続化します。通知が来るタイミングがおかしい等の不具合調査用で、既定はOFFです。
+  切り替えは次回起動から反映されます。
+</p>
+
 <div class="actions">
   {#if saved}<span class="ok">保存しました</span>{/if}
   <button class="save" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
@@ -61,6 +70,13 @@
 {#if err}<p class="err">{err}</p>{/if}
 
 <style>
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88rem;
+    margin-bottom: 8px;
+  }
   .field {
     display: flex;
     flex-direction: column;

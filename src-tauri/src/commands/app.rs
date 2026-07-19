@@ -21,6 +21,22 @@ pub fn open_devtools(window: tauri::WebviewWindow) {
     let _ = window;
 }
 
+/// フロント側の出来事(通知/通知音の発火など)をRust側ログ経路に流し込む(Issue #12: 「謎の
+/// タイミングで通知が来る」の調査用)。ロガー未登録(設定で動作ログがOFF)なら `log` クレートが
+/// 何もしない実装にフォールバックするだけなので、常時呼んでも安全。
+/// level は "error" | "warn" | "info" | "debug"（未知の値は info 扱い）。
+#[tauri::command]
+#[specta::specta]
+pub fn log_frontend_event(level: String, message: String) {
+    let level = match level.as_str() {
+        "error" => log::Level::Error,
+        "warn" => log::Level::Warn,
+        "debug" => log::Level::Debug,
+        _ => log::Level::Info,
+    };
+    log::log!(target: "frontend", level, "{message}");
+}
+
 /// ビルド時の短縮gitコミットハッシュ（`build.rs` が `TSUMUGI_GIT_HASH` として埋め込む）。
 /// `.git` が無い環境(tarball等)からのビルドでは "unknown" になる。
 #[tauri::command]

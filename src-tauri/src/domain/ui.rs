@@ -105,6 +105,10 @@ pub struct UiPrefs {
     /// ローカルキャッシュDBのサイズ上限（MB）。超えている間は古い順に削除し続ける。0 なら無制限。
     #[serde(default)]
     pub note_cache_max_size_mb: i32,
+    /// Rust側ログ(WS再接続/pingタイムアウト等)をアプリのログディレクトリへファイル永続化するか
+    /// （Issue #12: 「謎のタイミングで通知が来る」の調査用）。切替はアプリ再起動後に反映される。
+    #[serde(default)]
+    pub enable_file_logging: bool,
 }
 
 fn default_column_opacity() -> i32 {
@@ -164,6 +168,7 @@ impl Default for UiPrefs {
             note_cache_limit: default_note_cache_limit(),
             note_cache_max_age_days: 0,
             note_cache_max_size_mb: 0,
+            enable_file_logging: false,
         }
     }
 }
@@ -203,6 +208,7 @@ mod tests {
         assert_eq!(v.note_cache_limit, 10000);
         assert_eq!(v.note_cache_max_age_days, 0);
         assert_eq!(v.note_cache_max_size_mb, 0);
+        assert_eq!(v.enable_file_logging, false);
     }
 
     #[test]
@@ -255,6 +261,7 @@ mod tests {
             note_cache_limit: 8000,
             note_cache_max_age_days: 30,
             note_cache_max_size_mb: 200,
+            enable_file_logging: true,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
