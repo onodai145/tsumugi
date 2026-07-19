@@ -65,8 +65,8 @@
     }
     // Esc: 開いているリアクションピッカー/投稿モーダルを閉じる
     if (e.key === "Escape") {
-      if (app.reactPickerNoteId) {
-        app.reactPickerNoteId = null;
+      if (app.reactPicker) {
+        app.reactPicker = null;
         e.preventDefault();
       } else if (app.showComposeModal) {
         app.showComposeModal = false;

@@ -83,6 +83,18 @@ export interface ComposeState {
 }
 
 export type LogLevel = "info" | "success" | "warn" | "error";
+
+// リアクションピッカーの所有者トークン。同じノートが複数のNoteCard（Renote直後の
+// オリジナル＋Renote版の並列表示や、複数カラムでの重複表示）に同時に描画されうるため、
+// noteId一致だけでは開いた側とは別のインスタンスにもピッカーが出てしまう。
+// マウス操作は各NoteCardインスタンス固有のオブジェクト参照で、キーボード操作は
+// フォーカス中タブのtabIdで識別し、一致するインスタンスだけが表示するようにする。
+// id/tabId は文字列で保持する。$state はオブジェクトを深くプロキシするため、
+// オブジェクト参照(===)で持つと state 経由で読み出した側が別プロキシになり
+// 常に不一致になる（一意な文字列なら値比較になるためこの問題を回避できる）。
+export type ReactPickerToken =
+  | { kind: "instance"; id: string }
+  | { kind: "keyboard"; tabId: string };
 /// Backstage（操作ログ/エラー）の1エントリ。
 export interface LogEntry {
   id: number;
@@ -126,7 +138,7 @@ class AppStore {
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
-  reactPickerNoteId = $state<string | null>(null);
+  reactPicker = $state<{ noteId: string; token: ReactPickerToken } | null>(null);
   // Backstage: 操作ログ・エラー（新しいものが先頭）
   logs = $state<LogEntry[]>([]);
   #logSeq = 0;
@@ -492,9 +504,16 @@ class AppStore {
       case "note.renote":
         void this.renote(sel.tab.accountId, target.id);
         return;
-      case "note.react":
-        this.reactPickerNoteId = this.reactPickerNoteId === target.id ? null : target.id;
+      case "note.react": {
+        const isOpen =
+          this.reactPicker?.noteId === target.id &&
+          this.reactPicker?.token.kind === "keyboard" &&
+          this.reactPicker.token.tabId === sel.tab.id;
+        this.reactPicker = isOpen
+          ? null
+          : { noteId: target.id, token: { kind: "keyboard", tabId: sel.tab.id } };
         return;
+      }
       case "note.open": {
         const acc = this.accounts.find((a) => a.id === sel.tab.accountId);
         if (acc) void openUrl(`https://${acc.host}/notes/${target.id}`);
