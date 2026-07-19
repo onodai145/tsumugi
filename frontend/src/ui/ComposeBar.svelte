@@ -3,6 +3,7 @@
   import AccountSelect from "./AccountSelect.svelte";
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import Dropdown from "./Dropdown.svelte";
+  import DrivePicker from "./DrivePicker.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import { ImagePlus, X } from "@lucide/svelte";
@@ -51,6 +52,40 @@
     { value: "day", label: "日後" },
   ];
   let attached = $state<DriveFile[]>([]);
+  let attachTrigger = $state<HTMLElement | undefined>(undefined);
+  let showAttachMenu = $state(false);
+  let attachMenuPos = $state<{ left: number; top: number } | null>(null);
+  let showDrivePicker = $state(false);
+
+  function toggleAttachMenu() {
+    if (showAttachMenu) {
+      showAttachMenu = false;
+      return;
+    }
+    const r = attachTrigger?.getBoundingClientRect();
+    if (r) attachMenuPos = { left: r.left, top: r.bottom + 4 };
+    showAttachMenu = true;
+  }
+
+  function attachPortal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
+  async function chooseLocalUpload() {
+    showAttachMenu = false;
+    await pickFiles();
+  }
+
+  function chooseDrivePicker() {
+    showAttachMenu = false;
+    showDrivePicker = true;
+  }
+
+  function onDriveFilesSelected(picked: DriveFile[]) {
+    const known = new Set(attached.map((f) => f.id));
+    attached = [...attached, ...picked.filter((f) => !known.has(f.id))];
+  }
   let uploading = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -303,7 +338,13 @@
   <div class="toolbar">
     <div class="tools left">
       <VisibilitySelect bind:value={visibility} />
-      <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}><ImagePlus size={16} /></button>
+      <button
+        class="icon"
+        title="画像を添付"
+        bind:this={attachTrigger}
+        onclick={toggleAttachMenu}
+        disabled={uploading}
+      ><ImagePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
@@ -315,6 +356,41 @@
   </div>
   </div>
 </div>
+
+{#if showAttachMenu && attachMenuPos}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="attach-overlay" use:attachPortal onclick={() => (showAttachMenu = false)} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="attach-menu"
+      style={`left:${attachMenuPos.left}px;top:${attachMenuPos.top}px`}
+      onclick={(e) => e.stopPropagation()}
+      role="menu"
+      tabindex="-1"
+    >
+      <button
+        class="attach-item"
+        type="button"
+        disabled={!accountId}
+        title={accountId ? undefined : "アカウントを選択してください"}
+        onclick={chooseLocalUpload}
+      >ローカルから選択</button>
+      <button
+        class="attach-item"
+        type="button"
+        disabled={!accountId}
+        title={accountId ? undefined : "アカウントを選択してください"}
+        onclick={chooseDrivePicker}
+      >ドライブから選択</button>
+    </div>
+  </div>
+{/if}
+
+{#if showDrivePicker && accountId}
+  <DrivePicker {accountId} onSelect={onDriveFilesSelected} onclose={() => (showDrivePicker = false)} />
+{/if}
 
 <style>
   .composewrap {
@@ -579,5 +655,39 @@
     color: #ef4444;
     font-weight: 700;
     flex: none;
+  }
+  .attach-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+  }
+  .attach-menu {
+    position: fixed;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    padding: 4px;
+    min-width: 160px;
+  }
+  .attach-item {
+    display: block;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    font-size: 0.82rem;
+  }
+  .attach-item:hover {
+    background: var(--surface-2);
+  }
+  .attach-item:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>
