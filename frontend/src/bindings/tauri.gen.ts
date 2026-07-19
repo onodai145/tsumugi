@@ -547,6 +547,11 @@ export type UiPrefs = {
 	noteCacheMaxAgeDays?: number,
 	/**  ローカルキャッシュDBのサイズ上限（MB）。超えている間は古い順に削除し続ける。0 なら無制限。 */
 	noteCacheMaxSizeMb?: number,
+	/**
+	 *  Rust側ログ(WS再接続/pingタイムアウト等)をアプリのログディレクトリへファイル永続化するか
+	 *  （Issue #12: 「謎のタイミングで通知が来る」の調査用）。切替はアプリ再起動後に反映される。
+	 */
+	enableFileLogging?: boolean,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
