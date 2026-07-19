@@ -23,6 +23,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::git_commit_hash,
             commands::app::check_latest_release,
             commands::app::open_devtools,
+            commands::app::log_frontend_event,
             commands::account::start_miauth,
             commands::account::complete_miauth,
             commands::account::list_accounts,
@@ -172,6 +173,10 @@ pub fn run() {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
+                        // フロントの"発火"系詳細ログ(commands::app::log_frontend_event)だけは
+                        // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
+                        // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
+                        .level_for("frontend", log::LevelFilter::Debug)
                         .build(),
                 )?;
             }

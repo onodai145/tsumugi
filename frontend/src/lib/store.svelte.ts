@@ -332,11 +332,24 @@ class AppStore {
   // ---- Backstage（操作ログ） ----
 
   static #LOG_CAP = 300;
+  // Rust側の log::Level には無い "success" は info 相当として送る。
+  static #RUST_LEVEL: Record<LogLevel, "error" | "warn" | "info"> = {
+    error: "error",
+    warn: "warn",
+    info: "info",
+    success: "info",
+  };
   #log(level: LogLevel, text: string) {
     this.logs = [{ id: ++this.#logSeq, at: Date.now(), level, text }, ...this.logs].slice(
       0,
       AppStore.#LOG_CAP,
     );
+    if (this.ui.enableFileLogging) void commands.logFrontendEvent(AppStore.#RUST_LEVEL[level], text);
+  }
+  /// Backstage(UI)には出さず、設定でONならRust側のファイルログにのみ書く
+  /// (Issue #12調査用の詳細ログ。debugレベルなのでBackstageの通常ログよりファイル側でのみ見える)。
+  #logDebug(text: string) {
+    if (this.ui.enableFileLogging) void commands.logFrontendEvent("debug", text);
   }
   /// エラーをバナー表示＋Backstage へ記録する共通処理。
   #fail(e: unknown) {
@@ -652,6 +665,7 @@ class AppStore {
         const wantsDesktop = !isOwn && this.notify.desktop && tab.notifyDesktop;
         const wantsSound = !isOwn && this.notify.sound && tab.notifySound;
         if ((wantsDesktop || wantsSound) && this.#markNotified(`note:${e.payload.note.id}`)) {
+          this.#logDebug(`新着ノート通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
           if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
@@ -712,6 +726,7 @@ class AppStore {
         const wantsDesktop = this.notify.desktop && tab.notifyDesktop;
         const wantsSound = this.notify.sound && tab.notifySound;
         if ((wantsDesktop || wantsSound) && this.#markNotified(e.payload.notification.id)) {
+          this.#logDebug(`通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotify(e.payload.notification);
           if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }

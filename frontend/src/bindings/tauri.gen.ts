@@ -28,6 +28,13 @@ export const commands = {
 	 *  リリースビルド(devtools featureも未使用)ではこの分岐がコンパイルされず何もしない。
 	 */
 	openDevtools: () => __TAURI_INVOKE<void>("open_devtools"),
+	/**
+	 *  フロント側の出来事(通知/通知音の発火など)をRust側ログ経路に流し込む(Issue #12: 「謎の
+	 *  タイミングで通知が来る」の調査用)。ロガー未登録(設定で動作ログがOFF)なら `log` クレートが
+	 *  何もしない実装にフォールバックするだけなので、常時呼んでも安全。
+	 *  level は "error" | "warn" | "info" | "debug"（未知の値は info 扱い）。
+	 */
+	logFrontendEvent: (level: string, message: string) => __TAURI_INVOKE<void>("log_frontend_event", { level, message }),
 	/**  MiAuth を開始し、認可URLと session_id を返す。 */
 	startMiauth: (host: string) => typedError<MiAuthSession, Error>(__TAURI_INVOKE("start_miauth", { host })),
 	/**  ブラウザでの認可完了後に呼ぶ。token を keyring に保存し、Account を返す。 */
