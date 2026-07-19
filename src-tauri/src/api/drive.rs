@@ -79,6 +79,8 @@ pub async fn list_files(
     Ok(raw.into_iter().map(DriveFile::from).collect())
 }
 
+/// フォルダ一覧の取得上限は固定100件で、`list_files`と違い`untilId`によるページングは未実装。
+/// 直下のサブフォルダが100件を超えるドライブでは超過分が表示されない既知の制限（未対応、対応時はここを見直すこと）。
 fn list_folders_body(folder_id: Option<&str>) -> Value {
     json!({ "limit": 100, "folderId": folder_id })
 }
@@ -92,6 +94,8 @@ struct RawFolder {
 }
 
 /// 指定フォルダ直下のサブフォルダ一覧（`folder_id: None` はルート直下）。
+///
+/// 取得件数は最大100件固定でページングは未実装（`list_folders_body`参照）。
 pub async fn list_folders(client: &MisskeyClient, folder_id: Option<&str>) -> Result<Vec<SourceItem>> {
     let raw: Vec<RawFolder> = client
         .post("drive/folders", &list_folders_body(folder_id))

@@ -24,8 +24,10 @@
   let loadingMore = $state(false);
   let noMoreFiles = $state(false);
   let err = $state<string | null>(null);
+  let requestSeq = 0;
 
   async function refresh() {
+    const seq = ++requestSeq;
     err = null;
     loading = true;
     noMoreFiles = false;
@@ -34,13 +36,15 @@
         unwrap(commands.listDriveFolders(accountId, currentFolderId)),
         unwrap(commands.listDriveFiles(accountId, currentFolderId, null)),
       ]);
+      if (seq !== requestSeq) return; // 新しいナビゲーションで上書きされた古い応答は破棄
       folders = f;
       files = fl;
       if (fl.length < FILES_LIMIT) noMoreFiles = true;
     } catch (e) {
+      if (seq !== requestSeq) return;
       err = String(e);
     } finally {
-      loading = false;
+      if (seq === requestSeq) loading = false;
     }
   }
 
@@ -95,8 +99,7 @@
   void refresh();
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<div class="overlay" onclick={onclose} role="presentation">
+<div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
     <header class="head">

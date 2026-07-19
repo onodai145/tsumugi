@@ -370,7 +370,13 @@
       role="menu"
       tabindex="-1"
     >
-      <button class="attach-item" type="button" onclick={chooseLocalUpload}>ローカルから選択</button>
+      <button
+        class="attach-item"
+        type="button"
+        disabled={!accountId}
+        title={accountId ? undefined : "アカウントを選択してください"}
+        onclick={chooseLocalUpload}
+      >ローカルから選択</button>
       <button
         class="attach-item"
         type="button"
