@@ -390,6 +390,7 @@
     margin-top: 2px;
   }
   .cw-text {
+    font-size: 0.9rem;
     -webkit-user-select: text;
     user-select: text;
   }
