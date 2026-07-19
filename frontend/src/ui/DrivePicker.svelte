@@ -224,6 +224,9 @@
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    /* .cell の高さを aspect-ratio ではなく grid-auto-rows で直接固定する
+       (aspect-ratio 頼りだと画像が縦に伸びて列ごとに崩れる実機報告があったため)。 */
+    grid-auto-rows: 84px;
     gap: 8px;
     overflow-y: auto;
     flex: 1;
@@ -231,7 +234,8 @@
   }
   .cell {
     position: relative;
-    aspect-ratio: 1;
+    width: 100%;
+    height: 100%;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface-2);
