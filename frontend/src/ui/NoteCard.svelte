@@ -301,6 +301,10 @@
     /* 仮想化-lite: 画面外は描画スキップ */
     content-visibility: auto;
     contain-intrinsic-size: auto 92px;
+    /* ドラッグ選択で本文以外(ユーザー名/時刻/ボタン等)まで巻き込まれないよう既定で不可に。
+       WebKitGTK(Linuxのwebview)は無印字プロパティを反映しないため -webkit- 併記が必須。 */
+    -webkit-user-select: none;
+    user-select: none;
   }
   .note.quoted {
     border: 1px solid var(--border);
@@ -379,9 +383,15 @@
     word-break: break-word;
     line-height: 1.42;
     font-size: 0.9rem;
+    -webkit-user-select: text;
+    user-select: text;
   }
   .cw {
     margin-top: 2px;
+  }
+  .cw-text {
+    -webkit-user-select: text;
+    user-select: text;
   }
   .cw-toggle {
     margin-left: 8px;
