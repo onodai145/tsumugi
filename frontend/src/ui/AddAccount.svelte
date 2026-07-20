@@ -48,10 +48,10 @@
     {/if}
   </div>
   {#if !sessionId}
-    <p class="hint">Misskeyインスタンスのホスト名を入力してください（例: misskey.io）</p>
+    <p class="hint">Misskeyインスタンスのホスト名を入力してください（例: misskey.example）</p>
     <div class="form">
       <input
-        placeholder="misskey.io"
+        placeholder="misskey.example"
         bind:value={host}
         onkeydown={(e) => e.key === "Enter" && host.trim() && start()}
       />
