@@ -256,6 +256,7 @@
   function onKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
+      if (busy) return;
       submit();
     } else if (e.key === "Escape" && (replyTo || quoteOf)) {
       e.preventDefault();
