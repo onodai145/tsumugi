@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-07-20
+
+### 🐛 Bug Fixes
+
+- Cargo tauri android buildに--split-per-abiを追加しアーキテクチャ別APKを実際に生成する
+- Universalビルドとper-ABIビルドを分けて両方生成する
 ## [0.6.0] - 2026-07-20
 
 ### 🚀 Features
