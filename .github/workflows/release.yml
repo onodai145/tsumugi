@@ -176,10 +176,19 @@ jobs:
           base64 -d <<< "$ANDROID_KEY_BASE64" > "$RUNNER_TEMP/keystore.jks"
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
-      # --split-per-abi を付けないと universal APK しか生成されない
-      # (productFlavorとしてarm64/arm/x86/x86_64は定義済みでも、デフォルトではビルド対象外。
-      # Issue #69 で追加したアーキテクチャ別APKアップロードが空振りしていた原因)。
-      - name: cargo tauri android build (release, 署名済み)
+      # cargo-mobile2 の実装上、--split-per-abi はuniversalビルドと排他
+      # (付けるとassembleUniversal*系ではなくassemble{Arch}*系のみが走る)。
+      # universal・アーキテクチャ別の両方が欲しいため2回に分けて実行する。
+      # 2回目のRustクロスコンパイルは1回目でuniversal向けに全arch分ビルド済み
+      # (buildSrcのuniversalフレーバーが全archのrustBuildタスクに依存しているため)
+      # キャッシュが効きほぼ再ビルドは発生しない。
+      - name: cargo tauri android build (release, 署名済み, universal)
+        working-directory: src-tauri
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo tauri android build
+
+      - name: cargo tauri android build (release, 署名済み, per-ABI)
         working-directory: src-tauri
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
