@@ -19,7 +19,8 @@ let attachments = $state<AttachmentItem[]>([]);
 ```
 
 - `id`: クライアント側で `crypto.randomUUID()` により採番する。未アップロードのローカル項目にも一意キーを持たせ、削除・状態更新をindexではなくidベースで行う。
-- `previewUrl`: Tauriの `convertFileSrc(path)`(アセットプロトコル)で生成し、アップロード前でも画像プレビューを表示する。
+- `previewUrl`: 画像拡張子(png/jpg/jpeg/gif/webp)の場合のみ、新設する Rust コマンド `read_attachment_preview` でファイルを data URL(base64) に変換して表示する。動画(mp4/webm)や変換失敗時は `null` とし、拡張子バッジ表示にフォールバックする。
+  - Tauriのアセットプロトコル(`convertFileSrc`)は、静的スコープ設定が必要でユーザーが任意に選んだパスに対しては使いにくく、Android の `content://` パスも扱えないため採用しない。既存の `src-tauri/src/commands/mute.rs` の `read_image_data_url`(背景画像設定用に全く同じ「ローカル画像→data URL」変換を行っており、Android SAFパスにも対応済み)と同じ実装パターンを再利用する。
 - ドライブピッカー(`DrivePicker.svelte`)経由で選択された既存ドライブファイルは、最初から `kind: "drive"` として追加する(アップロード不要)。
 
 ## ファイル選択時の挙動
@@ -47,7 +48,9 @@ let attachments = $state<AttachmentItem[]>([]);
 
 ## Rust側の変更
 
-なし。`src-tauri/src/commands/note.rs` の `upload_file` コマンドと、`post_note` / `NoteDraft.file_ids`(`src-tauri/src/api/notes.rs`)は、いずれもアップロード済みファイルIDの配列を受け取る/返す既存インターフェースのままこのフローに適合する。
+投稿・アップロードのコマンド自体(`upload_file` / `post_note` / `NoteDraft.file_ids`)は変更不要で、既存インターフェースのままこのフローに適合する。
+
+ローカル画像プレビュー用に、新規コマンド `read_attachment_preview(path: String) -> Result<String>` を `src-tauri/src/commands/note.rs` に追加する。`src-tauri/src/commands/mute.rs` の `read_file_as_data_url` ヘルパー(`pub(crate)` に変更して再利用)に、画像拡張子(png/jpg/jpeg/gif/webp)のみを判定する新しい mime 判定関数を渡して実装する。`specta_builder()` への登録が必要。
 
 ## テスト方針
 
