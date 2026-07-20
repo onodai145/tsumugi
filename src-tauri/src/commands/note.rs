@@ -9,7 +9,7 @@ use crate::api::notes::{
 use crate::domain::{DriveFile, EmojiDef, Note, SourceItem};
 use crate::error::{Error, Result};
 use crate::state::AppState;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 /// 投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。
 #[tauri::command]
@@ -156,6 +156,39 @@ pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: Str
     Ok(())
 }
 
+/// プレビュー用途に許容する最大サイズ(base64化してフロントに保持するため、実アップロード上限より小さく抑える)。
+const MAX_ATTACHMENT_PREVIEW_BYTES: usize = 20 * 1024 * 1024;
+
+/// 投稿添付の未アップロードローカル画像を data URL(base64) に変換する(投稿前プレビュー用)。
+/// 動画や未知拡張子は `application/octet-stream` を返す(呼び出し側でバッジ表示にフォールバックする想定)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_attachment_preview(app: AppHandle, path: String) -> Result<String> {
+    crate::commands::mute::read_file_as_data_url(
+        &app,
+        &path,
+        MAX_ATTACHMENT_PREVIEW_BYTES,
+        guess_attachment_image_mime,
+    )
+    .await
+}
+
+/// 拡張子から画像 MIME を推定する。動画・未知拡張子は octet-stream(呼び出し側でバッジ表示にフォールバック)。
+fn guess_attachment_image_mime(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。
 #[tauri::command]
 #[specta::specta]
@@ -175,4 +208,25 @@ pub async fn list_custom_emojis(
         .unwrap()
         .insert(host, emojis.clone());
     Ok(emojis)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guess_attachment_image_mime_maps_known_extensions() {
+        assert_eq!(guess_attachment_image_mime("photo.png"), "image/png");
+        assert_eq!(guess_attachment_image_mime("photo.JPG"), "image/jpeg");
+        assert_eq!(guess_attachment_image_mime("photo.jpeg"), "image/jpeg");
+        assert_eq!(guess_attachment_image_mime("photo.gif"), "image/gif");
+        assert_eq!(guess_attachment_image_mime("photo.webp"), "image/webp");
+    }
+
+    #[test]
+    fn guess_attachment_image_mime_falls_back_for_unknown_or_video_extensions() {
+        assert_eq!(guess_attachment_image_mime("clip.mp4"), "application/octet-stream");
+        assert_eq!(guess_attachment_image_mime("clip.webm"), "application/octet-stream");
+        assert_eq!(guess_attachment_image_mime("noext"), "application/octet-stream");
+    }
 }
