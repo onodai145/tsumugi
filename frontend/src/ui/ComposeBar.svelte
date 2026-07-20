@@ -51,7 +51,18 @@
     { value: "hour", label: "時間後" },
     { value: "day", label: "日後" },
   ];
-  let attached = $state<DriveFile[]>([]);
+  type AttachmentItem =
+    | { kind: "local"; id: string; path: string; name: string; previewUrl: string | null }
+    | { kind: "drive"; id: string; file: DriveFile };
+
+  const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+  function extLower(name: string): string {
+    const i = name.lastIndexOf(".");
+    return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
+  }
+
+  let attachments = $state<AttachmentItem[]>([]);
   let attachTrigger = $state<HTMLElement | undefined>(undefined);
   let showAttachMenu = $state(false);
   let attachMenuPos = $state<{ left: number; top: number } | null>(null);
@@ -83,11 +94,17 @@
   }
 
   function onDriveFilesSelected(picked: DriveFile[]) {
-    const known = new Set(attached.map((f) => f.id));
-    attached = [...attached, ...picked.filter((f) => !known.has(f.id))];
+    const known = new Set(
+      attachments.flatMap((a) => (a.kind === "drive" ? [a.file.id] : [])),
+    );
+    const additions: AttachmentItem[] = picked
+      .filter((f) => !known.has(f.id))
+      .map((f) => ({ kind: "drive", id: f.id, file: f }));
+    attachments = [...attachments, ...additions];
   }
-  let uploading = $state(false);
   let busy = $state(false);
+  let uploadingAttachmentId = $state<string | null>(null);
+  let failedAttachmentId = $state<string | null>(null);
   let err = $state<string | null>(null);
   let replyTo = $state<Note | undefined>(undefined);
   let quoteOf = $state<Note | undefined>(undefined);
@@ -100,7 +117,7 @@
       !focused &&
       !text.trim() &&
       !cw.trim() &&
-      attached.length === 0 &&
+      attachments.length === 0 &&
       !usePoll &&
       !replyTo &&
       !quoteOf,
@@ -150,20 +167,22 @@
     });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
-    uploading = true;
-    try {
-      for (const p of paths) {
-        attached = [...attached, await unwrap(commands.uploadFile(accountId, p))];
+    for (const p of paths) {
+      const name = p.split(/[\\/]/).pop() ?? p;
+      let previewUrl: string | null = null;
+      if (IMAGE_EXTENSIONS.has(extLower(name))) {
+        try {
+          previewUrl = await unwrap(commands.readAttachmentPreview(p));
+        } catch {
+          previewUrl = null;
+        }
       }
-    } catch (e) {
-      err = String(e);
-    } finally {
-      uploading = false;
+      attachments = [...attachments, { kind: "local", id: crypto.randomUUID(), path: p, name, previewUrl }];
     }
   }
 
   function removeAttached(id: string) {
-    attached = attached.filter((f) => f.id !== id);
+    attachments = attachments.filter((a) => a.id !== id);
   }
 
   async function submit() {
@@ -173,25 +192,43 @@
       return;
     }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
-    if (!text.trim() && !quoteOf && choices.length === 0 && attached.length === 0) return;
+    if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
     let expiresAt: number | null = null;
     if (pollExpiryMode === "at" && pollExpiresAt) {
       expiresAt = new Date(pollExpiresAt).getTime();
     } else if (pollExpiryMode === "after") {
       expiresAt = Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
     }
-    const draft: NoteDraft = {
-      text: text.trim() || null,
-      cw: useCw && cw.trim() ? cw.trim() : null,
-      visibility,
-      fileIds: attached.map((f) => f.id),
-      poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt } : null,
-      replyId: replyTo?.id ?? null,
-      renoteId: quoteOf?.id ?? null,
-      localOnly,
-    };
+
     busy = true;
+    failedAttachmentId = null;
     try {
+      for (const a of attachments) {
+        if (a.kind === "drive") continue;
+        uploadingAttachmentId = a.id;
+        let file: DriveFile;
+        try {
+          file = await unwrap(commands.uploadFile(accountId, a.path));
+        } catch (e) {
+          failedAttachmentId = a.id;
+          err = String(e);
+          return;
+        } finally {
+          uploadingAttachmentId = null;
+        }
+        attachments = attachments.map((x) => (x.id === a.id ? { kind: "drive", id: file.id, file } : x));
+      }
+
+      const draft: NoteDraft = {
+        text: text.trim() || null,
+        cw: useCw && cw.trim() ? cw.trim() : null,
+        visibility,
+        fileIds: attachments.flatMap((a) => (a.kind === "drive" ? [a.file.id] : [])),
+        poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt } : null,
+        replyId: replyTo?.id ?? null,
+        renoteId: quoteOf?.id ?? null,
+        localOnly,
+      };
       await app.postNote(accountId, draft);
       text = "";
       cw = "";
@@ -204,7 +241,7 @@
       pollAfterAmount = 1;
       pollAfterUnit = "hour";
       localOnly = false;
-      attached = [];
+      attachments = [];
       replyTo = undefined;
       quoteOf = undefined;
       onPosted?.();
@@ -212,6 +249,7 @@
       err = String(e);
     } finally {
       busy = false;
+      uploadingAttachmentId = null;
     }
   }
 
@@ -266,19 +304,29 @@
     onblur={() => (focused = false)}
   ></textarea>
 
-  {#if attached.length > 0 || uploading}
+  {#if attachments.length > 0}
     <div class="thumbs">
-      {#each attached as f (f.id)}
+      {#each attachments as a (a.id)}
         <div class="thumb-wrap">
-          {#if f.mimeType.startsWith("image/")}
-            <img class="thumb" src={f.thumbnailUrl ?? f.url} alt="" />
+          {#if a.kind === "drive"}
+            {#if a.file.mimeType.startsWith("image/")}
+              <img class="thumb" src={a.file.thumbnailUrl ?? a.file.url} alt="" />
+            {:else}
+              <span class="thumb badge">{a.file.mimeType.split("/")[0]}</span>
+            {/if}
+          {:else if a.previewUrl}
+            <img class="thumb" src={a.previewUrl} alt="" />
           {:else}
-            <span class="thumb badge">{f.mimeType.split("/")[0]}</span>
+            <span class="thumb badge">{extLower(a.name).toUpperCase() || "FILE"}</span>
           {/if}
-          <button class="thumb-x" title="削除" onclick={() => removeAttached(f.id)}><X size={10} /></button>
+          {#if uploadingAttachmentId === a.id}
+            <span class="thumb-status" title="アップロード中">…</span>
+          {:else if failedAttachmentId === a.id}
+            <span class="thumb-status error" title={err ?? "アップロードに失敗しました"}>!</span>
+          {/if}
+          <button class="thumb-x" title="削除" onclick={() => removeAttached(a.id)}><X size={10} /></button>
         </div>
       {/each}
-      {#if uploading}<span class="thumb badge">…</span>{/if}
     </div>
   {/if}
 
@@ -343,7 +391,7 @@
         title="画像を添付"
         bind:this={attachTrigger}
         onclick={toggleAttachMenu}
-        disabled={uploading}
+        disabled={busy}
       ><ImagePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
@@ -582,6 +630,24 @@
     width: 14px;
     height: 14px;
     cursor: pointer;
+  }
+  .thumb-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    bottom: -4px;
+    left: -4px;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    font-size: 0.6rem;
+  }
+  .thumb-status.error {
+    background: #ef4444;
   }
   .toolbar {
     display: flex;
