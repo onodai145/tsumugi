@@ -78,7 +78,7 @@ pub async fn read_audio_data_url(app: AppHandle, path: String) -> Result<String>
 /// Android は SAF のファイルピッカーが `content://` URI を返し、通常のファイルシステム
 /// パスとして開けない（`std::fs`/`tokio::fs` では ENOENT になる）ため、
 /// `tauri-plugin-fs` 経由でネイティブの ContentResolver ブリッジを使って読む。
-async fn read_file_as_data_url(
+pub(crate) async fn read_file_as_data_url(
     #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: &AppHandle,
     path: &str,
     max_bytes: usize,

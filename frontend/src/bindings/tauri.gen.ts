@@ -141,6 +141,11 @@ export const commands = {
 	 */
 	listDriveFolders: (accountId: string, folderId: string | null) => typedError<SourceItem[], Error>(__TAURI_INVOKE("list_drive_folders", { accountId, folderId })),
 	saveUrlToFile: (url: string, path: string) => typedError<null, Error>(__TAURI_INVOKE("save_url_to_file", { url, path })),
+	/**
+	 *  投稿添付の未アップロードローカル画像を data URL(base64) に変換する(投稿前プレビュー用)。
+	 *  動画や未知拡張子は `application/octet-stream` を返す(呼び出し側でバッジ表示にフォールバックする想定)。
+	 */
+	readAttachmentPreview: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_attachment_preview", { path })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
