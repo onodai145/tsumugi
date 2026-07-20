@@ -434,7 +434,7 @@
       <label class="field">
         <span>ユーザ（@user@host。ローカルは @host 省略可）</span>
         <input
-          placeholder={editUserId ? "空欄で現在のユーザを維持" : "@alice@misskey.io"}
+          placeholder={editUserId ? "空欄で現在のユーザを維持" : "@alice@misskey.example"}
           bind:value={userAcct}
         />
       </label>
