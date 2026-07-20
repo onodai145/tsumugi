@@ -1,6 +1,6 @@
 [package]
 name = "tsumugi"
-version = "0.5.0"
+version = "0.6.0"
 description = "Misskey multi-column desktop client"
 authors = ["onodai145"]
 license = "MIT"
