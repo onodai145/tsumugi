@@ -176,11 +176,14 @@ jobs:
           base64 -d <<< "$ANDROID_KEY_BASE64" > "$RUNNER_TEMP/keystore.jks"
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
+      # --split-per-abi を付けないと universal APK しか生成されない
+      # (productFlavorとしてarm64/arm/x86/x86_64は定義済みでも、デフォルトではビルド対象外。
+      # Issue #69 で追加したアーキテクチャ別APKアップロードが空振りしていた原因)。
       - name: cargo tauri android build (release, 署名済み)
         working-directory: src-tauri
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: cargo tauri android build
+        run: cargo tauri android build --split-per-abi
 
       # 全部入りのuniversal APKはファイルサイズが大きくなるため(Issue #69)、
       # アーキテクチャ別APK(cargo tauri android build が productFlavor 経由で
