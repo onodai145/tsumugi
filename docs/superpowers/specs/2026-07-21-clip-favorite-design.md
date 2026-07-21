@@ -14,6 +14,10 @@
 
 ## バックエンド
 
+### MiAuth 権限スコープ
+
+`notes/favorites/create`/`delete` は `write:favorites`、`clips/create`/`clips/add-note` は `write:account` の付与が Misskey 側で必須(`clips/list` は既存の `read:account` で足りる)。`session/miauth.rs` の `PERMISSIONS` にこの2つを追加した。MiAuth はトークン発行後に権限を追加できない仕様のため、この変更より前に認可済みのアカウントは古い権限セットのトークンのままとなり、お気に入り/クリップ操作が403で失敗する。既存アカウントは一度ログアウトして MiAuth を再認可する必要がある(新規追加アカウントは初回から新スコープを含む)。
+
 ### お気に入り (`api/notes.rs`, `commands/note.rs`)
 
 Misskey API: `notes/favorites/create` / `notes/favorites/delete`(ともに `{ noteId }` のみ、トグルではなく明示的な作成/削除)。
