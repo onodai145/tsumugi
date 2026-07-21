@@ -1266,13 +1266,25 @@ class AppStore {
         this.#log("success", "お気に入りに登録しました");
       }
     } catch (e) {
+      const staleState = e instanceof Error && (e.message.includes("ALREADY_FAVORITED") || e.message.includes("NOT_FAVORITED"));
+      if (staleState) {
+        // サーバ側は既に希望の状態。is_favorited_by_me はバックフィルされないため
+        // ローカルの表示状態がズレていただけ — 楽観的更新をそのまま確定させる。
+        this.#log("info", "お気に入り状態を更新しました");
+        return;
+      }
       backups.forEach(({ n, was }) => (n.isFavoritedByMe = was));
       this.#fail(e);
     }
   }
 
   async listClips(accountId: string): Promise<Clip[]> {
-    return unwrap(commands.listClips(accountId));
+    try {
+      return await unwrap(commands.listClips(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async createClip(accountId: string, name: string): Promise<Clip> {

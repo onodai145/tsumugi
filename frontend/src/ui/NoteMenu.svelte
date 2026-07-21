@@ -8,8 +8,11 @@
   let clipSubmenuOpen = $state(false);
   let clips = $state<Clip[] | null>(null);
   let clipsLoading = $state(false);
+  let clipsError = $state(false);
   let creatingClip = $state(false);
   let newClipName = $state("");
+  let clipRowEl = $state<HTMLElement | null>(null);
+  let submenuSide = $state<"right" | "left">("right");
 
   function toggleFavorite() {
     app.toggleFavorite(accountId, note.id);
@@ -18,11 +21,18 @@
 
   function openClipSubmenu() {
     clipSubmenuOpen = true;
+    if (clipRowEl) {
+      const r = clipRowEl.getBoundingClientRect();
+      const SUBMENU_W = 200;
+      submenuSide = r.right + SUBMENU_W <= window.innerWidth ? "right" : "left";
+    }
     if (clips === null && !clipsLoading) {
       clipsLoading = true;
+      clipsError = false;
       app
         .listClips(accountId)
         .then((list) => (clips = list))
+        .catch(() => (clipsError = true))
         .finally(() => (clipsLoading = false));
     }
   }
@@ -44,8 +54,9 @@
       const clip = await app.createClip(accountId, name);
       await app.addNoteToClip(accountId, clip.id, note.id);
       onclose();
-    } catch {
+    } catch (e) {
       // creatingClip stays true so the create-row remains visible for retry
+      console.error("クリップ作成/追加に失敗しました", e);
     }
   }
 </script>
@@ -58,7 +69,7 @@
 
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="item-wrap" role="presentation" onmouseenter={openClipSubmenu}>
+  <div class="item-wrap" role="presentation" bind:this={clipRowEl} onmouseenter={openClipSubmenu}>
     <button class="item" onclick={openClipSubmenu}>
       <Paperclip size={14} />
       クリップに追加
@@ -66,7 +77,7 @@
     </button>
 
     {#if clipSubmenuOpen}
-      <div class="submenu">
+      <div class="submenu" class:submenu-left={submenuSide === "left"}>
         {#if creatingClip}
           <div class="create-row">
             <input
@@ -82,6 +93,8 @@
         {:else}
           {#if clipsLoading}
             <span class="hint">読み込み中…</span>
+          {:else if clipsError}
+            <span class="hint">読み込みに失敗しました</span>
           {:else if clips && clips.length === 0}
             <span class="hint">クリップがありません</span>
           {:else if clips}
@@ -141,6 +154,10 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  }
+  .submenu.submenu-left {
+    left: auto;
+    right: 100%;
   }
   .new-clip {
     color: var(--accent);
