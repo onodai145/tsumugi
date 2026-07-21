@@ -67,6 +67,7 @@
     return tabId !== undefined && p.token.tabId === tabId && selected;
   });
   function togglePicker() {
+    noteMenuOpen = false;
     app.reactPicker = showPicker ? null : { noteId: inner.id, token: myToken };
   }
 
@@ -307,7 +308,10 @@
               bind:this={noteMenuBtn}
               title="その他"
               class:on={noteMenuOpen}
-              onclick={() => (noteMenuOpen = !noteMenuOpen)}
+              onclick={() => {
+                app.reactPicker = null;
+                noteMenuOpen = !noteMenuOpen;
+              }}
             >
               <MoreHorizontal size={15} />
             </button>
