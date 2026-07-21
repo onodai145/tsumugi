@@ -40,9 +40,13 @@
   async function confirmCreateClip() {
     const name = newClipName.trim();
     if (!name) return;
-    const clip = await app.createClip(accountId, name);
-    await app.addNoteToClip(accountId, clip.id, note.id);
-    onclose();
+    try {
+      const clip = await app.createClip(accountId, name);
+      await app.addNoteToClip(accountId, clip.id, note.id);
+      onclose();
+    } catch {
+      // creatingClip stays true so the create-row remains visible for retry
+    }
   }
 </script>
 
@@ -52,7 +56,9 @@
     {note.isFavoritedByMe ? "お気に入り解除" : "お気に入り登録"}
   </button>
 
-  <div class="item-wrap" onmouseenter={openClipSubmenu}>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="item-wrap" role="presentation" onmouseenter={openClipSubmenu}>
     <button class="item" onclick={openClipSubmenu}>
       <Paperclip size={14} />
       クリップに追加
