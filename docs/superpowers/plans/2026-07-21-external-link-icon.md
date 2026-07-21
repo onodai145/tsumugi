@@ -1,6 +1,6 @@
 # 外部リンクアイコン付与 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** ノート本文の MFM `url`/`link` リンクに外部リンクアイコンを付与し、外部へ遷移することを視覚的に明示する(Issue #97)。
 
@@ -28,7 +28,7 @@
 
 このコンポーネントはロジック分岐を持たない純粋な表示変更のため、Rust側のユニットテストや自動テストは対象外。`pnpm check` の型チェックと `cargo tauri dev` での目視確認で検証する。
 
-- [ ] **Step 1: import 文に `ExternalLink` を追加**
+- [x] **Step 1: import 文に `ExternalLink` を追加**
 
 `frontend/src/render/MfmNode.svelte` の先頭 import 群に以下を追加する(既存の他 import の直後、6行目付近):
 
@@ -36,7 +36,7 @@
   import { ExternalLink } from "@lucide/svelte";
 ```
 
-- [ ] **Step 2: `url` ノードの描画にアイコンを追加**
+- [x] **Step 2: `url` ノードの描画にアイコンを追加**
 
 `frontend/src/render/MfmNode.svelte:87` の既存行:
 
@@ -50,7 +50,7 @@
   <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}<ExternalLink class="mfm-link-icon" size={12} /></a>
 ```
 
-- [ ] **Step 3: `link` ノードの描画にアイコンを追加**
+- [x] **Step 3: `link` ノードの描画にアイコンを追加**
 
 `frontend/src/render/MfmNode.svelte:90` の既存行:
 
@@ -64,7 +64,7 @@
   <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{#each children as c}<Self node={c} {emojis} />{/each}<ExternalLink class="mfm-link-icon" size={12} /></a>
 ```
 
-- [ ] **Step 4: app.css に `.mfm-link`/`.mfm-link-icon` スタイルを追加**
+- [x] **Step 4: app.css に `.mfm-link`/`.mfm-link-icon` スタイルを追加**
 
 `frontend/src/app.css` の `.mfm-mention {` ブロック(110行目)の直前に以下を挿入する:
 
@@ -80,18 +80,18 @@
 }
 ```
 
-- [ ] **Step 5: 型チェックを実行**
+- [x] **Step 5: 型チェックを実行**
 
 Run: `cd frontend && pnpm check`
 Expected: エラーなしで終了する。
 
-- [ ] **Step 6: 実機で目視確認**
+- [x] **Step 6: 実機で目視確認**
 
 Run: `cargo tauri dev`
 
 URLまたは `?[label](url)` 形式のリンクを含むノートをタイムラインに表示し、リンク末尾に外部リンクアイコンが表示されること、クリックで正しいURLに遷移することを確認する。
 
-- [ ] **Step 7: コミット**
+- [x] **Step 7: コミット**
 
 ```bash
 git add frontend/src/render/MfmNode.svelte frontend/src/app.css
