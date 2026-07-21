@@ -16,7 +16,7 @@ struct RawClip {
     #[serde(default)]
     description: Option<String>,
     is_public: bool,
-    notes_count: i64,
+    notes_count: u32,
 }
 
 impl From<RawClip> for Clip {

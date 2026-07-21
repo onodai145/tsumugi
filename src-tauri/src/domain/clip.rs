@@ -10,5 +10,5 @@ pub struct Clip {
     pub name: String,
     pub description: Option<String>,
     pub is_public: bool,
-    pub notes_count: i64,
+    pub notes_count: u32,
 }

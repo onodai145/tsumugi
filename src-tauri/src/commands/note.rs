@@ -3,8 +3,8 @@
 use crate::api::drive::{list_files as api_list_files, list_folders as api_list_folders, upload_file as api_upload_file};
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
-    create_note, create_reaction, delete_note, delete_reaction, renote as api_renote, vote_poll as api_vote_poll,
-    NoteDraft, VisibilityInput,
+    create_favorite, create_note, create_reaction, delete_favorite, delete_note, delete_reaction,
+    renote as api_renote, vote_poll as api_vote_poll, NoteDraft, VisibilityInput,
 };
 use crate::domain::{DriveFile, EmojiDef, Note, SourceItem};
 use crate::error::{Error, Result};
@@ -71,6 +71,30 @@ pub async fn unreact(
 ) -> Result<()> {
     let client = state.client_for(&account_id)?;
     delete_reaction(&client, &note_id).await
+}
+
+/// お気に入り登録。
+#[tauri::command]
+#[specta::specta]
+pub async fn favorite_note(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    create_favorite(&client, &note_id).await
+}
+
+/// お気に入り解除。
+#[tauri::command]
+#[specta::specta]
+pub async fn unfavorite_note(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    delete_favorite(&client, &note_id).await
 }
 
 /// アンケートに投票する（choice は 0-based index）。

@@ -124,6 +124,10 @@ export const commands = {
 	react: (accountId: string, noteId: string, reaction: string) => typedError<null, Error>(__TAURI_INVOKE("react", { accountId, noteId, reaction })),
 	/**  リアクション解除。 */
 	unreact: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unreact", { accountId, noteId })),
+	/**  お気に入り登録。 */
+	favoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("favorite_note", { accountId, noteId })),
+	/**  お気に入り解除。 */
+	unfavoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unfavorite_note", { accountId, noteId })),
 	/**  アンケートに投票する（choice は 0-based index）。 */
 	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
@@ -170,6 +174,12 @@ export const commands = {
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
 	 */
 	syncServerMutes: (accountId: string) => typedError<number, Error>(__TAURI_INVOKE("sync_server_mutes", { accountId })),
+	/**  自分のクリップ一覧を取得。 */
+	listClips: (accountId: string) => typedError<Clip[], Error>(__TAURI_INVOKE("list_clips", { accountId })),
+	/**  クリップを新規作成する。 */
+	createClip: (accountId: string, name: string) => typedError<Clip, Error>(__TAURI_INVOKE("create_clip", { accountId, name })),
+	/**  ノートをクリップへ追加する。 */
+	addNoteToClip: (accountId: string, clipId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("add_note_to_clip", { accountId, clipId, noteId })),
 };
 
 /** Events */
@@ -197,6 +207,18 @@ export type Account = {
 	userId: string,
 	displayName: string,
 	avatarUrl: string | null,
+};
+
+/**
+ *  Misskey のクリップ（名前付きノート集合）。今回のスコープでは一覧表示と
+ *  ノート追加にしか使わないため、フィールドは最小限。
+ */
+export type Clip = {
+	id: string,
+	name: string,
+	description: string | null,
+	isPublic: boolean,
+	notesCount: number,
 };
 
 /**  タブ = 受信ソース + フィルタ（1タイムライン）。視覚的なカラム(ColumnGroup)に属する。 */
