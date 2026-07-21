@@ -6,6 +6,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod account;
+mod clip;
 mod column;
 mod list;
 mod mute;
@@ -17,6 +18,7 @@ mod ui;
 mod user;
 
 pub use account::Account;
+pub use clip::Clip;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::{SourceItem, UserList};
 pub use mute::MuteConfig;
