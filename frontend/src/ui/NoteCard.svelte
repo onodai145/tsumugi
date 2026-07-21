@@ -5,12 +5,13 @@
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
+  import NoteMenu from "./NoteMenu.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji, isRemoteCustomEmoji } from "../lib/emoji";
-  import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail } from "@lucide/svelte";
+  import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail, MoreHorizontal } from "@lucide/svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
   // なるため、ピッカーは body 直下へ portal して封じ込めを脱出させる。
@@ -66,6 +67,7 @@
     return tabId !== undefined && p.token.tabId === tabId && selected;
   });
   function togglePicker() {
+    noteMenuOpen = false;
     app.reactPicker = showPicker ? null : { noteId: inner.id, token: myToken };
   }
 
@@ -90,6 +92,19 @@
     app.reactPicker = null;
     if (accountId) app.toggleReaction(accountId, inner.id, reaction);
   }
+
+  // ノートメニュー(お気に入り/クリップ)。リアクションピッカーと同じ position:fixed
+  // portal パターンで .notes の overflow クリップを脱出させる。
+  let noteMenuOpen = $state(false);
+  let noteMenuBtn = $state<HTMLElement | null>(null);
+  let noteMenuPos = $state<{ left: number; top: number } | null>(null);
+  const MENU_W = 200;
+  $effect(() => {
+    if (!noteMenuOpen || !noteMenuBtn) return;
+    const r = noteMenuBtn.getBoundingClientRect();
+    const left = Math.min(Math.max(8, r.right - MENU_W), window.innerWidth - MENU_W - 8);
+    noteMenuPos = { left, top: r.bottom + 6 };
+  });
 
   // 投票済み(multiple=falseは1択でもう投票不可)・期限切れなら投票不可。
   const pollExpired = $derived(!!inner.poll?.expiresAt && inner.poll.expiresAt * 1000 < Date.now());
@@ -284,6 +299,35 @@
                   role="presentation"
                 >
                   <ReactionPicker {accountId} onpick={react} />
+                </div>
+              </div>
+            {/if}
+          </div>
+          <div class="menu-wrap">
+            <button
+              bind:this={noteMenuBtn}
+              title="その他"
+              class:on={noteMenuOpen}
+              onclick={() => {
+                app.reactPicker = null;
+                noteMenuOpen = !noteMenuOpen;
+              }}
+            >
+              <MoreHorizontal size={15} />
+            </button>
+            {#if noteMenuOpen && noteMenuPos}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="picker-overlay" use:portal onclick={() => (noteMenuOpen = false)} role="presentation">
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="picker-pop"
+                  style={`left:${noteMenuPos.left}px;top:${noteMenuPos.top}px`}
+                  onclick={(e) => e.stopPropagation()}
+                  role="presentation"
+                >
+                  <NoteMenu {accountId} note={inner} onclose={() => (noteMenuOpen = false)} />
                 </div>
               </div>
             {/if}
@@ -495,6 +539,9 @@
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
   }
   .react-wrap {
+    position: relative;
+  }
+  .menu-wrap {
     position: relative;
   }
   .picker-overlay {

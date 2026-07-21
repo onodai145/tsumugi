@@ -24,6 +24,7 @@ import type {
   NotifyConfig,
   UiPrefs,
   LatestRelease,
+  Clip,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -1245,6 +1246,58 @@ class AppStore {
       }
     } catch (e) {
       backups.forEach(restoreReaction);
+      this.#fail(e);
+    }
+  }
+
+  async toggleFavorite(accountId: string, noteId: string) {
+    const targets = this.#collectNotes(noteId);
+    if (targets.length === 0) return;
+    const backups = targets.map((n) => ({ n, was: n.isFavoritedByMe }));
+    const already = targets[0].isFavoritedByMe;
+    targets.forEach((n) => (n.isFavoritedByMe = !already));
+
+    try {
+      if (already) {
+        await unwrap(commands.unfavoriteNote(accountId, noteId));
+        this.#log("info", "お気に入りを解除しました");
+      } else {
+        await unwrap(commands.favoriteNote(accountId, noteId));
+        this.#log("success", "お気に入りに登録しました");
+      }
+    } catch (e) {
+      const staleState = e instanceof Error && (e.message.includes("ALREADY_FAVORITED") || e.message.includes("NOT_FAVORITED"));
+      if (staleState) {
+        // サーバ側は既に希望の状態。is_favorited_by_me はバックフィルされないため
+        // ローカルの表示状態がズレていただけ — 楽観的更新をそのまま確定させる。
+        this.#log("info", "お気に入り状態を更新しました");
+        return;
+      }
+      backups.forEach(({ n, was }) => (n.isFavoritedByMe = was));
+      this.#fail(e);
+    }
+  }
+
+  async listClips(accountId: string): Promise<Clip[]> {
+    try {
+      return await unwrap(commands.listClips(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  async createClip(accountId: string, name: string): Promise<Clip> {
+    const clip = await unwrap(commands.createClip(accountId, name));
+    this.#log("success", `クリップを作成しました: ${clip.name}`);
+    return clip;
+  }
+
+  async addNoteToClip(accountId: string, clipId: string, noteId: string) {
+    try {
+      await unwrap(commands.addNoteToClip(accountId, clipId, noteId));
+      this.#log("success", "クリップに追加しました");
+    } catch (e) {
       this.#fail(e);
     }
   }

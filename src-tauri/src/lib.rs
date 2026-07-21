@@ -61,6 +61,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::delete_note_cmd,
             commands::note::react,
             commands::note::unreact,
+            commands::note::favorite_note,
+            commands::note::unfavorite_note,
             commands::note::vote_poll,
             commands::note::list_custom_emojis,
             commands::note::upload_file,
@@ -77,6 +79,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::read_image_data_url,
             commands::mute::read_audio_data_url,
             commands::mute::sync_server_mutes,
+            commands::clip::list_clips,
+            commands::clip::create_clip,
+            commands::clip::add_note_to_clip,
         ])
         .events(collect_events![
             events::ColumnNote,
