@@ -840,15 +840,23 @@ class AppStore {
     groupId?: string,
     title?: string,
   ) {
-    const opened = await unwrap(commands.addColumn(accountId, kind, filter, groupId ?? null));
-    const tab = this.#insertTab(opened);
-    const g = this.groups.find((x) => x.id === opened.group.id);
-    if (g) g.activeTabId = tab.id;
-    this.#captureInitial(opened.column.id, opened.notes);
-    const name = title?.trim();
-    if (name) await this.renameTab(tab.id, name);
-    this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
-    return tab;
+    try {
+      const opened = await unwrapAcc(
+        accountId,
+        commands.addColumn(accountId, kind, filter, groupId ?? null),
+      );
+      const tab = this.#insertTab(opened);
+      const g = this.groups.find((x) => x.id === opened.group.id);
+      if (g) g.activeTabId = tab.id;
+      this.#captureInitial(opened.column.id, opened.notes);
+      const name = title?.trim();
+      if (name) await this.renameTab(tab.id, name);
+      this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
+      return tab;
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// 既存タブのソース/フィルタ/名前を変更し、ストリームを張り直して内容を差し替える。
@@ -885,20 +893,40 @@ class AppStore {
   }
 
   async fetchUserLists(accountId: string) {
-    return await unwrap(commands.listUserLists(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listUserLists(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async fetchAntennas(accountId: string) {
-    return await unwrap(commands.listAntennas(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listAntennas(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async fetchChannels(accountId: string) {
-    return await unwrap(commands.listChannels(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listChannels(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// acct（@user@host）から userId を解決する。
   async resolveUser(accountId: string, acct: string) {
-    return await unwrap(commands.resolveUserAcct(accountId, acct));
+    try {
+      return await unwrapAcc(accountId, commands.resolveUserAcct(accountId, acct));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
@@ -1174,13 +1202,18 @@ class AppStore {
   }
 
   async postNote(accountId: string, draft: NoteDraft) {
-    await unwrap(commands.postNote(accountId, draft));
-    this.#log("success", "投稿しました");
+    try {
+      await unwrapAcc(accountId, commands.postNote(accountId, draft));
+      this.#log("success", "投稿しました");
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async renote(accountId: string, noteId: string, visibility: VisibilityInput = "public") {
     try {
-      await unwrap(commands.renote(accountId, noteId, visibility));
+      await unwrapAcc(accountId, commands.renote(accountId, noteId, visibility));
       this.#log("success", "Renote しました");
     } catch (e) {
       this.#fail(e);
@@ -1188,9 +1221,14 @@ class AppStore {
   }
 
   async deleteNote(accountId: string, noteId: string) {
-    await unwrap(commands.deleteNoteCmd(accountId, noteId));
-    for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
-    this.#log("info", "ノートを削除しました");
+    try {
+      await unwrapAcc(accountId, commands.deleteNoteCmd(accountId, noteId));
+      for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
+      this.#log("info", "ノートを削除しました");
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   #emojiLoads = new Map<string, Promise<EmojiDef[]>>();
@@ -1234,11 +1272,11 @@ class AppStore {
 
     try {
       if (already === reaction) {
-        await unwrap(commands.unreact(accountId, noteId));
+        await unwrapAcc(accountId, commands.unreact(accountId, noteId));
         this.#log("info", "リアクションを取り消しました");
       } else {
-        if (already) await unwrap(commands.unreact(accountId, noteId));
-        await unwrap(commands.react(accountId, noteId, reaction));
+        if (already) await unwrapAcc(accountId, commands.unreact(accountId, noteId));
+        await unwrapAcc(accountId, commands.react(accountId, noteId, reaction));
         this.#log("success", `リアクション ${reaction}`);
       }
     } catch (e) {
@@ -1256,10 +1294,10 @@ class AppStore {
 
     try {
       if (already) {
-        await unwrap(commands.unfavoriteNote(accountId, noteId));
+        await unwrapAcc(accountId, commands.unfavoriteNote(accountId, noteId));
         this.#log("info", "お気に入りを解除しました");
       } else {
-        await unwrap(commands.favoriteNote(accountId, noteId));
+        await unwrapAcc(accountId, commands.favoriteNote(accountId, noteId));
         this.#log("success", "お気に入りに登録しました");
       }
     } catch (e) {
@@ -1277,7 +1315,7 @@ class AppStore {
 
   async listClips(accountId: string): Promise<Clip[]> {
     try {
-      return await unwrap(commands.listClips(accountId));
+      return await unwrapAcc(accountId, commands.listClips(accountId));
     } catch (e) {
       this.#fail(e);
       throw e;
@@ -1285,14 +1323,19 @@ class AppStore {
   }
 
   async createClip(accountId: string, name: string): Promise<Clip> {
-    const clip = await unwrap(commands.createClip(accountId, name));
-    this.#log("success", `クリップを作成しました: ${clip.name}`);
-    return clip;
+    try {
+      const clip = await unwrapAcc(accountId, commands.createClip(accountId, name));
+      this.#log("success", `クリップを作成しました: ${clip.name}`);
+      return clip;
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async addNoteToClip(accountId: string, clipId: string, noteId: string) {
     try {
-      await unwrap(commands.addNoteToClip(accountId, clipId, noteId));
+      await unwrapAcc(accountId, commands.addNoteToClip(accountId, clipId, noteId));
       this.#log("success", "クリップに追加しました");
     } catch (e) {
       this.#fail(e);
@@ -1306,7 +1349,7 @@ class AppStore {
     targets.forEach((n) => applyVote(n, choice));
 
     try {
-      await unwrap(commands.votePoll(accountId, noteId, choice));
+      await unwrapAcc(accountId, commands.votePoll(accountId, noteId, choice));
       this.#log("success", "投票しました");
     } catch (e) {
       backups.forEach(restorePoll);
