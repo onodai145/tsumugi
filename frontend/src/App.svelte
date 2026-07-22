@@ -146,7 +146,12 @@
   </main>
 
   {#if app.accounts.length > 0 && !app.booting}
-    <Backstage />
+    <Backstage
+      onReauth={(accountId) => {
+        const acc = app.accounts.find((a) => a.id === accountId);
+        if (acc) startReauth(acc);
+      }}
+    />
   {/if}
 
   {#if useMobileUi && app.accounts.length > 0 && !app.booting}
