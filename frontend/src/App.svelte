@@ -183,6 +183,7 @@
     <Settings
       initial={settingsInitial}
       onAddAccount={addAccountFromSettings}
+      onReauth={startReauth}
       onclose={() => (showSettings = false)}
     />
   {/if}
