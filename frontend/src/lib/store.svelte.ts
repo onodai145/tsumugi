@@ -801,10 +801,14 @@ class AppStore {
 
   async completeAccount(sessionId: string) {
     const account = await unwrap(commands.completeMiauth(sessionId));
-    if (!this.accounts.some((a) => a.id === account.id)) {
+    const existingIdx = this.accounts.findIndex((a) => a.id === account.id);
+    if (existingIdx === -1) {
       this.accounts = [...this.accounts, account];
+      this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
+    } else {
+      this.accounts = this.accounts.map((a, i) => (i === existingIdx ? account : a));
+      this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
-    this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
     await this.#syncServerMutes(account.id);
   }
 
