@@ -5,6 +5,8 @@
   import type { Component } from "svelte";
   import { Circle, Check, TriangleAlert, X, ChevronUp, ChevronDown, Database, Activity, Clock } from "@lucide/svelte";
 
+  let { onReauth }: { onReauth: (accountId: string) => void } = $props();
+
   let open = $state(false);
 
   const latest = $derived(app.logs[0] ?? null);
@@ -52,6 +54,9 @@
             <span class="ic" data-level={l.level}><Ic size={12} /></span>
             <span class="ts">{hhmmss(l.at)}</span>
             <span class="msg">{l.text}</span>
+            {#if l.reauthAccountId}
+              <button class="reauth" onclick={() => onReauth(l.reauthAccountId!)}>再認証</button>
+            {/if}
           </div>
         {/each}
       {/if}
@@ -193,6 +198,20 @@
   }
   .msg {
     word-break: break-word;
+    flex: 1;
+  }
+  .reauth {
+    flex: none;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--accent);
+    border-radius: 4px;
+    padding: 1px 8px;
+    cursor: pointer;
+    font-size: 0.72rem;
+  }
+  .reauth:hover {
+    border-color: var(--accent);
   }
   .ic {
     display: inline-flex;

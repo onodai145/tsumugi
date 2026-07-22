@@ -1,6 +1,6 @@
 // アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
-import { commands, events, unwrap, formatError } from "./ipc";
+import { commands, events, unwrap, unwrapAcc, formatError, ForbiddenError } from "./ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -103,6 +103,7 @@ export interface LogEntry {
   at: number; // epoch ms
   level: LogLevel;
   text: string;
+  reauthAccountId?: string; // 403由来のエラーなら、再認証を促すボタンをBackstageが描画する
 }
 
 class AppStore {
@@ -342,11 +343,11 @@ class AppStore {
     info: "info",
     success: "info",
   };
-  #log(level: LogLevel, text: string) {
-    this.logs = [{ id: ++this.#logSeq, at: Date.now(), level, text }, ...this.logs].slice(
-      0,
-      AppStore.#LOG_CAP,
-    );
+  #log(level: LogLevel, text: string, reauthAccountId?: string) {
+    this.logs = [
+      { id: ++this.#logSeq, at: Date.now(), level, text, reauthAccountId },
+      ...this.logs,
+    ].slice(0, AppStore.#LOG_CAP);
     if (this.ui.enableFileLogging) void commands.logFrontendEvent(AppStore.#RUST_LEVEL[level], text);
   }
   /// Backstage(UI)には出さず、設定でONならRust側のファイルログにのみ書く
@@ -355,10 +356,11 @@ class AppStore {
     if (this.ui.enableFileLogging) void commands.logFrontendEvent("debug", text);
   }
   /// エラーをバナー表示＋Backstage へ記録する共通処理。
+  /// ForbiddenError なら「再認証」アクションをログ行に付与する。
   #fail(e: unknown) {
     const msg = String(e);
     this.error = msg;
-    this.#log("error", msg);
+    this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
   }
   clearLogs() {
     this.logs = [];
@@ -799,28 +801,27 @@ class AppStore {
 
   async completeAccount(sessionId: string) {
     const account = await unwrap(commands.completeMiauth(sessionId));
-    if (!this.accounts.some((a) => a.id === account.id)) {
+    const existingIdx = this.accounts.findIndex((a) => a.id === account.id);
+    if (existingIdx === -1) {
       this.accounts = [...this.accounts, account];
+      this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
+    } else {
+      this.accounts = this.accounts.map((a, i) => (i === existingIdx ? account : a));
+      this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
-    this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
     await this.#syncServerMutes(account.id);
   }
 
   /// サーバ側ミュート/ブロックを同期（失敗しても致命的でないのでログのみ）。
   async #syncServerMutes(accountId: string) {
     try {
-      const n = await unwrap(commands.syncServerMutes(accountId));
+      const n = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
       if (n > 0) this.#log("info", `サーバのミュート/ブロックを同期: ${n}件`);
     } catch (e) {
-      const msg = String(e);
-      // 旧トークンは read:mutes/read:blocks 権限が無い → 再認可が必要
-      if (/PERMISSION_DENIED|forbidden/i.test(msg)) {
-        this.#log(
-          "warn",
-          "サーバミュート同期: 権限不足。設定→アカウントで一度削除し再追加すると反映されます",
-        );
+      if (e instanceof ForbiddenError) {
+        this.#log("warn", "サーバミュート同期: 権限不足。再認証してください", e.accountId);
       } else {
-        this.#log("warn", `サーバミュート同期に失敗: ${msg}`);
+        this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
       }
     }
   }
@@ -843,15 +844,23 @@ class AppStore {
     groupId?: string,
     title?: string,
   ) {
-    const opened = await unwrap(commands.addColumn(accountId, kind, filter, groupId ?? null));
-    const tab = this.#insertTab(opened);
-    const g = this.groups.find((x) => x.id === opened.group.id);
-    if (g) g.activeTabId = tab.id;
-    this.#captureInitial(opened.column.id, opened.notes);
-    const name = title?.trim();
-    if (name) await this.renameTab(tab.id, name);
-    this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
-    return tab;
+    try {
+      const opened = await unwrapAcc(
+        accountId,
+        commands.addColumn(accountId, kind, filter, groupId ?? null),
+      );
+      const tab = this.#insertTab(opened);
+      const g = this.groups.find((x) => x.id === opened.group.id);
+      if (g) g.activeTabId = tab.id;
+      this.#captureInitial(opened.column.id, opened.notes);
+      const name = title?.trim();
+      if (name) await this.renameTab(tab.id, name);
+      this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
+      return tab;
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// 既存タブのソース/フィルタ/名前を変更し、ストリームを張り直して内容を差し替える。
@@ -888,20 +897,40 @@ class AppStore {
   }
 
   async fetchUserLists(accountId: string) {
-    return await unwrap(commands.listUserLists(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listUserLists(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async fetchAntennas(accountId: string) {
-    return await unwrap(commands.listAntennas(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listAntennas(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async fetchChannels(accountId: string) {
-    return await unwrap(commands.listChannels(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listChannels(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// acct（@user@host）から userId を解決する。
   async resolveUser(accountId: string, acct: string) {
-    return await unwrap(commands.resolveUserAcct(accountId, acct));
+    try {
+      return await unwrapAcc(accountId, commands.resolveUserAcct(accountId, acct));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
@@ -1177,13 +1206,18 @@ class AppStore {
   }
 
   async postNote(accountId: string, draft: NoteDraft) {
-    await unwrap(commands.postNote(accountId, draft));
-    this.#log("success", "投稿しました");
+    try {
+      await unwrapAcc(accountId, commands.postNote(accountId, draft));
+      this.#log("success", "投稿しました");
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async renote(accountId: string, noteId: string, visibility: VisibilityInput = "public") {
     try {
-      await unwrap(commands.renote(accountId, noteId, visibility));
+      await unwrapAcc(accountId, commands.renote(accountId, noteId, visibility));
       this.#log("success", "Renote しました");
     } catch (e) {
       this.#fail(e);
@@ -1191,9 +1225,14 @@ class AppStore {
   }
 
   async deleteNote(accountId: string, noteId: string) {
-    await unwrap(commands.deleteNoteCmd(accountId, noteId));
-    for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
-    this.#log("info", "ノートを削除しました");
+    try {
+      await unwrapAcc(accountId, commands.deleteNoteCmd(accountId, noteId));
+      for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
+      this.#log("info", "ノートを削除しました");
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   #emojiLoads = new Map<string, Promise<EmojiDef[]>>();
@@ -1237,11 +1276,11 @@ class AppStore {
 
     try {
       if (already === reaction) {
-        await unwrap(commands.unreact(accountId, noteId));
+        await unwrapAcc(accountId, commands.unreact(accountId, noteId));
         this.#log("info", "リアクションを取り消しました");
       } else {
-        if (already) await unwrap(commands.unreact(accountId, noteId));
-        await unwrap(commands.react(accountId, noteId, reaction));
+        if (already) await unwrapAcc(accountId, commands.unreact(accountId, noteId));
+        await unwrapAcc(accountId, commands.react(accountId, noteId, reaction));
         this.#log("success", `リアクション ${reaction}`);
       }
     } catch (e) {
@@ -1259,10 +1298,10 @@ class AppStore {
 
     try {
       if (already) {
-        await unwrap(commands.unfavoriteNote(accountId, noteId));
+        await unwrapAcc(accountId, commands.unfavoriteNote(accountId, noteId));
         this.#log("info", "お気に入りを解除しました");
       } else {
-        await unwrap(commands.favoriteNote(accountId, noteId));
+        await unwrapAcc(accountId, commands.favoriteNote(accountId, noteId));
         this.#log("success", "お気に入りに登録しました");
       }
     } catch (e) {
@@ -1280,7 +1319,7 @@ class AppStore {
 
   async listClips(accountId: string): Promise<Clip[]> {
     try {
-      return await unwrap(commands.listClips(accountId));
+      return await unwrapAcc(accountId, commands.listClips(accountId));
     } catch (e) {
       this.#fail(e);
       throw e;
@@ -1288,14 +1327,19 @@ class AppStore {
   }
 
   async createClip(accountId: string, name: string): Promise<Clip> {
-    const clip = await unwrap(commands.createClip(accountId, name));
-    this.#log("success", `クリップを作成しました: ${clip.name}`);
-    return clip;
+    try {
+      const clip = await unwrapAcc(accountId, commands.createClip(accountId, name));
+      this.#log("success", `クリップを作成しました: ${clip.name}`);
+      return clip;
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async addNoteToClip(accountId: string, clipId: string, noteId: string) {
     try {
-      await unwrap(commands.addNoteToClip(accountId, clipId, noteId));
+      await unwrapAcc(accountId, commands.addNoteToClip(accountId, clipId, noteId));
       this.#log("success", "クリップに追加しました");
     } catch (e) {
       this.#fail(e);
@@ -1309,7 +1353,7 @@ class AppStore {
     targets.forEach((n) => applyVote(n, choice));
 
     try {
-      await unwrap(commands.votePoll(accountId, noteId, choice));
+      await unwrapAcc(accountId, commands.votePoll(accountId, noteId, choice));
       this.#log("success", "投票しました");
     } catch (e) {
       backups.forEach(restorePoll);
