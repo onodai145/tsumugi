@@ -159,9 +159,16 @@
   }
   .grip {
     display: flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-dim);
     cursor: grab;
     touch-action: none;
+    /* アイコン自体は小さいが、実サイズのpaddingで当たり判定を広げる
+       (負のmarginで打ち消す方式は隣接する削除ボタン等と当たり判定が
+       重なってしまうため使わない)。 */
+    padding: 8px;
+    margin: -4px 0;
   }
   .glyph {
     font-size: 1.2rem;
