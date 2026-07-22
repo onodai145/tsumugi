@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { app } from "./lib/store.svelte";
   import type { TabView } from "./lib/store.svelte";
+  import type { Account } from "./bindings/tauri.gen";
   import Column from "./ui/Column.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
@@ -25,6 +26,7 @@
   let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);
   let columnSettingsGroupId = $state<string | null>(null);
+  let reauthAccount = $state<Account | null>(null);
 
   function openSettings(section: SettingsSection) {
     settingsInitial = section;
@@ -33,6 +35,10 @@
   function addAccountFromSettings() {
     showSettings = false;
     showAdd = true;
+  }
+  function startReauth(account: Account) {
+    showSettings = false;
+    reauthAccount = account;
   }
 
   function openAddColumn() {
@@ -114,8 +120,18 @@
   <main class="main">
     {#if app.booting}
       <div class="center-msg">起動中…</div>
-    {:else if showAdd || app.accounts.length === 0}
-      <AddAccount onclose={app.accounts.length > 0 ? () => (showAdd = false) : undefined} />
+    {:else if showAdd || reauthAccount || app.accounts.length === 0}
+      <AddAccount
+        reauthAccount={reauthAccount ?? undefined}
+        onclose={
+          app.accounts.length > 0
+            ? () => {
+                showAdd = false;
+                reauthAccount = null;
+              }
+            : undefined
+        }
+      />
     {:else if app.groups.length === 0}
       <div class="center-msg">
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。

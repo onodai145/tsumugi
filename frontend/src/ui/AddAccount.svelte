@@ -1,15 +1,27 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { app } from "../lib/store.svelte";
   import { X } from "@lucide/svelte";
 
   // onclose があれば「戻る」導線を出す（ログイン済みで設定経由で開いた場合）。
   // 初回（アカウント0件）は onclose 未指定で戻る先が無いため非表示。
-  let { onclose }: { onclose?: () => void } = $props();
+  // reauthAccount があれば host入力を省略し、そのアカウントの再認証フローになる。
+  let {
+    onclose,
+    reauthAccount,
+  }: {
+    onclose?: () => void;
+    reauthAccount?: { id: string; host: string; username: string };
+  } = $props();
 
-  let host = $state("");
+  let host = $state(reauthAccount?.host ?? "");
   let sessionId = $state<string | null>(null);
   let busy = $state(false);
   let err = $state<string | null>(null);
+
+  onMount(() => {
+    if (reauthAccount) void start();
+  });
 
   async function start() {
     err = null;
@@ -31,7 +43,7 @@
       await app.completeAccount(sessionId);
       sessionId = null;
       host = "";
-      onclose?.(); // 追加できたらカラム表示へ戻る
+      onclose?.(); // 完了できたらカラム表示/設定へ戻る
     } catch (e) {
       err = String(e);
     } finally {
@@ -42,12 +54,21 @@
 
 <div class="add-account">
   <div class="head">
-    <h2>アカウントを追加</h2>
+    <h2>
+      {reauthAccount
+        ? `再認証: @${reauthAccount.username}@${reauthAccount.host}`
+        : "アカウントを追加"}
+    </h2>
     {#if onclose}
       <button class="close" onclick={onclose} title="戻る"><X size={16} /></button>
     {/if}
   </div>
-  {#if !sessionId}
+  {#if reauthAccount && !sessionId}
+    <p class="hint">{busy ? "認可ページを開いています…" : "認可ページを開けませんでした。"}</p>
+    {#if !busy}
+      <button class="link" onclick={start}>もう一度試す</button>
+    {/if}
+  {:else if !sessionId}
     <p class="hint">Misskeyインスタンスのホスト名を入力してください（例: misskey.example）</p>
     <div class="form">
       <input
@@ -61,12 +82,16 @@
     </div>
   {:else}
     <p class="hint">
-      ブラウザで認可を完了したら、下のボタンを押してください。
+      {reauthAccount
+        ? "スコープが更新されたトークンを取得します。ブラウザで認可を完了したら、下のボタンを押してください。"
+        : "ブラウザで認可を完了したら、下のボタンを押してください。"}
     </p>
     <button class="primary" disabled={busy} onclick={complete}>
       {busy ? "確認中…" : "認可を完了した"}
     </button>
-    <button class="link" onclick={() => (sessionId = null)}>やり直す</button>
+    <button class="link" onclick={() => (reauthAccount ? start() : (sessionId = null))}>
+      やり直す
+    </button>
   {/if}
   {#if err}<p class="err">{err}</p>{/if}
 </div>
