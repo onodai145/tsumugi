@@ -14,6 +14,8 @@
     reauthAccount?: { id: string; host: string; username: string };
   } = $props();
 
+  // reauthAccount は再認証フロー開始時に設定され、その後の変更は想定していない。初期値参照でよい。
+  // svelte-ignore state_referenced_locally
   let host = $state(reauthAccount?.host ?? "");
   let sessionId = $state<string | null>(null);
   let busy = $state(false);
