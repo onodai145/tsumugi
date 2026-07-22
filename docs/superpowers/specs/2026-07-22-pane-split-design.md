@@ -85,9 +85,12 @@ async fn load_pane_layout() -> Result<PaneNode>
 ```
 
 - `split_pane` は空グループを作るだけ。フロントは戻り値の `group_id` を使って既存の `AddColumnModal` を「このグループにタブ追加」モードで開く。ユーザーがキャンセルしたら、空グループごと木から取り除く（`delete_empty_groups` 相当のロジックをこのタイミングでも呼ぶ）。
+- **初期サイズは「その場で領域を分け合う」ように決める**（tmuxの分割と同じ体感にするため。既存の「＋カラム」ボタンの挙動は変更しない、後述）。
+  - `direction: Row`（右に分割）: `reference_group_id` の現在の `size`(px) を半分にし、参照元と新規ペインでちょうど半分ずつ使う（Row全体の合計幅は変わらないため、既存の横スクロール位置や他の兄弟ペインの幅に影響しない）。
+  - `direction: Column`（下に分割）: 参照元が属する Column Split（無ければ新規に2子のColumn Splitを作る）内で、参照元と新規ペインの高さ比率をちょうど50/50に分ける。これは前述の「子挿入時の比率再正規化ルール」の特殊ケース（等分）としてそのまま実装できる。
 - `move_pane`: エッジがLeft/RightならRow方向、Top/BottomならColumn方向で target の前後に挿入。target の親が既にその方向のSplitならその子として差し込む。そうでなければ target の位置に新しい2子Splitノードを作り、targetをラップして差し込む。
 - `close_column`（タブを閉じる）は変更なし。内部で呼んでいる `delete_empty_groups` の実装に「木からも畳む」処理を足すだけで、ペイン削除は自然に連動する。
-- 既存の `add_column`(`group_id: None`) は「グローバルに新規グループを作る」だったが、木構造導入後は「フォーカス中の行の末尾に追加」に変更する。具体的には、フロント側で `app.focusedGroupId` から所属する最も近い祖先の Row Split を特定し、そのグループIDを `split_pane(reference_group_id, Row)` 相当のヘルパーに渡す（未フォーカス時はルートの最初のRowの末尾）。
+- 既存の `add_column`(`group_id: None`) は「グローバルに新規グループを作る」だったが、木構造導入後は「フォーカス中の行の末尾に追加」に変更する。具体的には、フロント側で `app.focusedGroupId` から所属する最も近い祖先の Row Split を特定し、そのグループIDを `split_pane(reference_group_id, Row)` 相当のヘルパーに渡す（未フォーカス時はルートの最初のRowの末尾）。ただし**この「＋カラム」経由の追加だけは初期サイズを既定幅 `DEFAULT_WIDTH`(px)にする**（前述の「半分に割る」初期サイズルールは分割ボタン専用で、「＋カラム」には適用しない）。これにより「横スクロールで多数のカラムを並べていく」既存の使い方・体感は一切変えない。
 - `lib.rs` の `specta_builder()` に新規コマンドと `PaneNode`/`PaneChild`/`SplitDirection`/`Edge` 型を登録する。`set_group_width`/`set_group_auto`/`reorder_groups` コマンドは削除（`reorder_groups` は木の並び順そのものが真実になるため不要）。
 
 ## フロントエンド
