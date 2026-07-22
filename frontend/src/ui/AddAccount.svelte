@@ -168,7 +168,7 @@
   }
   .err {
     margin-top: 12px;
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.85rem;
     word-break: break-word;
   }

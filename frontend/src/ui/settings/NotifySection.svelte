@@ -143,7 +143,7 @@
     margin: 8px 0 16px;
   }
   .warn {
-    color: #eab308;
+    color: var(--warning);
   }
   .actions {
     display: flex;
@@ -153,7 +153,7 @@
   }
   .ok {
     font-size: 0.8rem;
-    color: #22c55e;
+    color: var(--success);
   }
   .save {
     padding: 7px 18px;
@@ -168,7 +168,7 @@
     opacity: 0.5;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 8px 0 0;
   }

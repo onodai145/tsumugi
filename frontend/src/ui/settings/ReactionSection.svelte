@@ -213,7 +213,7 @@
     margin-top: 12px;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 8px 0 0;
   }

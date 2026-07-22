@@ -123,7 +123,7 @@
     border-color: var(--accent);
   }
   .badge {
-    background: #ef4444;
+    background: var(--danger);
     color: #fff;
     border-radius: 8px;
     padding: 0 5px;
@@ -218,13 +218,13 @@
     flex: none;
   }
   .ic[data-level="success"] {
-    color: #22c55e;
+    color: var(--success);
   }
   .ic[data-level="warn"] {
-    color: #eab308;
+    color: var(--warning);
   }
   .ic[data-level="error"] {
-    color: #ef4444;
+    color: var(--danger);
   }
   .ic[data-level="info"] {
     color: var(--text-dim);

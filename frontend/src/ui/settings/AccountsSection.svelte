@@ -165,7 +165,7 @@
     padding: 5px 10px;
     border: none;
     border-radius: 6px;
-    background: #ef4444;
+    background: var(--danger);
     color: #fff;
     cursor: pointer;
     font-size: 0.78rem;
@@ -192,7 +192,7 @@
     cursor: pointer;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 8px 0 0;
   }
