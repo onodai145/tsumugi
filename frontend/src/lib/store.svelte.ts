@@ -1,6 +1,6 @@
 // アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
-import { commands, events, unwrap, formatError } from "./ipc";
+import { commands, events, unwrap, unwrapAcc, formatError, ForbiddenError } from "./ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -103,6 +103,7 @@ export interface LogEntry {
   at: number; // epoch ms
   level: LogLevel;
   text: string;
+  reauthAccountId?: string; // 403由来のエラーなら、再認証を促すボタンをBackstageが描画する
 }
 
 class AppStore {
@@ -342,11 +343,11 @@ class AppStore {
     info: "info",
     success: "info",
   };
-  #log(level: LogLevel, text: string) {
-    this.logs = [{ id: ++this.#logSeq, at: Date.now(), level, text }, ...this.logs].slice(
-      0,
-      AppStore.#LOG_CAP,
-    );
+  #log(level: LogLevel, text: string, reauthAccountId?: string) {
+    this.logs = [
+      { id: ++this.#logSeq, at: Date.now(), level, text, reauthAccountId },
+      ...this.logs,
+    ].slice(0, AppStore.#LOG_CAP);
     if (this.ui.enableFileLogging) void commands.logFrontendEvent(AppStore.#RUST_LEVEL[level], text);
   }
   /// Backstage(UI)には出さず、設定でONならRust側のファイルログにのみ書く
@@ -355,10 +356,11 @@ class AppStore {
     if (this.ui.enableFileLogging) void commands.logFrontendEvent("debug", text);
   }
   /// エラーをバナー表示＋Backstage へ記録する共通処理。
+  /// ForbiddenError なら「再認証」アクションをログ行に付与する。
   #fail(e: unknown) {
     const msg = String(e);
     this.error = msg;
-    this.#log("error", msg);
+    this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
   }
   clearLogs() {
     this.logs = [];
@@ -809,18 +811,13 @@ class AppStore {
   /// サーバ側ミュート/ブロックを同期（失敗しても致命的でないのでログのみ）。
   async #syncServerMutes(accountId: string) {
     try {
-      const n = await unwrap(commands.syncServerMutes(accountId));
+      const n = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
       if (n > 0) this.#log("info", `サーバのミュート/ブロックを同期: ${n}件`);
     } catch (e) {
-      const msg = String(e);
-      // 旧トークンは read:mutes/read:blocks 権限が無い → 再認可が必要
-      if (/PERMISSION_DENIED|forbidden/i.test(msg)) {
-        this.#log(
-          "warn",
-          "サーバミュート同期: 権限不足。設定→アカウントで一度削除し再追加すると反映されます",
-        );
+      if (e instanceof ForbiddenError) {
+        this.#log("warn", "サーバミュート同期: 権限不足。再認証してください", e.accountId);
       } else {
-        this.#log("warn", `サーバミュート同期に失敗: ${msg}`);
+        this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
       }
     }
   }
