@@ -232,8 +232,8 @@
   }
   .global-err {
     padding: 4px 10px;
-    background: color-mix(in srgb, #ef4444 15%, var(--surface-1));
-    color: #ef4444;
+    background: color-mix(in srgb, var(--danger) 15%, var(--surface-1));
+    color: var(--danger);
     font-size: 0.78rem;
     cursor: pointer;
     flex: none;

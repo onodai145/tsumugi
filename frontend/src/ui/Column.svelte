@@ -262,14 +262,14 @@
     flex: none;
   }
   .tab-dot[data-state="connected"] {
-    background: #22c55e;
+    background: var(--success);
   }
   .tab-dot[data-state="connecting"],
   .tab-dot[data-state="reconnecting"] {
-    background: #eab308;
+    background: var(--warning);
   }
   .tab-dot[data-state="error"] {
-    background: #ef4444;
+    background: var(--danger);
   }
   .notes {
     overflow-y: auto;

@@ -648,7 +648,7 @@
     font-size: 0.6rem;
   }
   .thumb-status.error {
-    background: #ef4444;
+    background: var(--danger);
   }
   .toolbar {
     display: flex;
@@ -719,7 +719,7 @@
     opacity: 0.5;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-weight: 700;
     flex: none;
   }

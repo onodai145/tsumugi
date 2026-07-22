@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
-/// テーマ1個分の配色（app.css の CSS変数9個に対応）。
+/// テーマ1個分の配色（app.css の CSS変数11個に対応）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeColors {
@@ -19,6 +19,12 @@ pub struct ThemeColors {
     /// 情報的な意味の強調色（例: リプライバナー）。追加前のカスタムテーマ読み込み用に既定値を持つ。
     #[serde(default = "default_info_color")]
     pub info: String,
+    /// 危険/エラーの意味の強調色。追加前のカスタムテーマ読み込み用に既定値を持つ。
+    #[serde(default = "default_danger_color")]
+    pub danger: String,
+    /// 警告の意味の強調色。追加前のカスタムテーマ読み込み用に既定値を持つ。
+    #[serde(default = "default_warning_color")]
+    pub warning: String,
 }
 
 fn default_success_color() -> String {
@@ -27,6 +33,14 @@ fn default_success_color() -> String {
 
 fn default_info_color() -> String {
     "#3b82f6".into()
+}
+
+fn default_danger_color() -> String {
+    "#ef4444".into()
+}
+
+fn default_warning_color() -> String {
+    "#eab308".into()
 }
 
 /// ユーザーが作成したカスタムテーマ。
@@ -225,7 +239,7 @@ mod tests {
 
     #[test]
     fn theme_colors_deserializes_legacy_json_without_success_info() {
-        // success/info 追加前に保存されたカスタムテーマも読めること（#[serde(default)]）
+        // success/info/danger/warning 追加前に保存されたカスタムテーマも読めること（#[serde(default)]）
         let v: ThemeColors = serde_json::from_str(
             r##"{"surface1":"#111","surface2":"#222","surface3":"#333","border":"#444",
                 "text":"#eee","textDim":"#999","accent":"#ff8800"}"##,
@@ -233,6 +247,8 @@ mod tests {
         .unwrap();
         assert_eq!(v.success, "#22c55e");
         assert_eq!(v.info, "#3b82f6");
+        assert_eq!(v.danger, "#ef4444");
+        assert_eq!(v.warning, "#eab308");
     }
 
     #[test]
@@ -268,6 +284,8 @@ mod tests {
                     accent: "#ff8800".into(),
                     success: "#16a34a".into(),
                     info: "#2563eb".into(),
+                    danger: "#dc2626".into(),
+                    warning: "#ca8a04".into(),
                 },
             }],
             media_thumbnail_height: 320,

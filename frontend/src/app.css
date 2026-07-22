@@ -10,6 +10,9 @@
   /* 意味づけ色（例: Renoteバナー=success, リプライバナー=info）。テーマで上書き可能。 */
   --success: #22c55e;
   --info: #3b82f6;
+  /* 危険/警告色。ThemeColors(カスタムテーマ)には未対応、固定値。 */
+  --danger: #ef4444;
+  --warning: #eab308;
   --font-family-default: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN",
     "Noto Sans JP", sans-serif;
 

@@ -1,5 +1,5 @@
-// カスタムテーマ機能。app.css の7個のCSS変数(--surface-1/2/3, --border, --text,
-// --text-dim, --accent)に対応する配色セット(ThemeColors, bindings/tauri.gen.ts参照)を
+// カスタムテーマ機能。app.css のCSS変数群(THEME_VAR_KEYS参照)に対応する配色セット
+// (ThemeColors, bindings/tauri.gen.ts参照)を
 // プリセット or ユーザー定義(UiPrefs.customThemes)から選び、<html> に inline style として反映する。
 import type { ThemeColors } from "../bindings/tauri.gen";
 
@@ -20,17 +20,25 @@ export const THEME_VAR_KEYS: { css: string; key: keyof ThemeColors }[] = [
   { css: "--accent", key: "accent" },
   { css: "--success", key: "success" },
   { css: "--info", key: "info" },
+  { css: "--danger", key: "danger" },
+  { css: "--warning", key: "warning" },
 ];
 
-// 著名なエディタ/ターミナル配色を移植したプリセット(各テーマの公式パレットを参考に7トークンへ写像)。
+// 著名なエディタ/ターミナル配色を移植したプリセット(各テーマの公式パレットを参考に9トークンへ写像)。
 // 注記(不確かな/独自解釈の部分):
 // - Nordは公式には4つの色グループ(Polar Night=背景階調, Snow Storm=明背景/文字階調,
 //   Frost=寒色アクセント, Aurora=暖色アクセント)であり、それぞれが独立した「テーマ」ではない。
 //   ここでは依頼に合わせて「背景はPolar Night基調のまま、どの公式グループをアクセントに
 //   使うか」で4種に分けた(Polar Night=Frost cyan, Snow Storm=明背景版, Frost=Frost blue,
-//   Aurora=Aurora purple)。これは非公式の独自解釈。
+//   Aurora=Aurora purple)。これは非公式の独自解釈。danger/warningはAuroraグループの
+//   nord11/nord13を4種共通で採用(公式でも両配色デザインで共通用途のため)。
 // - Solarizedは公式8色(base03〜base3)に3段階目の背景トーンや境界線色の定義が無いため、
-//   surface3は補間した近似色(コメントで明記)。
+//   surface3は補間した近似色(コメントで明記)。danger/warningはAccent Colorsのred/yellowを
+//   dark/light共通で採用(公式仕様上も両モード共通の値)。
+// - Tokyo Night Light の danger/warning は tokyonight.nvim 由来ではなく、由来元の
+//   enkia/tokyo-night-vscode-theme(このプリセットのsuccess/infoもここ由来)のterminal
+//   red/orangeを採用。tokyonight.nvimのdayスタイルは night/storm パレットを自動反転
+//   生成する実装のため、手書きの参照値としては使っていない。
 export const PRESETS: ThemePreset[] = [
   {
     id: "tokyo-night",
@@ -45,6 +53,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#7aa2f7",
       success: "#9ece6a",
       info: "#7dcfff",
+      danger: "#f7768e",
+      warning: "#e0af68",
     },
   },
   {
@@ -60,6 +70,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#7aa2f7",
       success: "#9ece6a",
       info: "#7dcfff",
+      danger: "#f7768e",
+      warning: "#e0af68",
     },
   },
   {
@@ -75,6 +87,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#2e7de9",
       success: "#587539",
       info: "#007197",
+      danger: "#8c4351",
+      warning: "#965027",
     },
   },
   {
@@ -90,6 +104,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#bd93f9",
       success: "#50fa7b",
       info: "#8be9fd",
+      danger: "#ff5555",
+      warning: "#f1fa8c",
     },
   },
   {
@@ -103,8 +119,10 @@ export const PRESETS: ThemePreset[] = [
       text: "#14192b",
       textDim: "#8a8a8a",
       accent: "#644ac9",
-      success: "#1a8f4e",
-      info: "#1c8db0",
+      success: "#14710a",
+      info: "#036a96",
+      danger: "#cb3a2a",
+      warning: "#846e15",
     },
   },
   {
@@ -120,6 +138,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#88c0d0",
       success: "#a3be8c",
       info: "#81a1c1",
+      danger: "#bf616a",
+      warning: "#ebcb8b",
     },
   },
   {
@@ -135,6 +155,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#5e81ac",
       success: "#4c7031",
       info: "#5e81ac",
+      danger: "#bf616a",
+      warning: "#ebcb8b",
     },
   },
   {
@@ -150,6 +172,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#5e81ac",
       success: "#a3be8c",
       info: "#81a1c1",
+      danger: "#bf616a",
+      warning: "#ebcb8b",
     },
   },
   {
@@ -165,6 +189,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#b48ead",
       success: "#a3be8c",
       info: "#81a1c1",
+      danger: "#bf616a",
+      warning: "#ebcb8b",
     },
   },
   {
@@ -180,6 +206,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#cba6f7",
       success: "#a6e3a1",
       info: "#89b4fa",
+      danger: "#f38ba8",
+      warning: "#f9e2af",
     },
   },
   {
@@ -195,6 +223,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#8839ef",
       success: "#40a02b",
       info: "#1e66f5",
+      danger: "#d20f39",
+      warning: "#df8e1d",
     },
   },
   {
@@ -210,6 +240,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#ca9ee6",
       success: "#a6d189",
       info: "#8caaee",
+      danger: "#e78284",
+      warning: "#e5c890",
     },
   },
   {
@@ -225,6 +257,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#c6a0f6",
       success: "#a6da95",
       info: "#8aadf4",
+      danger: "#ed8796",
+      warning: "#eed49f",
     },
   },
   {
@@ -240,6 +274,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#268bd2",
       success: "#859900",
       info: "#2aa198",
+      danger: "#dc322f",
+      warning: "#b58900",
     },
   },
   {
@@ -255,6 +291,8 @@ export const PRESETS: ThemePreset[] = [
       accent: "#268bd2",
       success: "#859900",
       info: "#2aa198",
+      danger: "#dc322f",
+      warning: "#b58900",
     },
   },
 ];

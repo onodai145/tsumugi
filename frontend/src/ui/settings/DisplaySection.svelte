@@ -67,6 +67,8 @@
     accent: "アクセント",
     success: "成功色(Renoteバナー等)",
     info: "情報色(リプライバナー等)",
+    danger: "危険色(削除ボタン等)",
+    warning: "警告色",
   };
   const HEX_RE = /^#[0-9a-fA-F]{6}$/;
   function blankColors(): ThemeColors {
@@ -80,6 +82,8 @@
       accent: "#7c5cff",
       success: "#22c55e",
       info: "#3b82f6",
+      danger: "#ef4444",
+      warning: "#eab308",
     };
   }
   let editingTheme = $state<CustomTheme | null>(null);
@@ -90,7 +94,7 @@
     editErr = null;
   }
   function startEditTheme(t: CustomTheme) {
-    // success/info 追加前に作られたカスタムテーマは colors に無いことがあるため、
+    // success/info/danger/warning 追加前に作られたカスタムテーマは colors に無いことがあるため、
     // 既定値で埋めてから編集フォームへ渡す(undefinedのまま渡すとhex入力欄が空になる)。
     editingTheme = { id: t.id, name: t.name, colors: { ...blankColors(), ...t.colors } };
     editErr = null;
@@ -698,7 +702,7 @@
   }
   .ok {
     font-size: 0.8rem;
-    color: #22c55e;
+    color: var(--success);
   }
   .save {
     padding: 7px 18px;
@@ -713,7 +717,7 @@
     opacity: 0.5;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 8px 0 0;
   }

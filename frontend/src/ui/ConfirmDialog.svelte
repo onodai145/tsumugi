@@ -94,6 +94,6 @@
     font-weight: 600;
   }
   .confirm.danger {
-    background: #ef4444;
+    background: var(--danger);
   }
 </style>

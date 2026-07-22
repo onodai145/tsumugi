@@ -596,7 +596,7 @@
     font-family: inherit;
   }
   input.invalid {
-    border-color: #ef4444;
+    border-color: var(--danger);
   }
   .seg {
     display: inline-flex;
@@ -632,7 +632,7 @@
     resize: vertical;
   }
   .tql-input.invalid {
-    border-color: #ef4444;
+    border-color: var(--danger);
   }
   .bg-row {
     display: flex;
@@ -683,7 +683,7 @@
     opacity: 0.5;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 8px 0 0;
     word-break: break-word;
