@@ -113,6 +113,14 @@ async fn load_pane_layout() -> Result<PaneNode>
 - ヘッダに分割ボタンを追加。クリックで「右に分割 / 下に分割」の小さいメニューを開き、選択で `app.splitPane(group.id, direction)` を呼ぶ→新規グループIDで `AddColumnModal` をタブ追加モードでオープン。
 - 既存の grip ドラッグ（`app.draggingGroupId`/`dragOverGroup`等）を拡張。ドラッグ中、ドロップ先候補の `Column.svelte` の四辺に薄いドロップゾーンオーバーレイ（Left/Right/Top/Bottom）を表示し、離した位置に応じて `app.movePane(draggedGroupId, targetGroupId, edge)` を呼ぶ。中央エリアは対象外（既存のタブドラッグとは独立した機能のため、ペイン移動のドロップゾーンには含めない）。同一行内での並べ替えは Left/Right エッジへのドロップとして自然に包含される。
 
+### UI (`ui/ColumnSettings.svelte` 拡張)
+
+現状は「幅（px）」の固定/自動トグル＋数値入力のみ（`group.width`/`group.auto` を直接編集）。`ColumnGroup.width`/`auto` 廃止に伴い、このモーダルはグループが属する `PaneChild`（自分の `Leaf.id` を親から見た子として持つ `size`/`auto`）を編集する形に置き換える。
+
+- 親が **Row** の場合: 現行と同じUI（固定/自動ラジオ＋px数値入力 220〜720）。値変更は `app.resizePane(node_id, size)` / `app.setPaneAuto(node_id, auto)` を呼ぶ。
+- 親が **Column** の場合: ラジオは出さず（Column内には auto の概念が無いため）、「高さ（%、5〜95）」の数値入力のみを表示する。値変更は `app.resizePane(node_id, size / 100)` を呼ぶ（入力は%表記、内部は0-1のfraction）。95%までに制限するのは、兄弟が最低5%は残るようにするため（再正規化ロジックと矛盾しない範囲に收める）。
+- どちらの場合も、入力した瞬間に他の兄弟の `size` が「## 永続化」節の再正規化ルールに従って自動調整される（Row内はpx固定なので兄弟には影響しない。Column内はfractionなので入力値以外の兄弟が残り比率を按分する）。
+
 ## マイグレーション／互換性
 
 - 旧バージョンのJSON（`pane_layout`キー無し、`ColumnGroup.width`/`auto` 有り）を読み込む際は、`pane_layout: None` → 起動時に `load_pane_layout()` が group一覧(order順)から `Split{Row, [...]}` を組み立てて返すため、**アップデート後も見た目は変わらない**（横一列のまま）。
