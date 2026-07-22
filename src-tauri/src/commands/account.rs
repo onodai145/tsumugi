@@ -48,7 +48,17 @@ pub async fn complete_miauth(state: State<'_, AppState>, session_id: String) -> 
 
     let (token, raw_user) = check_miauth(&state.http, &host, &session_id).await?;
 
-    let account = build_account(&host, &raw_user);
+    // 同一 host+user_id の既存アカウントがあれば再認証とみなし、id を維持する
+    // （MiAuth はトークン発行後にスコープを追加できないため、権限不足時は再認証で
+    // トークンだけ差し替える。id が変わるとカラム/グループの紐付けが失われる）。
+    let existing_id = state
+        .accounts
+        .lock()
+        .unwrap()
+        .find_by_host_user(&host, &raw_user.id)
+        .map(|a| a.id.clone());
+
+    let account = build_account(existing_id, &host, &raw_user);
     // token は keyring のみに保存（Account/戻り値には含めない）
     state.secrets.set(&account.id, &token)?;
     state.settings.upsert_account(&account)?; // 再起動で復元できるよう永続化
@@ -113,9 +123,9 @@ fn normalize_host(input: &str) -> Result<String> {
     Ok(s.to_string())
 }
 
-fn build_account(host: &str, raw: &RawUser) -> Account {
+fn build_account(existing_id: Option<String>, host: &str, raw: &RawUser) -> Account {
     Account {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         host: host.to_string(),
         username: raw.username.clone(),
         user_id: raw.id.clone(),
@@ -142,7 +152,7 @@ mod tests {
     fn build_account_uses_name_then_username() {
         let raw: RawUser =
             serde_json::from_str(r#"{"id":"u1","username":"alice","name":"Alice A"}"#).unwrap();
-        let a = build_account("misskey.io", &raw);
+        let a = build_account(None, "misskey.io", &raw);
         assert_eq!(a.display_name, "Alice A");
         assert_eq!(a.user_id, "u1");
         assert_eq!(a.host, "misskey.io");
@@ -150,7 +160,15 @@ mod tests {
 
         let raw2: RawUser =
             serde_json::from_str(r#"{"id":"u2","username":"bob"}"#).unwrap();
-        let a2 = build_account("misskey.io", &raw2);
+        let a2 = build_account(None, "misskey.io", &raw2);
         assert_eq!(a2.display_name, "bob"); // name 無し → username
+    }
+
+    #[test]
+    fn build_account_reuses_existing_id_when_given() {
+        let raw: RawUser =
+            serde_json::from_str(r#"{"id":"u1","username":"alice","name":"Alice A"}"#).unwrap();
+        let a = build_account(Some("existing-id".into()), "misskey.io", &raw);
+        assert_eq!(a.id, "existing-id");
     }
 }
