@@ -14,6 +14,8 @@
   // ドラッグ中はローカルの並び順を先行して見せ、ドロップ確定時にまとめて永続化する。
   let dragOrder = $state<string[] | null>(null);
   let draggingIndex = $state<number | null>(null);
+  let activePointerId: number | null = null;
+  let didReorder = false;
   const displayOrder = $derived(dragOrder ?? pinned);
 
   $effect(() => {
@@ -47,32 +49,40 @@
     void apply([...pinned, stored]);
   }
 
-  function onDragStart(i: number, e: DragEvent) {
-    // dataTransfer.setData を呼ばないと WebKitGTK 等一部環境でドラッグ自体が開始しない。
-    e.dataTransfer?.setData("text/plain", String(i));
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  // HTML5 Drag-and-Drop APIはタッチ入力ではdragstart等が発火せず、Android(WebView)で
+  // 並べ替えが動作しないため、マウス/タッチ両対応のPointer Eventsで実装する。
+  function onPointerDown(i: number, e: PointerEvent) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    activePointerId = e.pointerId;
     draggingIndex = i;
     dragOrder = pinned;
+    didReorder = false;
+    // キャプチャ先はgrip自身ではなく.listにする。gripは並べ替えで再配置される
+    // chip内の要素のため、キャプチャ後にDOM移動が起きると一部環境でキャプチャが
+    // 外れ、ドラッグが途中で止まる恐れがある。.listは並べ替えで動かないため安全。
+    (e.currentTarget as HTMLElement).closest<HTMLElement>(".list")?.setPointerCapture(e.pointerId);
+    e.preventDefault();
   }
 
-  function onDragOver(i: number, e: DragEvent) {
+  function onPointerMove(e: PointerEvent) {
+    if (draggingIndex === null || e.pointerId !== activePointerId || !dragOrder) return;
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    if (draggingIndex === null || draggingIndex === i || !dragOrder) return;
+    const overEl = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-chip-index]");
+    const i = overEl ? Number(overEl.dataset.chipIndex) : NaN;
+    if (Number.isNaN(i) || i === draggingIndex) return;
     const next = [...dragOrder];
     const [moved] = next.splice(draggingIndex, 1);
     next.splice(i, 0, moved);
     dragOrder = next;
     draggingIndex = i;
+    didReorder = true;
   }
 
-  function onDrop(e: DragEvent) {
-    e.preventDefault();
-  }
-
-  function onDragEnd() {
+  function onPointerEnd(e: PointerEvent) {
+    if (e.pointerId !== activePointerId) return;
+    activePointerId = null;
     draggingIndex = null;
-    if (dragOrder) void apply(dragOrder);
+    if (didReorder && dragOrder) void apply(dragOrder);
     dragOrder = null;
   }
 </script>
@@ -80,23 +90,13 @@
 <h3 class="title">リアクション</h3>
 <p class="hint">絵文字ピッカーの「ピン留め」タブに表示する絵文字を編集できます（本家Misskeyのピン留め絵文字に相当）。ドラッグで並べ替えられます。</p>
 
-<div class="list">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="list" onpointermove={onPointerMove} onpointerup={onPointerEnd} onpointercancel={onPointerEnd}>
   {#each displayOrder as key, i (key)}
     {@const custom = isCustomEmojiKey(key) ? customEmojiByName(parseCustomEmojiPinKey(key).name) : null}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="chip"
-      class:dragging={draggingIndex === i}
-      ondragover={(e) => onDragOver(i, e)}
-      ondrop={onDrop}
-    >
-      <span
-        class="grip"
-        draggable="true"
-        ondragstart={(e) => onDragStart(i, e)}
-        ondragend={onDragEnd}
-        title="ドラッグで並べ替え"
-      >
+    <div class="chip" class:dragging={draggingIndex === i} data-chip-index={i}>
+      <span class="grip" onpointerdown={(e) => onPointerDown(i, e)} title="ドラッグで並べ替え">
         <GripVertical size={12} />
       </span>
       <span class="glyph">
@@ -159,8 +159,16 @@
   }
   .grip {
     display: flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-dim);
     cursor: grab;
+    touch-action: none;
+    /* アイコン自体は小さいが、実サイズのpaddingで当たり判定を広げる
+       (負のmarginで打ち消す方式は隣接する削除ボタン等と当たり判定が
+       重なってしまうため使わない)。 */
+    padding: 8px;
+    margin: -4px 0;
   }
   .glyph {
     font-size: 1.2rem;
