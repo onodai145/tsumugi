@@ -31,11 +31,14 @@ pub struct PaneChild {
     pub node: PaneNode,
     /// 親の主軸方向におけるこの子のサイズ。
     /// 親が Row のときは px（現行の ColumnGroup.width と同じ意味・同じ 220-720 clamp）。
-    /// 親が Column のときは高さ比率（0.0-1.0、兄弟間で合計 1.0）。
+    /// 親が Column のときは相対ウェイト（CSSの `flex-grow` にそのまま渡す正の数。
+    /// 兄弟間で合計1.0である必要はない＝厳密な正規化はしない。描画は
+    /// `flex: {size} 1 0` なので、実際の高さ比率は「自分のsize ÷ 兄弟のsize合計」に
+    /// ブラウザが自動で正規化してくれる。初期値は 1.0＝均等割り）。
     /// node が Leaf/Split どちらであっても同じ意味を持つ（Splitがネストしても幅/高さが必ず定まる）。
     pub size: f32,
     /// true なら size を無視し `flex:1 1 0` で余白を自動的に埋める。Row の子にのみ意味を持つ
-    /// （Column の子は常に size 比率で配分するため auto は無視する）。
+    /// （Column の子は常に size ウェイトで配分するため auto は無視する）。
     pub auto: bool,
 }
 ```
@@ -59,8 +62,14 @@ pub fn save_pane_layout(&self, root: &PaneNode) -> Result<()> {
 ```
 
 - `delete_empty_groups`（タブが0になったグループの自動削除）と連動させ、木からも該当 `Leaf` を除去する。
-- **Split の子が1つだけになったら、その親 Split ノードを残った子で置き換えて畳む**（tmuxのペイン閉じと同じ挙動）。畳んだ際、生き残った子の `size`/`auto` は、畳まれた `Split` 自身が親から見て持っていた `PaneChild.size`/`auto` を引き継ぐ（再帰的に繰り返し畳む可能性がある＝1子Splitの中にまた1子Splitが残るケースも同様に畳む）。
-- Column分割で子を挿入する際は `size` の比率を再正規化する（例: 挿入前 `n` 個、挿入後 `n+1` 個なら新規子は `1/(n+1)`、既存子は `n/(n+1)` 倍にスケール）。Row分割の子は px 固定なので挿入時の再正規化は不要（新規子は既定幅 `DEFAULT_WIDTH` clamp 220-720）。
+
+**挿入・削除の正規化ルール（tmuxに倣い、常に「隣接する1ペイン」とだけ取り分をやり取りする。無関係な兄弟には一切影響させない）:**
+
+- **挿入(insert_sibling)**: `reference` の直後に新規ペインを挿入するとき、`reference` 自身の `size` を半分にし、新規ペインがもう半分を受け取る。他の兄弟の `size` は変更しない（Row=px、Column=ウェイトのどちらでも同じ計算式。`reference` の親が挿入方向と異なる Split の場合は後述の「ラップ」を参照）。
+  - `reference` の親が既に挿入方向と同じ `direction` の Split なら、その子リストに `reference` の直後の位置へ差し込むだけでよい。
+  - `reference` の親が異なる `direction`（またはrefがルート直下でSplitに包まれていない）の場合は、`reference` の位置を「`reference` 自身 + 新規ペイン」の2子からなる新しい `direction` の Split で置き換える（＝ラップ）。ラップ後の新Split自体が親から見て持つ `size`/`auto` は、ラップ前に `reference` が持っていた値をそのまま引き継ぐ（外側の並びは変わらない）。ラップ内部の2子の `size` は、Row(px)なら`DEFAULT_WIDTH`を折半、Column(ウェイト)なら 1.0/1.0（均等）とする（内側は新しい軸なので `reference` の元の `size` は単位が異なり流用できないため）。
+- **削除(remove_group)**: `Leaf` を1つ取り除いたら、空いた `size` は隣接する兄弟1つに全て譲る（直前の兄弟があればそちらへ、無ければ直後の兄弟へ）。他の兄弟には影響しない。取り除いた結果、親の子が1つだけになったら、その親 `Split` ノードを残った子で置き換えて畳む（tmuxのペイン閉じと同じ挙動）。畳んだ際、生き残った子の `size`/`auto` は、畳まれた `Split` 自身が親から見て持っていた `PaneChild.size`/`auto` を引き継ぐ（1子Splitの中にまた1子Splitが残るケースも同様に再帰的に畳む）。
+- **移動(move_pane)**: 内部的には「削除」→「挿入」の組み合わせ（それぞれ上記ルールをそのまま適用）。
 
 ## Tauriコマンド（`src-tauri/src/commands/column.rs`）
 
@@ -85,10 +94,8 @@ async fn load_pane_layout() -> Result<PaneNode>
 ```
 
 - `split_pane` は空グループを作るだけ。フロントは戻り値の `group_id` を使って既存の `AddColumnModal` を「このグループにタブ追加」モードで開く。ユーザーがキャンセルしたら、空グループごと木から取り除く（`delete_empty_groups` 相当のロジックをこのタイミングでも呼ぶ）。
-- **初期サイズは「その場で領域を分け合う」ように決める**（tmuxの分割と同じ体感にするため。既存の「＋カラム」ボタンの挙動は変更しない、後述）。
-  - `direction: Row`（右に分割）: `reference_group_id` の現在の `size`(px) を半分にし、参照元と新規ペインでちょうど半分ずつ使う（Row全体の合計幅は変わらないため、既存の横スクロール位置や他の兄弟ペインの幅に影響しない）。
-  - `direction: Column`（下に分割）: 参照元が属する Column Split（無ければ新規に2子のColumn Splitを作る）内で、参照元と新規ペインの高さ比率をちょうど50/50に分ける。これは前述の「子挿入時の比率再正規化ルール」の特殊ケース（等分）としてそのまま実装できる。
-- `move_pane`: エッジがLeft/RightならRow方向、Top/BottomならColumn方向で target の前後に挿入。target の親が既にその方向のSplitならその子として差し込む。そうでなければ target の位置に新しい2子Splitノードを作り、targetをラップして差し込む。
+- 挿入位置・初期サイズは「## 永続化」節の **挿入(insert_sibling)** ルールをそのまま使う（`reference_group_id` の取り分を半分に分け合うだけで、他の兄弟ペインの幅/高さは変わらない。tmuxの分割と同じ体感になる）。既存の「＋カラム」ボタンの挙動は変更しない（後述）。
+- `move_pane`: エッジがLeft/RightならRow方向、Top/BottomならColumn方向として、「## 永続化」節の **削除→挿入** をそのまま適用する（target が挿入時の `reference` になる）。
 - `close_column`（タブを閉じる）は変更なし。内部で呼んでいる `delete_empty_groups` の実装に「木からも畳む」処理を足すだけで、ペイン削除は自然に連動する。
 - 既存の `add_column`(`group_id: None`) は「グローバルに新規グループを作る」だったが、木構造導入後は「フォーカス中の行の末尾に追加」に変更する。具体的には、フロント側で `app.focusedGroupId` から所属する最も近い祖先の Row Split を特定し、そのグループIDを `split_pane(reference_group_id, Row)` 相当のヘルパーに渡す（未フォーカス時はルートの最初のRowの末尾）。ただし**この「＋カラム」経由の追加だけは初期サイズを既定幅 `DEFAULT_WIDTH`(px)にする**（前述の「半分に割る」初期サイズルールは分割ボタン専用で、「＋カラム」には適用しない）。これにより「横スクロールで多数のカラムを並べていく」既存の使い方・体感は一切変えない。
 - `lib.rs` の `specta_builder()` に新規コマンドと `PaneNode`/`PaneChild`/`SplitDirection`/`Edge` 型を登録する。`set_group_width`/`set_group_auto`/`reorder_groups` コマンドは削除（`reorder_groups` は木の並び順そのものが真実になるため不要）。
@@ -105,7 +112,7 @@ async fn load_pane_layout() -> Result<PaneNode>
 再帰コンポーネント。
 - `Leaf` → 既存の `Column.svelte` をそのまま描画。
 - `Split(direction: Row)` → `display:flex; flex-direction:row; overflow-x:auto`。各子は `node` が Leaf/Split どちらでも `flex: ${auto ? "1 1 0" : "0 0 " + size + "px"}` で統一的にサイズ指定できる（Leaf/Splitで分岐しない）。
-- `Split(direction: Column)` → `display:flex; flex-direction:column`。各子は `flex-basis: ${size*100}%`。境界に縦方向リサイズハンドル（既存 `Column.svelte` の横方向リサイズ `onResizeDown/Move/Up` と同じPointer Eventsパターンを縦版として実装）。
+- `Split(direction: Column)` → `display:flex; flex-direction:column`。各子は `flex: ${size} 1 0`（`size`をそのまま`flex-grow`として使う。兄弟間で合計1.0である必要はなく、ブラウザが自動的に「自分のsize÷合計size」の比率で高さを割り付ける）。境界に縦方向リサイズハンドルを置き、ドラッグ中は挟む2つの子（ドラッグハンドルの上と下）の `size` を「2子の合計ウェイトを保ったまま」ペアで増減させる（既存 `Column.svelte` の横方向リサイズ `onResizeDown/Move/Up` の縦版だが、Rowと違い2子ペアで連動させる点が異なる）。ポインタアップ時に2子それぞれについて `resize_pane(node_id, size)` を1回ずつ呼んで永続化する（`resize_pane` は1ノードずつの更新なので、ペアの反映には2回呼ぶ）。
 - `App.svelte` の `.columns` div直書きを `<Pane node={app.paneRoot} />` 1つに置き換える。
 
 ### UI (`ui/Column.svelte` 拡張)
@@ -118,8 +125,8 @@ async fn load_pane_layout() -> Result<PaneNode>
 現状は「幅（px）」の固定/自動トグル＋数値入力のみ（`group.width`/`group.auto` を直接編集）。`ColumnGroup.width`/`auto` 廃止に伴い、このモーダルはグループが属する `PaneChild`（自分の `Leaf.id` を親から見た子として持つ `size`/`auto`）を編集する形に置き換える。
 
 - 親が **Row** の場合: 現行と同じUI（固定/自動ラジオ＋px数値入力 220〜720）。値変更は `app.resizePane(node_id, size)` / `app.setPaneAuto(node_id, auto)` を呼ぶ。
-- 親が **Column** の場合: ラジオは出さず（Column内には auto の概念が無いため）、「高さ（%、5〜95）」の数値入力のみを表示する。値変更は `app.resizePane(node_id, size / 100)` を呼ぶ（入力は%表記、内部は0-1のfraction）。95%までに制限するのは、兄弟が最低5%は残るようにするため（再正規化ロジックと矛盾しない範囲に收める）。
-- どちらの場合も、入力した瞬間に他の兄弟の `size` が「## 永続化」節の再正規化ルールに従って自動調整される（Row内はpx固定なので兄弟には影響しない。Column内はfractionなので入力値以外の兄弟が残り比率を按分する）。
+- 親が **Column** の場合: ラジオは出さず（Column内には auto の概念が無いため）、「高さ（%、5〜95）」の数値入力を表示する。表示/入力時は他の兄弟の `size` 合計 `othersSum`（自分以外の `size` の合計）を使って相互変換する: 表示は `size / (size + othersSum) * 100`、入力された%を `p` とすると新しい `size = othersSum * p / (100 - p)` を計算して `app.resizePane(node_id, size)` を呼ぶ。他の兄弟の `size` 自体は変更しない（`othersSum` は変わらないので、結果として入力した%が正しく反映される）。95%までに制限するのは 100% ちょうど(他の兄弟が高さ0になる)を避けるため。
+- `resize_pane`（ドラッグ・数値入力とも）は「対象ノード1つの `size` をその場で上書きする」操作。Column内では他の兄弟の `size` を変えないため、兄弟間の合計は1.0固定ではなくなるが、`flex: {size} 1 0` はブラウザが自動的に合計に対する比率で高さを割り付けるため、これは想定通りの挙動であり問題ない。
 
 ## マイグレーション／互換性
 
