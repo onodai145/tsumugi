@@ -13,6 +13,24 @@ export async function unwrap<T>(p: Promise<Result<T>>): Promise<T> {
   throw new Error(formatError(r.error));
 }
 
+/// 403 (kind: "forbidden") を ForbiddenError として throw する unwrap。
+/// 呼び出し元は accountId を渡し、store 側で「再認証」アクションをログに出せるようにする。
+export class ForbiddenError extends Error {
+  accountId: string;
+  constructor(accountId: string, message: string) {
+    super(message);
+    this.name = "ForbiddenError";
+    this.accountId = accountId;
+  }
+}
+
+export async function unwrapAcc<T>(accountId: string, p: Promise<Result<T>>): Promise<T> {
+  const r = await p;
+  if (r.status === "ok") return r.data;
+  if (r.error.kind === "forbidden") throw new ForbiddenError(accountId, formatError(r.error));
+  throw new Error(formatError(r.error));
+}
+
 export function formatError(e: ApiError): string {
   return "message" in e ? `${e.kind}: ${e.message}` : e.kind;
 }
