@@ -3,7 +3,7 @@
 //! （書き込み頻度は低いため、SQLiteのようなインクリメンタル更新は不要）。
 //! 書き込みは一時ファイル→rename で行い、途中でクラッシュしても壊れないようにする。
 
-use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, UiPrefs};
+use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -23,6 +23,8 @@ struct SettingsData {
     notify: NotifyConfig,
     #[serde(default)]
     ui: UiPrefs,
+    #[serde(default)]
+    pane_layout: Option<PaneNode>,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -134,12 +136,26 @@ impl SettingsStore {
         self.save(&guard)
     }
 
-    /// 空になったグループを削除する（タブが 0 のもの）。
+    /// 空になったグループを削除する（タブが 0 のもの）。木構造(pane_layout)からも
+    /// 該当Leafを取り除く(唯一のルートだった場合はツリーをリセットする)。
     pub fn delete_empty_groups(&self) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
         let used: std::collections::HashSet<String> =
             guard.columns.iter().map(|c| c.group_id.clone()).collect();
+        let removed_ids: Vec<String> =
+            guard.groups.iter().filter(|g| !used.contains(&g.id)).map(|g| g.id.clone()).collect();
         guard.groups.retain(|g| used.contains(&g.id));
+        for gid in &removed_ids {
+            if let Some(root) = &mut guard.pane_layout {
+                let is_root_leaf_target =
+                    matches!(root, PaneNode::Leaf { group_id, .. } if group_id == gid);
+                if is_root_leaf_target {
+                    guard.pane_layout = None;
+                } else {
+                    root.remove_group(gid);
+                }
+            }
+        }
         self.save(&guard)
     }
 
@@ -222,6 +238,41 @@ impl SettingsStore {
     pub fn save_ui(&self, prefs: &UiPrefs) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
         guard.ui = prefs.clone();
+        self.save(&guard)
+    }
+
+    // ---- PaneNode（ペイン分割ツリー） ----
+
+    /// 保存済みツリーがあればそれを返す。無ければ(旧バージョンからの移行)、既存の
+    /// groups を order 順に並べた Row 分割としてその場で組み立てて返す
+    /// (ファイルへの書き込みは行わない。実体化は次の分割/保存操作まで遅延する)。
+    pub fn load_pane_layout(&self) -> Result<PaneNode> {
+        let guard = self.data.lock().unwrap();
+        if let Some(root) = &guard.pane_layout {
+            return Ok(root.clone());
+        }
+        let mut groups = guard.groups.clone();
+        groups.sort_by_key(|g| g.order);
+        if groups.len() == 1 {
+            return Ok(PaneNode::new_leaf(groups[0].id.clone()));
+        }
+        Ok(PaneNode::Split {
+            id: uuid::Uuid::new_v4().to_string(),
+            direction: crate::domain::SplitDirection::Row,
+            children: groups
+                .iter()
+                .map(|g| crate::domain::PaneChild {
+                    node: PaneNode::new_leaf(g.id.clone()),
+                    size: g.width as f32,
+                    auto: g.auto,
+                })
+                .collect(),
+        })
+    }
+
+    pub fn save_pane_layout(&self, root: &PaneNode) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        guard.pane_layout = Some(root.clone());
         self.save(&guard)
     }
 
@@ -343,7 +394,7 @@ pub fn migrate_from_legacy_sqlite(
 
     let store = SettingsStore {
         backing: Backing::File(json_path.to_path_buf()),
-        data: Mutex::new(SettingsData { accounts, groups, columns, mute, notify, ui }),
+        data: Mutex::new(SettingsData { accounts, groups, columns, mute, notify, ui, pane_layout: None }),
     };
     store.save(&store.data.lock().unwrap())?;
     Ok(store)
@@ -352,7 +403,7 @@ pub fn migrate_from_legacy_sqlite(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ColumnKind, FilterQuery};
+    use crate::domain::{ColumnKind, FilterQuery, SplitDirection};
 
     fn store() -> SettingsStore {
         SettingsStore::new_in_memory()
@@ -461,6 +512,62 @@ mod tests {
         assert_eq!(groups[0].id, "g2");
         assert_eq!(groups[1].id, "g1");
         assert_eq!(groups[1].width, 420);
+    }
+
+    #[test]
+    fn pane_layout_defaults_to_row_of_existing_groups_when_unset() {
+        let s = SettingsStore::new_in_memory();
+        let g1 = ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false };
+        let g2 = ColumnGroup { id: "g2".into(), order: 1, width: 320, auto: false };
+        s.upsert_group(&g1).unwrap();
+        s.upsert_group(&g2).unwrap();
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Split { direction, children, .. } = root else { panic!("expected Split") };
+        assert_eq!(direction, SplitDirection::Row);
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].size, 300.0);
+        assert_eq!(children[1].size, 320.0);
+    }
+
+    #[test]
+    fn pane_layout_round_trips_through_save_and_load() {
+        let s = SettingsStore::new_in_memory();
+        let root = PaneNode::new_leaf("g1");
+        s.save_pane_layout(&root).unwrap();
+        assert_eq!(s.load_pane_layout().unwrap(), root);
+    }
+
+    #[test]
+    fn delete_empty_groups_prunes_pane_layout_and_collapses() {
+        let s = SettingsStore::new_in_memory();
+        let g1 = ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false };
+        let g2 = ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false };
+        s.upsert_group(&g1).unwrap();
+        s.upsert_group(&g2).unwrap();
+        // g1をColumn方向に分割してg3を作る(タブは無い状態を模す)
+        let mut root = s.load_pane_layout().unwrap();
+        assert!(root.insert_sibling("g1", "g3", SplitDirection::Column));
+        s.save_pane_layout(&root).unwrap();
+        let g3 = ColumnGroup { id: "g3".into(), order: 2, width: 300, auto: false };
+        s.upsert_group(&g3).unwrap();
+        // g3にはタブが無いまま delete_empty_groups を呼ぶ(g1/g2にはタブがある体で columns に積む)
+        let c1 = Column {
+            id: "c1".into(), account_id: "a".into(), kind: ColumnKind::Home, order: 0,
+            filter: FilterQuery::Keywords(vec![]), notify_sound: false, notify_desktop: false,
+            notify_sound_choice: String::new(), group_id: "g1".into(), title: None,
+        };
+        let c2 = Column { id: "c2".into(), group_id: "g2".into(), ..c1.clone() };
+        s.upsert_column(&c1).unwrap();
+        s.upsert_column(&c2).unwrap();
+        s.delete_empty_groups().unwrap();
+        // g3(タブ無し)は消え、pane_layoutからも取り除かれてg1側に畳まれている
+        let groups = s.load_groups().unwrap();
+        assert_eq!(groups.iter().map(|g| g.id.clone()).collect::<Vec<_>>(), vec!["g1", "g2"]);
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
+        assert_eq!(children.len(), 2);
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "g1"); // g3が畳まれ、g1が直接の子に戻っている
     }
 
     #[test]
