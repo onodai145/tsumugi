@@ -16,6 +16,7 @@ pub enum SplitDirection {
 pub enum PaneNode {
     Leaf {
         id: String,
+        #[serde(rename = "groupId")]
         group_id: String,
     },
     Split {

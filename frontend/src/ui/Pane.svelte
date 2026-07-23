@@ -20,7 +20,7 @@
 </script>
 
 {#if node.type === "leaf"}
-  {@const group = app.groups.find((g) => g.id === node.group_id)}
+  {@const group = app.groups.find((g) => g.id === node.groupId)}
   {#if group}
     <Column {group} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} />
   {/if}

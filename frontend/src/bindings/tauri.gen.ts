@@ -498,7 +498,7 @@ export type PaneChild = {
 	auto: boolean,
 };
 
-export type PaneNode = { type: "leaf"; id: string; group_id: string } | { type: "split"; id: string; direction: SplitDirection; children: PaneChild[] };
+export type PaneNode = { type: "leaf"; id: string; groupId: string } | { type: "split"; id: string; direction: SplitDirection; children: PaneChild[] };
 
 export type Poll = {
 	choices: PollChoice[],
