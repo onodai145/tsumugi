@@ -145,6 +145,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn leaf_deserializes_current_camel_case_group_id() {
+        let current = r#"{"type":"leaf","id":"l1","groupId":"g1"}"#;
+        let node: PaneNode = serde_json::from_str(current).unwrap();
+        let PaneNode::Leaf { group_id, .. } = &node else { panic!("expected leaf") };
+        assert_eq!(group_id, "g1");
+    }
+
+    #[test]
+    fn leaf_serializes_as_camel_case_group_id() {
+        let node = PaneNode::new_leaf("g1");
+        let v = serde_json::to_value(&node).unwrap();
+        assert_eq!(v["groupId"], "g1");
+        assert!(v.get("group_id").is_none());
+    }
+
+    #[test]
     fn insert_sibling_same_direction_halves_reference_size() {
         // root: Split(Row)[ Leaf(a, size=300), Leaf(b, size=300) ]
         let mut root = PaneNode::Split {

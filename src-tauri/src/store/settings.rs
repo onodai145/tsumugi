@@ -296,7 +296,40 @@ fn load_json_or_default(path: &Path) -> Result<SettingsData> {
         return Ok(SettingsData::default());
     }
     let s = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&s)?)
+    let mut value: serde_json::Value = serde_json::from_str(&s)?;
+    migrate_legacy_pane_group_id(&mut value);
+    Ok(serde_json::from_value(value)?)
+}
+
+/// pane_layout(Issue #31)は当初 PaneNode::Leaf.group_id を "group_id" で書き出していたが、
+/// 他フィールドとの camelCase 一貫性のため後から "groupId" にリネームした。この変更前の
+/// ビルドで既に実データを永続化した既存ユーザ(開発者自身の環境含む)が起動不能になるのを防ぐため、
+/// pane_layout 部分木内の "group_id" キーを "groupId" に読み替えてから型付きデシリアライズする。
+fn migrate_legacy_pane_group_id(root: &mut serde_json::Value) {
+    if let Some(pane_layout) = root.get_mut("pane_layout") {
+        rename_key_recursive(pane_layout, "group_id", "groupId");
+    }
+}
+
+fn rename_key_recursive(value: &mut serde_json::Value, from: &str, to: &str) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if !map.contains_key(to) {
+                if let Some(v) = map.remove(from) {
+                    map.insert(to.to_string(), v);
+                }
+            }
+            for v in map.values_mut() {
+                rename_key_recursive(v, from, to);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                rename_key_recursive(v, from, to);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// 旧バージョン(SQLite一体型 tsumugi.db)からの一回限りの移行。
@@ -604,6 +637,38 @@ mod tests {
         let reloaded = SettingsStore::new(path.clone()).unwrap();
         assert_eq!(reloaded.load_accounts().unwrap().len(), 1);
         assert_eq!(reloaded.load_columns().unwrap().len(), 1);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// リネーム前のビルドが書き出した旧キー名("group_id")の pane_layout を含む設定ファイルでも
+    /// 起動時に読み込めること(Issue #31)。実際にユーザ環境で発生した"missing field groupId"クラッシュの回帰テスト。
+    #[test]
+    fn loads_settings_with_legacy_snake_case_pane_layout_group_id() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-legacy-pane-layout-{}.json", uuid::Uuid::new_v4()));
+        let legacy_json = r#"{
+            "groups": [{"id": "g1", "order": 0, "width": 300, "auto": false}],
+            "pane_layout": {
+                "type": "split",
+                "id": "root",
+                "direction": "row",
+                "children": [
+                    {
+                        "node": {"type": "leaf", "id": "l1", "group_id": "g1"},
+                        "size": 300.0,
+                        "auto": false
+                    }
+                ]
+            }
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+
+        let s = SettingsStore::new(path.clone()).unwrap();
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected Leaf") };
+        assert_eq!(group_id, "g1");
 
         std::fs::remove_file(&path).ok();
     }
