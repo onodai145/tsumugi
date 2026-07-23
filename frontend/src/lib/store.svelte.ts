@@ -25,6 +25,7 @@ import type {
   UiPrefs,
   LatestRelease,
   Clip,
+  PaneNode,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -109,6 +110,7 @@ export interface LogEntry {
 class AppStore {
   accounts = $state<Account[]>([]);
   groups = $state<GroupView[]>([]);
+  paneRoot = $state<PaneNode>({ type: "split", id: "boot", direction: "row", children: [] });
   booting = $state(true);
   error = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
@@ -224,6 +226,7 @@ class AppStore {
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, auto: g.auto, tabs: [], activeTabId: "" }));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
       const tabDefs = await unwrap(commands.listColumns());
       for (const tab of tabDefs) {
         try {
@@ -644,6 +647,35 @@ class AppStore {
     if (g) g.auto = auto;
     try {
       await unwrap(commands.setGroupAuto(groupId, auto));
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
+  // ---- ペイン分割(Issue #31 Slice 1: 下方向のみ) ----
+
+  async splitPane(groupId: string, direction: "row" | "column"): Promise<string | null> {
+    try {
+      const newGroup = await unwrap(commands.splitPane(groupId, direction));
+      this.groups = [...this.groups, { id: newGroup.id, width: newGroup.width, auto: newGroup.auto, tabs: [], activeTabId: "" }];
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
+      return newGroup.id;
+    } catch (e) {
+      this.#fail(e);
+      return null;
+    }
+  }
+
+  /// splitPaneで作ったがタブ追加をキャンセルされた空グループを後始末する
+  /// (discardEmptyGroupコマンドはタブが残っている場合は何もしないので、
+  /// 成功時にも安全に呼べる)。
+  async discardEmptyGroup(groupId: string) {
+    const g = this.groups.find((x) => x.id === groupId);
+    if (!g || g.tabs.length > 0) return; // 既にタブが追加済みなら何もしない
+    try {
+      await unwrap(commands.discardEmptyGroup(groupId));
+      this.groups = this.groups.filter((x) => x.id !== groupId);
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
       this.#fail(e);
     }
