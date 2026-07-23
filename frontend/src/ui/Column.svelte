@@ -10,11 +10,13 @@
     onAddTab,
     onEditTab,
     onEditGroup,
+    onSplitDown,
   }: {
     group: GroupView;
     onAddTab: (groupId: string) => void;
     onEditTab: (tab: TabView) => void;
     onEditGroup: (groupId: string) => void;
+    onSplitDown: (groupId: string) => void;
   } = $props();
 
   const activeTab = $derived(
@@ -119,6 +121,7 @@
     {/each}
 
     <button class="tab-add" title="タブを追加" onclick={() => onAddTab(group.id)}>＋</button>
+    <button class="tab-add" title="下に分割" onclick={() => onSplitDown(group.id)}>⬓</button>
   </div>
 
   {#if activeTab}
