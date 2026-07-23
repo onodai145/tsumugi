@@ -25,6 +25,7 @@ import type {
   UiPrefs,
   LatestRelease,
   Clip,
+  PaneNode,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -109,6 +110,7 @@ export interface LogEntry {
 class AppStore {
   accounts = $state<Account[]>([]);
   groups = $state<GroupView[]>([]);
+  paneRoot = $state<PaneNode>({ type: "split", id: "boot", direction: "row", children: [] });
   booting = $state(true);
   error = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
@@ -224,6 +226,7 @@ class AppStore {
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, auto: g.auto, tabs: [], activeTabId: "" }));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
       const tabDefs = await unwrap(commands.listColumns());
       for (const tab of tabDefs) {
         try {
@@ -596,6 +599,8 @@ class AppStore {
     try {
       await unwrap(commands.moveTab(dragId, loc.group.id, loc.group.tabs.map((t) => t.id)));
       await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
+      // 移動元グループが空になっていればペイン分割ツリーも畳まれているため取り直す(Issue #31)。
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
       this.#fail(e);
     }
@@ -644,6 +649,37 @@ class AppStore {
     if (g) g.auto = auto;
     try {
       await unwrap(commands.setGroupAuto(groupId, auto));
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
+  // ---- ペイン分割(Issue #31 Slice 1: 下方向のみ) ----
+
+  async splitPane(groupId: string, direction: "row" | "column"): Promise<string | null> {
+    try {
+      const newGroup = await unwrap(commands.splitPane(groupId, direction));
+      const paneRoot = await unwrap(commands.loadPaneLayout());
+      this.groups = [...this.groups, { id: newGroup.id, width: newGroup.width, auto: newGroup.auto, tabs: [], activeTabId: "" }];
+      this.paneRoot = paneRoot;
+      return newGroup.id;
+    } catch (e) {
+      this.#fail(e);
+      return null;
+    }
+  }
+
+  /// splitPaneで作ったがタブ追加をキャンセルされた空グループを後始末する
+  /// (discardEmptyGroupコマンドはタブが残っている場合は何もしないので、
+  /// 成功時にも安全に呼べる)。
+  async discardEmptyGroup(groupId: string) {
+    const g = this.groups.find((x) => x.id === groupId);
+    if (!g || g.tabs.length > 0) return; // 既にタブが追加済みなら何もしない
+    try {
+      await unwrap(commands.discardEmptyGroup(groupId));
+      const paneRoot = await unwrap(commands.loadPaneLayout());
+      this.groups = this.groups.filter((x) => x.id !== groupId);
+      this.paneRoot = paneRoot;
     } catch (e) {
       this.#fail(e);
     }
@@ -1178,9 +1214,11 @@ class AppStore {
     }
   }
 
-  /// タブを閉じる。グループが空になったらグループも消す。
+  /// タブを閉じる。グループが空になったらグループも消す。空グループが消えた結果
+  /// ペイン分割ツリーが畳まれることがあるため(Issue #31)、paneRootも取り直す。
   async closeTab(tabId: string) {
     await unwrap(commands.closeColumn(tabId));
+    const paneRoot = await unwrap(commands.loadPaneLayout());
     this.#connState.delete(tabId);
     this.#wasReconnecting.delete(tabId);
     for (const g of this.groups) {
@@ -1189,6 +1227,7 @@ class AppStore {
       if (g.activeTabId === tabId) g.activeTabId = g.tabs[0]?.id ?? "";
     }
     this.groups = this.groups.filter((g) => g.tabs.length > 0);
+    this.paneRoot = paneRoot;
     if (this.groups.length > 0 && !this.groups.some((g) => g.id === this.focusedGroupId)) {
       this.focusedGroupId = this.groups[0].id;
     }

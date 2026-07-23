@@ -6,7 +6,8 @@ use crate::api::meta::{fetch_antennas, fetch_followed_channels, fetch_user_lists
 use crate::api::notes::fetch_notes;
 use crate::api::notifications::fetch_notifications;
 use crate::domain::{
-    Column, ColumnGroup, ColumnKind, FilterQuery, Note, Notification, SourceItem, User, UserList,
+    Column, ColumnGroup, ColumnKind, FilterQuery, Note, Notification, PaneNode, SourceItem,
+    SplitDirection, User, UserList,
 };
 use crate::error::{Error, Result};
 use crate::filter::{ast, parser, sql, CompiledFilter};
@@ -106,6 +107,56 @@ pub async fn add_column(
         notes,
         notifications,
     })
+}
+
+/// reference_group_id の隣に空の新規グループ(タブなし)を挿入し、その ColumnGroup を返す。
+/// フロントは戻り値の group.id で AddColumnModal を「このグループにタブ追加」モードで開く。
+#[tauri::command]
+#[specta::specta]
+pub async fn split_pane(
+    state: State<'_, AppState>,
+    reference_group_id: String,
+    direction: SplitDirection,
+) -> Result<ColumnGroup> {
+    let order = state.settings.load_groups()?.len() as i32;
+    let width = state
+        .settings
+        .load_ui()
+        .map(|p| p.default_column_width)
+        .unwrap_or(DEFAULT_WIDTH)
+        .clamp(220, 720);
+    let group = ColumnGroup { id: uuid::Uuid::new_v4().to_string(), order, width, auto: false };
+    state.settings.upsert_group(&group)?;
+
+    let mut root = state.settings.load_pane_layout()?;
+    if !root.insert_sibling(&reference_group_id, &group.id, direction) {
+        // reference_group_idはフロントが既存グループのidしか渡さない前提のため通常到達しないが、
+        // 到達した場合は作成済みの空グループ(まだタブが無い)を後始末してからエラーを返す。
+        state.settings.delete_empty_groups()?;
+        return Err(Error::Invalid(format!("unknown reference group: {reference_group_id}")));
+    }
+    state.settings.save_pane_layout(&root)?;
+    Ok(group)
+}
+
+/// 永続化済みペイン分割ツリー(起動時のレイアウト復元用)。
+#[tauri::command]
+#[specta::specta]
+pub async fn load_pane_layout(state: State<'_, AppState>) -> Result<PaneNode> {
+    state.settings.load_pane_layout()
+}
+
+/// タブが1つも無い空グループを削除する(split_paneでタブ追加をキャンセルされた後始末用)。
+/// タブが残っている場合は何もしない(誤操作防止)。
+#[tauri::command]
+#[specta::specta]
+pub async fn discard_empty_group(state: State<'_, AppState>, group_id: String) -> Result<()> {
+    let has_tabs = state.settings.load_columns()?.iter().any(|c| c.group_id == group_id);
+    if has_tabs {
+        return Ok(());
+    }
+    state.settings.delete_empty_groups()?; // group_id自体がタブ0件ならここで消え、木からも畳まれる
+    Ok(())
 }
 
 /// 既存タブのソース種別・フィルタ・名前を変更し、ストリームを張り直す。

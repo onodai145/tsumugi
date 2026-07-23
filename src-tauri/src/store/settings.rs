@@ -3,7 +3,7 @@
 //! （書き込み頻度は低いため、SQLiteのようなインクリメンタル更新は不要）。
 //! 書き込みは一時ファイル→rename で行い、途中でクラッシュしても壊れないようにする。
 
-use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, UiPrefs};
+use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -23,6 +23,8 @@ struct SettingsData {
     notify: NotifyConfig,
     #[serde(default)]
     ui: UiPrefs,
+    #[serde(default)]
+    pane_layout: Option<PaneNode>,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -134,12 +136,26 @@ impl SettingsStore {
         self.save(&guard)
     }
 
-    /// 空になったグループを削除する（タブが 0 のもの）。
+    /// 空になったグループを削除する（タブが 0 のもの）。木構造(pane_layout)からも
+    /// 該当Leafを取り除く(唯一のルートだった場合はツリーをリセットする)。
     pub fn delete_empty_groups(&self) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
         let used: std::collections::HashSet<String> =
             guard.columns.iter().map(|c| c.group_id.clone()).collect();
+        let removed_ids: Vec<String> =
+            guard.groups.iter().filter(|g| !used.contains(&g.id)).map(|g| g.id.clone()).collect();
         guard.groups.retain(|g| used.contains(&g.id));
+        for gid in &removed_ids {
+            if let Some(root) = &mut guard.pane_layout {
+                let is_root_leaf_target =
+                    matches!(root, PaneNode::Leaf { group_id, .. } if group_id == gid);
+                if is_root_leaf_target {
+                    guard.pane_layout = None;
+                } else {
+                    root.remove_group(gid);
+                }
+            }
+        }
         self.save(&guard)
     }
 
@@ -225,6 +241,64 @@ impl SettingsStore {
         self.save(&guard)
     }
 
+    // ---- PaneNode（ペイン分割ツリー） ----
+
+    /// 保存済みツリーがあればそれを返す。無ければ(旧バージョンからの移行)、既存の
+    /// groups を order 順に並べた Row 分割としてその場で組み立てて返す
+    /// (ファイルへの書き込みは行わない。実体化は次の分割/保存操作まで遅延する)。
+    ///
+    /// 保存済みツリーに、既に groups から消えたグループを指す Leaf(孤児)が残っている
+    /// 場合は、返す前にその場で取り除く(木からも畳む)。`delete_account` 等、
+    /// `delete_empty_groups` を経由しない経路でグループが消えた際の後始末を毎回の
+    /// 読み込みで自己修復するため(Issue #31)。ディスクへの書き戻しはしない
+    /// (読むたびに同じ掃除を繰り返すだけで実害が無いため)。
+    pub fn load_pane_layout(&self) -> Result<PaneNode> {
+        let guard = self.data.lock().unwrap();
+        let known: std::collections::HashSet<&str> =
+            guard.groups.iter().map(|g| g.id.as_str()).collect();
+        if let Some(root) = &guard.pane_layout {
+            let mut orphan_ids = Vec::new();
+            collect_group_ids(root, &mut orphan_ids);
+            orphan_ids.retain(|id| !known.contains(id.as_str()));
+            let mut cleaned = root.clone();
+            for gid in &orphan_ids {
+                cleaned.remove_group(gid);
+            }
+            let root_is_valid = match &cleaned {
+                PaneNode::Leaf { group_id, .. } => known.contains(group_id.as_str()),
+                PaneNode::Split { .. } => true,
+            };
+            if root_is_valid {
+                return Ok(cleaned);
+            }
+            // ルート自体が孤児のLeafで自己削除できない(全グループが入れ替わった等)場合は
+            // 下の再構築ロジックへフォールバックする。
+        }
+        let mut groups = guard.groups.clone();
+        groups.sort_by_key(|g| g.order);
+        if groups.len() == 1 {
+            return Ok(PaneNode::new_leaf(groups[0].id.clone()));
+        }
+        Ok(PaneNode::Split {
+            id: uuid::Uuid::new_v4().to_string(),
+            direction: crate::domain::SplitDirection::Row,
+            children: groups
+                .iter()
+                .map(|g| crate::domain::PaneChild {
+                    node: PaneNode::new_leaf(g.id.clone()),
+                    size: g.width as f32,
+                    auto: g.auto,
+                })
+                .collect(),
+        })
+    }
+
+    pub fn save_pane_layout(&self, root: &PaneNode) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        guard.pane_layout = Some(root.clone());
+        self.save(&guard)
+    }
+
     /// タブを別グループへ移動し、そのグループ内での順序を id 順に振り直す。
     pub fn move_tab(&self, tab_id: &str, group_id: &str, ordered_tab_ids: &[String]) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
@@ -240,12 +314,57 @@ impl SettingsStore {
     }
 }
 
+/// 木の中に出現する group_id を(順不同で)全て集める。
+fn collect_group_ids(node: &PaneNode, out: &mut Vec<String>) {
+    match node {
+        PaneNode::Leaf { group_id, .. } => out.push(group_id.clone()),
+        PaneNode::Split { children, .. } => {
+            for c in children {
+                collect_group_ids(&c.node, out);
+            }
+        }
+    }
+}
+
 fn load_json_or_default(path: &Path) -> Result<SettingsData> {
     if !path.exists() {
         return Ok(SettingsData::default());
     }
     let s = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&s)?)
+    let mut value: serde_json::Value = serde_json::from_str(&s)?;
+    migrate_legacy_pane_group_id(&mut value);
+    Ok(serde_json::from_value(value)?)
+}
+
+/// pane_layout(Issue #31)は当初 PaneNode::Leaf.group_id を "group_id" で書き出していたが、
+/// 他フィールドとの camelCase 一貫性のため後から "groupId" にリネームした。この変更前の
+/// ビルドで既に実データを永続化した既存ユーザ(開発者自身の環境含む)が起動不能になるのを防ぐため、
+/// pane_layout 部分木内の "group_id" キーを "groupId" に読み替えてから型付きデシリアライズする。
+fn migrate_legacy_pane_group_id(root: &mut serde_json::Value) {
+    if let Some(pane_layout) = root.get_mut("pane_layout") {
+        rename_key_recursive(pane_layout, "group_id", "groupId");
+    }
+}
+
+fn rename_key_recursive(value: &mut serde_json::Value, from: &str, to: &str) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if !map.contains_key(to) {
+                if let Some(v) = map.remove(from) {
+                    map.insert(to.to_string(), v);
+                }
+            }
+            for v in map.values_mut() {
+                rename_key_recursive(v, from, to);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                rename_key_recursive(v, from, to);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// 旧バージョン(SQLite一体型 tsumugi.db)からの一回限りの移行。
@@ -343,7 +462,7 @@ pub fn migrate_from_legacy_sqlite(
 
     let store = SettingsStore {
         backing: Backing::File(json_path.to_path_buf()),
-        data: Mutex::new(SettingsData { accounts, groups, columns, mute, notify, ui }),
+        data: Mutex::new(SettingsData { accounts, groups, columns, mute, notify, ui, pane_layout: None }),
     };
     store.save(&store.data.lock().unwrap())?;
     Ok(store)
@@ -352,7 +471,7 @@ pub fn migrate_from_legacy_sqlite(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ColumnKind, FilterQuery};
+    use crate::domain::{ColumnKind, FilterQuery, PaneChild, SplitDirection};
 
     fn store() -> SettingsStore {
         SettingsStore::new_in_memory()
@@ -464,6 +583,106 @@ mod tests {
     }
 
     #[test]
+    fn pane_layout_defaults_to_row_of_existing_groups_when_unset() {
+        let s = SettingsStore::new_in_memory();
+        let g1 = ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false };
+        let g2 = ColumnGroup { id: "g2".into(), order: 1, width: 320, auto: false };
+        s.upsert_group(&g1).unwrap();
+        s.upsert_group(&g2).unwrap();
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Split { direction, children, .. } = root else { panic!("expected Split") };
+        assert_eq!(direction, SplitDirection::Row);
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].size, 300.0);
+        assert_eq!(children[1].size, 320.0);
+    }
+
+    #[test]
+    fn load_pane_layout_prunes_orphaned_leaf_and_collapses() {
+        // delete_account等、delete_empty_groupsを経由しない経路でグループが消えた場合の
+        // 自己修復(Issue #31)。g1(存在)とorphan(groupsに無い)の2子Splitは、読み込み時点で
+        // orphanが取り除かれ1子になり、g1単体のLeafへ畳まれて返る。
+        let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        let stale = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Column,
+            children: vec![
+                PaneChild {
+                    node: PaneNode::Leaf { id: "l1".into(), group_id: "g1".into() },
+                    size: 1.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf { id: "l2".into(), group_id: "orphan".into() },
+                    size: 1.0,
+                    auto: false,
+                },
+            ],
+        };
+        s.save_pane_layout(&stale).unwrap();
+
+        let cleaned = s.load_pane_layout().unwrap();
+        let PaneNode::Leaf { group_id, .. } = &cleaned else { panic!("expected collapsed Leaf") };
+        assert_eq!(group_id, "g1");
+    }
+
+    #[test]
+    fn load_pane_layout_falls_back_to_reconstruction_when_root_itself_is_orphaned() {
+        // 全グループが入れ替わった等でルート自体(裸のLeaf)が孤児になった場合は、
+        // remove_groupで自己削除できないため、現在のgroupsから素直に再構築する。
+        let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g_new".into(), order: 0, width: 400, auto: false }).unwrap();
+        s.save_pane_layout(&PaneNode::Leaf { id: "l1".into(), group_id: "g_old_gone".into() }).unwrap();
+
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Leaf { group_id, .. } = &root else { panic!("expected Leaf") };
+        assert_eq!(group_id, "g_new");
+    }
+
+    #[test]
+    fn pane_layout_round_trips_through_save_and_load() {
+        let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        let root = PaneNode::new_leaf("g1");
+        s.save_pane_layout(&root).unwrap();
+        assert_eq!(s.load_pane_layout().unwrap(), root);
+    }
+
+    #[test]
+    fn delete_empty_groups_prunes_pane_layout_and_collapses() {
+        let s = SettingsStore::new_in_memory();
+        let g1 = ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false };
+        let g2 = ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false };
+        s.upsert_group(&g1).unwrap();
+        s.upsert_group(&g2).unwrap();
+        // g1をColumn方向に分割してg3を作る(タブは無い状態を模す)
+        let mut root = s.load_pane_layout().unwrap();
+        assert!(root.insert_sibling("g1", "g3", SplitDirection::Column));
+        s.save_pane_layout(&root).unwrap();
+        let g3 = ColumnGroup { id: "g3".into(), order: 2, width: 300, auto: false };
+        s.upsert_group(&g3).unwrap();
+        // g3にはタブが無いまま delete_empty_groups を呼ぶ(g1/g2にはタブがある体で columns に積む)
+        let c1 = Column {
+            id: "c1".into(), account_id: "a".into(), kind: ColumnKind::Home, order: 0,
+            filter: FilterQuery::Keywords(vec![]), notify_sound: false, notify_desktop: false,
+            notify_sound_choice: String::new(), group_id: "g1".into(), title: None,
+        };
+        let c2 = Column { id: "c2".into(), group_id: "g2".into(), ..c1.clone() };
+        s.upsert_column(&c1).unwrap();
+        s.upsert_column(&c2).unwrap();
+        s.delete_empty_groups().unwrap();
+        // g3(タブ無し)は消え、pane_layoutからも取り除かれてg1側に畳まれている
+        let groups = s.load_groups().unwrap();
+        assert_eq!(groups.iter().map(|g| g.id.clone()).collect::<Vec<_>>(), vec!["g1", "g2"]);
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
+        assert_eq!(children.len(), 2);
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "g1"); // g3が畳まれ、g1が直接の子に戻っている
+    }
+
+    #[test]
     fn group_auto_roundtrips_and_set_group_auto_updates() {
         let s = store();
         s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: true }).unwrap();
@@ -497,6 +716,38 @@ mod tests {
         let reloaded = SettingsStore::new(path.clone()).unwrap();
         assert_eq!(reloaded.load_accounts().unwrap().len(), 1);
         assert_eq!(reloaded.load_columns().unwrap().len(), 1);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// リネーム前のビルドが書き出した旧キー名("group_id")の pane_layout を含む設定ファイルでも
+    /// 起動時に読み込めること(Issue #31)。実際にユーザ環境で発生した"missing field groupId"クラッシュの回帰テスト。
+    #[test]
+    fn loads_settings_with_legacy_snake_case_pane_layout_group_id() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-legacy-pane-layout-{}.json", uuid::Uuid::new_v4()));
+        let legacy_json = r#"{
+            "groups": [{"id": "g1", "order": 0, "width": 300, "auto": false}],
+            "pane_layout": {
+                "type": "split",
+                "id": "root",
+                "direction": "row",
+                "children": [
+                    {
+                        "node": {"type": "leaf", "id": "l1", "group_id": "g1"},
+                        "size": 300.0,
+                        "auto": false
+                    }
+                ]
+            }
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+
+        let s = SettingsStore::new(path.clone()).unwrap();
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected Leaf") };
+        assert_eq!(group_id, "g1");
 
         std::fs::remove_file(&path).ok();
     }

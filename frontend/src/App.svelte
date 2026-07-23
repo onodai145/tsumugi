@@ -3,7 +3,7 @@
   import { app } from "./lib/store.svelte";
   import type { TabView } from "./lib/store.svelte";
   import type { Account } from "./bindings/tauri.gen";
-  import Column from "./ui/Column.svelte";
+  import Pane from "./ui/Pane.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
   import ColumnSettings from "./ui/ColumnSettings.svelte";
@@ -58,6 +58,15 @@
   }
   function openColumnSettings(groupId: string) {
     columnSettingsGroupId = groupId; // カラム(視覚カラム)自体の設定
+  }
+
+  let pendingSplitGroupId = $state<string | null>(null);
+
+  async function splitDown(groupId: string) {
+    const newGroupId = await app.splitPane(groupId, "column");
+    if (!newGroupId) return;
+    pendingSplitGroupId = newGroupId;
+    openAddTab(newGroupId);
   }
 
   function onGlobalKey(e: KeyboardEvent) {
@@ -138,9 +147,7 @@
       </div>
     {:else}
       <div class="columns">
-        {#each app.groups as group (group.id)}
-          <Column {group} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} />
-        {/each}
+        <Pane node={app.paneRoot} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} onSplitDown={splitDown} />
       </div>
     {/if}
   </main>
@@ -178,7 +185,13 @@
     <AddColumnModal
       groupId={addTabGroupId}
       editTab={editTab ?? undefined}
-      onclose={() => (showAddColumn = false)}
+      onclose={() => {
+        showAddColumn = false;
+        if (pendingSplitGroupId) {
+          void app.discardEmptyGroup(pendingSplitGroupId);
+          pendingSplitGroupId = null;
+        }
+      }}
     />
   {/if}
   {#if columnSettingsGroupId}
