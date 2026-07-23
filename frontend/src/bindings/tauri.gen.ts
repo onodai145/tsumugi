@@ -56,6 +56,8 @@ export const commands = {
 	 *  フロントは戻り値の group.id で AddColumnModal を「このグループにタブ追加」モードで開く。
 	 */
 	splitPane: (referenceGroupId: string, direction: SplitDirection) => typedError<ColumnGroup, Error>(__TAURI_INVOKE("split_pane", { referenceGroupId, direction })),
+	/**  ペインノード(Leaf/Splitどちらのidでも可)のsizeを更新する(Column分割の高さ調整用)。 */
+	resizePane: (nodeId: string, size: number | null) => typedError<null, Error>(__TAURI_INVOKE("resize_pane", { nodeId, size })),
 	/**  永続化済みペイン分割ツリー(起動時のレイアウト復元用)。 */
 	loadPaneLayout: () => typedError<PaneNode, Error>(__TAURI_INVOKE("load_pane_layout")),
 	/**

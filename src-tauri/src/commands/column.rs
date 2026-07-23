@@ -139,6 +139,17 @@ pub async fn split_pane(
     Ok(group)
 }
 
+/// ペインノード(Leaf/Splitどちらのidでも可)のsizeを更新する(Column分割の高さ調整用)。
+#[tauri::command]
+#[specta::specta]
+pub async fn resize_pane(state: State<'_, AppState>, node_id: String, size: f32) -> Result<()> {
+    let mut root = state.settings.load_pane_layout()?;
+    if !root.set_size(&node_id, size) {
+        return Err(Error::Invalid(format!("unknown pane node: {node_id}")));
+    }
+    state.settings.save_pane_layout(&root)
+}
+
 /// 永続化済みペイン分割ツリー(起動時のレイアウト復元用)。
 #[tauri::command]
 #[specta::specta]
