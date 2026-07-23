@@ -42,6 +42,13 @@ impl PaneNode {
         }
     }
 
+    pub fn id(&self) -> &str {
+        match self {
+            PaneNode::Leaf { id, .. } => id,
+            PaneNode::Split { id, .. } => id,
+        }
+    }
+
     fn default_weight(direction: SplitDirection) -> f32 {
         match direction {
             SplitDirection::Row => DEFAULT_ROW_WEIGHT_PX,
@@ -138,6 +145,25 @@ impl PaneNode {
         }
         false
     }
+
+    /// node_id(Leaf/Splitどちらのidでも可)を持つノードを親から見たsizeを上書きする。
+    /// 見つかって更新できたらtrue。node_idがルート自身を指す場合はsizeを保持する
+    /// 親が無いためfalse(呼び出し元はエラー扱いにしてよい)。
+    pub fn set_size(&mut self, node_id: &str, size: f32) -> bool {
+        let PaneNode::Split { children, .. } = self else {
+            return false;
+        };
+        for child in children.iter_mut() {
+            if child.node.id() == node_id {
+                child.size = size;
+                return true;
+            }
+            if child.node.set_size(node_id, size) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -229,6 +255,70 @@ mod tests {
     fn insert_sibling_returns_false_when_reference_not_found() {
         let mut root = PaneNode::new_leaf("a");
         assert!(!root.insert_sibling("nope", "c", SplitDirection::Column));
+    }
+
+    #[test]
+    fn id_returns_leaf_and_split_ids() {
+        let leaf = PaneNode::Leaf { id: "l1".into(), group_id: "g1".into() };
+        assert_eq!(leaf.id(), "l1");
+        let split = PaneNode::Split { id: "s1".into(), direction: SplitDirection::Row, children: vec![] };
+        assert_eq!(split.id(), "s1");
+    }
+
+    #[test]
+    fn set_size_updates_direct_child_leaf() {
+        let mut root = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Column,
+            children: vec![
+                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 1.0, auto: false },
+                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 1.0, auto: false },
+            ],
+        };
+        assert!(root.set_size("la", 3.0));
+        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        assert_eq!(children[0].size, 3.0);
+        assert_eq!(children[1].size, 1.0); // 兄弟は変化しない
+    }
+
+    #[test]
+    fn set_size_updates_nested_split_by_its_own_id() {
+        // root(Row)[ Leaf(a), Split(Column, id="inner")[...] ] の inner 自身のsizeを更新できる
+        let mut root = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Row,
+            children: vec![
+                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Split {
+                        id: "inner".into(),
+                        direction: SplitDirection::Column,
+                        children: vec![
+                            PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 1.0, auto: false },
+                            PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 1.0, auto: false },
+                        ],
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+            ],
+        };
+        assert!(root.set_size("inner", 450.0));
+        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        assert_eq!(children[1].size, 450.0);
+    }
+
+    #[test]
+    fn set_size_returns_false_when_node_id_not_found() {
+        let mut root = PaneNode::new_leaf("a");
+        assert!(!root.set_size("nope", 1.0));
+    }
+
+    #[test]
+    fn set_size_returns_false_for_root_itself() {
+        // ルート自身のidを指定しても、sizeを保持する親が無いのでfalse。
+        let mut root = PaneNode::Split { id: "root".into(), direction: SplitDirection::Row, children: vec![] };
+        assert!(!root.set_size("root", 1.0));
     }
 
     #[test]
