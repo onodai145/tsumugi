@@ -685,6 +685,42 @@ class AppStore {
     }
   }
 
+  /// groupIdのLeafがColumn分割の直下に居れば、そのノードid・現在のsize・
+  /// 他の兄弟のsize合計(othersSum)を返す。Row分割の直下(または見つからない)ならnull。
+  paneColumnContext(groupId: string): { nodeId: string; size: number; othersSum: number } | null {
+    const search = (node: PaneNode): { nodeId: string; size: number; othersSum: number } | null => {
+      if (node.type !== "split") return null;
+      if (node.direction === "column") {
+        const idx = node.children.findIndex(
+          (c) => c.node.type === "leaf" && c.node.groupId === groupId,
+        );
+        if (idx >= 0) {
+          const size = node.children[idx].size ?? 1;
+          const othersSum = node.children.reduce(
+            (sum, c, i) => (i === idx ? sum : sum + (c.size ?? 1)),
+            0,
+          );
+          return { nodeId: node.children[idx].node.id, size, othersSum };
+        }
+      }
+      for (const c of node.children) {
+        const found = search(c.node);
+        if (found) return found;
+      }
+      return null;
+    };
+    return search(this.paneRoot);
+  }
+
+  async resizePane(nodeId: string, size: number) {
+    try {
+      await unwrap(commands.resizePane(nodeId, size));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
   async #subscribe() {
     for (const u of this.#unlisten) u();
     this.#unlisten = [];

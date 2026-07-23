@@ -17,6 +17,18 @@
     app.setGroupWidthLocal(groupId, clamped);
     app.persistGroupWidth(groupId, clamped);
   }
+
+  const paneCtx = $derived(groupId ? app.paneColumnContext(groupId) : null);
+  const heightPercent = $derived(
+    paneCtx ? Math.round((paneCtx.size / (paneCtx.size + paneCtx.othersSum)) * 100) : 0,
+  );
+
+  function setHeightPercent(p: number) {
+    if (!paneCtx || !Number.isFinite(p)) return;
+    const clamped = Math.min(95, Math.max(5, Math.round(p)));
+    const size = (paneCtx.othersSum * clamped) / (100 - clamped);
+    app.resizePane(paneCtx.nodeId, size);
+  }
 </script>
 
 <div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
@@ -28,25 +40,38 @@
     </header>
 
     {#if group}
-      <div class="field">
-        <span>幅</span>
-        <label class="check-row">
-          <input type="radio" name="width-mode" checked={!group.auto} onchange={() => setAuto(false)} /> 固定（ドラッグで調整）
-        </label>
-        <label class="check-row">
-          <input type="radio" name="width-mode" checked={group.auto} onchange={() => setAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
-        </label>
-      </div>
+      {#if !paneCtx}
+        <div class="field">
+          <span>幅</span>
+          <label class="check-row">
+            <input type="radio" name="width-mode" checked={!group.auto} onchange={() => setAuto(false)} /> 固定（ドラッグで調整）
+          </label>
+          <label class="check-row">
+            <input type="radio" name="width-mode" checked={group.auto} onchange={() => setAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
+          </label>
+        </div>
 
-      {#if !group.auto}
+        {#if !group.auto}
+          <label class="field num-field">
+            <span>幅（px、220〜720）</span>
+            <input
+              type="number"
+              min="220"
+              max="720"
+              value={group.width}
+              onchange={(e) => setWidth(Number((e.currentTarget as HTMLInputElement).value))}
+            />
+          </label>
+        {/if}
+      {:else}
         <label class="field num-field">
-          <span>幅（px、220〜720）</span>
+          <span>高さ（%、5〜95）</span>
           <input
             type="number"
-            min="220"
-            max="720"
-            value={group.width}
-            onchange={(e) => setWidth(Number((e.currentTarget as HTMLInputElement).value))}
+            min="5"
+            max="95"
+            value={heightPercent}
+            onchange={(e) => setHeightPercent(Number((e.currentTarget as HTMLInputElement).value))}
           />
         </label>
       {/if}
