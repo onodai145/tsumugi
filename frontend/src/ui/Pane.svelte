@@ -10,19 +10,21 @@
     onEditTab,
     onEditGroup,
     onSplitDown,
+    stretch = false,
   }: {
     node: PaneNode;
     onAddTab: (groupId: string) => void;
     onEditTab: (tab: TabView) => void;
     onEditGroup: (groupId: string) => void;
     onSplitDown: (groupId: string) => void;
+    stretch?: boolean;
   } = $props();
 </script>
 
 {#if node.type === "leaf"}
   {@const group = app.groups.find((g) => g.id === node.groupId)}
   {#if group}
-    <Column {group} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} />
+    <Column {group} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {stretch} />
   {/if}
 {:else if node.direction === "row"}
   <div class="row">
@@ -45,7 +47,7 @@
   <div class="col">
     {#each node.children as child (child.node.id)}
       <div class="col-item" style={`flex:${child.size} 1 0`}>
-        <svelte:self node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} />
+        <svelte:self node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} stretch={true} />
       </div>
     {/each}
   </div>
