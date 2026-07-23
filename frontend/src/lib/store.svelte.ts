@@ -657,8 +657,9 @@ class AppStore {
   async splitPane(groupId: string, direction: "row" | "column"): Promise<string | null> {
     try {
       const newGroup = await unwrap(commands.splitPane(groupId, direction));
+      const paneRoot = await unwrap(commands.loadPaneLayout());
       this.groups = [...this.groups, { id: newGroup.id, width: newGroup.width, auto: newGroup.auto, tabs: [], activeTabId: "" }];
-      this.paneRoot = await unwrap(commands.loadPaneLayout());
+      this.paneRoot = paneRoot;
       return newGroup.id;
     } catch (e) {
       this.#fail(e);
@@ -674,8 +675,9 @@ class AppStore {
     if (!g || g.tabs.length > 0) return; // 既にタブが追加済みなら何もしない
     try {
       await unwrap(commands.discardEmptyGroup(groupId));
+      const paneRoot = await unwrap(commands.loadPaneLayout());
       this.groups = this.groups.filter((x) => x.id !== groupId);
-      this.paneRoot = await unwrap(commands.loadPaneLayout());
+      this.paneRoot = paneRoot;
     } catch (e) {
       this.#fail(e);
     }
