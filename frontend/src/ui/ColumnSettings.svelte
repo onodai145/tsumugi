@@ -29,6 +29,17 @@
     const size = (paneCtx.othersSum * clamped) / (100 - clamped);
     app.resizePane(paneCtx.nodeId, size);
   }
+
+  // 縦分割されたブロック全体の幅(Row内でこのグループを含むSplit自身の幅)。
+  // 一度も分割していない普通のカラムなら isLeaf=true になり、既存のColumnGroup.width
+  // ベースの幅UIをそのまま使う(こちらは触らない)。
+  const rowSlot = $derived(groupId ? app.paneRowSlotContext(groupId) : null);
+
+  function setBlockWidth(w: number) {
+    if (!rowSlot || rowSlot.isLeaf || !Number.isFinite(w)) return;
+    const clamped = Math.min(720, Math.max(220, Math.round(w)));
+    app.resizePane(rowSlot.nodeId, clamped);
+  }
 </script>
 
 <div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
@@ -40,7 +51,7 @@
     </header>
 
     {#if group}
-      {#if !paneCtx}
+      {#if rowSlot?.isLeaf}
         <div class="field">
           <span>幅</span>
           <label class="check-row">
@@ -63,7 +74,20 @@
             />
           </label>
         {/if}
-      {:else}
+      {:else if rowSlot}
+        <label class="field num-field">
+          <span>分割ブロック全体の幅（px、220〜720）</span>
+          <input
+            type="number"
+            min="220"
+            max="720"
+            value={Math.round(rowSlot.size)}
+            onchange={(e) => setBlockWidth(Number((e.currentTarget as HTMLInputElement).value))}
+          />
+        </label>
+      {/if}
+
+      {#if paneCtx}
         <label class="field num-field">
           <span>高さ（%、5〜95）</span>
           <input

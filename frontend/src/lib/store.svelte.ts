@@ -712,6 +712,36 @@ class AppStore {
     return search(this.paneRoot);
   }
 
+  /// groupIdのLeafの「行スロット祖先」を返す: そのLeafがRow分割の直下ならLeaf自身
+  /// (isLeaf=true、幅は今まで通りColumnGroup.width/autoで管理)、Column分割にネスト
+  /// されているならその分割ブロック全体を表すSplitノード(isLeaf=false、幅は
+  /// resizePane経由でこのnodeIdを指定して調整する)を返す。木全体が裸のLeaf1つ
+  /// だけ(まだ一度も分割していない唯一のグループ)の場合もisLeaf=trueとして扱う。
+  paneRowSlotContext(groupId: string): { nodeId: string; size: number; isLeaf: boolean } {
+    if (this.paneRoot.type === "leaf") {
+      return { nodeId: this.paneRoot.id, size: 300, isLeaf: true };
+    }
+    const containsGroup = (node: PaneNode): boolean =>
+      node.type === "leaf" ? node.groupId === groupId : node.children.some((c) => containsGroup(c.node));
+    const search = (node: PaneNode): { nodeId: string; size: number; isLeaf: boolean } | null => {
+      if (node.type !== "split") return null;
+      if (node.direction === "row") {
+        for (const c of node.children) {
+          if (containsGroup(c.node)) {
+            return { nodeId: c.node.id, size: c.size ?? 300, isLeaf: c.node.type === "leaf" };
+          }
+        }
+        return null;
+      }
+      for (const c of node.children) {
+        const found = search(c.node);
+        if (found) return found;
+      }
+      return null;
+    };
+    return search(this.paneRoot) ?? { nodeId: "", size: 300, isLeaf: true };
+  }
+
   async resizePane(nodeId: string, size: number) {
     try {
       await unwrap(commands.resizePane(nodeId, size));
@@ -921,7 +951,11 @@ class AppStore {
         accountId,
         commands.addColumn(accountId, kind, filter, groupId ?? null),
       );
+      // groupId未指定(新規グループ作成)の場合、バックエンドはpane_layoutにも
+      // 追加している(Issue #31)ので、こちらも取り直しておく。
+      const paneRoot = await unwrap(commands.loadPaneLayout());
       const tab = this.#insertTab(opened);
+      this.paneRoot = paneRoot;
       const g = this.groups.find((x) => x.id === opened.group.id);
       if (g) g.activeTabId = tab.id;
       this.#captureInitial(opened.column.id, opened.notes);

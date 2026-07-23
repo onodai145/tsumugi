@@ -250,8 +250,10 @@ impl SettingsStore {
     /// 保存済みツリーに、既に groups から消えたグループを指す Leaf(孤児)が残っている
     /// 場合は、返す前にその場で取り除く(木からも畳む)。`delete_account` 等、
     /// `delete_empty_groups` を経由しない経路でグループが消えた際の後始末を毎回の
-    /// 読み込みで自己修復するため(Issue #31)。ディスクへの書き戻しはしない
-    /// (読むたびに同じ掃除を繰り返すだけで実害が無いため)。
+    /// 読み込みで自己修復するため(Issue #31)。逆に、木の中に一切登場しない groups
+    /// (`add_column` がまだ木への追加を実装していなかった旧バージョンで作られた
+    /// グループ等)があれば、ルートのRow末尾に追加して補う。ディスクへの書き戻しは
+    /// しない(読むたびに同じ掃除/補完を繰り返すだけで実害が無いため)。
     pub fn load_pane_layout(&self) -> Result<PaneNode> {
         let guard = self.data.lock().unwrap();
         let known: std::collections::HashSet<&str> =
@@ -259,6 +261,7 @@ impl SettingsStore {
         if let Some(root) = &guard.pane_layout {
             let mut orphan_ids = Vec::new();
             collect_group_ids(root, &mut orphan_ids);
+            let present: std::collections::HashSet<String> = orphan_ids.iter().cloned().collect();
             orphan_ids.retain(|id| !known.contains(id.as_str()));
             let mut cleaned = root.clone();
             for gid in &orphan_ids {
@@ -269,6 +272,15 @@ impl SettingsStore {
                 PaneNode::Split { .. } => true,
             };
             if root_is_valid {
+                let mut missing: Vec<&ColumnGroup> = guard
+                    .groups
+                    .iter()
+                    .filter(|g| !present.contains(&g.id))
+                    .collect();
+                missing.sort_by_key(|g| g.order);
+                for g in missing {
+                    cleaned.append_row_leaf(&g.id, g.width as f32);
+                }
                 return Ok(cleaned);
             }
             // ルート自体が孤児のLeafで自己削除できない(全グループが入れ替わった等)場合は
@@ -625,6 +637,26 @@ mod tests {
         let cleaned = s.load_pane_layout().unwrap();
         let PaneNode::Leaf { group_id, .. } = &cleaned else { panic!("expected collapsed Leaf") };
         assert_eq!(group_id, "g1");
+    }
+
+    #[test]
+    fn load_pane_layout_appends_groups_missing_from_saved_tree() {
+        // 旧バージョンのadd_column(木への追加を実装する前)が作った、木に一切登場しない
+        // グループがある場合、読み込み時点でRowの末尾に補って返す(Issue #31)。
+        let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 400, auto: false }).unwrap();
+        s.save_pane_layout(&PaneNode::new_leaf("g1")).unwrap();
+
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Split { direction, children, .. } = &root else { panic!("expected Split") };
+        assert_eq!(*direction, SplitDirection::Row);
+        assert_eq!(children.len(), 2);
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "g1");
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "g2");
+        assert_eq!(children[1].size, 400.0);
     }
 
     #[test]

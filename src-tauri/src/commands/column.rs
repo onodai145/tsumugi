@@ -79,6 +79,12 @@ pub async fn add_column(
                 auto: false,
             };
             state.settings.upsert_group(&group)?;
+            // ペイン分割ツリーにも末尾のRow子として追加する。これを忘れると、
+            // Pane.svelteは木だけを辿って描画するため新規グループが画面に一切
+            // 表示されなくなる(Issue #31, Slice 1で漏れていた実際の不具合)。
+            let mut root = state.settings.load_pane_layout()?;
+            root.append_row_leaf(&group.id, width as f32);
+            state.settings.save_pane_layout(&root)?;
             (group, 0)
         }
     };
