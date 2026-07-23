@@ -51,6 +51,18 @@ export const commands = {
 	whoami: (accountId: string) => typedError<User, Error>(__TAURI_INVOKE("whoami", { accountId })),
 	/**  タブを新規作成する。`group_id` が None なら新しい視覚カラム(グループ)を作る。 */
 	addColumn: (accountId: string, kind: ColumnKind, filter: FilterQuery, groupId: string | null) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("add_column", { accountId, kind, filter, groupId })),
+	/**
+	 *  reference_group_id の隣に空の新規グループ(タブなし)を挿入し、その ColumnGroup を返す。
+	 *  フロントは戻り値の group.id で AddColumnModal を「このグループにタブ追加」モードで開く。
+	 */
+	splitPane: (referenceGroupId: string, direction: SplitDirection) => typedError<ColumnGroup, Error>(__TAURI_INVOKE("split_pane", { referenceGroupId, direction })),
+	/**  永続化済みペイン分割ツリー(起動時のレイアウト復元用)。 */
+	loadPaneLayout: () => typedError<PaneNode, Error>(__TAURI_INVOKE("load_pane_layout")),
+	/**
+	 *  タブが1つも無い空グループを削除する(split_paneでタブ追加をキャンセルされた後始末用)。
+	 *  タブが残っている場合は何もしない(誤操作防止)。
+	 */
+	discardEmptyGroup: (groupId: string) => typedError<null, Error>(__TAURI_INVOKE("discard_empty_group", { groupId })),
 	/**  永続化済みタブを再開する（起動時の復元）。 */
 	resumeColumn: (columnId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("resume_column", { columnId })),
 	/**  永続化済みグループ一覧。 */
@@ -480,6 +492,14 @@ export type OpenedColumn = {
 	notifications: Notification[],
 };
 
+export type PaneChild = {
+	node: PaneNode,
+	size: number | null,
+	auto: boolean,
+};
+
+export type PaneNode = { type: "leaf"; id: string; group_id: string } | { type: "split"; id: string; direction: SplitDirection; children: PaneChild[] };
+
 export type Poll = {
 	choices: PollChoice[],
 	multiple: boolean,
@@ -511,6 +531,8 @@ export type SourceItem = {
 	id: string,
 	name: string,
 };
+
+export type SplitDirection = "row" | "column";
 
 /**  テーマ1個分の配色（app.css の CSS変数11個に対応）。 */
 export type ThemeColors = {
