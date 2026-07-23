@@ -599,6 +599,8 @@ class AppStore {
     try {
       await unwrap(commands.moveTab(dragId, loc.group.id, loc.group.tabs.map((t) => t.id)));
       await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
+      // 移動元グループが空になっていればペイン分割ツリーも畳まれているため取り直す(Issue #31)。
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
       this.#fail(e);
     }
@@ -1212,9 +1214,11 @@ class AppStore {
     }
   }
 
-  /// タブを閉じる。グループが空になったらグループも消す。
+  /// タブを閉じる。グループが空になったらグループも消す。空グループが消えた結果
+  /// ペイン分割ツリーが畳まれることがあるため(Issue #31)、paneRootも取り直す。
   async closeTab(tabId: string) {
     await unwrap(commands.closeColumn(tabId));
+    const paneRoot = await unwrap(commands.loadPaneLayout());
     this.#connState.delete(tabId);
     this.#wasReconnecting.delete(tabId);
     for (const g of this.groups) {
@@ -1223,6 +1227,7 @@ class AppStore {
       if (g.activeTabId === tabId) g.activeTabId = g.tabs[0]?.id ?? "";
     }
     this.groups = this.groups.filter((g) => g.tabs.length > 0);
+    this.paneRoot = paneRoot;
     if (this.groups.length > 0 && !this.groups.some((g) => g.id === this.focusedGroupId)) {
       this.focusedGroupId = this.groups[0].id;
     }

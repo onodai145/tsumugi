@@ -246,10 +246,33 @@ impl SettingsStore {
     /// 保存済みツリーがあればそれを返す。無ければ(旧バージョンからの移行)、既存の
     /// groups を order 順に並べた Row 分割としてその場で組み立てて返す
     /// (ファイルへの書き込みは行わない。実体化は次の分割/保存操作まで遅延する)。
+    ///
+    /// 保存済みツリーに、既に groups から消えたグループを指す Leaf(孤児)が残っている
+    /// 場合は、返す前にその場で取り除く(木からも畳む)。`delete_account` 等、
+    /// `delete_empty_groups` を経由しない経路でグループが消えた際の後始末を毎回の
+    /// 読み込みで自己修復するため(Issue #31)。ディスクへの書き戻しはしない
+    /// (読むたびに同じ掃除を繰り返すだけで実害が無いため)。
     pub fn load_pane_layout(&self) -> Result<PaneNode> {
         let guard = self.data.lock().unwrap();
+        let known: std::collections::HashSet<&str> =
+            guard.groups.iter().map(|g| g.id.as_str()).collect();
         if let Some(root) = &guard.pane_layout {
-            return Ok(root.clone());
+            let mut orphan_ids = Vec::new();
+            collect_group_ids(root, &mut orphan_ids);
+            orphan_ids.retain(|id| !known.contains(id.as_str()));
+            let mut cleaned = root.clone();
+            for gid in &orphan_ids {
+                cleaned.remove_group(gid);
+            }
+            let root_is_valid = match &cleaned {
+                PaneNode::Leaf { group_id, .. } => known.contains(group_id.as_str()),
+                PaneNode::Split { .. } => true,
+            };
+            if root_is_valid {
+                return Ok(cleaned);
+            }
+            // ルート自体が孤児のLeafで自己削除できない(全グループが入れ替わった等)場合は
+            // 下の再構築ロジックへフォールバックする。
         }
         let mut groups = guard.groups.clone();
         groups.sort_by_key(|g| g.order);
@@ -288,6 +311,18 @@ impl SettingsStore {
             }
         }
         self.save(&guard)
+    }
+}
+
+/// 木の中に出現する group_id を(順不同で)全て集める。
+fn collect_group_ids(node: &PaneNode, out: &mut Vec<String>) {
+    match node {
+        PaneNode::Leaf { group_id, .. } => out.push(group_id.clone()),
+        PaneNode::Split { children, .. } => {
+            for c in children {
+                collect_group_ids(&c.node, out);
+            }
+        }
     }
 }
 
@@ -436,7 +471,7 @@ pub fn migrate_from_legacy_sqlite(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ColumnKind, FilterQuery, SplitDirection};
+    use crate::domain::{ColumnKind, FilterQuery, PaneChild, SplitDirection};
 
     fn store() -> SettingsStore {
         SettingsStore::new_in_memory()
@@ -563,8 +598,52 @@ mod tests {
     }
 
     #[test]
+    fn load_pane_layout_prunes_orphaned_leaf_and_collapses() {
+        // delete_account等、delete_empty_groupsを経由しない経路でグループが消えた場合の
+        // 自己修復(Issue #31)。g1(存在)とorphan(groupsに無い)の2子Splitは、読み込み時点で
+        // orphanが取り除かれ1子になり、g1単体のLeafへ畳まれて返る。
+        let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        let stale = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Column,
+            children: vec![
+                PaneChild {
+                    node: PaneNode::Leaf { id: "l1".into(), group_id: "g1".into() },
+                    size: 1.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf { id: "l2".into(), group_id: "orphan".into() },
+                    size: 1.0,
+                    auto: false,
+                },
+            ],
+        };
+        s.save_pane_layout(&stale).unwrap();
+
+        let cleaned = s.load_pane_layout().unwrap();
+        let PaneNode::Leaf { group_id, .. } = &cleaned else { panic!("expected collapsed Leaf") };
+        assert_eq!(group_id, "g1");
+    }
+
+    #[test]
+    fn load_pane_layout_falls_back_to_reconstruction_when_root_itself_is_orphaned() {
+        // 全グループが入れ替わった等でルート自体(裸のLeaf)が孤児になった場合は、
+        // remove_groupで自己削除できないため、現在のgroupsから素直に再構築する。
+        let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g_new".into(), order: 0, width: 400, auto: false }).unwrap();
+        s.save_pane_layout(&PaneNode::Leaf { id: "l1".into(), group_id: "g_old_gone".into() }).unwrap();
+
+        let root = s.load_pane_layout().unwrap();
+        let PaneNode::Leaf { group_id, .. } = &root else { panic!("expected Leaf") };
+        assert_eq!(group_id, "g_new");
+    }
+
+    #[test]
     fn pane_layout_round_trips_through_save_and_load() {
         let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
         let root = PaneNode::new_leaf("g1");
         s.save_pane_layout(&root).unwrap();
         assert_eq!(s.load_pane_layout().unwrap(), root);

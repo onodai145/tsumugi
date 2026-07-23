@@ -92,6 +92,9 @@ pub async fn remove_account(state: State<'_, AppState>, account_id: String) -> R
     state.accounts.lock().unwrap().remove(&account_id)?;
     state.secrets.delete(&account_id)?;
     state.settings.delete_account(&account_id)?; // アカウント＋カラムを永続層から削除
+    // 上記でそのアカウントのカラムが全て消えたことで空になったグループが有り得るため、
+    // 空グループとペイン分割ツリー上の対応するLeafも掃除する(Issue #31)。
+    state.settings.delete_empty_groups()?;
     Ok(())
 }
 
