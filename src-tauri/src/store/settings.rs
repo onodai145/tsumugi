@@ -250,23 +250,38 @@ impl SettingsStore {
     /// 保存済みツリーに、既に groups から消えたグループを指す Leaf(孤児)が残っている
     /// 場合は、返す前にその場で取り除く(木からも畳む)。`delete_account` 等、
     /// `delete_empty_groups` を経由しない経路でグループが消えた際の後始末を毎回の
-    /// 読み込みで自己修復するため(Issue #31)。逆に、木の中に一切登場しない groups
-    /// (`add_column` がまだ木への追加を実装していなかった旧バージョンで作られた
-    /// グループ等)があれば、ルートのRow末尾に追加して補う。ディスクへの書き戻しは
-    /// しない(読むたびに同じ掃除/補完を繰り返すだけで実害が無いため)。
+    /// 読み込みで自己修復するため(Issue #31)。同じgroup_idが木の中に複数回登場する
+    /// 場合(add_columnとsplit_paneに一時期あった二重挿入バグの後始末)は1つだけ残す。
+    /// 逆に、木の中に一切登場しない groups(旧バージョンで作られたグループ等)があれば、
+    /// ルートのRow末尾に追加して補う。ディスクへの書き戻しはしない(読むたびに同じ
+    /// 掃除/補完を繰り返すだけで実害が無いため)。
     pub fn load_pane_layout(&self) -> Result<PaneNode> {
         let guard = self.data.lock().unwrap();
         let known: std::collections::HashSet<&str> =
             guard.groups.iter().map(|g| g.id.as_str()).collect();
         if let Some(root) = &guard.pane_layout {
-            let mut orphan_ids = Vec::new();
-            collect_group_ids(root, &mut orphan_ids);
-            let present: std::collections::HashSet<String> = orphan_ids.iter().cloned().collect();
-            orphan_ids.retain(|id| !known.contains(id.as_str()));
+            let mut all_ids = Vec::new();
+            collect_group_ids(root, &mut all_ids);
+            let present: std::collections::HashSet<String> = all_ids.iter().cloned().collect();
+
             let mut cleaned = root.clone();
-            for gid in &orphan_ids {
+
+            let orphan_ids: Vec<&String> = all_ids.iter().filter(|id| !known.contains(id.as_str())).collect();
+            for gid in orphan_ids {
                 cleaned.remove_group(gid);
             }
+
+            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for id in &all_ids {
+                if !known.contains(id.as_str()) {
+                    continue; // 孤児は上ですでに除去済み
+                }
+                if !seen.insert(id.as_str()) {
+                    // 2回目以降の出現(重複)を1つ取り除く
+                    cleaned.remove_group(id);
+                }
+            }
+
             let root_is_valid = match &cleaned {
                 PaneNode::Leaf { group_id, .. } => known.contains(group_id.as_str()),
                 PaneNode::Split { .. } => true,
@@ -657,6 +672,31 @@ mod tests {
         let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
         assert_eq!(group_id, "g2");
         assert_eq!(children[1].size, 400.0);
+    }
+
+    #[test]
+    fn load_pane_layout_dedupes_group_appearing_twice_in_tree() {
+        // add_column/split_paneに一時期あった二重挿入バグの後始末(Issue #31)。
+        // 同じgroup_idが木の中に2回登場する場合、読み込み時点で1つだけ残す。
+        let s = SettingsStore::new_in_memory();
+        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
+        let dup = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Row,
+            children: vec![
+                PaneChild { node: PaneNode::Leaf { id: "l1".into(), group_id: "g1".into() }, size: 300.0, auto: false },
+                PaneChild { node: PaneNode::Leaf { id: "l2".into(), group_id: "g2".into() }, size: 300.0, auto: false },
+                PaneChild { node: PaneNode::Leaf { id: "l3".into(), group_id: "g2".into() }, size: 300.0, auto: false },
+            ],
+        };
+        s.save_pane_layout(&dup).unwrap();
+
+        let cleaned = s.load_pane_layout().unwrap();
+        let mut ids = Vec::new();
+        collect_group_ids(&cleaned, &mut ids);
+        ids.sort();
+        assert_eq!(ids, vec!["g1".to_string(), "g2".to_string()]);
     }
 
     #[test]
