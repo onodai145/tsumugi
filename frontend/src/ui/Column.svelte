@@ -11,12 +11,14 @@
     onEditTab,
     onEditGroup,
     onSplitDown,
+    stretch = false,
   }: {
     group: GroupView;
     onAddTab: (groupId: string) => void;
     onEditTab: (tab: TabView) => void;
     onEditGroup: (groupId: string) => void;
     onSplitDown: (groupId: string) => void;
+    stretch?: boolean;
   } = $props();
 
   const activeTab = $derived(
@@ -55,7 +57,7 @@
 
 <section
   class="column"
-  style={group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
+  style={stretch ? "flex:1 1 0;min-width:0" : group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
   class:dragging={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
   ondragover={(e) => {
@@ -150,7 +152,7 @@
     </div>
   {/if}
 
-  {#if !group.auto}
+  {#if !stretch && !group.auto}
     <div
       class="resize"
       onpointerdown={onResizeDown}

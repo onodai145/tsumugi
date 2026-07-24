@@ -17,6 +17,35 @@
     app.setGroupWidthLocal(groupId, clamped);
     app.persistGroupWidth(groupId, clamped);
   }
+
+  const paneCtx = $derived(groupId ? app.paneColumnContext(groupId) : null);
+
+  function setHeightPercent(p: number) {
+    if (!paneCtx || !Number.isFinite(p)) return;
+    const clamped = Math.min(95, Math.max(5, Math.round(p)));
+    app.resizePane(paneCtx.nodeId, clamped);
+  }
+
+  function setHeightAuto(auto: boolean) {
+    if (!paneCtx) return;
+    app.setPaneAuto(paneCtx.nodeId, auto);
+  }
+
+  // 縦分割されたブロック全体の幅(Row内でこのグループを含むSplit自身の幅)。
+  // 一度も分割していない普通のカラムなら isLeaf=true になり、既存のColumnGroup.width
+  // ベースの幅UIをそのまま使う(こちらは触らない)。
+  const rowSlot = $derived(groupId ? app.paneRowSlotContext(groupId) : null);
+
+  function setBlockWidth(w: number) {
+    if (!rowSlot || rowSlot.isLeaf || !Number.isFinite(w)) return;
+    const clamped = Math.min(720, Math.max(220, Math.round(w)));
+    app.resizePane(rowSlot.nodeId, clamped);
+  }
+
+  function setBlockAuto(auto: boolean) {
+    if (!rowSlot || rowSlot.isLeaf) return;
+    app.setPaneAuto(rowSlot.nodeId, auto);
+  }
 </script>
 
 <div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
@@ -28,27 +57,77 @@
     </header>
 
     {#if group}
-      <div class="field">
-        <span>幅</span>
-        <label class="check-row">
-          <input type="radio" name="width-mode" checked={!group.auto} onchange={() => setAuto(false)} /> 固定（ドラッグで調整）
-        </label>
-        <label class="check-row">
-          <input type="radio" name="width-mode" checked={group.auto} onchange={() => setAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
-        </label>
-      </div>
+      {#if rowSlot?.isLeaf}
+        <div class="field">
+          <span>幅</span>
+          <label class="check-row">
+            <input type="radio" name="width-mode" checked={!group.auto} onchange={() => setAuto(false)} /> 固定（ドラッグで調整）
+          </label>
+          <label class="check-row">
+            <input type="radio" name="width-mode" checked={group.auto} onchange={() => setAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
+          </label>
+        </div>
 
-      {#if !group.auto}
-        <label class="field num-field">
-          <span>幅（px、220〜720）</span>
-          <input
-            type="number"
-            min="220"
-            max="720"
-            value={group.width}
-            onchange={(e) => setWidth(Number((e.currentTarget as HTMLInputElement).value))}
-          />
-        </label>
+        {#if !group.auto}
+          <label class="field num-field">
+            <span>幅（px、220〜720）</span>
+            <input
+              type="number"
+              min="220"
+              max="720"
+              value={group.width}
+              onchange={(e) => setWidth(Number((e.currentTarget as HTMLInputElement).value))}
+            />
+          </label>
+        {/if}
+      {:else if rowSlot}
+        <div class="field">
+          <span>分割ブロック全体の幅</span>
+          <label class="check-row">
+            <input type="radio" name="block-width-mode" checked={!rowSlot.auto} onchange={() => setBlockAuto(false)} /> 固定
+          </label>
+          <label class="check-row">
+            <input type="radio" name="block-width-mode" checked={rowSlot.auto} onchange={() => setBlockAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
+          </label>
+        </div>
+
+        {#if !rowSlot.auto}
+          <label class="field num-field">
+            <span>幅（px、220〜720）</span>
+            <input
+              type="number"
+              min="220"
+              max="720"
+              value={Math.round(rowSlot.size)}
+              onchange={(e) => setBlockWidth(Number((e.currentTarget as HTMLInputElement).value))}
+            />
+          </label>
+        {/if}
+      {/if}
+
+      {#if paneCtx}
+        <div class="field">
+          <span>高さ</span>
+          <label class="check-row">
+            <input type="radio" name="height-mode" checked={!paneCtx.auto} onchange={() => setHeightAuto(false)} /> 固定
+          </label>
+          <label class="check-row">
+            <input type="radio" name="height-mode" checked={paneCtx.auto} onchange={() => setHeightAuto(true)} /> 自動調整（残りを均等割り）
+          </label>
+        </div>
+
+        {#if !paneCtx.auto}
+          <label class="field num-field">
+            <span>高さ（%、5〜95）</span>
+            <input
+              type="number"
+              min="5"
+              max="95"
+              value={Math.round(paneCtx.size)}
+              onchange={(e) => setHeightPercent(Number((e.currentTarget as HTMLInputElement).value))}
+            />
+          </label>
+        {/if}
       {/if}
     {/if}
   </div>

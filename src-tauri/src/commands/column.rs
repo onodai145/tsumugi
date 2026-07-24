@@ -78,7 +78,16 @@ pub async fn add_column(
                 width,
                 auto: false,
             };
+            // load_pane_layout は「groupsに存在するのに木に無いグループ」を自動補完する
+            // (Issue #31の自己修復ロジック)。この group はまだ upsert_group していない
+            // = groupsにまだ存在しないため、ここで読んでも補完対象にならない。
+            // 先にupsert_groupしてしまうと、次のload_pane_layoutが「木に無い新規グループ」
+            // として自動補完し、直後の明示的なappend_row_leafと合わせて二重挿入になる
+            // (実際に発生した不具合: カラム追加のたびに2つ追加される)。
+            let mut root = state.settings.load_pane_layout()?;
+            root.append_row_leaf(&group.id, width as f32);
             state.settings.upsert_group(&group)?;
+            state.settings.save_pane_layout(&root)?;
             (group, 0)
         }
     };
@@ -126,17 +135,38 @@ pub async fn split_pane(
         .unwrap_or(DEFAULT_WIDTH)
         .clamp(220, 720);
     let group = ColumnGroup { id: uuid::Uuid::new_v4().to_string(), order, width, auto: false };
-    state.settings.upsert_group(&group)?;
-
+    // upsert_groupより先にload_pane_layoutする(add_columnと同じ理由: 自己修復ロジックとの
+    // 二重挿入を避けるため。Issue #31)。
     let mut root = state.settings.load_pane_layout()?;
     if !root.insert_sibling(&reference_group_id, &group.id, direction) {
-        // reference_group_idはフロントが既存グループのidしか渡さない前提のため通常到達しないが、
-        // 到達した場合は作成済みの空グループ(まだタブが無い)を後始末してからエラーを返す。
-        state.settings.delete_empty_groups()?;
+        // reference_group_idはフロントが既存グループのidしか渡さない前提のため通常到達しない。
         return Err(Error::Invalid(format!("unknown reference group: {reference_group_id}")));
     }
+    state.settings.upsert_group(&group)?;
     state.settings.save_pane_layout(&root)?;
     Ok(group)
+}
+
+/// ペインノード(Leaf/Splitどちらのidでも可)のsizeを更新する(Column分割の高さ調整用)。
+#[tauri::command]
+#[specta::specta]
+pub async fn resize_pane(state: State<'_, AppState>, node_id: String, size: f32) -> Result<()> {
+    let mut root = state.settings.load_pane_layout()?;
+    if !root.set_size(&node_id, size) {
+        return Err(Error::Invalid(format!("unknown pane node: {node_id}")));
+    }
+    state.settings.save_pane_layout(&root)
+}
+
+/// ペインノード(Leaf/Splitどちらのidでも可)のauto(自動幅調整)フラグを更新する。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_pane_auto(state: State<'_, AppState>, node_id: String, auto: bool) -> Result<()> {
+    let mut root = state.settings.load_pane_layout()?;
+    if !root.set_auto(&node_id, auto) {
+        return Err(Error::Invalid(format!("unknown pane node: {node_id}")));
+    }
+    state.settings.save_pane_layout(&root)
 }
 
 /// 永続化済みペイン分割ツリー(起動時のレイアウト復元用)。
