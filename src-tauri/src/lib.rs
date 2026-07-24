@@ -34,6 +34,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::add_column,
             commands::column::split_pane,
             commands::column::resize_pane,
+            commands::column::set_pane_auto,
             commands::column::load_pane_layout,
             commands::column::discard_empty_group,
             commands::column::resume_column,

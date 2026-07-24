@@ -165,6 +165,24 @@ impl PaneNode {
         false
     }
 
+    /// node_id(Leaf/Splitどちらのidでも可)を持つノードを親から見たautoを上書きする。
+    /// 見つかって更新できたらtrue。set_sizeと同じ理由でルート自身を指す場合はfalse。
+    pub fn set_auto(&mut self, node_id: &str, auto: bool) -> bool {
+        let PaneNode::Split { children, .. } = self else {
+            return false;
+        };
+        for child in children.iter_mut() {
+            if child.node.id() == node_id {
+                child.auto = auto;
+                return true;
+            }
+            if child.node.set_auto(node_id, auto) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// ルート自体が Row の Split ならその末尾に new_group_id の Leaf を追加する。
     /// ルートが Row 以外(裸のLeaf、または Column の Split)の場合は、ルート全体を
     /// 新しい Row の Split でラップし、旧ルートと新規Leafの2子にする(＋カラムで
@@ -340,6 +358,51 @@ mod tests {
         // ルート自身のidを指定しても、sizeを保持する親が無いのでfalse。
         let mut root = PaneNode::Split { id: "root".into(), direction: SplitDirection::Row, children: vec![] };
         assert!(!root.set_size("root", 1.0));
+    }
+
+    #[test]
+    fn set_auto_updates_direct_child_leaf() {
+        let mut root = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Row,
+            children: vec![
+                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
+                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+            ],
+        };
+        assert!(root.set_auto("la", true));
+        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        assert!(children[0].auto);
+        assert!(!children[1].auto); // 兄弟は変化しない
+    }
+
+    #[test]
+    fn set_auto_updates_nested_split_by_its_own_id() {
+        let mut root = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Row,
+            children: vec![PaneChild {
+                node: PaneNode::Split {
+                    id: "inner".into(),
+                    direction: SplitDirection::Column,
+                    children: vec![
+                        PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 1.0, auto: false },
+                        PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 1.0, auto: false },
+                    ],
+                },
+                size: 300.0,
+                auto: false,
+            }],
+        };
+        assert!(root.set_auto("inner", true));
+        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        assert!(children[0].auto);
+    }
+
+    #[test]
+    fn set_auto_returns_false_when_node_id_not_found() {
+        let mut root = PaneNode::new_leaf("a");
+        assert!(!root.set_auto("nope", true));
     }
 
     #[test]

@@ -158,6 +158,17 @@ pub async fn resize_pane(state: State<'_, AppState>, node_id: String, size: f32)
     state.settings.save_pane_layout(&root)
 }
 
+/// ペインノード(Leaf/Splitどちらのidでも可)のauto(自動幅調整)フラグを更新する。
+#[tauri::command]
+#[specta::specta]
+pub async fn set_pane_auto(state: State<'_, AppState>, node_id: String, auto: bool) -> Result<()> {
+    let mut root = state.settings.load_pane_layout()?;
+    if !root.set_auto(&node_id, auto) {
+        return Err(Error::Invalid(format!("unknown pane node: {node_id}")));
+    }
+    state.settings.save_pane_layout(&root)
+}
+
 /// 永続化済みペイン分割ツリー(起動時のレイアウト復元用)。
 #[tauri::command]
 #[specta::specta]

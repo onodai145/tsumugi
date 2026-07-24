@@ -717,18 +717,20 @@ class AppStore {
   /// されているならその分割ブロック全体を表すSplitノード(isLeaf=false、幅は
   /// resizePane経由でこのnodeIdを指定して調整する)を返す。木全体が裸のLeaf1つ
   /// だけ(まだ一度も分割していない唯一のグループ)の場合もisLeaf=trueとして扱う。
-  paneRowSlotContext(groupId: string): { nodeId: string; size: number; isLeaf: boolean } {
+  paneRowSlotContext(groupId: string): { nodeId: string; size: number; auto: boolean; isLeaf: boolean } {
     if (this.paneRoot.type === "leaf") {
-      return { nodeId: this.paneRoot.id, size: 300, isLeaf: true };
+      return { nodeId: this.paneRoot.id, size: 300, auto: false, isLeaf: true };
     }
     const containsGroup = (node: PaneNode): boolean =>
       node.type === "leaf" ? node.groupId === groupId : node.children.some((c) => containsGroup(c.node));
-    const search = (node: PaneNode): { nodeId: string; size: number; isLeaf: boolean } | null => {
+    const search = (
+      node: PaneNode,
+    ): { nodeId: string; size: number; auto: boolean; isLeaf: boolean } | null => {
       if (node.type !== "split") return null;
       if (node.direction === "row") {
         for (const c of node.children) {
           if (containsGroup(c.node)) {
-            return { nodeId: c.node.id, size: c.size ?? 300, isLeaf: c.node.type === "leaf" };
+            return { nodeId: c.node.id, size: c.size ?? 300, auto: c.auto, isLeaf: c.node.type === "leaf" };
           }
         }
         return null;
@@ -739,7 +741,16 @@ class AppStore {
       }
       return null;
     };
-    return search(this.paneRoot) ?? { nodeId: "", size: 300, isLeaf: true };
+    return search(this.paneRoot) ?? { nodeId: "", size: 300, auto: false, isLeaf: true };
+  }
+
+  async setPaneAuto(nodeId: string, auto: boolean) {
+    try {
+      await unwrap(commands.setPaneAuto(nodeId, auto));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
+    } catch (e) {
+      this.#fail(e);
+    }
   }
 
   async resizePane(nodeId: string, size: number) {

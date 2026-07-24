@@ -58,6 +58,8 @@ export const commands = {
 	splitPane: (referenceGroupId: string, direction: SplitDirection) => typedError<ColumnGroup, Error>(__TAURI_INVOKE("split_pane", { referenceGroupId, direction })),
 	/**  ペインノード(Leaf/Splitどちらのidでも可)のsizeを更新する(Column分割の高さ調整用)。 */
 	resizePane: (nodeId: string, size: number | null) => typedError<null, Error>(__TAURI_INVOKE("resize_pane", { nodeId, size })),
+	/**  ペインノード(Leaf/Splitどちらのidでも可)のauto(自動幅調整)フラグを更新する。 */
+	setPaneAuto: (nodeId: string, auto: boolean) => typedError<null, Error>(__TAURI_INVOKE("set_pane_auto", { nodeId, auto })),
 	/**  永続化済みペイン分割ツリー(起動時のレイアウト復元用)。 */
 	loadPaneLayout: () => typedError<PaneNode, Error>(__TAURI_INVOKE("load_pane_layout")),
 	/**

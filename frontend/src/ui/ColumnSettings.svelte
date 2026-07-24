@@ -40,6 +40,11 @@
     const clamped = Math.min(720, Math.max(220, Math.round(w)));
     app.resizePane(rowSlot.nodeId, clamped);
   }
+
+  function setBlockAuto(auto: boolean) {
+    if (!rowSlot || rowSlot.isLeaf) return;
+    app.setPaneAuto(rowSlot.nodeId, auto);
+  }
 </script>
 
 <div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
@@ -75,16 +80,28 @@
           </label>
         {/if}
       {:else if rowSlot}
-        <label class="field num-field">
-          <span>分割ブロック全体の幅（px、220〜720）</span>
-          <input
-            type="number"
-            min="220"
-            max="720"
-            value={Math.round(rowSlot.size)}
-            onchange={(e) => setBlockWidth(Number((e.currentTarget as HTMLInputElement).value))}
-          />
-        </label>
+        <div class="field">
+          <span>分割ブロック全体の幅</span>
+          <label class="check-row">
+            <input type="radio" name="block-width-mode" checked={!rowSlot.auto} onchange={() => setBlockAuto(false)} /> 固定
+          </label>
+          <label class="check-row">
+            <input type="radio" name="block-width-mode" checked={rowSlot.auto} onchange={() => setBlockAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
+          </label>
+        </div>
+
+        {#if !rowSlot.auto}
+          <label class="field num-field">
+            <span>幅（px、220〜720）</span>
+            <input
+              type="number"
+              min="220"
+              max="720"
+              value={Math.round(rowSlot.size)}
+              onchange={(e) => setBlockWidth(Number((e.currentTarget as HTMLInputElement).value))}
+            />
+          </label>
+        {/if}
       {/if}
 
       {#if paneCtx}
