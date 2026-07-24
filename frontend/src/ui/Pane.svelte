@@ -46,7 +46,7 @@
 {:else}
   <div class="col">
     {#each node.children as child (child.node.id)}
-      <div class="col-item" style={`flex:${child.size} 1 0`}>
+      <div class="col-item" style={child.auto ? "flex:1 1 0" : `flex:0 0 ${child.size}%`}>
         <svelte:self node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} stretch={true} />
       </div>
     {/each}

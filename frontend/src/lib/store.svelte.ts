@@ -685,22 +685,18 @@ class AppStore {
     }
   }
 
-  /// groupIdのLeafがColumn分割の直下に居れば、そのノードid・現在のsize・
-  /// 他の兄弟のsize合計(othersSum)を返す。Row分割の直下(または見つからない)ならnull。
-  paneColumnContext(groupId: string): { nodeId: string; size: number; othersSum: number } | null {
-    const search = (node: PaneNode): { nodeId: string; size: number; othersSum: number } | null => {
+  /// groupIdのLeafがColumn分割の直下に居れば、そのノードid・現在のsize(固定時は
+  /// 分割ブロックに対する絶対%)・autoを返す。Row分割の直下(または見つからない)ならnull。
+  paneColumnContext(groupId: string): { nodeId: string; size: number; auto: boolean } | null {
+    const search = (node: PaneNode): { nodeId: string; size: number; auto: boolean } | null => {
       if (node.type !== "split") return null;
       if (node.direction === "column") {
         const idx = node.children.findIndex(
           (c) => c.node.type === "leaf" && c.node.groupId === groupId,
         );
         if (idx >= 0) {
-          const size = node.children[idx].size ?? 1;
-          const othersSum = node.children.reduce(
-            (sum, c, i) => (i === idx ? sum : sum + (c.size ?? 1)),
-            0,
-          );
-          return { nodeId: node.children[idx].node.id, size, othersSum };
+          const c = node.children[idx];
+          return { nodeId: c.node.id, size: c.size ?? 50, auto: c.auto };
         }
       }
       for (const c of node.children) {

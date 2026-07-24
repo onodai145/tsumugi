@@ -19,15 +19,16 @@
   }
 
   const paneCtx = $derived(groupId ? app.paneColumnContext(groupId) : null);
-  const heightPercent = $derived(
-    paneCtx ? Math.round((paneCtx.size / (paneCtx.size + paneCtx.othersSum)) * 100) : 0,
-  );
 
   function setHeightPercent(p: number) {
     if (!paneCtx || !Number.isFinite(p)) return;
     const clamped = Math.min(95, Math.max(5, Math.round(p)));
-    const size = (paneCtx.othersSum * clamped) / (100 - clamped);
-    app.resizePane(paneCtx.nodeId, size);
+    app.resizePane(paneCtx.nodeId, clamped);
+  }
+
+  function setHeightAuto(auto: boolean) {
+    if (!paneCtx) return;
+    app.setPaneAuto(paneCtx.nodeId, auto);
   }
 
   // 縦分割されたブロック全体の幅(Row内でこのグループを含むSplit自身の幅)。
@@ -105,16 +106,28 @@
       {/if}
 
       {#if paneCtx}
-        <label class="field num-field">
-          <span>高さ（%、5〜95）</span>
-          <input
-            type="number"
-            min="5"
-            max="95"
-            value={heightPercent}
-            onchange={(e) => setHeightPercent(Number((e.currentTarget as HTMLInputElement).value))}
-          />
-        </label>
+        <div class="field">
+          <span>高さ</span>
+          <label class="check-row">
+            <input type="radio" name="height-mode" checked={!paneCtx.auto} onchange={() => setHeightAuto(false)} /> 固定
+          </label>
+          <label class="check-row">
+            <input type="radio" name="height-mode" checked={paneCtx.auto} onchange={() => setHeightAuto(true)} /> 自動調整（残りを均等割り）
+          </label>
+        </div>
+
+        {#if !paneCtx.auto}
+          <label class="field num-field">
+            <span>高さ（%、5〜95）</span>
+            <input
+              type="number"
+              min="5"
+              max="95"
+              value={Math.round(paneCtx.size)}
+              onchange={(e) => setHeightPercent(Number((e.currentTarget as HTMLInputElement).value))}
+            />
+          </label>
+        {/if}
       {/if}
     {/if}
   </div>
