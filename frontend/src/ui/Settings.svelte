@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Account } from "../bindings/tauri.gen";
   import NotifySection from "./settings/NotifySection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
   import DisplaySection from "./settings/DisplaySection.svelte";
@@ -14,8 +15,14 @@
   let {
     onclose,
     onAddAccount,
+    onReauth,
     initial = "notify",
-  }: { onclose: () => void; onAddAccount: () => void; initial?: Section } = $props();
+  }: {
+    onclose: () => void;
+    onAddAccount: () => void;
+    onReauth: (account: Account) => void;
+    initial?: Section;
+  } = $props();
 
   const nav: { id: Section; label: string }[] = [
     { id: "accounts", label: "アカウント" },
@@ -51,7 +58,7 @@
       </nav>
       <section class="pane">
         {#if active === "accounts"}
-          <AccountsSection {onAddAccount} />
+          <AccountsSection {onAddAccount} {onReauth} />
         {:else if active === "display"}
           <DisplaySection />
         {:else if active === "reaction"}

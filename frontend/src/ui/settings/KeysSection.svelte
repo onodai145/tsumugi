@@ -232,7 +232,7 @@
     margin: 6px 0 10px;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 6px 0;
   }

@@ -28,6 +28,13 @@ export const commands = {
 	 *  リリースビルド(devtools featureも未使用)ではこの分岐がコンパイルされず何もしない。
 	 */
 	openDevtools: () => __TAURI_INVOKE<void>("open_devtools"),
+	/**
+	 *  フロント側の出来事(通知/通知音の発火など)をRust側ログ経路に流し込む(Issue #12: 「謎の
+	 *  タイミングで通知が来る」の調査用)。ロガー未登録(設定で動作ログがOFF)なら `log` クレートが
+	 *  何もしない実装にフォールバックするだけなので、常時呼んでも安全。
+	 *  level は "error" | "warn" | "info" | "debug"（未知の値は info 扱い）。
+	 */
+	logFrontendEvent: (level: string, message: string) => __TAURI_INVOKE<void>("log_frontend_event", { level, message }),
 	/**  MiAuth を開始し、認可URLと session_id を返す。 */
 	startMiauth: (host: string) => typedError<MiAuthSession, Error>(__TAURI_INVOKE("start_miauth", { host })),
 	/**  ブラウザでの認可完了後に呼ぶ。token を keyring に保存し、Account を返す。 */
@@ -44,6 +51,22 @@ export const commands = {
 	whoami: (accountId: string) => typedError<User, Error>(__TAURI_INVOKE("whoami", { accountId })),
 	/**  タブを新規作成する。`group_id` が None なら新しい視覚カラム(グループ)を作る。 */
 	addColumn: (accountId: string, kind: ColumnKind, filter: FilterQuery, groupId: string | null) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("add_column", { accountId, kind, filter, groupId })),
+	/**
+	 *  reference_group_id の隣に空の新規グループ(タブなし)を挿入し、その ColumnGroup を返す。
+	 *  フロントは戻り値の group.id で AddColumnModal を「このグループにタブ追加」モードで開く。
+	 */
+	splitPane: (referenceGroupId: string, direction: SplitDirection) => typedError<ColumnGroup, Error>(__TAURI_INVOKE("split_pane", { referenceGroupId, direction })),
+	/**  ペインノード(Leaf/Splitどちらのidでも可)のsizeを更新する(Column分割の高さ調整用)。 */
+	resizePane: (nodeId: string, size: number | null) => typedError<null, Error>(__TAURI_INVOKE("resize_pane", { nodeId, size })),
+	/**  ペインノード(Leaf/Splitどちらのidでも可)のauto(自動幅調整)フラグを更新する。 */
+	setPaneAuto: (nodeId: string, auto: boolean) => typedError<null, Error>(__TAURI_INVOKE("set_pane_auto", { nodeId, auto })),
+	/**  永続化済みペイン分割ツリー(起動時のレイアウト復元用)。 */
+	loadPaneLayout: () => typedError<PaneNode, Error>(__TAURI_INVOKE("load_pane_layout")),
+	/**
+	 *  タブが1つも無い空グループを削除する(split_paneでタブ追加をキャンセルされた後始末用)。
+	 *  タブが残っている場合は何もしない(誤操作防止)。
+	 */
+	discardEmptyGroup: (groupId: string) => typedError<null, Error>(__TAURI_INVOKE("discard_empty_group", { groupId })),
 	/**  永続化済みタブを再開する（起動時の復元）。 */
 	resumeColumn: (columnId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("resume_column", { columnId })),
 	/**  永続化済みグループ一覧。 */
@@ -117,6 +140,10 @@ export const commands = {
 	react: (accountId: string, noteId: string, reaction: string) => typedError<null, Error>(__TAURI_INVOKE("react", { accountId, noteId, reaction })),
 	/**  リアクション解除。 */
 	unreact: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unreact", { accountId, noteId })),
+	/**  お気に入り登録。 */
+	favoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("favorite_note", { accountId, noteId })),
+	/**  お気に入り解除。 */
+	unfavoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unfavorite_note", { accountId, noteId })),
 	/**  アンケートに投票する（choice は 0-based index）。 */
 	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
@@ -125,7 +152,22 @@ export const commands = {
 	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
 	/**  クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。 */
 	uploadBytes: (accountId: string, filename: string, bytes: number[]) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_bytes", { accountId, filename, bytes })),
+	/**
+	 *  ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
+	 *  until_id は直前に取得した最後のファイルIDを渡してページングする。
+	 */
+	listDriveFiles: (accountId: string, folderId: string | null, untilId: string | null) => typedError<DriveFile[], Error>(__TAURI_INVOKE("list_drive_files", { accountId, folderId, untilId })),
+	/**
+	 *  ドライブのフォルダ一覧（添付ピッカーのフォルダナビゲーション用）。
+	 *  folder_id: None はルート直下のフォルダ一覧。
+	 */
+	listDriveFolders: (accountId: string, folderId: string | null) => typedError<SourceItem[], Error>(__TAURI_INVOKE("list_drive_folders", { accountId, folderId })),
 	saveUrlToFile: (url: string, path: string) => typedError<null, Error>(__TAURI_INVOKE("save_url_to_file", { url, path })),
+	/**
+	 *  投稿添付の未アップロードローカル画像を data URL(base64) に変換する(投稿前プレビュー用)。
+	 *  動画や未知拡張子は `application/octet-stream` を返す(呼び出し側でバッジ表示にフォールバックする想定)。
+	 */
+	readAttachmentPreview: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_attachment_preview", { path })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
@@ -150,6 +192,12 @@ export const commands = {
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
 	 */
 	syncServerMutes: (accountId: string) => typedError<number, Error>(__TAURI_INVOKE("sync_server_mutes", { accountId })),
+	/**  自分のクリップ一覧を取得。 */
+	listClips: (accountId: string) => typedError<Clip[], Error>(__TAURI_INVOKE("list_clips", { accountId })),
+	/**  クリップを新規作成する。 */
+	createClip: (accountId: string, name: string) => typedError<Clip, Error>(__TAURI_INVOKE("create_clip", { accountId, name })),
+	/**  ノートをクリップへ追加する。 */
+	addNoteToClip: (accountId: string, clipId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("add_note_to_clip", { accountId, clipId, noteId })),
 };
 
 /** Events */
@@ -177,6 +225,18 @@ export type Account = {
 	userId: string,
 	displayName: string,
 	avatarUrl: string | null,
+};
+
+/**
+ *  Misskey のクリップ（名前付きノート集合）。今回のスコープでは一覧表示と
+ *  ノート追加にしか使わないため、フィールドは最小限。
+ */
+export type Clip = {
+	id: string,
+	name: string,
+	description: string | null,
+	isPublic: boolean,
+	notesCount: number,
 };
 
 /**  タブ = 受信ソース + フィルタ（1タイムライン）。視覚的なカラム(ColumnGroup)に属する。 */
@@ -438,6 +498,14 @@ export type OpenedColumn = {
 	notifications: Notification[],
 };
 
+export type PaneChild = {
+	node: PaneNode,
+	size: number | null,
+	auto: boolean,
+};
+
+export type PaneNode = { type: "leaf"; id: string; groupId: string } | { type: "split"; id: string; direction: SplitDirection; children: PaneChild[] };
+
 export type Poll = {
 	choices: PollChoice[],
 	multiple: boolean,
@@ -470,7 +538,9 @@ export type SourceItem = {
 	name: string,
 };
 
-/**  テーマ1個分の配色（app.css の CSS変数9個に対応）。 */
+export type SplitDirection = "row" | "column";
+
+/**  テーマ1個分の配色（app.css の CSS変数11個に対応）。 */
 export type ThemeColors = {
 	surface1: string,
 	surface2: string,
@@ -483,6 +553,10 @@ export type ThemeColors = {
 	success?: string,
 	/**  情報的な意味の強調色（例: リプライバナー）。追加前のカスタムテーマ読み込み用に既定値を持つ。 */
 	info?: string,
+	/**  危険/エラーの意味の強調色。追加前のカスタムテーマ読み込み用に既定値を持つ。 */
+	danger?: string,
+	/**  警告の意味の強調色。追加前のカスタムテーマ読み込み用に既定値を持つ。 */
+	warning?: string,
 };
 
 /**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。 */
@@ -511,6 +585,12 @@ export type UiPrefs = {
 	columnOpacity?: number,
 	/**  背景画像の配置方法。"cover" | "contain" | "fill" | "tile"（Issue #45）。 */
 	backgroundFitMode?: string,
+	/**
+	 *  背景画像の基準点（background-position）。9点グリッドから選択（Issue #76）。
+	 *  "top-left" | "top" | "top-right" | "left" | "center" | "right"
+	 *  | "bottom-left" | "bottom" | "bottom-right"
+	 */
+	backgroundPosition?: string,
 	/**
 	 *  リアクションピッカーのピン留め絵文字（Issue #19）。Unicode絵文字はそのまま、
 	 *  カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
@@ -549,6 +629,11 @@ export type UiPrefs = {
 	noteCacheMaxAgeDays?: number,
 	/**  ローカルキャッシュDBのサイズ上限（MB）。超えている間は古い順に削除し続ける。0 なら無制限。 */
 	noteCacheMaxSizeMb?: number,
+	/**
+	 *  Rust側ログ(WS再接続/pingタイムアウト等)をアプリのログディレクトリへファイル永続化するか
+	 *  （Issue #12: 「謎のタイミングで通知が来る」の調査用）。切替はアプリ再起動後に反映される。
+	 */
+	enableFileLogging?: boolean,
 };
 
 /**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */

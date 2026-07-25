@@ -3,6 +3,7 @@
   import AccountSelect from "./AccountSelect.svelte";
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import Dropdown from "./Dropdown.svelte";
+  import DrivePicker from "./DrivePicker.svelte";
   import { commands, unwrap } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import { ImagePlus, X } from "@lucide/svelte";
@@ -50,9 +51,60 @@
     { value: "hour", label: "時間後" },
     { value: "day", label: "日後" },
   ];
-  let attached = $state<DriveFile[]>([]);
-  let uploading = $state(false);
+  type AttachmentItem =
+    | { kind: "local"; id: string; path: string; name: string; previewUrl: string | null }
+    | { kind: "drive"; id: string; file: DriveFile };
+
+  const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+  function extLower(name: string): string {
+    const i = name.lastIndexOf(".");
+    return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
+  }
+
+  let attachments = $state<AttachmentItem[]>([]);
+  let attachTrigger = $state<HTMLElement | undefined>(undefined);
+  let showAttachMenu = $state(false);
+  let attachMenuPos = $state<{ left: number; top: number } | null>(null);
+  let showDrivePicker = $state(false);
+
+  function toggleAttachMenu() {
+    if (showAttachMenu) {
+      showAttachMenu = false;
+      return;
+    }
+    const r = attachTrigger?.getBoundingClientRect();
+    if (r) attachMenuPos = { left: r.left, top: r.bottom + 4 };
+    showAttachMenu = true;
+  }
+
+  function attachPortal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
+  async function chooseLocalUpload() {
+    showAttachMenu = false;
+    await pickFiles();
+  }
+
+  function chooseDrivePicker() {
+    showAttachMenu = false;
+    showDrivePicker = true;
+  }
+
+  function onDriveFilesSelected(picked: DriveFile[]) {
+    const known = new Set(
+      attachments.flatMap((a) => (a.kind === "drive" ? [a.file.id] : [])),
+    );
+    const additions: AttachmentItem[] = picked
+      .filter((f) => !known.has(f.id))
+      .map((f) => ({ kind: "drive", id: f.id, file: f }));
+    attachments = [...attachments, ...additions];
+  }
   let busy = $state(false);
+  let uploadingAttachmentId = $state<string | null>(null);
+  let failedAttachmentId = $state<string | null>(null);
   let err = $state<string | null>(null);
   let replyTo = $state<Note | undefined>(undefined);
   let quoteOf = $state<Note | undefined>(undefined);
@@ -65,7 +117,7 @@
       !focused &&
       !text.trim() &&
       !cw.trim() &&
-      attached.length === 0 &&
+      attachments.length === 0 &&
       !usePoll &&
       !replyTo &&
       !quoteOf,
@@ -115,20 +167,22 @@
     });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
-    uploading = true;
-    try {
-      for (const p of paths) {
-        attached = [...attached, await unwrap(commands.uploadFile(accountId, p))];
+    for (const p of paths) {
+      const name = p.split(/[\\/]/).pop() ?? p;
+      let previewUrl: string | null = null;
+      if (IMAGE_EXTENSIONS.has(extLower(name))) {
+        try {
+          previewUrl = await unwrap(commands.readAttachmentPreview(p));
+        } catch {
+          previewUrl = null;
+        }
       }
-    } catch (e) {
-      err = String(e);
-    } finally {
-      uploading = false;
+      attachments = [...attachments, { kind: "local", id: crypto.randomUUID(), path: p, name, previewUrl }];
     }
   }
 
   function removeAttached(id: string) {
-    attached = attached.filter((f) => f.id !== id);
+    attachments = attachments.filter((a) => a.id !== id);
   }
 
   async function submit() {
@@ -138,25 +192,43 @@
       return;
     }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
-    if (!text.trim() && !quoteOf && choices.length === 0 && attached.length === 0) return;
+    if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
     let expiresAt: number | null = null;
     if (pollExpiryMode === "at" && pollExpiresAt) {
       expiresAt = new Date(pollExpiresAt).getTime();
     } else if (pollExpiryMode === "after") {
       expiresAt = Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
     }
-    const draft: NoteDraft = {
-      text: text.trim() || null,
-      cw: useCw && cw.trim() ? cw.trim() : null,
-      visibility,
-      fileIds: attached.map((f) => f.id),
-      poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt } : null,
-      replyId: replyTo?.id ?? null,
-      renoteId: quoteOf?.id ?? null,
-      localOnly,
-    };
+
     busy = true;
+    failedAttachmentId = null;
     try {
+      for (const a of attachments) {
+        if (a.kind === "drive") continue;
+        uploadingAttachmentId = a.id;
+        let file: DriveFile;
+        try {
+          file = await unwrap(commands.uploadFile(accountId, a.path));
+        } catch (e) {
+          failedAttachmentId = a.id;
+          err = String(e);
+          return;
+        } finally {
+          uploadingAttachmentId = null;
+        }
+        attachments = attachments.map((x) => (x.id === a.id ? { kind: "drive", id: file.id, file } : x));
+      }
+
+      const draft: NoteDraft = {
+        text: text.trim() || null,
+        cw: useCw && cw.trim() ? cw.trim() : null,
+        visibility,
+        fileIds: attachments.flatMap((a) => (a.kind === "drive" ? [a.file.id] : [])),
+        poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt } : null,
+        replyId: replyTo?.id ?? null,
+        renoteId: quoteOf?.id ?? null,
+        localOnly,
+      };
       await app.postNote(accountId, draft);
       text = "";
       cw = "";
@@ -169,7 +241,7 @@
       pollAfterAmount = 1;
       pollAfterUnit = "hour";
       localOnly = false;
-      attached = [];
+      attachments = [];
       replyTo = undefined;
       quoteOf = undefined;
       onPosted?.();
@@ -177,12 +249,14 @@
       err = String(e);
     } finally {
       busy = false;
+      uploadingAttachmentId = null;
     }
   }
 
   function onKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
+      if (busy) return;
       submit();
     } else if (e.key === "Escape" && (replyTo || quoteOf)) {
       e.preventDefault();
@@ -231,19 +305,29 @@
     onblur={() => (focused = false)}
   ></textarea>
 
-  {#if attached.length > 0 || uploading}
+  {#if attachments.length > 0}
     <div class="thumbs">
-      {#each attached as f (f.id)}
+      {#each attachments as a (a.id)}
         <div class="thumb-wrap">
-          {#if f.mimeType.startsWith("image/")}
-            <img class="thumb" src={f.thumbnailUrl ?? f.url} alt="" />
+          {#if a.kind === "drive"}
+            {#if a.file.mimeType.startsWith("image/")}
+              <img class="thumb" src={a.file.thumbnailUrl ?? a.file.url} alt="" />
+            {:else}
+              <span class="thumb badge">{a.file.mimeType.split("/")[0]}</span>
+            {/if}
+          {:else if a.previewUrl}
+            <img class="thumb" src={a.previewUrl} alt="" />
           {:else}
-            <span class="thumb badge">{f.mimeType.split("/")[0]}</span>
+            <span class="thumb badge">{extLower(a.name).toUpperCase() || "FILE"}</span>
           {/if}
-          <button class="thumb-x" title="削除" onclick={() => removeAttached(f.id)}><X size={10} /></button>
+          {#if uploadingAttachmentId === a.id}
+            <span class="thumb-status" title="アップロード中">…</span>
+          {:else if failedAttachmentId === a.id}
+            <span class="thumb-status error" title={err ?? "アップロードに失敗しました"}>!</span>
+          {/if}
+          <button class="thumb-x" title="削除" onclick={() => removeAttached(a.id)}><X size={10} /></button>
         </div>
       {/each}
-      {#if uploading}<span class="thumb badge">…</span>{/if}
     </div>
   {/if}
 
@@ -303,7 +387,13 @@
   <div class="toolbar">
     <div class="tools left">
       <VisibilitySelect bind:value={visibility} />
-      <button class="icon" title="画像を添付" onclick={pickFiles} disabled={uploading}><ImagePlus size={16} /></button>
+      <button
+        class="icon"
+        title="画像を添付"
+        bind:this={attachTrigger}
+        onclick={toggleAttachMenu}
+        disabled={busy}
+      ><ImagePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
@@ -315,6 +405,41 @@
   </div>
   </div>
 </div>
+
+{#if showAttachMenu && attachMenuPos}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="attach-overlay" use:attachPortal onclick={() => (showAttachMenu = false)} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="attach-menu"
+      style={`left:${attachMenuPos.left}px;top:${attachMenuPos.top}px`}
+      onclick={(e) => e.stopPropagation()}
+      role="menu"
+      tabindex="-1"
+    >
+      <button
+        class="attach-item"
+        type="button"
+        disabled={!accountId}
+        title={accountId ? undefined : "アカウントを選択してください"}
+        onclick={chooseLocalUpload}
+      >ローカルから選択</button>
+      <button
+        class="attach-item"
+        type="button"
+        disabled={!accountId}
+        title={accountId ? undefined : "アカウントを選択してください"}
+        onclick={chooseDrivePicker}
+      >ドライブから選択</button>
+    </div>
+  </div>
+{/if}
+
+{#if showDrivePicker && accountId}
+  <DrivePicker {accountId} onSelect={onDriveFilesSelected} onclose={() => (showDrivePicker = false)} />
+{/if}
 
 <style>
   .composewrap {
@@ -507,6 +632,24 @@
     height: 14px;
     cursor: pointer;
   }
+  .thumb-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    bottom: -4px;
+    left: -4px;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    font-size: 0.6rem;
+  }
+  .thumb-status.error {
+    background: var(--danger);
+  }
   .toolbar {
     display: flex;
     align-items: center;
@@ -576,8 +719,42 @@
     opacity: 0.5;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-weight: 700;
     flex: none;
+  }
+  .attach-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+  }
+  .attach-menu {
+    position: fixed;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    padding: 4px;
+    min-width: 160px;
+  }
+  .attach-item {
+    display: block;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    font-size: 0.82rem;
+  }
+  .attach-item:hover {
+    background: var(--surface-2);
+  }
+  .attach-item:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

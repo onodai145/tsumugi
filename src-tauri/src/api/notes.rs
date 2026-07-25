@@ -125,6 +125,22 @@ pub async fn delete_reaction(client: &MisskeyClient, note_id: &str) -> Result<()
     Ok(())
 }
 
+/// お気に入り登録。`notes/favorites/create`。
+pub async fn create_favorite(client: &MisskeyClient, note_id: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("notes/favorites/create", &json!({ "noteId": note_id }))
+        .await?;
+    Ok(())
+}
+
+/// お気に入り解除。`notes/favorites/delete`。
+pub async fn delete_favorite(client: &MisskeyClient, note_id: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("notes/favorites/delete", &json!({ "noteId": note_id }))
+        .await?;
+    Ok(())
+}
+
 /// 投票（choice は 0-based index）。
 pub async fn vote_poll(client: &MisskeyClient, note_id: &str, choice: u32) -> Result<()> {
     let _: serde_json::Value = client

@@ -1,7 +1,11 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
+  import type { Account } from "../../bindings/tauri.gen";
 
-  let { onAddAccount }: { onAddAccount: () => void } = $props();
+  let {
+    onAddAccount,
+    onReauth,
+  }: { onAddAccount: () => void; onReauth: (account: Account) => void } = $props();
 
   let busyId = $state<string | null>(null);
   let confirmId = $state<string | null>(null);
@@ -59,6 +63,7 @@
           {#if a.id !== app.defaultAccountId()}
             <button class="ghost" onclick={() => makeDefault(a.id)}>既定に設定</button>
           {/if}
+          <button class="ghost" onclick={() => onReauth(a)}>再認証</button>
           <button class="ghost" onclick={() => (confirmId = a.id)}>削除</button>
         {/if}
       </li>
@@ -160,7 +165,7 @@
     padding: 5px 10px;
     border: none;
     border-radius: 6px;
-    background: #ef4444;
+    background: var(--danger);
     color: #fff;
     cursor: pointer;
     font-size: 0.78rem;
@@ -187,7 +192,7 @@
     cursor: pointer;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 8px 0 0;
   }

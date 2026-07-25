@@ -3,6 +3,7 @@
   import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import { PRESETS, THEME_VAR_KEYS } from "../../lib/theme";
   import { BACKGROUND_FIT_MODE_OPTIONS, type BackgroundFitMode } from "../../lib/backgroundFitMode";
+  import { BACKGROUND_POSITION_GRID, type BackgroundPosition } from "../../lib/backgroundPosition";
   import type { CustomTheme, ThemeColors } from "../../bindings/tauri.gen";
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
 
@@ -16,6 +17,9 @@
   let backgroundFitMode = $state<BackgroundFitMode>(
     (app.ui.backgroundFitMode as BackgroundFitMode) ?? "cover",
   );
+  let backgroundPosition = $state<BackgroundPosition>(
+    (app.ui.backgroundPosition as BackgroundPosition) ?? "center",
+  );
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let uiMode = $state(app.ui.uiMode ?? "auto");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
@@ -24,6 +28,19 @@
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
+
+  // 背景画像の基準点（9点グリッド、Issue #76）。position→アクセシブルラベル。
+  const positionLabels: Record<BackgroundPosition, string> = {
+    "top-left": "左上",
+    top: "上",
+    "top-right": "右上",
+    left: "左",
+    center: "中央",
+    right: "右",
+    "bottom-left": "左下",
+    bottom: "下",
+    "bottom-right": "右下",
+  };
 
   const themes: { id: string; label: string }[] = [
     { id: "auto", label: "OSに合わせる" },
@@ -50,6 +67,8 @@
     accent: "アクセント",
     success: "成功色(Renoteバナー等)",
     info: "情報色(リプライバナー等)",
+    danger: "危険色(削除ボタン等)",
+    warning: "警告色",
   };
   const HEX_RE = /^#[0-9a-fA-F]{6}$/;
   function blankColors(): ThemeColors {
@@ -63,6 +82,8 @@
       accent: "#7c5cff",
       success: "#22c55e",
       info: "#3b82f6",
+      danger: "#ef4444",
+      warning: "#eab308",
     };
   }
   let editingTheme = $state<CustomTheme | null>(null);
@@ -73,7 +94,7 @@
     editErr = null;
   }
   function startEditTheme(t: CustomTheme) {
-    // success/info 追加前に作られたカスタムテーマは colors に無いことがあるため、
+    // success/info/danger/warning 追加前に作られたカスタムテーマは colors に無いことがあるため、
     // 既定値で埋めてから編集フォームへ渡す(undefinedのまま渡すとhex入力欄が空になる)。
     editingTheme = { id: t.id, name: t.name, colors: { ...blankColors(), ...t.colors } };
     editErr = null;
@@ -168,6 +189,7 @@
         backgroundBlur,
         columnOpacity,
         backgroundFitMode,
+        backgroundPosition,
         uiMode,
         emojiStyle,
         gapFillLimit: gapLimit,
@@ -370,6 +392,22 @@
       {/each}
     </div>
   </div>
+  {#if backgroundFitMode !== "fill"}
+    <div class="field">
+      <span>基準点</span>
+      <div class="pos-grid">
+        {#each BACKGROUND_POSITION_GRID as p (p)}
+          <button
+            class="pos-btn"
+            class:active={backgroundPosition === p}
+            title={positionLabels[p]}
+            aria-label={positionLabels[p]}
+            onclick={() => (backgroundPosition = p)}
+          ></button>
+        {/each}
+      </div>
+    </div>
+  {/if}
   <label class="field">
     <span>背景の暗さ（{backgroundDim}%）</span>
     <input type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
@@ -429,6 +467,27 @@
   .seg-btn.active {
     background: var(--accent);
     color: #fff;
+  }
+  .pos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 28px);
+    grid-template-rows: repeat(3, 28px);
+    gap: 4px;
+    width: fit-content;
+  }
+  .pos-btn {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    cursor: pointer;
+    padding: 0;
+  }
+  .pos-btn:hover {
+    border-color: var(--accent);
+  }
+  .pos-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
   }
   input[type="number"] {
     padding: 7px 9px;
@@ -643,7 +702,7 @@
   }
   .ok {
     font-size: 0.8rem;
-    color: #22c55e;
+    color: var(--success);
   }
   .save {
     padding: 7px 18px;
@@ -658,7 +717,7 @@
     opacity: 0.5;
   }
   .err {
-    color: #ef4444;
+    color: var(--danger);
     font-size: 0.82rem;
     margin: 8px 0 0;
   }

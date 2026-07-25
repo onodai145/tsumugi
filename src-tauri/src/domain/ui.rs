@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
-/// テーマ1個分の配色（app.css の CSS変数9個に対応）。
+/// テーマ1個分の配色（app.css の CSS変数11個に対応）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeColors {
@@ -19,6 +19,12 @@ pub struct ThemeColors {
     /// 情報的な意味の強調色（例: リプライバナー）。追加前のカスタムテーマ読み込み用に既定値を持つ。
     #[serde(default = "default_info_color")]
     pub info: String,
+    /// 危険/エラーの意味の強調色。追加前のカスタムテーマ読み込み用に既定値を持つ。
+    #[serde(default = "default_danger_color")]
+    pub danger: String,
+    /// 警告の意味の強調色。追加前のカスタムテーマ読み込み用に既定値を持つ。
+    #[serde(default = "default_warning_color")]
+    pub warning: String,
 }
 
 fn default_success_color() -> String {
@@ -27,6 +33,14 @@ fn default_success_color() -> String {
 
 fn default_info_color() -> String {
     "#3b82f6".into()
+}
+
+fn default_danger_color() -> String {
+    "#ef4444".into()
+}
+
+fn default_warning_color() -> String {
+    "#eab308".into()
 }
 
 /// ユーザーが作成したカスタムテーマ。
@@ -69,6 +83,11 @@ pub struct UiPrefs {
     /// 背景画像の配置方法。"cover" | "contain" | "fill" | "tile"（Issue #45）。
     #[serde(default = "default_background_fit_mode")]
     pub background_fit_mode: String,
+    /// 背景画像の基準点（background-position）。9点グリッドから選択（Issue #76）。
+    /// "top-left" | "top" | "top-right" | "left" | "center" | "right"
+    /// | "bottom-left" | "bottom" | "bottom-right"
+    #[serde(default = "default_background_position")]
+    pub background_position: String,
     /// リアクションピッカーのピン留め絵文字（Issue #19）。Unicode絵文字はそのまま、
     /// カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
     #[serde(default = "default_pinned_emojis")]
@@ -105,6 +124,10 @@ pub struct UiPrefs {
     /// ローカルキャッシュDBのサイズ上限（MB）。超えている間は古い順に削除し続ける。0 なら無制限。
     #[serde(default)]
     pub note_cache_max_size_mb: i32,
+    /// Rust側ログ(WS再接続/pingタイムアウト等)をアプリのログディレクトリへファイル永続化するか
+    /// （Issue #12: 「謎のタイミングで通知が来る」の調査用）。切替はアプリ再起動後に反映される。
+    #[serde(default)]
+    pub enable_file_logging: bool,
 }
 
 fn default_column_opacity() -> i32 {
@@ -113,6 +136,10 @@ fn default_column_opacity() -> i32 {
 
 fn default_background_fit_mode() -> String {
     "cover".into()
+}
+
+fn default_background_position() -> String {
+    "center".into()
 }
 
 fn default_pinned_emojis() -> Vec<String> {
@@ -154,6 +181,7 @@ impl Default for UiPrefs {
             background_blur: 0,
             column_opacity: default_column_opacity(),
             background_fit_mode: default_background_fit_mode(),
+            background_position: default_background_position(),
             pinned_emojis: default_pinned_emojis(),
             ui_mode: default_ui_mode(),
             default_account_id: String::new(),
@@ -164,6 +192,7 @@ impl Default for UiPrefs {
             note_cache_limit: default_note_cache_limit(),
             note_cache_max_age_days: 0,
             note_cache_max_size_mb: 0,
+            enable_file_logging: false,
         }
     }
 }
@@ -189,6 +218,8 @@ mod tests {
         assert_eq!(v.column_opacity, 100);
         // background_fit_mode も同様に既定値(cover, 追加前の見た目)へフォールバックすること。
         assert_eq!(v.background_fit_mode, "cover");
+        // background_position も同様に既定値(center, 追加前の見た目)へフォールバックすること。
+        assert_eq!(v.background_position, "center");
         // pinned_emojis も同様に既定値(追加前のハードコード8種)へフォールバックすること。
         assert_eq!(
             v.pinned_emojis,
@@ -203,11 +234,12 @@ mod tests {
         assert_eq!(v.note_cache_limit, 10000);
         assert_eq!(v.note_cache_max_age_days, 0);
         assert_eq!(v.note_cache_max_size_mb, 0);
+        assert_eq!(v.enable_file_logging, false);
     }
 
     #[test]
     fn theme_colors_deserializes_legacy_json_without_success_info() {
-        // success/info 追加前に保存されたカスタムテーマも読めること（#[serde(default)]）
+        // success/info/danger/warning 追加前に保存されたカスタムテーマも読めること（#[serde(default)]）
         let v: ThemeColors = serde_json::from_str(
             r##"{"surface1":"#111","surface2":"#222","surface3":"#333","border":"#444",
                 "text":"#eee","textDim":"#999","accent":"#ff8800"}"##,
@@ -215,6 +247,8 @@ mod tests {
         .unwrap();
         assert_eq!(v.success, "#22c55e");
         assert_eq!(v.info, "#3b82f6");
+        assert_eq!(v.danger, "#ef4444");
+        assert_eq!(v.warning, "#eab308");
     }
 
     #[test]
@@ -231,6 +265,7 @@ mod tests {
             background_blur: 8,
             column_opacity: 85,
             background_fit_mode: "tile".into(),
+            background_position: "top-left".into(),
             pinned_emojis: vec!["👍".into(), ":blob_cat:".into()],
             ui_mode: "mobile".into(),
             default_account_id: "a1".into(),
@@ -249,12 +284,15 @@ mod tests {
                     accent: "#ff8800".into(),
                     success: "#16a34a".into(),
                     info: "#2563eb".into(),
+                    danger: "#dc2626".into(),
+                    warning: "#ca8a04".into(),
                 },
             }],
             media_thumbnail_height: 320,
             note_cache_limit: 8000,
             note_cache_max_age_days: 30,
             note_cache_max_size_mb: 200,
+            enable_file_logging: true,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();

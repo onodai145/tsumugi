@@ -1,6 +1,6 @@
 // アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
-import { commands, events, unwrap, formatError } from "./ipc";
+import { commands, events, unwrap, unwrapAcc, formatError, ForbiddenError } from "./ipc";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -24,11 +24,14 @@ import type {
   NotifyConfig,
   UiPrefs,
   LatestRelease,
+  Clip,
+  PaneNode,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
+import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
 import { isMobilePlatform } from "./platform";
@@ -83,17 +86,31 @@ export interface ComposeState {
 }
 
 export type LogLevel = "info" | "success" | "warn" | "error";
+
+// リアクションピッカーの所有者トークン。同じノートが複数のNoteCard（Renote直後の
+// オリジナル＋Renote版の並列表示や、複数カラムでの重複表示）に同時に描画されうるため、
+// noteId一致だけでは開いた側とは別のインスタンスにもピッカーが出てしまう。
+// マウス操作は各NoteCardインスタンス固有のオブジェクト参照で、キーボード操作は
+// フォーカス中タブのtabIdで識別し、一致するインスタンスだけが表示するようにする。
+// id/tabId は文字列で保持する。$state はオブジェクトを深くプロキシするため、
+// オブジェクト参照(===)で持つと state 経由で読み出した側が別プロキシになり
+// 常に不一致になる（一意な文字列なら値比較になるためこの問題を回避できる）。
+export type ReactPickerToken =
+  | { kind: "instance"; id: string }
+  | { kind: "keyboard"; tabId: string };
 /// Backstage（操作ログ/エラー）の1エントリ。
 export interface LogEntry {
   id: number;
   at: number; // epoch ms
   level: LogLevel;
   text: string;
+  reauthAccountId?: string; // 403由来のエラーなら、再認証を促すボタンをBackstageが描画する
 }
 
 class AppStore {
   accounts = $state<Account[]>([]);
   groups = $state<GroupView[]>([]);
+  paneRoot = $state<PaneNode>({ type: "split", id: "boot", direction: "row", children: [] });
   booting = $state(true);
   error = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
@@ -113,6 +130,7 @@ class AppStore {
     backgroundBlur: 0,
     columnOpacity: 100,
     backgroundFitMode: "cover",
+    backgroundPosition: "center",
     pinnedEmojis: DEFAULT_PINNED_EMOJIS,
     uiMode: "auto",
     defaultAccountId: "",
@@ -126,7 +144,7 @@ class AppStore {
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
-  reactPickerNoteId = $state<string | null>(null);
+  reactPicker = $state<{ noteId: string; token: ReactPickerToken } | null>(null);
   // Backstage: 操作ログ・エラー（新しいものが先頭）
   logs = $state<LogEntry[]>([]);
   #logSeq = 0;
@@ -208,6 +226,7 @@ class AppStore {
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, auto: g.auto, tabs: [], activeTabId: "" }));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
       const tabDefs = await unwrap(commands.listColumns());
       for (const tab of tabDefs) {
         try {
@@ -320,17 +339,31 @@ class AppStore {
   // ---- Backstage（操作ログ） ----
 
   static #LOG_CAP = 300;
-  #log(level: LogLevel, text: string) {
-    this.logs = [{ id: ++this.#logSeq, at: Date.now(), level, text }, ...this.logs].slice(
-      0,
-      AppStore.#LOG_CAP,
-    );
+  // Rust側の log::Level には無い "success" は info 相当として送る。
+  static #RUST_LEVEL: Record<LogLevel, "error" | "warn" | "info"> = {
+    error: "error",
+    warn: "warn",
+    info: "info",
+    success: "info",
+  };
+  #log(level: LogLevel, text: string, reauthAccountId?: string) {
+    this.logs = [
+      { id: ++this.#logSeq, at: Date.now(), level, text, reauthAccountId },
+      ...this.logs,
+    ].slice(0, AppStore.#LOG_CAP);
+    if (this.ui.enableFileLogging) void commands.logFrontendEvent(AppStore.#RUST_LEVEL[level], text);
+  }
+  /// Backstage(UI)には出さず、設定でONならRust側のファイルログにのみ書く
+  /// (Issue #12調査用の詳細ログ。debugレベルなのでBackstageの通常ログよりファイル側でのみ見える)。
+  #logDebug(text: string) {
+    if (this.ui.enableFileLogging) void commands.logFrontendEvent("debug", text);
   }
   /// エラーをバナー表示＋Backstage へ記録する共通処理。
+  /// ForbiddenError なら「再認証」アクションをログ行に付与する。
   #fail(e: unknown) {
     const msg = String(e);
     this.error = msg;
-    this.#log("error", msg);
+    this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
   }
   clearLogs() {
     this.logs = [];
@@ -492,9 +525,16 @@ class AppStore {
       case "note.renote":
         void this.renote(sel.tab.accountId, target.id);
         return;
-      case "note.react":
-        this.reactPickerNoteId = this.reactPickerNoteId === target.id ? null : target.id;
+      case "note.react": {
+        const isOpen =
+          this.reactPicker?.noteId === target.id &&
+          this.reactPicker?.token.kind === "keyboard" &&
+          this.reactPicker.token.tabId === sel.tab.id;
+        this.reactPicker = isOpen
+          ? null
+          : { noteId: target.id, token: { kind: "keyboard", tabId: sel.tab.id } };
         return;
+      }
       case "note.open": {
         const acc = this.accounts.find((a) => a.id === sel.tab.accountId);
         if (acc) void openUrl(`https://${acc.host}/notes/${target.id}`);
@@ -559,6 +599,8 @@ class AppStore {
     try {
       await unwrap(commands.moveTab(dragId, loc.group.id, loc.group.tabs.map((t) => t.id)));
       await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
+      // 移動元グループが空になっていればペイン分割ツリーも畳まれているため取り直す(Issue #31)。
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
       this.#fail(e);
     }
@@ -612,6 +654,110 @@ class AppStore {
     }
   }
 
+  // ---- ペイン分割(Issue #31 Slice 1: 下方向のみ) ----
+
+  async splitPane(groupId: string, direction: "row" | "column"): Promise<string | null> {
+    try {
+      const newGroup = await unwrap(commands.splitPane(groupId, direction));
+      const paneRoot = await unwrap(commands.loadPaneLayout());
+      this.groups = [...this.groups, { id: newGroup.id, width: newGroup.width, auto: newGroup.auto, tabs: [], activeTabId: "" }];
+      this.paneRoot = paneRoot;
+      return newGroup.id;
+    } catch (e) {
+      this.#fail(e);
+      return null;
+    }
+  }
+
+  /// splitPaneで作ったがタブ追加をキャンセルされた空グループを後始末する
+  /// (discardEmptyGroupコマンドはタブが残っている場合は何もしないので、
+  /// 成功時にも安全に呼べる)。
+  async discardEmptyGroup(groupId: string) {
+    const g = this.groups.find((x) => x.id === groupId);
+    if (!g || g.tabs.length > 0) return; // 既にタブが追加済みなら何もしない
+    try {
+      await unwrap(commands.discardEmptyGroup(groupId));
+      const paneRoot = await unwrap(commands.loadPaneLayout());
+      this.groups = this.groups.filter((x) => x.id !== groupId);
+      this.paneRoot = paneRoot;
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
+  /// groupIdのLeafがColumn分割の直下に居れば、そのノードid・現在のsize(固定時は
+  /// 分割ブロックに対する絶対%)・autoを返す。Row分割の直下(または見つからない)ならnull。
+  paneColumnContext(groupId: string): { nodeId: string; size: number; auto: boolean } | null {
+    const search = (node: PaneNode): { nodeId: string; size: number; auto: boolean } | null => {
+      if (node.type !== "split") return null;
+      if (node.direction === "column") {
+        const idx = node.children.findIndex(
+          (c) => c.node.type === "leaf" && c.node.groupId === groupId,
+        );
+        if (idx >= 0) {
+          const c = node.children[idx];
+          return { nodeId: c.node.id, size: c.size ?? 50, auto: c.auto };
+        }
+      }
+      for (const c of node.children) {
+        const found = search(c.node);
+        if (found) return found;
+      }
+      return null;
+    };
+    return search(this.paneRoot);
+  }
+
+  /// groupIdのLeafの「行スロット祖先」を返す: そのLeafがRow分割の直下ならLeaf自身
+  /// (isLeaf=true、幅は今まで通りColumnGroup.width/autoで管理)、Column分割にネスト
+  /// されているならその分割ブロック全体を表すSplitノード(isLeaf=false、幅は
+  /// resizePane経由でこのnodeIdを指定して調整する)を返す。木全体が裸のLeaf1つ
+  /// だけ(まだ一度も分割していない唯一のグループ)の場合もisLeaf=trueとして扱う。
+  paneRowSlotContext(groupId: string): { nodeId: string; size: number; auto: boolean; isLeaf: boolean } {
+    if (this.paneRoot.type === "leaf") {
+      return { nodeId: this.paneRoot.id, size: 300, auto: false, isLeaf: true };
+    }
+    const containsGroup = (node: PaneNode): boolean =>
+      node.type === "leaf" ? node.groupId === groupId : node.children.some((c) => containsGroup(c.node));
+    const search = (
+      node: PaneNode,
+    ): { nodeId: string; size: number; auto: boolean; isLeaf: boolean } | null => {
+      if (node.type !== "split") return null;
+      if (node.direction === "row") {
+        for (const c of node.children) {
+          if (containsGroup(c.node)) {
+            return { nodeId: c.node.id, size: c.size ?? 300, auto: c.auto, isLeaf: c.node.type === "leaf" };
+          }
+        }
+        return null;
+      }
+      for (const c of node.children) {
+        const found = search(c.node);
+        if (found) return found;
+      }
+      return null;
+    };
+    return search(this.paneRoot) ?? { nodeId: "", size: 300, auto: false, isLeaf: true };
+  }
+
+  async setPaneAuto(nodeId: string, auto: boolean) {
+    try {
+      await unwrap(commands.setPaneAuto(nodeId, auto));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
+  async resizePane(nodeId: string, size: number) {
+    try {
+      await unwrap(commands.resizePane(nodeId, size));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
+    } catch (e) {
+      this.#fail(e);
+    }
+  }
+
   async #subscribe() {
     for (const u of this.#unlisten) u();
     this.#unlisten = [];
@@ -633,6 +779,7 @@ class AppStore {
         const wantsDesktop = !isOwn && this.notify.desktop && tab.notifyDesktop;
         const wantsSound = !isOwn && this.notify.sound && tab.notifySound;
         if ((wantsDesktop || wantsSound) && this.#markNotified(`note:${e.payload.note.id}`)) {
+          this.#logDebug(`新着ノート通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
           if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
@@ -693,6 +840,7 @@ class AppStore {
         const wantsDesktop = this.notify.desktop && tab.notifyDesktop;
         const wantsSound = this.notify.sound && tab.notifySound;
         if ((wantsDesktop || wantsSound) && this.#markNotified(e.payload.notification.id)) {
+          this.#logDebug(`通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotify(e.payload.notification);
           if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
@@ -762,28 +910,27 @@ class AppStore {
 
   async completeAccount(sessionId: string) {
     const account = await unwrap(commands.completeMiauth(sessionId));
-    if (!this.accounts.some((a) => a.id === account.id)) {
+    const existingIdx = this.accounts.findIndex((a) => a.id === account.id);
+    if (existingIdx === -1) {
       this.accounts = [...this.accounts, account];
+      this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
+    } else {
+      this.accounts = this.accounts.map((a, i) => (i === existingIdx ? account : a));
+      this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
-    this.#log("success", `アカウントを追加: @${account.username}@${account.host}`);
     await this.#syncServerMutes(account.id);
   }
 
   /// サーバ側ミュート/ブロックを同期（失敗しても致命的でないのでログのみ）。
   async #syncServerMutes(accountId: string) {
     try {
-      const n = await unwrap(commands.syncServerMutes(accountId));
+      const n = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
       if (n > 0) this.#log("info", `サーバのミュート/ブロックを同期: ${n}件`);
     } catch (e) {
-      const msg = String(e);
-      // 旧トークンは read:mutes/read:blocks 権限が無い → 再認可が必要
-      if (/PERMISSION_DENIED|forbidden/i.test(msg)) {
-        this.#log(
-          "warn",
-          "サーバミュート同期: 権限不足。設定→アカウントで一度削除し再追加すると反映されます",
-        );
+      if (e instanceof ForbiddenError) {
+        this.#log("warn", "サーバミュート同期: 権限不足。再認証してください", e.accountId);
       } else {
-        this.#log("warn", `サーバミュート同期に失敗: ${msg}`);
+        this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
       }
     }
   }
@@ -806,15 +953,27 @@ class AppStore {
     groupId?: string,
     title?: string,
   ) {
-    const opened = await unwrap(commands.addColumn(accountId, kind, filter, groupId ?? null));
-    const tab = this.#insertTab(opened);
-    const g = this.groups.find((x) => x.id === opened.group.id);
-    if (g) g.activeTabId = tab.id;
-    this.#captureInitial(opened.column.id, opened.notes);
-    const name = title?.trim();
-    if (name) await this.renameTab(tab.id, name);
-    this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
-    return tab;
+    try {
+      const opened = await unwrapAcc(
+        accountId,
+        commands.addColumn(accountId, kind, filter, groupId ?? null),
+      );
+      // groupId未指定(新規グループ作成)の場合、バックエンドはpane_layoutにも
+      // 追加している(Issue #31)ので、こちらも取り直しておく。
+      const paneRoot = await unwrap(commands.loadPaneLayout());
+      const tab = this.#insertTab(opened);
+      this.paneRoot = paneRoot;
+      const g = this.groups.find((x) => x.id === opened.group.id);
+      if (g) g.activeTabId = tab.id;
+      this.#captureInitial(opened.column.id, opened.notes);
+      const name = title?.trim();
+      if (name) await this.renameTab(tab.id, name);
+      this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
+      return tab;
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// 既存タブのソース/フィルタ/名前を変更し、ストリームを張り直して内容を差し替える。
@@ -851,20 +1010,40 @@ class AppStore {
   }
 
   async fetchUserLists(accountId: string) {
-    return await unwrap(commands.listUserLists(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listUserLists(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async fetchAntennas(accountId: string) {
-    return await unwrap(commands.listAntennas(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listAntennas(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async fetchChannels(accountId: string) {
-    return await unwrap(commands.listChannels(accountId));
+    try {
+      return await unwrapAcc(accountId, commands.listChannels(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// acct（@user@host）から userId を解決する。
   async resolveUser(accountId: string, acct: string) {
-    return await unwrap(commands.resolveUserAcct(accountId, acct));
+    try {
+      return await unwrapAcc(accountId, commands.resolveUserAcct(accountId, acct));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
@@ -995,7 +1174,12 @@ class AppStore {
   #applyBackground(
     prefs: Pick<
       UiPrefs,
-      "backgroundImage" | "backgroundDim" | "backgroundBlur" | "columnOpacity" | "backgroundFitMode"
+      | "backgroundImage"
+      | "backgroundDim"
+      | "backgroundBlur"
+      | "columnOpacity"
+      | "backgroundFitMode"
+      | "backgroundPosition"
     >,
   ) {
     const root = document.documentElement;
@@ -1012,6 +1196,9 @@ class AppStore {
       BACKGROUND_FIT_MODE_CSS.cover;
     root.style.setProperty("--bg-size", bgSize);
     root.style.setProperty("--bg-repeat", bgRepeat);
+    const bgPosition = BACKGROUND_POSITION_CSS[prefs.backgroundPosition ?? "center"] ??
+      BACKGROUND_POSITION_CSS.center;
+    root.style.setProperty("--bg-position", bgPosition);
   }
 
   /// メディアサムネイルの高さ上限を <html> に反映する（ノートを詰めたい人は小さく、
@@ -1104,9 +1291,11 @@ class AppStore {
     }
   }
 
-  /// タブを閉じる。グループが空になったらグループも消す。
+  /// タブを閉じる。グループが空になったらグループも消す。空グループが消えた結果
+  /// ペイン分割ツリーが畳まれることがあるため(Issue #31)、paneRootも取り直す。
   async closeTab(tabId: string) {
     await unwrap(commands.closeColumn(tabId));
+    const paneRoot = await unwrap(commands.loadPaneLayout());
     this.#connState.delete(tabId);
     this.#wasReconnecting.delete(tabId);
     for (const g of this.groups) {
@@ -1115,6 +1304,7 @@ class AppStore {
       if (g.activeTabId === tabId) g.activeTabId = g.tabs[0]?.id ?? "";
     }
     this.groups = this.groups.filter((g) => g.tabs.length > 0);
+    this.paneRoot = paneRoot;
     if (this.groups.length > 0 && !this.groups.some((g) => g.id === this.focusedGroupId)) {
       this.focusedGroupId = this.groups[0].id;
     }
@@ -1132,13 +1322,18 @@ class AppStore {
   }
 
   async postNote(accountId: string, draft: NoteDraft) {
-    await unwrap(commands.postNote(accountId, draft));
-    this.#log("success", "投稿しました");
+    try {
+      await unwrapAcc(accountId, commands.postNote(accountId, draft));
+      this.#log("success", "投稿しました");
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   async renote(accountId: string, noteId: string, visibility: VisibilityInput = "public") {
     try {
-      await unwrap(commands.renote(accountId, noteId, visibility));
+      await unwrapAcc(accountId, commands.renote(accountId, noteId, visibility));
       this.#log("success", "Renote しました");
     } catch (e) {
       this.#fail(e);
@@ -1146,9 +1341,14 @@ class AppStore {
   }
 
   async deleteNote(accountId: string, noteId: string) {
-    await unwrap(commands.deleteNoteCmd(accountId, noteId));
-    for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
-    this.#log("info", "ノートを削除しました");
+    try {
+      await unwrapAcc(accountId, commands.deleteNoteCmd(accountId, noteId));
+      for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
+      this.#log("info", "ノートを削除しました");
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
   }
 
   #emojiLoads = new Map<string, Promise<EmojiDef[]>>();
@@ -1192,15 +1392,72 @@ class AppStore {
 
     try {
       if (already === reaction) {
-        await unwrap(commands.unreact(accountId, noteId));
+        await unwrapAcc(accountId, commands.unreact(accountId, noteId));
         this.#log("info", "リアクションを取り消しました");
       } else {
-        if (already) await unwrap(commands.unreact(accountId, noteId));
-        await unwrap(commands.react(accountId, noteId, reaction));
+        if (already) await unwrapAcc(accountId, commands.unreact(accountId, noteId));
+        await unwrapAcc(accountId, commands.react(accountId, noteId, reaction));
         this.#log("success", `リアクション ${reaction}`);
       }
     } catch (e) {
       backups.forEach(restoreReaction);
+      this.#fail(e);
+    }
+  }
+
+  async toggleFavorite(accountId: string, noteId: string) {
+    const targets = this.#collectNotes(noteId);
+    if (targets.length === 0) return;
+    const backups = targets.map((n) => ({ n, was: n.isFavoritedByMe }));
+    const already = targets[0].isFavoritedByMe;
+    targets.forEach((n) => (n.isFavoritedByMe = !already));
+
+    try {
+      if (already) {
+        await unwrapAcc(accountId, commands.unfavoriteNote(accountId, noteId));
+        this.#log("info", "お気に入りを解除しました");
+      } else {
+        await unwrapAcc(accountId, commands.favoriteNote(accountId, noteId));
+        this.#log("success", "お気に入りに登録しました");
+      }
+    } catch (e) {
+      const staleState = e instanceof Error && (e.message.includes("ALREADY_FAVORITED") || e.message.includes("NOT_FAVORITED"));
+      if (staleState) {
+        // サーバ側は既に希望の状態。is_favorited_by_me はバックフィルされないため
+        // ローカルの表示状態がズレていただけ — 楽観的更新をそのまま確定させる。
+        this.#log("info", "お気に入り状態を更新しました");
+        return;
+      }
+      backups.forEach(({ n, was }) => (n.isFavoritedByMe = was));
+      this.#fail(e);
+    }
+  }
+
+  async listClips(accountId: string): Promise<Clip[]> {
+    try {
+      return await unwrapAcc(accountId, commands.listClips(accountId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  async createClip(accountId: string, name: string): Promise<Clip> {
+    try {
+      const clip = await unwrapAcc(accountId, commands.createClip(accountId, name));
+      this.#log("success", `クリップを作成しました: ${clip.name}`);
+      return clip;
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  async addNoteToClip(accountId: string, clipId: string, noteId: string) {
+    try {
+      await unwrapAcc(accountId, commands.addNoteToClip(accountId, clipId, noteId));
+      this.#log("success", "クリップに追加しました");
+    } catch (e) {
       this.#fail(e);
     }
   }
@@ -1212,7 +1469,7 @@ class AppStore {
     targets.forEach((n) => applyVote(n, choice));
 
     try {
-      await unwrap(commands.votePoll(accountId, noteId, choice));
+      await unwrapAcc(accountId, commands.votePoll(accountId, noteId, choice));
       this.#log("success", "投票しました");
     } catch (e) {
       backups.forEach(restorePoll);

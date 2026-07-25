@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import { app } from "./lib/store.svelte";
   import type { TabView } from "./lib/store.svelte";
-  import Column from "./ui/Column.svelte";
+  import type { Account } from "./bindings/tauri.gen";
+  import Pane from "./ui/Pane.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
   import ColumnSettings from "./ui/ColumnSettings.svelte";
@@ -25,6 +26,7 @@
   let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);
   let columnSettingsGroupId = $state<string | null>(null);
+  let reauthAccount = $state<Account | null>(null);
 
   function openSettings(section: SettingsSection) {
     settingsInitial = section;
@@ -33,6 +35,10 @@
   function addAccountFromSettings() {
     showSettings = false;
     showAdd = true;
+  }
+  function startReauth(account: Account) {
+    showSettings = false;
+    reauthAccount = account;
   }
 
   function openAddColumn() {
@@ -54,6 +60,15 @@
     columnSettingsGroupId = groupId; // カラム(視覚カラム)自体の設定
   }
 
+  let pendingSplitGroupId = $state<string | null>(null);
+
+  async function splitDown(groupId: string) {
+    const newGroupId = await app.splitPane(groupId, "column");
+    if (!newGroupId) return;
+    pendingSplitGroupId = newGroupId;
+    openAddTab(newGroupId);
+  }
+
   function onGlobalKey(e: KeyboardEvent) {
     const el = document.activeElement as HTMLElement | null;
     // 入力中はキーバインドを無効化（タイプを妨げない）
@@ -65,8 +80,8 @@
     }
     // Esc: 開いているリアクションピッカー/投稿モーダルを閉じる
     if (e.key === "Escape") {
-      if (app.reactPickerNoteId) {
-        app.reactPickerNoteId = null;
+      if (app.reactPicker) {
+        app.reactPicker = null;
         e.preventDefault();
       } else if (app.showComposeModal) {
         app.showComposeModal = false;
@@ -114,23 +129,36 @@
   <main class="main">
     {#if app.booting}
       <div class="center-msg">起動中…</div>
-    {:else if showAdd || app.accounts.length === 0}
-      <AddAccount onclose={app.accounts.length > 0 ? () => (showAdd = false) : undefined} />
+    {:else if showAdd || reauthAccount || app.accounts.length === 0}
+      <AddAccount
+        reauthAccount={reauthAccount ?? undefined}
+        onclose={
+          app.accounts.length > 0
+            ? () => {
+                showAdd = false;
+                reauthAccount = null;
+              }
+            : undefined
+        }
+      />
     {:else if app.groups.length === 0}
       <div class="center-msg">
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。
       </div>
     {:else}
       <div class="columns">
-        {#each app.groups as group (group.id)}
-          <Column {group} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} />
-        {/each}
+        <Pane node={app.paneRoot} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} onSplitDown={splitDown} />
       </div>
     {/if}
   </main>
 
   {#if app.accounts.length > 0 && !app.booting}
-    <Backstage />
+    <Backstage
+      onReauth={(accountId) => {
+        const acc = app.accounts.find((a) => a.id === accountId);
+        if (acc) startReauth(acc);
+      }}
+    />
   {/if}
 
   {#if useMobileUi && app.accounts.length > 0 && !app.booting}
@@ -157,7 +185,13 @@
     <AddColumnModal
       groupId={addTabGroupId}
       editTab={editTab ?? undefined}
-      onclose={() => (showAddColumn = false)}
+      onclose={() => {
+        showAddColumn = false;
+        if (pendingSplitGroupId) {
+          void app.discardEmptyGroup(pendingSplitGroupId);
+          pendingSplitGroupId = null;
+        }
+      }}
     />
   {/if}
   {#if columnSettingsGroupId}
@@ -167,6 +201,7 @@
     <Settings
       initial={settingsInitial}
       onAddAccount={addAccountFromSettings}
+      onReauth={startReauth}
       onclose={() => (showSettings = false)}
     />
   {/if}
@@ -210,8 +245,8 @@
   }
   .global-err {
     padding: 4px 10px;
-    background: color-mix(in srgb, #ef4444 15%, var(--surface-1));
-    color: #ef4444;
+    background: color-mix(in srgb, var(--danger) 15%, var(--surface-1));
+    color: var(--danger);
     font-size: 0.78rem;
     cursor: pointer;
     flex: none;

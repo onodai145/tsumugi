@@ -5,12 +5,13 @@
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
+  import NoteMenu from "./NoteMenu.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji, isRemoteCustomEmoji } from "../lib/emoji";
-  import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail } from "@lucide/svelte";
+  import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail, MoreHorizontal } from "@lucide/svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
   // なるため、ピッカーは body 直下へ portal して封じ込めを脱出させる。
@@ -25,6 +26,7 @@
   let {
     note,
     quoted = false,
+    hideReactions = false,
     accountId,
     emojiAccountId,
     tabId,
@@ -32,6 +34,7 @@
   }: {
     note: Note;
     quoted?: boolean;
+    hideReactions?: boolean;
     accountId?: string;
     emojiAccountId?: string;
     tabId?: string;
@@ -52,10 +55,20 @@
     emojiAcct ? app.accounts.find((a) => a.id === emojiAcct)?.host : undefined,
   );
 
-  // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）
-  const showPicker = $derived(app.reactPickerNoteId === inner.id);
+  // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）。
+  // 同じノートがRenote直後の並列表示や複数カラムで重複して描画されうるため、
+  // noteId一致だけでなく自インスタンス固有トークン（マウス）/ tabId+selected（キーボード）
+  // でも一致を確認し、開いた側のインスタンスだけに表示する。
+  const myToken = { kind: "instance" as const, id: crypto.randomUUID() };
+  const showPicker = $derived.by(() => {
+    const p = app.reactPicker;
+    if (!p || p.noteId !== inner.id) return false;
+    if (p.token.kind === "instance") return p.token.id === myToken.id;
+    return tabId !== undefined && p.token.tabId === tabId && selected;
+  });
   function togglePicker() {
-    app.reactPickerNoteId = showPicker ? null : inner.id;
+    noteMenuOpen = false;
+    app.reactPicker = showPicker ? null : { noteId: inner.id, token: myToken };
   }
 
   // ピッカーは position:fixed でスクロール領域(.notes の overflow)を脱出させる。
@@ -76,9 +89,22 @@
   });
 
   function react(reaction: string) {
-    app.reactPickerNoteId = null;
+    app.reactPicker = null;
     if (accountId) app.toggleReaction(accountId, inner.id, reaction);
   }
+
+  // ノートメニュー(お気に入り/クリップ)。リアクションピッカーと同じ position:fixed
+  // portal パターンで .notes の overflow クリップを脱出させる。
+  let noteMenuOpen = $state(false);
+  let noteMenuBtn = $state<HTMLElement | null>(null);
+  let noteMenuPos = $state<{ left: number; top: number } | null>(null);
+  const MENU_W = 200;
+  $effect(() => {
+    if (!noteMenuOpen || !noteMenuBtn) return;
+    const r = noteMenuBtn.getBoundingClientRect();
+    const left = Math.min(Math.max(8, r.right - MENU_W), window.innerWidth - MENU_W - 8);
+    noteMenuPos = { left, top: r.bottom + 6 };
+  });
 
   // 投票済み(multiple=falseは1択でもう投票不可)・期限切れなら投票不可。
   const pollExpired = $derived(!!inner.poll?.expiresAt && inner.poll.expiresAt * 1000 < Date.now());
@@ -216,7 +242,7 @@
         {/if}
       {/if}
 
-      {#if reactionList.length > 0}
+      {#if !hideReactions && reactionList.length > 0}
         <div class="reactions">
           {#each reactionList as [key, count]}
             <button
@@ -263,7 +289,7 @@
             {#if showPicker && pickerPos}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="picker-overlay" use:portal onclick={() => (app.reactPickerNoteId = null)} role="presentation">
+              <div class="picker-overlay" use:portal onclick={() => (app.reactPicker = null)} role="presentation">
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
@@ -273,6 +299,35 @@
                   role="presentation"
                 >
                   <ReactionPicker {accountId} onpick={react} />
+                </div>
+              </div>
+            {/if}
+          </div>
+          <div class="menu-wrap">
+            <button
+              bind:this={noteMenuBtn}
+              title="その他"
+              class:on={noteMenuOpen}
+              onclick={() => {
+                app.reactPicker = null;
+                noteMenuOpen = !noteMenuOpen;
+              }}
+            >
+              <MoreHorizontal size={15} />
+            </button>
+            {#if noteMenuOpen && noteMenuPos}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="picker-overlay" use:portal onclick={() => (noteMenuOpen = false)} role="presentation">
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="picker-pop"
+                  style={`left:${noteMenuPos.left}px;top:${noteMenuPos.top}px`}
+                  onclick={(e) => e.stopPropagation()}
+                  role="presentation"
+                >
+                  <NoteMenu {accountId} note={inner} onclose={() => (noteMenuOpen = false)} />
                 </div>
               </div>
             {/if}
@@ -290,6 +345,10 @@
     /* 仮想化-lite: 画面外は描画スキップ */
     content-visibility: auto;
     contain-intrinsic-size: auto 92px;
+    /* ドラッグ選択で本文以外(ユーザー名/時刻/ボタン等)まで巻き込まれないよう既定で不可に。
+       WebKitGTK(Linuxのwebview)は無印字プロパティを反映しないため -webkit- 併記が必須。 */
+    -webkit-user-select: none;
+    user-select: none;
   }
   .note.quoted {
     border: 1px solid var(--border);
@@ -368,9 +427,16 @@
     word-break: break-word;
     line-height: 1.42;
     font-size: 0.9rem;
+    -webkit-user-select: text;
+    user-select: text;
   }
   .cw {
     margin-top: 2px;
+  }
+  .cw-text {
+    font-size: 0.9rem;
+    -webkit-user-select: text;
+    user-select: text;
   }
   .cw-toggle {
     margin-left: 8px;
@@ -473,6 +539,9 @@
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
   }
   .react-wrap {
+    position: relative;
+  }
+  .menu-wrap {
     position: relative;
   }
   .picker-overlay {

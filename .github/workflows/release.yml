@@ -176,18 +176,42 @@ jobs:
           base64 -d <<< "$ANDROID_KEY_BASE64" > "$RUNNER_TEMP/keystore.jks"
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
-      - name: cargo tauri android build (release, 署名済み)
+      # cargo-mobile2 の実装上、--split-per-abi はuniversalビルドと排他
+      # (付けるとassembleUniversal*系ではなくassemble{Arch}*系のみが走る)。
+      # universal・アーキテクチャ別の両方が欲しいため2回に分けて実行する。
+      # 2回目のRustクロスコンパイルは1回目でuniversal向けに全arch分ビルド済み
+      # (buildSrcのuniversalフレーバーが全archのrustBuildタスクに依存しているため)
+      # キャッシュが効きほぼ再ビルドは発生しない。
+      - name: cargo tauri android build (release, 署名済み, universal)
         working-directory: src-tauri
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: cargo tauri android build
 
+      - name: cargo tauri android build (release, 署名済み, per-ABI)
+        working-directory: src-tauri
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo tauri android build --split-per-abi
+
+      # 全部入りのuniversal APKはファイルサイズが大きくなるため(Issue #69)、
+      # アーキテクチャ別APK(cargo tauri android build が productFlavor 経由で
+      # 同時に生成済み。src-tauri/gen/android/buildSrc の RustPlugin.kt 参照)も
+      # 個別にリネームし、universalと併せてリリース資産に含める。
       - name: Rename Android artifacts
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
           cp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk \
             "tsumugi-$REF_NAME-android-universal.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk \
+            "tsumugi-$REF_NAME-android-arm64-v8a.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/arm/release/app-arm-release.apk \
+            "tsumugi-$REF_NAME-android-armeabi-v7a.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/x86/release/app-x86-release.apk \
+            "tsumugi-$REF_NAME-android-x86.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/x86_64/release/app-x86_64-release.apk \
+            "tsumugi-$REF_NAME-android-x86_64.apk"
 
       - name: Upload Android artifacts to release
         uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
@@ -196,4 +220,9 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         with:
           tag_name: ${{ github.ref_name }}
-          files: tsumugi-${{ env.REF_NAME }}-android-universal.apk
+          files: |
+            tsumugi-${{ env.REF_NAME }}-android-universal.apk
+            tsumugi-${{ env.REF_NAME }}-android-arm64-v8a.apk
+            tsumugi-${{ env.REF_NAME }}-android-armeabi-v7a.apk
+            tsumugi-${{ env.REF_NAME }}-android-x86.apk
+            tsumugi-${{ env.REF_NAME }}-android-x86_64.apk

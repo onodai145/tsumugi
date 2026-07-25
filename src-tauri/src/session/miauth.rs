@@ -19,6 +19,9 @@ pub const PERMISSIONS: &[&str] = &[
     "write:following",
     "write:votes",
     "write:drive",
+    "read:drive",
+    "write:favorites",
+    "write:account",
 ];
 
 pub const APP_NAME: &str = "tsumugi";

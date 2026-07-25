@@ -4,6 +4,7 @@
   import CustomEmoji from "./CustomEmoji.svelte";
   import UnicodeEmoji from "./UnicodeEmoji.svelte";
   import Sparkle from "./Sparkle.svelte";
+  import { ExternalLink } from "@lucide/svelte";
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
 
@@ -84,10 +85,10 @@
     <span>$[{p.name} {#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}]</span>
   {/if}
 {:else if node.type === "url"}
-  <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}</a>
+  <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{p.url}<ExternalLink class="mfm-link-icon" size={12} /></a>
 {:else if node.type === "link"}
   <!-- 本家準拠: リンクラベル内は nyaize しない（disableNyaize） -->
-  <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{#each children as c}<Self node={c} {emojis} />{/each}</a>
+  <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{#each children as c}<Self node={c} {emojis} />{/each}<ExternalLink class="mfm-link-icon" size={12} /></a>
 {:else if node.type === "mention"}
   <span class="mfm-mention">{p.acct}</span>
 {:else if node.type === "hashtag"}

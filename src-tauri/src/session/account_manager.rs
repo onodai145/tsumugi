@@ -30,6 +30,11 @@ impl AccountManager {
         self.accounts.iter().find(|a| a.id == account_id)
     }
 
+    /// 同一 host + user_id の既存アカウントを探す（再認証で id を維持するために使う）。
+    pub fn find_by_host_user(&self, host: &str, user_id: &str) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.host == host && a.user_id == user_id)
+    }
+
     /// 追加（同一 host + user_id の重複は置き換え）。追加したアカウントを active にする。
     pub fn upsert(&mut self, account: Account) {
         self.active = Some(account.id.clone());
@@ -97,6 +102,15 @@ mod tests {
 
         m.upsert(acc("id2", "u2"));
         assert_eq!(m.list().len(), 2);
+    }
+
+    #[test]
+    fn find_by_host_user_finds_existing() {
+        let mut m = AccountManager::default();
+        m.upsert(acc("id1", "u1"));
+        assert_eq!(m.find_by_host_user("misskey.io", "u1").map(|a| a.id.as_str()), Some("id1"));
+        assert!(m.find_by_host_user("misskey.io", "u2").is_none());
+        assert!(m.find_by_host_user("other.example", "u1").is_none());
     }
 
     #[test]

@@ -6,23 +6,27 @@
 #![allow(dead_code, unused_imports)]
 
 mod account;
+mod clip;
 mod column;
 mod list;
 mod mute;
 mod note;
 mod notification;
 mod notify;
+mod pane;
 mod reaction;
 mod ui;
 mod user;
 
 pub use account::Account;
+pub use clip::Clip;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::{SourceItem, UserList};
 pub use mute::MuteConfig;
 pub use note::{DriveFile, Note, Poll, PollChoice, Visibility};
 pub use notification::Notification;
 pub use notify::NotifyConfig;
+pub use pane::{PaneChild, PaneNode, SplitDirection};
 pub use reaction::{EmojiDef, ReactionSummary};
 pub use ui::UiPrefs;
 pub use user::User;

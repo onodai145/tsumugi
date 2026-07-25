@@ -1,15 +1,18 @@
 //! 投稿・リアクション系 command（Phase 3）。
 
-use crate::api::drive::{upload_bytes as api_upload_bytes, upload_file as api_upload_file};
+use crate::api::drive::{
+    list_files as api_list_files, list_folders as api_list_folders, upload_bytes as api_upload_bytes,
+    upload_file as api_upload_file,
+};
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
-    create_note, create_reaction, delete_note, delete_reaction, renote as api_renote, vote_poll as api_vote_poll,
-    NoteDraft, VisibilityInput,
+    create_favorite, create_note, create_reaction, delete_favorite, delete_note, delete_reaction,
+    renote as api_renote, vote_poll as api_vote_poll, NoteDraft, VisibilityInput,
 };
-use crate::domain::{DriveFile, EmojiDef, Note};
+use crate::domain::{DriveFile, EmojiDef, Note, SourceItem};
 use crate::error::{Error, Result};
 use crate::state::AppState;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 /// 投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。
 #[tauri::command]
@@ -73,6 +76,30 @@ pub async fn unreact(
     delete_reaction(&client, &note_id).await
 }
 
+/// お気に入り登録。
+#[tauri::command]
+#[specta::specta]
+pub async fn favorite_note(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    create_favorite(&client, &note_id).await
+}
+
+/// お気に入り解除。
+#[tauri::command]
+#[specta::specta]
+pub async fn unfavorite_note(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    delete_favorite(&client, &note_id).await
+}
+
 /// アンケートに投票する（choice は 0-based index）。
 #[tauri::command]
 #[specta::specta]
@@ -96,6 +123,33 @@ pub async fn upload_file(
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
     api_upload_file(&state.http, &host, &token, &path).await
+}
+
+/// ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
+/// until_id は直前に取得した最後のファイルIDを渡してページングする。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_drive_files(
+    state: State<'_, AppState>,
+    account_id: String,
+    folder_id: Option<String>,
+    until_id: Option<String>,
+) -> Result<Vec<DriveFile>> {
+    let client = state.client_for(&account_id)?;
+    api_list_files(&client, folder_id.as_deref(), until_id.as_deref()).await
+}
+
+/// ドライブのフォルダ一覧（添付ピッカーのフォルダナビゲーション用）。
+/// folder_id: None はルート直下のフォルダ一覧。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_drive_folders(
+    state: State<'_, AppState>,
+    account_id: String,
+    folder_id: Option<String>,
+) -> Result<Vec<SourceItem>> {
+    let client = state.client_for(&account_id)?;
+    api_list_folders(&client, folder_id.as_deref()).await
 }
 
 /// クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。
@@ -142,6 +196,39 @@ pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: Str
     Ok(())
 }
 
+/// プレビュー用途に許容する最大サイズ(base64化してフロントに保持するため、実アップロード上限より小さく抑える)。
+const MAX_ATTACHMENT_PREVIEW_BYTES: usize = 20 * 1024 * 1024;
+
+/// 投稿添付の未アップロードローカル画像を data URL(base64) に変換する(投稿前プレビュー用)。
+/// 動画や未知拡張子は `application/octet-stream` を返す(呼び出し側でバッジ表示にフォールバックする想定)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_attachment_preview(app: AppHandle, path: String) -> Result<String> {
+    crate::commands::mute::read_file_as_data_url(
+        &app,
+        &path,
+        MAX_ATTACHMENT_PREVIEW_BYTES,
+        guess_attachment_image_mime,
+    )
+    .await
+}
+
+/// 拡張子から画像 MIME を推定する。動画・未知拡張子は octet-stream(呼び出し側でバッジ表示にフォールバック)。
+fn guess_attachment_image_mime(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。
 #[tauri::command]
 #[specta::specta]
@@ -161,4 +248,25 @@ pub async fn list_custom_emojis(
         .unwrap()
         .insert(host, emojis.clone());
     Ok(emojis)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guess_attachment_image_mime_maps_known_extensions() {
+        assert_eq!(guess_attachment_image_mime("photo.png"), "image/png");
+        assert_eq!(guess_attachment_image_mime("photo.JPG"), "image/jpeg");
+        assert_eq!(guess_attachment_image_mime("photo.jpeg"), "image/jpeg");
+        assert_eq!(guess_attachment_image_mime("photo.gif"), "image/gif");
+        assert_eq!(guess_attachment_image_mime("photo.webp"), "image/webp");
+    }
+
+    #[test]
+    fn guess_attachment_image_mime_falls_back_for_unknown_or_video_extensions() {
+        assert_eq!(guess_attachment_image_mime("clip.mp4"), "application/octet-stream");
+        assert_eq!(guess_attachment_image_mime("clip.webm"), "application/octet-stream");
+        assert_eq!(guess_attachment_image_mime("noext"), "application/octet-stream");
+    }
 }
