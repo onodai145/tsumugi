@@ -183,6 +183,8 @@
   }
 
   function removeAttached(id: string) {
+    const removed = attachments.find((a) => a.id === id);
+    if (removed?.kind === "clipboard") URL.revokeObjectURL(removed.previewUrl);
     attachments = attachments.filter((a) => a.id !== id);
   }
 
@@ -236,6 +238,7 @@
         } finally {
           uploadingAttachmentId = null;
         }
+        if (a.kind === "clipboard") URL.revokeObjectURL(a.previewUrl);
         attachments = attachments.map((x) => (x.id === a.id ? { kind: "drive", id: file.id, file } : x));
       }
 
