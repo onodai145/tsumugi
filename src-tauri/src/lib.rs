@@ -72,6 +72,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::list_custom_emojis,
             commands::note::upload_file,
             commands::note::upload_bytes,
+            commands::note::read_clipboard_image,
             commands::note::list_drive_files,
             commands::note::list_drive_folders,
             commands::note::save_url_to_file,

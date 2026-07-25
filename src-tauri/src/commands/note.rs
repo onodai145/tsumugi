@@ -12,7 +12,10 @@ use crate::api::notes::{
 use crate::domain::{DriveFile, EmojiDef, Note, SourceItem};
 use crate::error::{Error, Result};
 use crate::state::AppState;
+use serde::Serialize;
+use specta::Type;
 use tauri::{AppHandle, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// 投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。
 #[tauri::command]
@@ -163,6 +166,45 @@ pub async fn upload_bytes(
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
     api_upload_bytes(&state.http, &host, &token, bytes, filename).await
+}
+
+/// `read_clipboard_image` の戻り値。アップロードはせず、フロントは投稿時まで保持してから
+/// `upload_bytes` へ渡す(Issue #66 の「投稿時アップロード」原則を踏襲するため)。
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardImage {
+    pub filename: String,
+    pub bytes: Vec<u8>,
+}
+
+/// クリップボードの画像を読み、PNGへエンコードして返す(アップロードはしない)。
+/// クリップボードに画像が無い場合や PNG エンコードに失敗した場合は `Error::Invalid` を返す
+/// (このコマンド内では Invalid を「実質画像が無い/内部処理異常」を表す専用シグナルとして扱う)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_clipboard_image(app: AppHandle) -> Result<ClipboardImage> {
+    let (rgba, width, height) = tauri::async_runtime::spawn_blocking(move || {
+        let image = app
+            .clipboard()
+            .read_image()
+            .map_err(|e| Error::Invalid(format!("クリップボードに画像がありません: {e}")))?;
+        let width = image.width();
+        let height = image.height();
+        let rgba = image.rgba().to_vec();
+        Ok::<(Vec<u8>, u32, u32), Error>((rgba, width, height))
+    })
+    .await
+    .map_err(|e| Error::Invalid(format!("クリップボード読み取りに失敗しました: {e}")))??;
+
+    let png_bytes = encode_png_rgba(&rgba, width, height)?;
+
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let filename = clipboard_filename(millis);
+
+    Ok(ClipboardImage { filename, bytes: png_bytes })
 }
 
 /// 添付ファイル(画像/動画等)を上限サイズまで超えていないか調べつつダウンロードし、
