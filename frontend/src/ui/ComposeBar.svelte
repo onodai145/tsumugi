@@ -4,7 +4,7 @@
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import Dropdown from "./Dropdown.svelte";
   import DrivePicker from "./DrivePicker.svelte";
-  import { commands, unwrap } from "../lib/ipc";
+  import { commands, unwrap, formatError } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import { ImagePlus, X } from "@lucide/svelte";
   import type {
@@ -53,7 +53,8 @@
   ];
   type AttachmentItem =
     | { kind: "local"; id: string; path: string; name: string; previewUrl: string | null }
-    | { kind: "drive"; id: string; file: DriveFile };
+    | { kind: "drive"; id: string; file: DriveFile }
+    | { kind: "clipboard"; id: string; name: string; bytes: number[]; previewUrl: string };
 
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
@@ -182,7 +183,25 @@
   }
 
   function removeAttached(id: string) {
+    const removed = attachments.find((a) => a.id === id);
+    if (removed?.kind === "clipboard") URL.revokeObjectURL(removed.previewUrl);
     attachments = attachments.filter((a) => a.id !== id);
+  }
+
+  async function handlePaste(e: ClipboardEvent) {
+    if (e.clipboardData?.getData("text/plain")) return;
+    e.preventDefault();
+    const r = await commands.readClipboardImage();
+    if (r.status === "error") {
+      if (r.error.kind !== "invalid") err = formatError(r.error);
+      return;
+    }
+    const blob = new Blob([new Uint8Array(r.data.bytes)], { type: "image/png" });
+    const previewUrl = URL.createObjectURL(blob);
+    attachments = [
+      ...attachments,
+      { kind: "clipboard", id: crypto.randomUUID(), name: r.data.filename, bytes: r.data.bytes, previewUrl },
+    ];
   }
 
   async function submit() {
@@ -208,7 +227,10 @@
         uploadingAttachmentId = a.id;
         let file: DriveFile;
         try {
-          file = await unwrap(commands.uploadFile(accountId, a.path));
+          file =
+            a.kind === "clipboard"
+              ? await unwrap(commands.uploadBytes(accountId, a.name, a.bytes))
+              : await unwrap(commands.uploadFile(accountId, a.path));
         } catch (e) {
           failedAttachmentId = a.id;
           err = String(e);
@@ -216,6 +238,7 @@
         } finally {
           uploadingAttachmentId = null;
         }
+        if (a.kind === "clipboard") URL.revokeObjectURL(a.previewUrl);
         attachments = attachments.map((x) => (x.id === a.id ? { kind: "drive", id: file.id, file } : x));
       }
 
@@ -303,6 +326,7 @@
     onkeydown={onKey}
     onfocus={() => (focused = true)}
     onblur={() => (focused = false)}
+    onpaste={handlePaste}
   ></textarea>
 
   {#if attachments.length > 0}

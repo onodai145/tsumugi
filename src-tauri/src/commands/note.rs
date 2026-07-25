@@ -1,6 +1,9 @@
 //! 投稿・リアクション系 command（Phase 3）。
 
-use crate::api::drive::{list_files as api_list_files, list_folders as api_list_folders, upload_file as api_upload_file};
+use crate::api::drive::{
+    list_files as api_list_files, list_folders as api_list_folders, upload_bytes as api_upload_bytes,
+    upload_file as api_upload_file,
+};
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
     create_favorite, create_note, create_reaction, delete_favorite, delete_note, delete_reaction,
@@ -9,7 +12,10 @@ use crate::api::notes::{
 use crate::domain::{DriveFile, EmojiDef, Note, SourceItem};
 use crate::error::{Error, Result};
 use crate::state::AppState;
+use serde::Serialize;
+use specta::Type;
 use tauri::{AppHandle, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// 投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。
 #[tauri::command]
@@ -149,6 +155,58 @@ pub async fn list_drive_folders(
     api_list_folders(&client, folder_id.as_deref()).await
 }
 
+/// クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。
+#[tauri::command]
+#[specta::specta]
+pub async fn upload_bytes(
+    state: State<'_, AppState>,
+    account_id: String,
+    filename: String,
+    bytes: Vec<u8>,
+) -> Result<DriveFile> {
+    let (host, token) = state.host_token(&account_id)?;
+    api_upload_bytes(&state.http, &host, &token, bytes, filename).await
+}
+
+/// `read_clipboard_image` の戻り値。アップロードはせず、フロントは投稿時まで保持してから
+/// `upload_bytes` へ渡す(Issue #66 の「投稿時アップロード」原則を踏襲するため)。
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardImage {
+    pub filename: String,
+    pub bytes: Vec<u8>,
+}
+
+/// クリップボードの画像を読み、PNGへエンコードして返す(アップロードはしない)。
+/// クリップボードに画像が無い場合や PNG エンコードに失敗した場合は `Error::Invalid` を返す
+/// (このコマンド内では Invalid を「実質画像が無い/内部処理異常」を表す専用シグナルとして扱う)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_clipboard_image(app: AppHandle) -> Result<ClipboardImage> {
+    let (rgba, width, height) = tauri::async_runtime::spawn_blocking(move || {
+        let image = app
+            .clipboard()
+            .read_image()
+            .map_err(|e| Error::Invalid(format!("クリップボードに画像がありません: {e}")))?;
+        let width = image.width();
+        let height = image.height();
+        let rgba = image.rgba().to_vec();
+        Ok::<(Vec<u8>, u32, u32), Error>((rgba, width, height))
+    })
+    .await
+    .map_err(|e| Error::Invalid(format!("クリップボード読み取りに失敗しました: {e}")))??;
+
+    let png_bytes = encode_png_rgba(&rgba, width, height)?;
+
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let filename = clipboard_filename(millis);
+
+    Ok(ClipboardImage { filename, bytes: png_bytes })
+}
+
 /// 添付ファイル(画像/動画等)を上限サイズまで超えていないか調べつつダウンロードし、
 /// 指定パスへ保存する（メディアビューワーの「保存」ボタン用）。
 /// ドライブの添付URLは公開直リンクのため、認証トークンは不要。
@@ -213,6 +271,31 @@ fn guess_attachment_image_mime(path: &str) -> &'static str {
     }
 }
 
+/// RGBA8 のピクセル配列を PNG バイト列にエンコードする(クリップボード貼り付け画像用)。
+fn encode_png_rgba(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut encoder = png::Encoder::new(&mut buf, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| Error::Invalid(format!("PNGヘッダ書き込みに失敗しました: {e}")))?;
+    writer
+        .write_image_data(rgba)
+        .map_err(|e| Error::Invalid(format!("PNGエンコードに失敗しました: {e}")))?;
+    writer
+        .finish()
+        .map_err(|e| Error::Invalid(format!("PNG書き込みの完了に失敗しました: {e}")))?;
+    Ok(buf)
+}
+
+/// ミリ秒Unix時刻から `clipboard-YYYYMMDD-HHMMSS-mmm.png` 形式のファイル名を生成する(UTC基準)。
+fn clipboard_filename(millis: i64) -> String {
+    let dt = chrono::DateTime::from_timestamp_millis(millis)
+        .unwrap_or_else(|| chrono::DateTime::from_timestamp_millis(0).expect("timestamp 0 is valid"));
+    format!("clipboard-{}.png", dt.format("%Y%m%d-%H%M%S-%3f"))
+}
+
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。
 #[tauri::command]
 #[specta::specta]
@@ -252,5 +335,21 @@ mod tests {
         assert_eq!(guess_attachment_image_mime("clip.mp4"), "application/octet-stream");
         assert_eq!(guess_attachment_image_mime("clip.webm"), "application/octet-stream");
         assert_eq!(guess_attachment_image_mime("noext"), "application/octet-stream");
+    }
+
+    #[test]
+    fn encode_png_rgba_produces_valid_png_signature() {
+        // 2x1 の赤・青ピクセル(RGBA)
+        let rgba = [255u8, 0, 0, 255, 0, 0, 255, 255];
+        let png_bytes = encode_png_rgba(&rgba, 2, 1).expect("encode should succeed");
+        // PNG シグネチャ: 89 50 4E 47 0D 0A 1A 0A
+        assert_eq!(&png_bytes[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    }
+
+    #[test]
+    fn clipboard_filename_formats_utc_datetime_with_millis() {
+        // 2026-07-25T15:30:45.123Z の Unix ミリ秒
+        let millis = 1784993445123;
+        assert_eq!(clipboard_filename(millis), "clipboard-20260725-153045-123.png");
     }
 }

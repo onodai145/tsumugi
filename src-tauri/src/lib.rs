@@ -71,6 +71,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::vote_poll,
             commands::note::list_custom_emojis,
             commands::note::upload_file,
+            commands::note::upload_bytes,
+            commands::note::read_clipboard_image,
             commands::note::list_drive_files,
             commands::note::list_drive_folders,
             commands::note::save_url_to_file,
@@ -132,6 +134,7 @@ pub fn run() {
 
     tauri_builder
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())

@@ -150,6 +150,14 @@ export const commands = {
 	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
 	/**  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。 */
 	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
+	/**  クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。 */
+	uploadBytes: (accountId: string, filename: string, bytes: number[]) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_bytes", { accountId, filename, bytes })),
+	/**
+	 *  クリップボードの画像を読み、PNGへエンコードして返す(アップロードはしない)。
+	 *  クリップボードに画像が無い場合や PNG エンコードに失敗した場合は `Error::Invalid` を返す
+	 *  (このコマンド内では Invalid を「実質画像が無い/内部処理異常」を表す専用シグナルとして扱う)。
+	 */
+	readClipboardImage: () => typedError<ClipboardImage, Error>(__TAURI_INVOKE("read_clipboard_image")),
 	/**
 	 *  ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
 	 *  until_id は直前に取得した最後のファイルIDを渡してページングする。
@@ -235,6 +243,15 @@ export type Clip = {
 	description: string | null,
 	isPublic: boolean,
 	notesCount: number,
+};
+
+/**
+ *  `read_clipboard_image` の戻り値。アップロードはせず、フロントは投稿時まで保持してから
+ *  `upload_bytes` へ渡す(Issue #66 の「投稿時アップロード」原則を踏襲するため)。
+ */
+export type ClipboardImage = {
+	filename: string,
+	bytes: number[],
 };
 
 /**  タブ = 受信ソース + フィルタ（1タイムライン）。視覚的なカラム(ColumnGroup)に属する。 */
