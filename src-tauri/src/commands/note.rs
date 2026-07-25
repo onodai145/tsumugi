@@ -229,6 +229,31 @@ fn guess_attachment_image_mime(path: &str) -> &'static str {
     }
 }
 
+/// RGBA8 のピクセル配列を PNG バイト列にエンコードする(クリップボード貼り付け画像用)。
+fn encode_png_rgba(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut encoder = png::Encoder::new(&mut buf, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| Error::Invalid(format!("PNGヘッダ書き込みに失敗しました: {e}")))?;
+    writer
+        .write_image_data(rgba)
+        .map_err(|e| Error::Invalid(format!("PNGエンコードに失敗しました: {e}")))?;
+    writer
+        .finish()
+        .map_err(|e| Error::Invalid(format!("PNG書き込みの完了に失敗しました: {e}")))?;
+    Ok(buf)
+}
+
+/// ミリ秒Unix時刻から `clipboard-YYYYMMDD-HHMMSS-mmm.png` 形式のファイル名を生成する(UTC基準)。
+fn clipboard_filename(millis: i64) -> String {
+    let dt = chrono::DateTime::from_timestamp_millis(millis)
+        .unwrap_or_else(|| chrono::DateTime::from_timestamp_millis(0).expect("timestamp 0 is valid"));
+    format!("clipboard-{}.png", dt.format("%Y%m%d-%H%M%S-%3f"))
+}
+
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。
 #[tauri::command]
 #[specta::specta]
@@ -268,5 +293,21 @@ mod tests {
         assert_eq!(guess_attachment_image_mime("clip.mp4"), "application/octet-stream");
         assert_eq!(guess_attachment_image_mime("clip.webm"), "application/octet-stream");
         assert_eq!(guess_attachment_image_mime("noext"), "application/octet-stream");
+    }
+
+    #[test]
+    fn encode_png_rgba_produces_valid_png_signature() {
+        // 2x1 の赤・青ピクセル(RGBA)
+        let rgba = [255u8, 0, 0, 255, 0, 0, 255, 255];
+        let png_bytes = encode_png_rgba(&rgba, 2, 1).expect("encode should succeed");
+        // PNG シグネチャ: 89 50 4E 47 0D 0A 1A 0A
+        assert_eq!(&png_bytes[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    }
+
+    #[test]
+    fn clipboard_filename_formats_utc_datetime_with_millis() {
+        // 2026-07-25T15:30:45.123Z の Unix ミリ秒
+        let millis = 1784993445123;
+        assert_eq!(clipboard_filename(millis), "clipboard-20260725-153045-123.png");
     }
 }
