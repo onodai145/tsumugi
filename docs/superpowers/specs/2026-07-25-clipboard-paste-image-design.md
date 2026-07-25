@@ -45,7 +45,7 @@ Issue #57 のコメントに記録済みの調査結果: DOM の `paste` イベ�
 
   - `tauri-plugin-clipboard-manager` の `read_image()` で画像を取得(取得失敗 = クリップボードに画像が無い場合は `Error::Invalid(...)` を返す)。
   - `png` crate で RGBA バイト列を PNG にエンコード(エンコード失敗も `Error::Invalid(...)`)。
-  - ファイル名は `clipboard-<unixtime_ms>.png` 固定で生成する。
+  - ファイル名はローカル日時ベースで `clipboard-YYYYMMDD-HHMMSS-mmm.png`(例: `clipboard-20260725-153045-123.png`)の形式で生成する(`chrono` crateを使用)。秒単位だけだと連続貼り付けで衝突しうるためミリ秒まで含める。
   - `state.host_token(&account_id)` で取得したホスト/トークンと共に `api::drive::upload_bytes`(既存・上記参照)を呼ぶ(このアップロード自体の失敗は `Network`/`Unauthorized`/`Api` 等、通常の `upload_file` と同じエラー種別がそのまま伝播する)。
 
   このコマンド内では `Error::Invalid` を「画像が実質無い/内部処理異常」を表す専用シグナルとして扱い、それ以外のエラー種別(Network/Unauthorized/Forbidden/RateLimited/Api)は実アップロード失敗として区別する。
