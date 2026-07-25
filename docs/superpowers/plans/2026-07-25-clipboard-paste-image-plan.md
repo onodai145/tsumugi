@@ -121,7 +121,7 @@ git commit -m "feat: tauri-plugin-clipboard-managerとpng crateを追加"
     #[test]
     fn clipboard_filename_formats_utc_datetime_with_millis() {
         // 2026-07-25T15:30:45.123Z の Unix ミリ秒
-        let millis = 1785166245123;
+        let millis = 1784993445123;
         assert_eq!(clipboard_filename(millis), "clipboard-20260725-153045-123.png");
     }
 ```
