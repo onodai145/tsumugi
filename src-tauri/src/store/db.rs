@@ -126,6 +126,10 @@ pub fn open_cache(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.pragma_update(None, "cache_size", -20_000i64)?;
+    conn.pragma_update(None, "mmap_size", 67_108_864i64)?;
     conn.execute_batch(CACHE_SCHEMA)?;
     migrate_cache(&conn)?;
     enable_incremental_vacuum(&conn)?;
@@ -390,5 +394,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(idx_count, 1);
+    }
+
+    #[test]
+    fn open_cache_applies_pragma_tuning() {
+        let path = std::env::temp_dir().join(format!("tsumugi_test_{}.db", uuid::Uuid::new_v4()));
+        let conn = open_cache(&path).unwrap();
+
+        let synchronous: i64 = conn.query_row("PRAGMA synchronous", [], |r| r.get(0)).unwrap();
+        assert_eq!(synchronous, 1); // NORMAL
+
+        let temp_store: i64 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0)).unwrap();
+        assert_eq!(temp_store, 2); // MEMORY
+
+        let cache_size: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0)).unwrap();
+        assert_eq!(cache_size, -20000);
+
+        let mmap_size: i64 = conn.query_row("PRAGMA mmap_size", [], |r| r.get(0)).unwrap();
+        assert_eq!(mmap_size, 67_108_864);
+
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("db-wal"));
+        let _ = std::fs::remove_file(path.with_extension("db-shm"));
     }
 }
