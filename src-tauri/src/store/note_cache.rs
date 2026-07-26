@@ -56,8 +56,8 @@ impl NoteCacheStore {
         for n in notes {
             upsert_note(&tx, n)?;
             tx.execute(
-                "INSERT OR IGNORE INTO column_note (column_id, note_id, received_at) VALUES (?1, ?2, ?3)",
-                params![column_id, n.id, now],
+                "INSERT OR IGNORE INTO column_note (column_id, note_id, received_at, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![column_id, n.id, now, n.created_at],
             )?;
         }
         tx.commit()?;
@@ -73,10 +73,10 @@ impl NoteCacheStore {
     pub fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT n.payload FROM note n
-             JOIN column_note cn ON cn.note_id = n.id
+            "SELECT n.payload FROM column_note cn
+             JOIN note n ON n.id = cn.note_id
              WHERE cn.column_id = ?1
-             ORDER BY n.created_at DESC, n.id DESC
+             ORDER BY cn.created_at DESC, cn.note_id DESC
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![column_id, limit], |r| r.get::<_, String>(0))?;
