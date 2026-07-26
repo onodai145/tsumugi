@@ -2,6 +2,91 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-07-26
+
+### 🚀 Features
+
+- バイト列から直接アップロードするコマンドを追加
+- Domain::Clip型を追加
+- Notes/favorites REST ラッパを追加
+- Clips系REST ラッパを追加
+- お気に入り/クリップのTauri commandを追加
+- お気に入り/クリップ操作をstoreに追加
+- NoteMenuコンポーネントを追加
+- NoteCardに⋯メニューを追加
+- 403検知用のForbiddenError/unwrapAccを追加
+- LogEntryに再認証アクションを持たせる
+- AccountId付きIPC呼び出しをunwrapAccに統一
+- 再認証時にaccount情報を上書きしログ文言を分ける
+- AddAccountに再認証モードを追加
+- 設定→アカウントに再認証ボタンを追加
+- Backstageの403ログに再認証アクションを追加
+- ペイン分割ツリー(PaneNode)のドメイン型と挿入/削除ロジックを追加
+- Pane_layoutの永続化とdelete_empty_groups連動によるペイン畳み込みを追加
+- Split_pane/load_pane_layout/discard_empty_groupコマンドを追加しTSバインディングを再生成
+- フロントにpaneRoot状態とsplitPane/discardEmptyGroupを追加
+- Pane.svelteによる木構造描画と「下に分割」ボタンを追加
+- PaneNode::id/set_sizeを追加(ペイン高さの数値リサイズ用)
+- Resize_paneコマンドを追加
+- カラム設定に縦分割ペインの高さ(%)入力を追加
+- 分割ブロック全体の幅にも自動調整(auto)を設定できるようにする
+- 高さもRowの幅と同じ固定%/自動調整モデルにする(下に分割の新規2子はデフォルトauto)
+- Tauri-plugin-clipboard-managerとpng crateを追加
+- クリップボード画像用のPNGエンコード/ファイル名生成関数を追加
+- Read_clipboard_image コマンドを追加
+- 投稿欄でクリップボード画像の貼り付けに対応
+- Column_noteにcreated_atを非正規化しカバリングインデックスを追加
+
+### 🐛 Bug Fixes
+
+- Clip.notes_countをi64+specta::Numberアノテーションに戻す
+- NoteMenuのエラーハンドリングとa11y警告を修正
+- リアクションピッカーとノートメニューを排他表示にする
+- 最終レビュー指摘(クリップ一覧のエラー処理・お気に入り不整合・サブメニューはみ出し)を修正
+- MiAuth権限にwrite:favorites/write:accountを追加
+- AddAccountのstate_referenced_locally警告を抑制
+- MiAuth再認証時に既存account.idを維持する
+- リアクションのピン留め並べ替えをPointer Events化してAndroidに対応
+- 並べ替えgripのタップ判定を拡大
+- UIのハードコードされた危険/警告色をテーマ変数化してカスタムテーマにも対応
+- SplitPane/discardEmptyGroupのgroups/paneRoot更新を両方成功後にまとめて反映
+- PaneNode.group_idをTSバインディングでもcamelCase(groupId)に統一
+- 旧キー名(group_id)のpane_layoutで起動不能になる問題を修正
+- ペインのレイアウト崩れ・畳み込み漏れを修正
+- Column分割内のLeafが利用可能幅いっぱいに広がるよう修正
+- 新規カラムがペイン木に反映されず非表示になる問題と、分割ブロック全体の幅設定を追加
+- カラム追加/分割時に自己修復ロジックと競合して二重挿入されるバグを修正
+- クリップボード画像プレビューのblob URLを削除/アップロード後に解放する
+
+### 📚 Documentation
+
+- クリップボード画像貼り付け(#57)の設計を追加
+- クリップボード画像のファイル名をミリ秒付き人間可読形式に変更
+- クリップ/お気に入り機能の設計を追加(Issue #14, #15)
+- クリップ/お気に入り実装計画を追加
+- MiAuth再認証UIの設計ドキュメントを追加
+- MiAuth再認証UIの実装計画を追加
+- カラム縦分割(ペイン化)の設計ドキュメント追加(Issue #31)
+- 分割ボタンの初期サイズルールを追記(Issue #31)
+- ColumnSettingsでのペインサイズ数値指定(Row/Column両対応)を追記(Issue #31)
+- ペインサイズの正規化ルールを整理(挿入/削除は隣接1つとだけやり取り、Columnはflex-growウェイト方式に変更)
+- ペイン分割Slice1(下分割のみ)の実装計画を追加(Issue #31)
+- ペイン高さの数値リサイズ Slice 2 実装計画を追加(Issue #31)
+- クリップボード画像の設計をアップロード投稿時遅延方式に変更
+- クリップボード画像貼り付け(#57)の実装計画を追加
+- Task2テストのepochミリ秒の誤りを修正(2026-07-27→2026-07-25相当の値に)
+- SQLiteチューニング(Issue #114)の設計ドキュメントを追加
+- SQLiteチューニング(Issue #114)の実装プランを追加
+- 設計docのインデックス作成箇所の記述を実装に合わせて修正
+
+### ⚡ Performance
+
+- Load_cachedをidx_cn_column_created経由のクエリに変更
+- Cache.dbにPRAGMAチューニングを適用
+
+### ⚙️ Miscellaneous Tasks
+
+- AUR向けPKGBUILDと自動更新ワークフローを追加 (#120)
 ## [0.6.1] - 2026-07-20
 
 ### 🐛 Bug Fixes
