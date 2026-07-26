@@ -1,0 +1,64 @@
+# Maintainer: onodai145
+pkgname=tsumugi
+pkgver=0.6.1
+pkgrel=1
+pkgdesc="Misskey multi-column desktop client (Krile-like UX) built on Tauri v2"
+arch=('x86_64' 'aarch64')
+url="https://github.com/onodai145/tsumugi"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg')
+makedepends=('rust' 'cargo-tauri' 'nodejs' 'pnpm' 'git' 'patchelf')
+provides=('tsumugi')
+conflicts=('tsumugi-bin')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('bc7515ff1c261bdd936280c3dd56bb3a8262ebda1256aa9103727aa4f8dc63ec')
+
+prepare() {
+  cd "$pkgname-$pkgver/frontend"
+  pnpm install --frozen-lockfile
+
+  cd "../src-tauri"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export CARGO_TARGET_DIR="$srcdir/target"
+  export CARGO_NET_OFFLINE=true
+  cargo tauri build --bundles appimage --frozen
+}
+
+package() {
+  local appimage
+  appimage=$(find "$srcdir/target/release/bundle/appimage" -name '*.AppImage' -print -quit)
+  [[ -n "$appimage" ]] || { echo "AppImage bundle not found"; return 1; }
+
+  install -d "$srcdir/extract"
+  cd "$srcdir/extract"
+  cp "$appimage" ./app.AppImage
+  chmod +x app.AppImage
+  ./app.AppImage --appimage-extract >/dev/null
+
+  install -d "$pkgdir/opt/$pkgname"
+  cp -a squashfs-root/. "$pkgdir/opt/$pkgname/"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$pkgname/AppRun" "$pkgdir/usr/bin/$pkgname"
+
+  local desktop_file
+  desktop_file=$(find squashfs-root -maxdepth 1 -name '*.desktop' -print -quit)
+  if [[ -n "$desktop_file" ]]; then
+    install -Dm644 "$desktop_file" "$pkgdir/usr/share/applications/$pkgname.desktop"
+    sed -i -e "s|^Exec=.*|Exec=$pkgname|" \
+           -e "s|^Icon=.*|Icon=$pkgname|" \
+           "$pkgdir/usr/share/applications/$pkgname.desktop"
+  fi
+
+  local icon_file
+  icon_file=$(find squashfs-root -maxdepth 1 \( -name '*.png' -o -name '*.svg' \) -print -quit)
+  if [[ -n "$icon_file" ]]; then
+    install -Dm644 "$icon_file" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
+  fi
+
+  install -Dm644 "$srcdir/$pkgname-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

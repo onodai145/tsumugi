@@ -1,0 +1,47 @@
+# Maintainer: onodai145
+pkgname=tsumugi-bin
+_pkgname=tsumugi
+pkgver=0.6.1
+pkgrel=1
+pkgdesc="Misskey multi-column desktop client (Krile-like UX) built on Tauri v2 (prebuilt AppImage from GitHub Releases)"
+arch=('x86_64')
+url="https://github.com/onodai145/tsumugi"
+license=('MIT')
+depends=('gtk3' 'libayatana-appindicator' 'librsvg' 'fuse2')
+provides=('tsumugi')
+conflicts=('tsumugi')
+source=("${_pkgname}_${pkgver}_amd64.AppImage::$url/releases/download/v$pkgver/${_pkgname}_${pkgver}_amd64.AppImage"
+        "LICENSE::$url/raw/v$pkgver/LICENSE")
+sha256sums=('956ba0044c73251430c883024e5e60660349138e8c88ee4fa57c49ba0994f6f3'
+            'e1f01c812632b726afcfe397e61a769c9e6a804208506c2695af3b615feddff6')
+
+package() {
+  install -d "$srcdir/extract"
+  cd "$srcdir/extract"
+  cp "$srcdir/${_pkgname}_${pkgver}_amd64.AppImage" ./app.AppImage
+  chmod +x app.AppImage
+  ./app.AppImage --appimage-extract >/dev/null
+
+  install -d "$pkgdir/opt/$_pkgname"
+  cp -a squashfs-root/. "$pkgdir/opt/$_pkgname/"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$_pkgname/AppRun" "$pkgdir/usr/bin/$_pkgname"
+
+  local desktop_file
+  desktop_file=$(find squashfs-root -maxdepth 1 -name '*.desktop' -print -quit)
+  if [[ -n "$desktop_file" ]]; then
+    install -Dm644 "$desktop_file" "$pkgdir/usr/share/applications/$_pkgname.desktop"
+    sed -i -e "s|^Exec=.*|Exec=$_pkgname|" \
+           -e "s|^Icon=.*|Icon=$_pkgname|" \
+           "$pkgdir/usr/share/applications/$_pkgname.desktop"
+  fi
+
+  local icon_file
+  icon_file=$(find squashfs-root -maxdepth 1 \( -name '*.png' -o -name '*.svg' \) -print -quit)
+  if [[ -n "$icon_file" ]]; then
+    install -Dm644 "$icon_file" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$_pkgname.png"
+  fi
+
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$_pkgname/LICENSE"
+}
