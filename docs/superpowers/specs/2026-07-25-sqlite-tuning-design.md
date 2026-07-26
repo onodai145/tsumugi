@@ -45,10 +45,13 @@ CREATE TABLE IF NOT EXISTS column_note (
     PRIMARY KEY (column_id, note_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id);
-CREATE INDEX IF NOT EXISTS idx_cn_column_created ON column_note(column_id, created_at DESC, note_id DESC);
 ```
 
 既存の `idx_cn_column` は `clear_column_notes` 等の等値検索で使われ続けるため残す。
+
+`idx_cn_column_created` は `CACHE_SCHEMA` には含めない。既存DBに対して `CACHE_SCHEMA` の
+`execute_batch` が走る時点ではまだ `created_at` 列が存在しないため、この位置に置くと
+`CREATE INDEX` がエラーになる。列追加後の `migrate_cache`（後述）側で作成する。
 
 ### マイグレーション
 
