@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS column_note (
     column_id   TEXT NOT NULL,
     note_id     TEXT NOT NULL,
     received_at INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (column_id, note_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id);
@@ -126,6 +127,7 @@ pub fn open_cache(path: &Path) -> Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.execute_batch(CACHE_SCHEMA)?;
+    migrate_cache(&conn)?;
     enable_incremental_vacuum(&conn)?;
     Ok(conn)
 }
@@ -211,6 +213,27 @@ fn migrate(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// `column_note` にソート用の `created_at` を非正規化し、`load_cached` が
+/// カラム別に「新しい順」をインデックスだけで取り出せるようにする。
+/// 既存DBには列が無いため、`note` から逆算してバックフィルしてからインデックスを張る。
+/// 新規DBでは `column_exists` が true を返しバックフィルはスキップされ、インデックス作成のみ行う。
+fn migrate_cache(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "column_note", "created_at")? {
+        conn.execute_batch("ALTER TABLE column_note ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")?;
+        conn.execute_batch(
+            "UPDATE column_note SET created_at = (
+                SELECT created_at FROM note WHERE note.id = column_note.note_id
+            )
+            WHERE EXISTS (SELECT 1 FROM note WHERE note.id = column_note.note_id)",
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_cn_column_created \
+         ON column_note(column_id, created_at DESC, note_id DESC)",
+    )?;
+    Ok(())
+}
+
 fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let names = stmt.query_map([], |r| r.get::<_, String>(1))?;
@@ -227,6 +250,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 pub fn open_cache_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
     conn.execute_batch(CACHE_SCHEMA)?;
+    migrate_cache(&conn)?;
     enable_incremental_vacuum(&conn)?;
     Ok(conn)
 }
@@ -318,5 +342,53 @@ mod tests {
             .query_row("SELECT notify_sound FROM column_def WHERE id='c1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(sound, 0);
+    }
+
+    #[test]
+    fn migrate_cache_backfills_created_at_from_note() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 旧スキーマ（column_note に created_at 列が無い状態）を模倣
+        conn.execute_batch(
+            "CREATE TABLE note (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+             CREATE TABLE column_note (
+                 column_id TEXT NOT NULL, note_id TEXT NOT NULL, received_at INTEGER NOT NULL,
+                 PRIMARY KEY (column_id, note_id)
+             );
+             INSERT INTO note (id, created_at) VALUES ('n1', 12345);
+             INSERT INTO column_note (column_id, note_id, received_at) VALUES ('c1', 'n1', 999);",
+        )
+        .unwrap();
+
+        migrate_cache(&conn).unwrap();
+
+        let created_at: i64 = conn
+            .query_row(
+                "SELECT created_at FROM column_note WHERE column_id='c1' AND note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(created_at, 12345);
+
+        // 冪等: 再実行してもエラーにならず値は変わらない
+        migrate_cache(&conn).unwrap();
+        let created_at2: i64 = conn
+            .query_row(
+                "SELECT created_at FROM column_note WHERE column_id='c1' AND note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(created_at2, 12345);
+
+        // idx_cn_column_created が作成されていること
+        let idx_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_cn_column_created'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx_count, 1);
     }
 }
