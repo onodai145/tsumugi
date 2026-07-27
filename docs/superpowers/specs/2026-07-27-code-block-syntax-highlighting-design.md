@@ -37,14 +37,14 @@ pub struct CustomSyntaxTheme {
 
 ```rust
 // UiPrefs に追加
-/// "shiki:<bundled-theme-id>" | "custom:<CustomSyntaxTheme.id>"
+/// "auto" | "shiki:<bundled-theme-id>" | "custom:<CustomSyntaxTheme.id>"
 #[serde(default = "default_code_highlight_theme")]
 pub code_highlight_theme: String,
 #[serde(default)]
 pub custom_syntax_themes: Vec<CustomSyntaxTheme>,
 ```
 
-- 既定値: `"shiki:github-dark"`。
+- 既定値: `"auto"`。UI本体のテーマ既定値（`theme: "auto"`）と同じく、OSの`prefers-color-scheme`（および`data-theme`属性による明示上書き）に追従して `github-light` / `github-dark` を自動切替する。固定の1テーマにはしない。
 - 11項目（background/text + 9トークン色）は shiki 組み込みの特殊テーマ `css-variables` が実際に出力する変数集合と一致させる。この変数名はこちらで自由に決められるものではないため、実装時に `node_modules/shiki` 内の `css-variables` テーマ定義を確認し、変数名・項目数を確定させる（設計時点では未検証）。
 - `ThemeColors` / `CustomTheme` と同様、legacy JSON（フィールド追加前に保存された設定）を読める後方互換テストを追加する。
 
@@ -56,6 +56,10 @@ frontend/src/lib/shiki.ts (新規)
   - 同梱言語: ts, tsx, js, jsx, rust, bash, json, yaml, toml, python, go, sql, markdown, html, css
   - highlightCode(code, lang, themeSelection): Promise<string>
     - lang が同梱言語に無い/未指定 → escapeHtmlしたプレーンHTMLを返す（ハイライト無し）
+    - themeSelection が "auto" → github-light/github-darkの両方を遅延ロードし、
+      codeToHtml(code, { lang, themes: { light: "github-light", dark: "github-dark" }, defaultColor: false })
+      でデュアルテーマ出力（各トークンに --shiki-light / --shiki-dark を埋め込む。実際にどちらを
+      使うかはCSS側で決まる。以下「CSS（テーマ切替）」参照）
     - themeSelection が "shiki:<id>" → highlighter.loadTheme(id) を遅延ロードして codeToHtml()（実色ベタ書き）
     - themeSelection が "custom:<id>" → 組み込み特殊テーマ 'css-variables' で codeToHtml()
       （出力は --shiki-token-* の var() 参照。実色は lib/theme.ts が <html> に設定する）
@@ -77,11 +81,35 @@ frontend/src/render/MfmNode.svelte
 - `codeHighlightTheme` が `"custom:<id>"` のとき、対応する `CustomSyntaxTheme` の11色を `--shiki-token-*` として `<html>` に設定する。
 - `"shiki:<id>"` のときはこれらの変数を解除する（shikiが実色をベタ書きするため不要）。
 
+### CSS（`"auto"` のテーマ切替）
+
+`"auto"` の出力（`--shiki-light` / `--shiki-dark` を埋め込んだデュアルテーマHTML）をどちらの色で見せるかは、`app.css` の既存パターンをそのままコードブロック用に拡張して切り替える。
+
+```css
+/* 既定はOS設定に追従（app.css の :root:not([data-theme="light"]) と同じ考え方） */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mfm-codeblock .shiki,
+  :root:not([data-theme="light"]) .mfm-codeblock .shiki span {
+    color: var(--shiki-dark);
+    background-color: var(--shiki-dark-bg);
+  }
+}
+/* 明示的に dark 上書き時も同様に反映 */
+:root[data-theme="dark"] .mfm-codeblock .shiki,
+:root[data-theme="dark"] .mfm-codeblock .shiki span {
+  color: var(--shiki-dark);
+  background-color: var(--shiki-dark-bg);
+}
+/* light（既定 :root、または明示的な light 上書き）はデフォルトで --shiki-light を使う */
+```
+
+これによりUI本体テーマの `"auto"` と全く同じ条件（OSのprefers-color-scheme、および`data-theme`属性による明示上書き）でコードハイライトの明暗が切り替わる。
+
 ## 設定UI（`frontend/src/ui/settings/DisplaySection.svelte`）
 
 既存のカスタムUIテーマ編集UIと同じ操作感で、隣接する「コードハイライト」小セクションを追加する。
 
-- ドロップダウン: shiki同梱テーマ一覧（検索可能） + 区切り + 作成済みカスタムシンタックステーマ
+- ドロップダウン: 「自動（OSに追従）」 + 区切り + shiki同梱テーマ一覧（検索可能） + 区切り + 作成済みカスタムシンタックステーマ
 - 「新規カスタムテーマを作成」ボタン → 11色分のカラーピッカーを持つフォーム（background/text/comment を上段、残り8トークン色をグリッド表示）。保存・編集・削除は既存 `customThemes` の実装（`startEditTheme` / `saveCustomTheme` / `removeCustomTheme` 相当）に倣う。
 
 ## スコープ外
@@ -95,5 +123,6 @@ frontend/src/render/MfmNode.svelte
 - フロントエンド: 型チェックは `pnpm check`。専用テストフレームワークは無いため、`cargo tauri dev` で以下を手動確認する。
   - 同梱言語（例: rust, ts）のコードブロックが色分けされること
   - 未対応言語・言語未指定のコードブロックがプレーン表示のままであること
+  - 既定（"auto"）でOSのライト/ダーク設定に応じてコードブロックの明暗が切り替わること
   - 設定でshiki同梱テーマを切り替えると表示中のコードブロックの色が変わること
   - カスタムシンタックステーマを作成・選択すると、その配色が反映されること
