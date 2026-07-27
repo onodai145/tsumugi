@@ -27,12 +27,14 @@
     "@lucide/svelte": "^1.23.0",
     "@misskey-dev/emoji-assets": "^17.0.6",
     "@misskey-dev/emoji-data": "^17.0.6",
+    "@shikijs/engine-javascript": "^4.3.1",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-os": "^2.3.2",
     "mfm-js": "^0.26.0",
+    "shiki": "^4.3.1",
     "viewerjs": "^1.11.7"
   }
 }
