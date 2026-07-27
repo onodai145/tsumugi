@@ -327,6 +327,27 @@ export type ColumnNotification = {
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";
 
+/**
+ *  ユーザーが作成したカスタムシンタックス（コードハイライト）テーマ。
+ *  各フィールドは shiki の createCssVariablesTheme() が出力する
+ *  `--shiki-token-*` 系トークンに1対1で対応する（Issue #118）。
+ */
+export type CustomSyntaxTheme = {
+	id: string,
+	name: string,
+	background: string,
+	text: string,
+	comment: string,
+	string: string,
+	keyword: string,
+	function: string,
+	constant: string,
+	parameter: string,
+	stringExpression: string,
+	punctuation: string,
+	link: string,
+};
+
 /**  ユーザーが作成したカスタムテーマ。 */
 export type CustomTheme = {
 	id: string,
@@ -627,6 +648,14 @@ export type UiPrefs = {
 	gapFillLimit?: number,
 	/**  ユーザーが作成したカスタムテーマの一覧。 */
 	customThemes?: CustomTheme[],
+	/**
+	 *  コードハイライトのテーマ選択。"auto"（OSのlight/darkに追従） |
+	 *  "shiki:<bundled-theme-id>"（shiki同梱テーマ） | "custom:<CustomSyntaxTheme.id>"。
+	 *  UI全体の配色（`theme`フィールド）とは独立（Issue #118）。
+	 */
+	codeHighlightTheme?: string,
+	/**  ユーザーが作成したカスタムシンタックステーマの一覧。 */
+	customSyntaxThemes?: CustomSyntaxTheme[],
 	/**
 	 *  メディア添付ノートのサムネイル高さ上限（px）。ノートを詰めたい人は小さく、
 	 *  大きく見たい人は大きくできるようにする。
