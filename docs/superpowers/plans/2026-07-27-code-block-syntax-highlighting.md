@@ -4,7 +4,7 @@
 
 **Goal:** MFM の ```` ```lang ```` コードブロックに shiki でシンタックスハイライトを付ける。ハイライトテーマは UI 全体の配色プリセットとは独立に、「auto（OS追従）」「shiki同梱テーマ」「ユーザー作成のカスタムシンタックステーマ」から選べるようにする。
 
-**Architecture:** Rust側 `UiPrefs` に `code_highlight_theme` / `custom_syntax_themes` を追加して永続化する。フロントは `lib/shiki.ts` にシングルトンの shiki ハイライタを持ち、`CodeBlock.svelte` が非同期にハイライトHTMLを生成して `MfmNode.svelte` の `blockCode` 分岐から使う。「auto」はshikiのデュアルテーマ機能（`--shiki-light`/`--shiki-dark` のCSS変数出力）＋ `app.css` の `prefers-color-scheme`/`data-theme` パターンで切り替える。「custom」はshiki組み込みの `css-variables` テーマ（`--shiki-token-*` 出力）＋ `lib/theme.ts` が `<html>` にユーザー配色を反映する形で切り替える。
+**Architecture:** Rust側 `UiPrefs` に `code_highlight_theme` / `custom_syntax_themes` を追加して永続化する。フロントは `lib/shiki.ts` にシングルトンの shiki ハイライタを持ち、`CodeBlock.svelte` が非同期にハイライトHTMLを生成して `MfmNode.svelte` の `blockCode` 分岐から使う。「auto」はshikiのデュアルテーマ機能（`themes:{light,dark}, defaultColor:false` による `--shiki-light`/`--shiki-dark` のCSS変数出力）＋ `app.css` の `prefers-color-scheme`/`data-theme` パターンで切り替える。「custom」は `createCssVariablesTheme()` で作った専用テーマ（`--shiki-token-*` 出力）＋ `lib/theme.ts` が `<html>` にユーザー配色を反映する形で切り替える（shikiに同梱の "css-variables" テーマは存在しないため、Task 1でのAPI確認結果に基づきこの方式に修正済み）。
 
 **Tech Stack:** shiki (`shiki` + `@shikijs/engine-javascript`), Svelte 5, Rust/specta（`UiPrefs`拡張）。
 
@@ -100,7 +100,7 @@ Expected: FAIL（`code_highlight_theme`/`custom_syntax_themes` フィールド�
 
 ```rust
 /// ユーザーが作成したカスタムシンタックス（コードハイライト）テーマ。
-/// 各フィールドは shiki 組み込み特殊テーマ "css-variables" が出力する
+/// 各フィールドは shiki の createCssVariablesTheme() が出力する
 /// `--shiki-token-*` 系トークンに1対1で対応する（Issue #118）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -228,6 +228,7 @@ git commit -m "feat: UiPrefsにコードハイライト設定を追加"
 // ハイライタはモジュールスカラーのシングルトンとして遅延生成する
 // （マルチカラムで多数のノートが同時描画されるため、1インスタンスを使い回す）。
 import type { HighlighterGeneric } from "shiki/core";
+import { createHighlighter, createCssVariablesTheme } from "shiki";
 import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
 import type { CustomSyntaxTheme } from "../bindings/tauri.gen";
 
@@ -251,19 +252,21 @@ export const BUNDLED_LANGS = [
 
 const AUTO_LIGHT_THEME = "github-light";
 const AUTO_DARK_THEME = "github-dark";
-const CSS_VARIABLES_THEME = "css-variables";
+// shikiに "css-variables" という同梱テーマは存在しない（shiki 4.3.1で確認済み、Task 1参照）。
+// createCssVariablesTheme() で --shiki-token-* を出力するテーマオブジェクトを1つ作り、
+// codeToHtml() の theme に登録名ではなく直接渡す（値はユーザーごとに変わらず、
+// 実際の色は lib/theme.ts が <html> に設定する --shiki-token-* 側で決まるため使い回せる）。
+const CSS_VARIABLES_THEME = createCssVariablesTheme({ name: "css-variables", variablePrefix: "--shiki-" });
 
 let highlighterPromise: Promise<HighlighterGeneric<any, any>> | null = null;
 
 function getHighlighter() {
   if (!highlighterPromise) {
-    highlighterPromise = import("shiki").then(({ createHighlighter }) =>
-      createHighlighter({
-        themes: [AUTO_LIGHT_THEME, AUTO_DARK_THEME, CSS_VARIABLES_THEME],
-        langs: [],
-        engine: createJavaScriptRegexEngine(),
-      }),
-    );
+    highlighterPromise = createHighlighter({
+      themes: [AUTO_LIGHT_THEME, AUTO_DARK_THEME],
+      langs: [],
+      engine: createJavaScriptRegexEngine(),
+    });
   }
   return highlighterPromise;
 }
@@ -371,11 +374,11 @@ import type { ThemeColors, CustomSyntaxTheme } from "../bindings/tauri.gen";
 
 ```typescript
 // CSS変数名 <-> CustomSyntaxTheme のフィールド名対応。
-// shiki組み込み特殊テーマ "css-variables" が出力する --shiki-token-* / --shiki-color-*
-// と一致させる必要がある（実際の変数名は Task 1 Step 3 で確認したものに合わせること）。
+// lib/shiki.ts の createCssVariablesTheme({ variablePrefix: "--shiki-" }) が出力する
+// 変数名と一致させる（shiki 4.3.1で実測済み、Task 1報告参照）。
 export const SYNTAX_VAR_KEYS: { css: string; key: keyof CustomSyntaxTheme }[] = [
-  { css: "--shiki-color-background", key: "background" },
-  { css: "--shiki-color-text", key: "text" },
+  { css: "--shiki-background", key: "background" },
+  { css: "--shiki-foreground", key: "text" },
   { css: "--shiki-token-comment", key: "comment" },
   { css: "--shiki-token-string", key: "string" },
   { css: "--shiki-token-keyword", key: "keyword" },
