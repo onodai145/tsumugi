@@ -4,6 +4,7 @@
   import CustomEmoji from "./CustomEmoji.svelte";
   import UnicodeEmoji from "./UnicodeEmoji.svelte";
   import Sparkle from "./Sparkle.svelte";
+  import CodeBlock from "./CodeBlock.svelte";
   import { ExternalLink } from "@lucide/svelte";
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
@@ -100,7 +101,7 @@
 {:else if node.type === "inlineCode"}
   <code class="mfm-code">{p.code}</code>
 {:else if node.type === "blockCode"}
-  <pre class="mfm-codeblock"><code>{p.code}</code></pre>
+  <CodeBlock code={p.code} lang={p.lang ?? null} />
 {:else if node.type === "mathInline" || node.type === "mathBlock"}
   <code class="mfm-code">{p.formula}</code>
 {:else if node.type === "search"}
