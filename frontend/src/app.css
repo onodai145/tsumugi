@@ -144,7 +144,7 @@ a:hover {
 }
 .mfm-codeblock pre {
   margin: 0;
-  background: transparent !important;
+  background: transparent;
   font-family: ui-monospace, monospace;
   font-size: 0.9em;
 }
@@ -154,18 +154,32 @@ a:hover {
 
 /* ---- shiki "auto"（OS追従）テーマのライト/ダーク切替。
    app.css 冒頭の :root / prefers-color-scheme / [data-theme] パターンと同じ条件で、
-   shikiのデュアルテーマ出力（--shiki-light / --shiki-dark）のどちらを使うか決める。 */
+   shikiのデュアルテーマ出力（--shiki-light / --shiki-dark 等）のどちらを使うか決める。
+   shiki:<id> / custom:<id> は codeToHtml 自身が <pre class="shiki"> に直接
+   color/background-color をインラインで出力するため、ここでは触れない
+   （.mfm-codeblock pre の transparent は !important を外したのでインラインが自然に勝つ）。 */
+.mfm-codeblock .shiki,
+.mfm-codeblock .shiki span {
+  color: var(--shiki-light);
+}
+.mfm-codeblock .shiki {
+  background-color: var(--shiki-light-bg);
+}
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .mfm-codeblock .shiki,
   :root:not([data-theme="light"]) .mfm-codeblock .shiki span {
     color: var(--shiki-dark);
-    background-color: var(--shiki-dark-bg) !important;
+  }
+  :root:not([data-theme="light"]) .mfm-codeblock .shiki {
+    background-color: var(--shiki-dark-bg);
   }
 }
 :root[data-theme="dark"] .mfm-codeblock .shiki,
 :root[data-theme="dark"] .mfm-codeblock .shiki span {
   color: var(--shiki-dark);
-  background-color: var(--shiki-dark-bg) !important;
+}
+:root[data-theme="dark"] .mfm-codeblock .shiki {
+  background-color: var(--shiki-dark-bg);
 }
 
 /* ---- MFM 関数（$[...]）の装飾・アニメーション ----

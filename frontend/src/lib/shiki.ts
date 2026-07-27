@@ -22,6 +22,13 @@ export const BUNDLED_LANGS = [
   "markdown",
   "html",
   "css",
+  "ts",
+  "js",
+  "py",
+  "rs",
+  "sh",
+  "md",
+  "yml",
 ] as const;
 
 const AUTO_LIGHT_THEME = "github-light";
