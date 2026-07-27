@@ -1,13 +1,15 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
   import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
-  import { PRESETS, THEME_VAR_KEYS } from "../../lib/theme";
+  import { PRESETS, THEME_VAR_KEYS, SYNTAX_VAR_KEYS } from "../../lib/theme";
   import { BACKGROUND_FIT_MODE_OPTIONS, type BackgroundFitMode } from "../../lib/backgroundFitMode";
   import { BACKGROUND_POSITION_GRID, type BackgroundPosition } from "../../lib/backgroundPosition";
-  import type { CustomTheme, ThemeColors } from "../../bindings/tauri.gen";
+  import type { CustomTheme, ThemeColors, CustomSyntaxTheme } from "../../bindings/tauri.gen";
+  import { BUNDLED_SHIKI_THEMES } from "../../lib/shikiThemeList";
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
 
   let theme = $state(app.ui.theme);
+  let codeHighlightTheme = $state(app.ui.codeHighlightTheme ?? "auto");
   let width = $state(app.ui.defaultColumnWidth);
   let fontFamily = $state(app.ui.fontFamily ?? "");
   let backgroundImage = $state(app.ui.backgroundImage ?? "");
@@ -132,6 +134,86 @@
     if (clearing) theme = "auto";
   }
 
+  // ---- カスタムシンタックステーマ ----
+  const customSyntaxThemes = $derived(app.ui.customSyntaxThemes ?? []);
+  const syntaxColorLabels: Record<keyof CustomSyntaxTheme, string> = {
+    id: "id",
+    name: "名前",
+    background: "背景",
+    text: "文字（既定）",
+    comment: "コメント",
+    string: "文字列",
+    keyword: "キーワード",
+    function: "関数",
+    constant: "定数・数値",
+    parameter: "引数",
+    stringExpression: "文字列内の式展開",
+    punctuation: "記号",
+    link: "リンク",
+  };
+  function blankSyntaxColors(): CustomSyntaxTheme {
+    return {
+      id: crypto.randomUUID(),
+      name: "",
+      background: "#1e1e1e",
+      text: "#d4d4d4",
+      comment: "#6a9955",
+      string: "#ce9178",
+      keyword: "#569cd6",
+      function: "#dcdcaa",
+      constant: "#b5cea8",
+      parameter: "#9cdcfe",
+      stringExpression: "#d7ba7d",
+      punctuation: "#d4d4d4",
+      link: "#569cd6",
+    };
+  }
+  let editingSyntaxTheme = $state<CustomSyntaxTheme | null>(null);
+  let syntaxEditErr = $state<string | null>(null);
+
+  function startCreateSyntaxTheme() {
+    editingSyntaxTheme = blankSyntaxColors();
+    syntaxEditErr = null;
+  }
+  function startEditSyntaxTheme(t: CustomSyntaxTheme) {
+    editingSyntaxTheme = { ...t };
+    syntaxEditErr = null;
+  }
+  function cancelEditSyntaxTheme() {
+    editingSyntaxTheme = null;
+    syntaxEditErr = null;
+  }
+  async function saveCustomSyntaxTheme() {
+    if (!editingSyntaxTheme) return;
+    if (!editingSyntaxTheme.name.trim()) {
+      syntaxEditErr = "名前を入力してください";
+      return;
+    }
+    for (const { key } of SYNTAX_VAR_KEYS) {
+      if (!HEX_RE.test(editingSyntaxTheme[key] ?? "")) {
+        syntaxEditErr = `${syntaxColorLabels[key]}は #rrggbb 形式で入力してください`;
+        return;
+      }
+    }
+    const exists = customSyntaxThemes.some((t) => t.id === editingSyntaxTheme!.id);
+    const next = exists
+      ? customSyntaxThemes.map((t) => (t.id === editingSyntaxTheme!.id ? editingSyntaxTheme! : t))
+      : [...customSyntaxThemes, editingSyntaxTheme];
+    await app.setUiPrefs({ ...app.ui, customSyntaxThemes: next });
+    editingSyntaxTheme = null;
+    syntaxEditErr = null;
+  }
+  async function removeCustomSyntaxTheme(id: string) {
+    const next = customSyntaxThemes.filter((t) => t.id !== id);
+    const clearing = codeHighlightTheme === `custom:${id}`;
+    await app.setUiPrefs({
+      ...app.ui,
+      customSyntaxThemes: next,
+      codeHighlightTheme: clearing ? "auto" : app.ui.codeHighlightTheme,
+    });
+    if (clearing) codeHighlightTheme = "auto";
+  }
+
   const emojiStyles: { id: EmojiStyle; label: string }[] = [
     { id: "twemoji", label: "Twemoji" },
     { id: "fluentEmoji", label: "Fluent Emoji" },
@@ -182,6 +264,7 @@
       await app.setUiPrefs({
         ...app.ui,
         theme,
+        codeHighlightTheme,
         defaultColumnWidth: w,
         fontFamily,
         backgroundImage,
@@ -285,6 +368,66 @@
       <div class="editor-actions">
         <button class="mini-btn" onclick={cancelEditTheme}><X size={13} /> キャンセル</button>
         <button class="save" onclick={saveCustomTheme}>このテーマを保存</button>
+      </div>
+    </div>
+  {/if}
+</div>
+
+<div class="field">
+  <span>コードハイライト</span>
+  <select bind:value={codeHighlightTheme}>
+    <option value="auto">自動（OSに合わせる）</option>
+    <optgroup label="同梱テーマ">
+      {#each BUNDLED_SHIKI_THEMES as t (t.id)}
+        <option value={`shiki:${t.id}`}>{t.label}</option>
+      {/each}
+    </optgroup>
+    {#if customSyntaxThemes.length > 0}
+      <optgroup label="カスタムテーマ">
+        {#each customSyntaxThemes as t (t.id)}
+          <option value={`custom:${t.id}`}>{t.name}</option>
+        {/each}
+      </optgroup>
+    {/if}
+  </select>
+</div>
+
+<div class="field">
+  <span>カスタムシンタックステーマ</span>
+  <div class="theme-grid">
+    {#each customSyntaxThemes as t (t.id)}
+      <div class="theme-card-wrap">
+        <span class="theme-card">
+          <span class="swatch-strip">
+            {#each SYNTAX_VAR_KEYS as v (v.key)}
+              <span class="sw" style={`background:${t[v.key]}`}></span>
+            {/each}
+          </span>
+          <span class="theme-card-name">{t.name}</span>
+        </span>
+        <div class="theme-card-actions">
+          <button class="icon-btn" title="編集" onclick={() => startEditSyntaxTheme(t)}><Pencil size={13} /></button>
+          <button class="icon-btn" title="削除" onclick={() => removeCustomSyntaxTheme(t.id)}><Trash2 size={13} /></button>
+        </div>
+      </div>
+    {/each}
+  </div>
+  <button class="mini-btn add-theme" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</button>
+
+  {#if editingSyntaxTheme}
+    <div class="theme-editor">
+      <input type="text" class="theme-name-input" placeholder="テーマ名" bind:value={editingSyntaxTheme.name} />
+      {#each SYNTAX_VAR_KEYS as v (v.key)}
+        <div class="color-row">
+          <span class="color-label">{syntaxColorLabels[v.key]}</span>
+          <span class="swatch" style={`background:${editingSyntaxTheme[v.key]}`}></span>
+          <input type="text" class="hex-input" bind:value={editingSyntaxTheme[v.key]} />
+        </div>
+      {/each}
+      {#if syntaxEditErr}<p class="err">{syntaxEditErr}</p>{/if}
+      <div class="editor-actions">
+        <button class="mini-btn" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</button>
+        <button class="save" onclick={saveCustomSyntaxTheme}>このテーマを保存</button>
       </div>
     </div>
   {/if}
@@ -497,6 +640,16 @@
     color: var(--text);
     font-family: inherit;
     width: 140px;
+  }
+  select {
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.82rem;
+    width: fit-content;
   }
   .font-input {
     padding: 7px 9px;
