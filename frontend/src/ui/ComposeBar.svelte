@@ -4,6 +4,7 @@
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import Dropdown from "./Dropdown.svelte";
   import DrivePicker from "./DrivePicker.svelte";
+  import Modal from "./Modal.svelte";
   import { commands, unwrap, formatError } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import { ImagePlus, X } from "@lucide/svelte";
@@ -347,7 +348,7 @@
           {#if uploadingAttachmentId === a.id}
             <span class="thumb-status" title="アップロード中">…</span>
           {:else if failedAttachmentId === a.id}
-            <span class="thumb-status error" title={err ?? "アップロードに失敗しました"}>!</span>
+            <span class="thumb-status error">!</span>
           {/if}
           <button class="thumb-x" title="削除" onclick={() => removeAttached(a.id)}><X size={10} /></button>
         </div>
@@ -421,7 +422,6 @@
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
-      {#if err}<span class="err" title={err}>!</span>{/if}
     </div>
     <div class="tools right">
       <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
@@ -429,6 +429,17 @@
   </div>
   </div>
 </div>
+
+{#if err}
+  <Modal title="エラー" onclose={() => (err = null)}>
+    {#snippet children()}
+      <p class="err-body">{err}</p>
+      <div class="err-actions">
+        <button class="err-ok" onclick={() => (err = null)}>わかった</button>
+      </div>
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if showAttachMenu && attachMenuPos}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -742,10 +753,25 @@
   .post:disabled {
     opacity: 0.5;
   }
-  .err {
-    color: var(--danger);
-    font-weight: 700;
-    flex: none;
+  .err-body {
+    color: var(--text);
+    font-size: 0.9rem;
+    margin: 0 0 14px;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .err-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .err-ok {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
   }
   .attach-overlay {
     position: fixed;
