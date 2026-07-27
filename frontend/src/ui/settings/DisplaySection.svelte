@@ -389,6 +389,11 @@
     {#each BUNDLED_SHIKI_THEMES as t (t.id)}
       {@const isActive = codeHighlightTheme === `shiki:${t.id}`}
       <button class="theme-card" class:active={isActive} onclick={() => (codeHighlightTheme = `shiki:${t.id}`)}>
+        <span class="swatch-strip">
+          <span class="sw" style={`background:${t.swatch.bg}`}></span>
+          <span class="sw" style={`background:${t.swatch.fg}`}></span>
+          <span class="sw" style={`background:${t.swatch.accent}`}></span>
+        </span>
         <span class="theme-card-name">
           {t.label}
           {#if isActive}<Check size={13} class="theme-card-check" />{/if}
