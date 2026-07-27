@@ -139,14 +139,29 @@ a:hover {
 .mfm-codeblock {
   background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   border-radius: 8px;
+  /* 外枠としてのpadding（surface-3の余白フレームを常に見せる）。
+     横スクロール終端側の余白は下のpre自身のpaddingで別途保証する
+     （コンテナ側paddingだけだと終端側の余白がブラウザによって欠落することがある）。 */
   padding: 10px;
   overflow-x: auto;
+  max-width: 100%;
 }
 .mfm-codeblock pre {
-  margin: 0;
+  margin: 0 10px 0 0;
   background: transparent;
   font-family: ui-monospace, monospace;
   font-size: 0.9em;
+  /* 折り返さない行(white-space:pre)がコンテナ幅を超えると、pre自身の幅は
+     コンテナ幅のまま中身だけ overflow:visible ではみ出し、backgroundがそこまで
+     追従しない。width:max-content で pre 自身をコンテンツ幅まで広げ、
+     横スクロールは親の .mfm-codeblock（overflow-x:auto）に任せる。
+     終端側の余白は padding ではなく margin-right で確保する
+     （コンテナのスクロール可能領域は子のmarginボックスを含めて計算されるため、
+     paddingよりも終端側の欠落が起きにくい）。 */
+  width: max-content;
+  /* margin-right 10px を足しても中身が狭い時に不要な横スクロールが出ないよう、その分差し引く */
+  min-width: calc(100% - 10px);
+  padding-left: 10px;
 }
 .mfm-codeblock .shiki-plain code {
   color: var(--text);
