@@ -15,6 +15,8 @@ cargo tauri build             # release build with frontend embedded (frontendDi
 cd src-tauri && cargo test    # Rust tests (real Misskey connectivity tests are #[ignore])
 cd src-tauri && cargo test <test_name>   # run a single test
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
+
+scripts/release.sh X.Y.Z      # bump version in package.json/Cargo.toml/tauri.conf.json/Cargo.lock, generate CHANGELOG.md, create release/vX.Y.Z branch + commit — never hand-edit these version fields with sed
 ```
 
 Never run `./target/debug/tsumugi` or `cargo run` directly — Tauri's debug build loads the frontend from the dev server (`devUrl` = `127.0.0.1:5173`); without vite running you get a connection-refused error. Always use `cargo tauri dev`.
