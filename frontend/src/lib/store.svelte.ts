@@ -23,6 +23,7 @@ import type {
   MuteConfig,
   NotifyConfig,
   UiPrefs,
+  CustomSyntaxTheme,
   LatestRelease,
   Clip,
   PaneNode,
@@ -33,7 +34,7 @@ import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
 import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
-import { applyThemeColors, findPreset, parseThemeRef } from "./theme";
+import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
 import { isMobilePlatform } from "./platform";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
@@ -212,12 +213,15 @@ class AppStore {
         emojiStyle: ui.emojiStyle ?? "twemoji",
         gapFillLimit: ui.gapFillLimit ?? 200,
         customThemes: ui.customThemes ?? [],
+        codeHighlightTheme: ui.codeHighlightTheme ?? "auto",
+        customSyntaxThemes: ui.customSyntaxThemes ?? [],
         mediaThumbnailHeight: ui.mediaThumbnailHeight ?? 200,
         noteCacheLimit: ui.noteCacheLimit ?? 10000,
         noteCacheMaxAgeDays: ui.noteCacheMaxAgeDays ?? 0,
         noteCacheMaxSizeMb: ui.noteCacheMaxSizeMb ?? 0,
       };
       this.#applyTheme(this.ui.theme);
+      this.#applySyntaxTheme(this.ui.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
       this.#applyFont(this.ui.fontFamily ?? "");
       this.#applyBackground(this.ui);
       this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
@@ -1073,12 +1077,15 @@ class AppStore {
       emojiStyle: prefs.emojiStyle ?? "twemoji",
       gapFillLimit: prefs.gapFillLimit ?? 200,
       customThemes: prefs.customThemes ?? [],
+      codeHighlightTheme: prefs.codeHighlightTheme ?? "auto",
+      customSyntaxThemes: prefs.customSyntaxThemes ?? [],
       mediaThumbnailHeight: prefs.mediaThumbnailHeight ?? 200,
       noteCacheLimit: prefs.noteCacheLimit ?? 10000,
       noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
       noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
     };
     this.#applyTheme(prefs.theme);
+    this.#applySyntaxTheme(prefs.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
     this.#applyFont(prefs.fontFamily ?? "");
     this.#applyBackground(this.ui);
     this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
@@ -1157,6 +1164,25 @@ class AppStore {
       return;
     }
     applyThemeColors(null);
+  }
+
+  /// codeHighlightTheme("auto"/"shiki:<id>"/"custom:<id>")のうち "custom:<id>" の場合のみ
+  /// 対応する CustomSyntaxTheme の配色を <html> に反映する。それ以外は解除する
+  /// （shikiが実色をベタ書き、または auto はデュアルテーマCSSで切り替わるため）。
+  #applySyntaxTheme(codeHighlightTheme: string, customSyntaxThemes: CustomSyntaxTheme[]) {
+    const customId = parseThemeRef(codeHighlightTheme, "custom:");
+    if (customId) {
+      const found = customSyntaxThemes.find((t) => t.id === customId);
+      if (found) {
+        applySyntaxColors(found);
+        return;
+      }
+      // 選択中のカスタムシンタックステーマが削除済み: autoにフォールバックして保存し直す
+      applySyntaxColors(null);
+      void this.setUiPrefs({ ...this.ui, codeHighlightTheme: "auto" });
+      return;
+    }
+    applySyntaxColors(null);
   }
 
   /// --font-family を <html> に反映（CSS font-family 値をそのまま渡す）。

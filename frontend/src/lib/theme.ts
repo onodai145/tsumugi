@@ -1,7 +1,7 @@
 // カスタムテーマ機能。app.css のCSS変数群(THEME_VAR_KEYS参照)に対応する配色セット
 // (ThemeColors, bindings/tauri.gen.ts参照)を
 // プリセット or ユーザー定義(UiPrefs.customThemes)から選び、<html> に inline style として反映する。
-import type { ThemeColors } from "../bindings/tauri.gen";
+import type { ThemeColors, CustomSyntaxTheme } from "../bindings/tauri.gen";
 
 export interface ThemePreset {
   id: string;
@@ -22,6 +22,23 @@ export const THEME_VAR_KEYS: { css: string; key: keyof ThemeColors }[] = [
   { css: "--info", key: "info" },
   { css: "--danger", key: "danger" },
   { css: "--warning", key: "warning" },
+];
+
+// CSS変数名 <-> CustomSyntaxTheme のフィールド名対応。
+// lib/shiki.ts の createCssVariablesTheme({ variablePrefix: "--shiki-" }) が出力する
+// 変数名と一致させる（shiki 4.3.1で実測済み、Task 1報告参照）。
+export const SYNTAX_VAR_KEYS: { css: string; key: keyof CustomSyntaxTheme }[] = [
+  { css: "--shiki-background", key: "background" },
+  { css: "--shiki-foreground", key: "text" },
+  { css: "--shiki-token-comment", key: "comment" },
+  { css: "--shiki-token-string", key: "string" },
+  { css: "--shiki-token-keyword", key: "keyword" },
+  { css: "--shiki-token-function", key: "function" },
+  { css: "--shiki-token-constant", key: "constant" },
+  { css: "--shiki-token-parameter", key: "parameter" },
+  { css: "--shiki-token-string-expression", key: "stringExpression" },
+  { css: "--shiki-token-punctuation", key: "punctuation" },
+  { css: "--shiki-token-link", key: "link" },
 ];
 
 // 著名なエディタ/ターミナル配色を移植したプリセット(各テーマの公式パレットを参考に9トークンへ写像)。
@@ -313,6 +330,17 @@ export function applyThemeColors(colors: ThemeColors | null) {
     const value = colors?.[key];
     // success/info は追加前のプリセット/カスタムテーマでは未定義のことがあるため、
     // その場合は inline指定を外して app.css の既定色(--success/--info)へフォールバックさせる。
+    if (value) root.style.setProperty(css, value);
+    else root.style.removeProperty(css);
+  }
+}
+
+/// <html> にカスタムシンタックステーマの配色を反映する。
+/// null なら inline指定を全解除する（"auto"/"shiki:<id>" 選択時はshikiが実色をベタ書きするため不要）。
+export function applySyntaxColors(colors: CustomSyntaxTheme | null) {
+  const root = document.documentElement;
+  for (const { css, key } of SYNTAX_VAR_KEYS) {
+    const value = colors?.[key];
     if (value) root.style.setProperty(css, value);
     else root.style.removeProperty(css);
   }

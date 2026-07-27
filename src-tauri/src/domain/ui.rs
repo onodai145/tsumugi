@@ -52,6 +52,27 @@ pub struct CustomTheme {
     pub colors: ThemeColors,
 }
 
+/// ユーザーが作成したカスタムシンタックス（コードハイライト）テーマ。
+/// 各フィールドは shiki の createCssVariablesTheme() が出力する
+/// `--shiki-token-*` 系トークンに1対1で対応する（Issue #118）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomSyntaxTheme {
+    pub id: String,
+    pub name: String,
+    pub background: String,
+    pub text: String,
+    pub comment: String,
+    pub string: String,
+    pub keyword: String,
+    pub function: String,
+    pub constant: String,
+    pub parameter: String,
+    pub string_expression: String,
+    pub punctuation: String,
+    pub link: String,
+}
+
 /// 表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -109,6 +130,14 @@ pub struct UiPrefs {
     /// ユーザーが作成したカスタムテーマの一覧。
     #[serde(default)]
     pub custom_themes: Vec<CustomTheme>,
+    /// コードハイライトのテーマ選択。"auto"（OSのlight/darkに追従） |
+    /// "shiki:<bundled-theme-id>"（shiki同梱テーマ） | "custom:<CustomSyntaxTheme.id>"。
+    /// UI全体の配色（`theme`フィールド）とは独立（Issue #118）。
+    #[serde(default = "default_code_highlight_theme")]
+    pub code_highlight_theme: String,
+    /// ユーザーが作成したカスタムシンタックステーマの一覧。
+    #[serde(default)]
+    pub custom_syntax_themes: Vec<CustomSyntaxTheme>,
     /// メディア添付ノートのサムネイル高さ上限（px）。ノートを詰めたい人は小さく、
     /// 大きく見たい人は大きくできるようにする。
     #[serde(default = "default_media_thumbnail_height")]
@@ -169,6 +198,10 @@ fn default_note_cache_limit() -> i32 {
     10000
 }
 
+fn default_code_highlight_theme() -> String {
+    "auto".into()
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -188,6 +221,8 @@ impl Default for UiPrefs {
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
             custom_themes: Vec::new(),
+            code_highlight_theme: default_code_highlight_theme(),
+            custom_syntax_themes: Vec::new(),
             media_thumbnail_height: default_media_thumbnail_height(),
             note_cache_limit: default_note_cache_limit(),
             note_cache_max_age_days: 0,
@@ -235,6 +270,8 @@ mod tests {
         assert_eq!(v.note_cache_max_age_days, 0);
         assert_eq!(v.note_cache_max_size_mb, 0);
         assert_eq!(v.enable_file_logging, false);
+        assert_eq!(v.code_highlight_theme, "auto");
+        assert!(v.custom_syntax_themes.is_empty());
     }
 
     #[test]
@@ -293,6 +330,22 @@ mod tests {
             note_cache_max_age_days: 30,
             note_cache_max_size_mb: 200,
             enable_file_logging: true,
+            code_highlight_theme: "shiki:github-dark".into(),
+            custom_syntax_themes: vec![CustomSyntaxTheme {
+                id: "s1".into(),
+                name: "My Syntax Theme".into(),
+                background: "#1e1e1e".into(),
+                text: "#d4d4d4".into(),
+                comment: "#6a9955".into(),
+                string: "#ce9178".into(),
+                keyword: "#569cd6".into(),
+                function: "#dcdcaa".into(),
+                constant: "#b5cea8".into(),
+                parameter: "#9cdcfe".into(),
+                string_expression: "#d7ba7d".into(),
+                punctuation: "#d4d4d4".into(),
+                link: "#569cd6".into(),
+            }],
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
