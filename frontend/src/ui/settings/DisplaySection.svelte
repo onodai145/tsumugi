@@ -374,37 +374,51 @@
 </div>
 
 <div class="field">
-  <span>コードハイライト</span>
-  <select bind:value={codeHighlightTheme}>
-    <option value="auto">自動（OSに合わせる）</option>
-    <optgroup label="同梱テーマ">
-      {#each BUNDLED_SHIKI_THEMES as t (t.id)}
-        <option value={`shiki:${t.id}`}>{t.label}</option>
-      {/each}
-    </optgroup>
-    {#if customSyntaxThemes.length > 0}
-      <optgroup label="カスタムテーマ">
-        {#each customSyntaxThemes as t (t.id)}
-          <option value={`custom:${t.id}`}>{t.name}</option>
-        {/each}
-      </optgroup>
-    {/if}
-  </select>
+  <span>コードハイライトテーマ</span>
+  <div class="theme-grid">
+    <button
+      class="theme-card"
+      class:active={codeHighlightTheme === "auto"}
+      onclick={() => (codeHighlightTheme = "auto")}
+    >
+      <span class="theme-card-name">
+        自動（OSに合わせる）
+        {#if codeHighlightTheme === "auto"}<Check size={13} class="theme-card-check" />{/if}
+      </span>
+    </button>
+    {#each BUNDLED_SHIKI_THEMES as t (t.id)}
+      {@const isActive = codeHighlightTheme === `shiki:${t.id}`}
+      <button class="theme-card" class:active={isActive} onclick={() => (codeHighlightTheme = `shiki:${t.id}`)}>
+        <span class="theme-card-name">
+          {t.label}
+          {#if isActive}<Check size={13} class="theme-card-check" />{/if}
+        </span>
+      </button>
+    {/each}
+  </div>
 </div>
 
 <div class="field">
   <span>カスタムシンタックステーマ</span>
   <div class="theme-grid">
     {#each customSyntaxThemes as t (t.id)}
+      {@const isActive = codeHighlightTheme === `custom:${t.id}`}
       <div class="theme-card-wrap">
-        <span class="theme-card">
+        <button
+          class="theme-card"
+          class:active={isActive}
+          onclick={() => (codeHighlightTheme = `custom:${t.id}`)}
+        >
           <span class="swatch-strip">
             {#each SYNTAX_VAR_KEYS as v (v.key)}
               <span class="sw" style={`background:${t[v.key]}`}></span>
             {/each}
           </span>
-          <span class="theme-card-name">{t.name}</span>
-        </span>
+          <span class="theme-card-name">
+            {t.name}
+            {#if isActive}<Check size={13} class="theme-card-check" />{/if}
+          </span>
+        </button>
         <div class="theme-card-actions">
           <button class="icon-btn" title="編集" onclick={() => startEditSyntaxTheme(t)}><Pencil size={13} /></button>
           <button class="icon-btn" title="削除" onclick={() => removeCustomSyntaxTheme(t.id)}><Trash2 size={13} /></button>
@@ -640,16 +654,6 @@
     color: var(--text);
     font-family: inherit;
     width: 140px;
-  }
-  select {
-    padding: 7px 9px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.82rem;
-    width: fit-content;
   }
   .font-input {
     padding: 7px 9px;
