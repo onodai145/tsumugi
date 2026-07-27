@@ -142,6 +142,31 @@ a:hover {
   padding: 10px;
   overflow-x: auto;
 }
+.mfm-codeblock pre {
+  margin: 0;
+  background: transparent !important;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.mfm-codeblock .shiki-plain code {
+  color: var(--text);
+}
+
+/* ---- shiki "auto"（OS追従）テーマのライト/ダーク切替。
+   app.css 冒頭の :root / prefers-color-scheme / [data-theme] パターンと同じ条件で、
+   shikiのデュアルテーマ出力（--shiki-light / --shiki-dark）のどちらを使うか決める。 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mfm-codeblock .shiki,
+  :root:not([data-theme="light"]) .mfm-codeblock .shiki span {
+    color: var(--shiki-dark);
+    background-color: var(--shiki-dark-bg) !important;
+  }
+}
+:root[data-theme="dark"] .mfm-codeblock .shiki,
+:root[data-theme="dark"] .mfm-codeblock .shiki span {
+  color: var(--shiki-dark);
+  background-color: var(--shiki-dark-bg) !important;
+}
 
 /* ---- MFM 関数（$[...]）の装飾・アニメーション ----
    値は Misskey 本家 packages/frontend/src/style.scss の @keyframes に準拠。
