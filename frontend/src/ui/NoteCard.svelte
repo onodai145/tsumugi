@@ -7,6 +7,7 @@
   import ReactionPicker from "../input/ReactionPicker.svelte";
   import NoteMenu from "./NoteMenu.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
@@ -124,6 +125,55 @@
   function doRenote() {
     if (accountId) app.renote(accountId, inner.id);
   }
+
+  // リアクション/Renoteの「誰が」ポップオーバー。ホバーで表示、150msのin/outディレイで
+  // ボタン→ポップオーバー間のマウス移動中に消えないようにする。
+  type HoverTarget = { kind: "reaction"; key: string } | { kind: "renote" };
+  let hoverTarget = $state<HoverTarget | null>(null);
+  let hoverBtn = $state<HTMLElement | null>(null);
+  let hoverShowTimer: ReturnType<typeof setTimeout> | null = null;
+  let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
+  const POPOVER_W = 240;
+
+  function enterHover(target: HoverTarget, btn: HTMLElement) {
+    if (!accountId) return;
+    if (hoverHideTimer) {
+      clearTimeout(hoverHideTimer);
+      hoverHideTimer = null;
+    }
+    if (hoverShowTimer) clearTimeout(hoverShowTimer);
+    hoverShowTimer = setTimeout(() => {
+      hoverTarget = target;
+      hoverBtn = btn;
+    }, 150);
+  }
+  function leaveHover() {
+    if (hoverShowTimer) {
+      clearTimeout(hoverShowTimer);
+      hoverShowTimer = null;
+    }
+    hoverHideTimer = setTimeout(() => {
+      hoverTarget = null;
+      hoverBtn = null;
+    }, 150);
+  }
+  function keepHover() {
+    if (hoverHideTimer) {
+      clearTimeout(hoverHideTimer);
+      hoverHideTimer = null;
+    }
+  }
+
+  let hoverPos = $state<{ left: number; top: number } | null>(null);
+  $effect(() => {
+    if (!hoverTarget || !hoverBtn) {
+      hoverPos = null;
+      return;
+    }
+    const r = hoverBtn.getBoundingClientRect();
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - POPOVER_W - 8);
+    hoverPos = { left, top: r.bottom + 4 };
+  });
 
   // キーボード選択中はスクロールで見える位置へ
   let el = $state<HTMLElement | null>(null);
@@ -251,6 +301,8 @@
               disabled={!accountId || isRemoteCustomEmoji(key)}
               title={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
               onclick={() => react(key)}
+              onmouseenter={(e) => enterHover({ kind: "reaction", key }, e.currentTarget as HTMLElement)}
+              onmouseleave={leaveHover}
             >
               {#if key.startsWith(":")}
                 {@const e = reactionEmoji(key, emojiMap, instanceHost)}
@@ -271,7 +323,14 @@
           </button>
           {#if canRenote}
             <button title="Renote" onclick={doRenote}>
-              <Repeat2 size={15} /> {inner.renoteCount || ""}
+              <Repeat2 size={15} />
+              {#if inner.renoteCount > 0}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span
+                  onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
+                  onmouseleave={leaveHover}
+                >{inner.renoteCount}</span>
+              {/if}
             </button>
             <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
               <Quote size={15} />
@@ -336,6 +395,24 @@
       {/if}
     </div>
   </div>
+  {#if hoverTarget && hoverPos && accountId}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      use:portal
+      style={`position:fixed; left:0; top:0;`}
+      onmouseenter={keepHover}
+      onmouseleave={leaveHover}
+    >
+      <ReactionUsersPopover
+        {accountId}
+        noteId={inner.id}
+        reactionKey={hoverTarget.kind === "reaction" ? hoverTarget.key : null}
+        totalCount={hoverTarget.kind === "reaction" ? (inner.reactions[hoverTarget.key] ?? 0) : inner.renoteCount}
+        left={hoverPos.left}
+        top={hoverPos.top}
+      />
+    </div>
+  {/if}
 </article>
 
 <style>
