@@ -79,8 +79,8 @@ impl AppState {
     }
 
     #[cfg(test)]
-    /// テスト用: keyring を使わずインメモリ DB で構築する。
-    fn new_for_test(settings: SettingsStore) -> Self {
+    /// テスト用: keyring を使わずインメモリ DB で構築する。他モジュールのテストからも使う。
+    pub(crate) fn new_for_test(settings: SettingsStore) -> Self {
         let cache = NoteCacheStore::new(crate::store::db::open_cache_in_memory().unwrap());
         Self::new(Box::new(crate::session::MemoryStore::default()), settings, cache)
     }

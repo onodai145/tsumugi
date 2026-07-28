@@ -3,7 +3,7 @@
 
 use crate::domain::{Note, Visibility};
 use crate::error::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::Mutex;
 
 /// ノートキャッシュ専用のSQLite接続。`SettingsStore`とは別ファイル(cache.db)を持つ。
@@ -85,6 +85,28 @@ impl NoteCacheStore {
             out.push(serde_json::from_str::<Note>(&payload?)?);
         }
         Ok(out)
+    }
+
+    /// note_id 単体をキャッシュから取得する（column_note を経由しない）。
+    /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映する際、
+    /// 対象ノートがどのカラムに属すか気にせず読み書きするために使う。
+    pub fn get_note(&self, note_id: &str) -> Result<Option<Note>> {
+        let conn = self.conn.lock().unwrap();
+        let payload: Option<String> = conn
+            .query_row("SELECT payload FROM note WHERE id = ?1", params![note_id], |r| r.get(0))
+            .optional()?;
+        Ok(match payload {
+            Some(p) => Some(serde_json::from_str(&p)?),
+            None => None,
+        })
+    }
+
+    /// 1件のノートのキャッシュ内容を更新する（column_note には触れない）。
+    /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映するために使う。
+    /// 対象がまだキャッシュに無ければ何もしない想定の呼び出し元(get_noteでSomeを確認済み)向け。
+    pub fn update_note(&self, note: &Note) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        upsert_note(&conn, note)
     }
 
     /// カラム所属レコードを消す（カラム削除時。note 本体は他カラムと共有しうるので残す）。
@@ -411,6 +433,35 @@ mod tests {
         assert_eq!(got[0].files[0].mime_type, "image/png");
         assert_eq!(got[0].tags, vec!["rust".to_string()]);
         assert_eq!(got[0].my_reaction.as_deref(), Some("👍"));
+    }
+
+    #[test]
+    fn get_note_returns_none_when_not_cached() {
+        let s = store();
+        assert!(s.get_note("missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn update_note_persists_without_column_note_and_get_note_reflects_it() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
+
+        let mut n = s.get_note("n1").unwrap().unwrap();
+        n.reactions.insert("😀".into(), 1);
+        n.reaction_count += 1;
+        n.my_reaction = Some("😀".into());
+        s.update_note(&n).unwrap();
+
+        // update_note は column_note に触れないので、既存の所属は変わらない
+        let got = s.load_cached("col1", 10).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].reactions.get("😀"), Some(&1));
+        assert_eq!(got[0].reaction_count, 4); // 元の3 + 1
+        assert_eq!(got[0].my_reaction.as_deref(), Some("😀"));
+
+        // get_note 単体でも同じ内容が読める
+        let single = s.get_note("n1").unwrap().unwrap();
+        assert_eq!(single.reactions.get("😀"), Some(&1));
     }
 
     #[test]
