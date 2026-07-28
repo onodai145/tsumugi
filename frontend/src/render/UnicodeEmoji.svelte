@@ -2,7 +2,8 @@
   import { app } from "../lib/store.svelte";
 
   // 設定→表示の絵文字スタイル（native/Twemoji/Fluent Emoji）に従って1文字を描画する。
-  let { char }: { char: string } = $props();
+  // showTitle=false でネイティブツールチップを抑制（例: リアクションバッジは独自のホバー一覧を持つため不要）
+  let { char, showTitle = true }: { char: string; showTitle?: boolean } = $props();
 
   const url = $derived(app.emojiImageUrl(char));
   // 同梱アセットに無い文字（未知の絵文字コードポイント組み合わせ等）は生テキストへフォールバック
@@ -18,7 +19,7 @@
     class="unicode-emoji"
     src={url}
     alt={char}
-    title={char}
+    title={showTitle ? char : undefined}
     draggable="false"
     loading="lazy"
     onerror={() => (broken = true)}

@@ -172,7 +172,7 @@
     }
     const r = hoverBtn.getBoundingClientRect();
     const left = Math.min(Math.max(8, r.left), window.innerWidth - POPOVER_W - 8);
-    hoverPos = { left, top: r.bottom + 4 };
+    hoverPos = { left, top: r.bottom + 10 };
   });
 
   // キーボード選択中はスクロールで見える位置へ
@@ -307,14 +307,14 @@
                 class="reaction"
                 class:mine={inner.myReaction === key}
                 disabled={!accountId || isRemoteCustomEmoji(key)}
-                title={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
+                aria-label={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
                 onclick={() => react(key)}
               >
                 {#if key.startsWith(":")}
                   {@const e = reactionEmoji(key, emojiMap, instanceHost)}
-                  <CustomEmoji name={e.name} url={e.url} />
+                  <CustomEmoji name={e.name} url={e.url} showTitle={false} />
                 {:else}
-                  <UnicodeEmoji char={key} />
+                  <UnicodeEmoji char={key} showTitle={false} />
                 {/if}
                 <span class="rcount">{count}</span>
               </button>
@@ -325,12 +325,12 @@
 
       {#if !quoted && accountId}
         <footer class="actions">
-          <button title="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
+          <button aria-label="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
             <Reply size={15} /> {inner.replyCount || ""}
           </button>
           {#if canRenote}
             <button
-              title="Renote"
+              aria-label="Renote"
               onclick={doRenote}
               onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
               onmouseleave={leaveHover}
@@ -340,14 +340,14 @@
                 <span>{inner.renoteCount}</span>
               {/if}
             </button>
-            <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
+            <button aria-label="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
               <Quote size={15} />
             </button>
           {/if}
           <div class="react-wrap">
             <button
               bind:this={pickerBtn}
-              title="リアクション"
+              aria-label="リアクション"
               class:on={showPicker}
               onclick={togglePicker}
             >
@@ -373,7 +373,7 @@
           <div class="menu-wrap">
             <button
               bind:this={noteMenuBtn}
-              title="その他"
+              aria-label="その他"
               class:on={noteMenuOpen}
               onclick={() => {
                 app.reactPicker = null;
@@ -418,6 +418,8 @@
         totalCount={hoverTarget.kind === "reaction" ? (inner.reactions[hoverTarget.key] ?? 0) : inner.renoteCount}
         left={hoverPos.left}
         top={hoverPos.top}
+        {emojiMap}
+        {instanceHost}
       />
     </div>
   {/if}

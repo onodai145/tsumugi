@@ -1,6 +1,7 @@
 // アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
 import { commands, events, unwrap, unwrapAcc, formatError, ForbiddenError } from "./ipc";
+import { invalidateReactionUsers } from "./reactionUsersCache";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -1415,6 +1416,10 @@ class AppStore {
 
     if (already === reaction) targets.forEach(removeReaction);
     else targets.forEach((n) => addReaction(n, reaction));
+
+    // 自分の増減で「誰が」一覧が古いままにならないよう、影響するキーのキャッシュを破棄する
+    invalidateReactionUsers(accountId, noteId, reaction);
+    if (already && already !== reaction) invalidateReactionUsers(accountId, noteId, already);
 
     try {
       if (already === reaction) {

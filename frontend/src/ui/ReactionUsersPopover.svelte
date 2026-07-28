@@ -1,31 +1,10 @@
-<script lang="ts" module>
-  import type { User } from "../bindings/tauri.gen";
-  import { commands, unwrap } from "../lib/ipc";
-
-  // note+key単位のキャッシュ。モジュールスコープなのでコンポーネントの再マウントを跨いで保持される。
-  const cache = new Map<string, Promise<User[]>>();
-
-  function cacheKey(accountId: string, noteId: string, reactionKey: string | null): string {
-    return `${accountId}:${noteId}:${reactionKey ?? "\0renote"}`;
-  }
-
-  function fetchUsers(accountId: string, noteId: string, reactionKey: string | null): Promise<User[]> {
-    const key = cacheKey(accountId, noteId, reactionKey);
-    let p = cache.get(key);
-    if (!p) {
-      p =
-        reactionKey !== null
-          ? unwrap(commands.getNoteReactions(accountId, noteId, reactionKey)).then((rs) => rs.map((r) => r.user))
-          : unwrap(commands.getNoteRenotes(accountId, noteId));
-      p.catch(() => cache.delete(key));
-      cache.set(key, p);
-    }
-    return p;
-  }
-</script>
-
 <script lang="ts">
+  import type { User } from "../bindings/tauri.gen";
   import Mfm from "../render/Mfm.svelte";
+  import CustomEmoji from "../render/CustomEmoji.svelte";
+  import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
+  import { reactionEmoji } from "../lib/emoji";
+  import { fetchReactionUsers } from "../lib/reactionUsersCache";
 
   let {
     accountId,
@@ -34,6 +13,8 @@
     totalCount,
     left,
     top,
+    emojiMap = {},
+    instanceHost,
   }: {
     accountId: string;
     noteId: string;
@@ -41,7 +22,11 @@
     totalCount: number;
     left: number;
     top: number;
+    emojiMap?: Record<string, string>;
+    instanceHost?: string;
   } = $props();
+
+  const emoji = $derived(reactionKey ? reactionEmoji(reactionKey, emojiMap, instanceHost) : null);
 
   let users = $state<User[] | null>(null);
   let failed = $state(false);
@@ -52,7 +37,7 @@
     const key = reactionKey;
     users = null;
     failed = false;
-    fetchUsers(acc, nid, key)
+    fetchReactionUsers(acc, nid, key)
       .then((u) => {
         // Discard stale response if props have changed since fetch initiated
         if (noteId === nid && reactionKey === key) {
@@ -70,34 +55,51 @@
   const displayName = (u: User) => u.name ?? u.username;
   const acct = (u: User) => (u.host ? `@${u.username}@${u.host}` : `@${u.username}`);
   const moreCount = $derived(users ? Math.max(0, totalCount - users.length) : 0);
+  // Renoteは誰もしていないケースが多く、取得中の一瞬や「なし」を出すと煩わしいので、
+  // 結果が判明して中身がある場合(またはエラー)以外は何も表示しない。
+  // リアクションはバッジ自体が誰か押した時にしか出ないため実質発生しない。
+  const hideWhenEmpty = $derived(reactionKey === null && !failed && (users === null || users.length === 0));
 </script>
 
-<div class="popover" style={`left:${left}px;top:${top}px`}>
-  {#if failed}
-    <div class="status">取得に失敗しました</div>
-  {:else if users === null}
-    <div class="status">読み込み中…</div>
-  {:else if users.length === 0}
-    <div class="status">なし</div>
-  {:else}
-    <ul>
-      {#each users as u (u.id)}
-        <li>
-          {#if u.avatarUrl}
-            <img class="avatar" src={u.avatarUrl} alt="" loading="lazy" />
-          {:else}
-            <div class="avatar placeholder"></div>
-          {/if}
-          <span class="name"><Mfm text={displayName(u)} emojis={u.emojis} simple /></span>
-          <span class="acct">{acct(u)}</span>
-        </li>
-      {/each}
-    </ul>
-    {#if moreCount > 0}
-      <div class="more">他{moreCount}件</div>
+{#if !hideWhenEmpty}
+  <div class="popover" style={`left:${left}px;top:${top}px`}>
+    {#if failed}
+      <div class="status">取得に失敗しました</div>
+    {:else if users === null}
+      <div class="status">読み込み中…</div>
+    {:else if users.length === 0}
+      <div class="status">なし</div>
+    {:else}
+      <ul>
+        {#each users as u (u.id)}
+          <li>
+            {#if u.avatarUrl}
+              <img class="avatar" src={u.avatarUrl} alt="" loading="lazy" />
+            {:else}
+              <div class="avatar placeholder"></div>
+            {/if}
+            <span class="user-info">
+              <span class="name"><Mfm text={displayName(u)} emojis={u.emojis} simple /></span>
+              <span class="acct">{acct(u)}</span>
+            </span>
+            {#if reactionKey && emoji}
+              <span class="row-emoji">
+                {#if reactionKey.startsWith(":")}
+                  <CustomEmoji name={emoji.name} url={emoji.url} showTitle={false} />
+                {:else}
+                  <UnicodeEmoji char={reactionKey} showTitle={false} />
+                {/if}
+              </span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+      {#if moreCount > 0}
+        <div class="more">他{moreCount}件</div>
+      {/if}
     {/if}
-  {/if}
-</div>
+  </div>
+{/if}
 
 <style>
   .popover {
@@ -140,6 +142,12 @@
   .avatar.placeholder {
     background: var(--border);
   }
+  .user-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
   .name {
     color: var(--text);
     white-space: nowrap;
@@ -152,6 +160,12 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .row-emoji {
+    flex-shrink: 0;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
   }
   .more {
     padding: 3px 6px;
