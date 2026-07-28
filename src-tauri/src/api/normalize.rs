@@ -1,6 +1,6 @@
 //! Misskey の生 JSON レスポンスを domain 型へ正規化する。
 
-use crate::domain::{DriveFile, Note, Notification, Poll, PollChoice, User, Visibility};
+use crate::domain::{DriveFile, Note, Notification, Poll, PollChoice, ReactionUser, User, Visibility};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -46,6 +46,25 @@ impl From<RawUser> for User {
             following_count: r.following_count,
             notes_count: r.notes_count,
             emojis: r.emojis,
+        }
+    }
+}
+
+/// Misskey の NoteReaction オブジェクト（`notes/reactions` のレスポンス要素）を受ける生型。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawReactionUser {
+    pub user: RawUser,
+    /// Misskey形式キー（Unicode生 or :name@host:）。JSON上のフィールド名は `type`。
+    #[serde(rename = "type")]
+    pub reaction: String,
+}
+
+impl From<RawReactionUser> for ReactionUser {
+    fn from(r: RawReactionUser) -> Self {
+        ReactionUser {
+            user: r.user.into(),
+            reaction: r.reaction,
         }
     }
 }
@@ -298,6 +317,19 @@ mod tests {
         let u: User = raw.into();
         assert_eq!(u.name.as_deref(), Some("Alice :blobcat:"));
         assert_eq!(u.emojis.get("blobcat").map(String::as_str), Some("http://x/e.png"));
+    }
+
+    #[test]
+    fn parses_reaction_user() {
+        let raw: RawReactionUser = serde_json::from_str(
+            r#"{"id":"r1","createdAt":"2026-07-05T00:00:00Z","type":"👍",
+                "user":{"id":"u1","username":"alice"}}"#,
+        )
+        .unwrap();
+        let ru: ReactionUser = raw.into();
+        assert_eq!(ru.reaction, "👍");
+        assert_eq!(ru.user.id, "u1");
+        assert_eq!(ru.user.username, "alice");
     }
 
     #[test]
