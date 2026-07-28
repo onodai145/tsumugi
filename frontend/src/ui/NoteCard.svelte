@@ -329,14 +329,15 @@
             <Reply size={15} /> {inner.replyCount || ""}
           </button>
           {#if canRenote}
-            <button title="Renote" onclick={doRenote}>
+            <button
+              title="Renote"
+              onclick={doRenote}
+              onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
+              onmouseleave={leaveHover}
+            >
               <Repeat2 size={15} />
               {#if inner.renoteCount > 0}
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <span
-                  onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
-                  onmouseleave={leaveHover}
-                >{inner.renoteCount}</span>
+                <span>{inner.renoteCount}</span>
               {/if}
             </button>
             <button title="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
