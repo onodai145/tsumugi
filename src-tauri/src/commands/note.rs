@@ -7,9 +7,10 @@ use crate::api::drive::{
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
     create_favorite, create_note, create_reaction, delete_favorite, delete_note, delete_reaction,
-    renote as api_renote, vote_poll as api_vote_poll, NoteDraft, VisibilityInput,
+    get_reactions, get_renotes, renote as api_renote, vote_poll as api_vote_poll, NoteDraft,
+    VisibilityInput,
 };
-use crate::domain::{DriveFile, EmojiDef, Note, SourceItem};
+use crate::domain::{DriveFile, EmojiDef, Note, ReactionUser, SourceItem, User};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use serde::Serialize;
@@ -77,6 +78,31 @@ pub async fn unreact(
 ) -> Result<()> {
     let client = state.client_for(&account_id)?;
     delete_reaction(&client, &note_id).await
+}
+
+/// リアクション付与ユーザー一覧取得（絵文字ごと、最大100件）。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_note_reactions(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+    reaction_type: Option<String>,
+) -> Result<Vec<ReactionUser>> {
+    let client = state.client_for(&account_id)?;
+    get_reactions(&client, &note_id, reaction_type.as_deref()).await
+}
+
+/// Renoteしたユーザー一覧取得（最大100件）。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_note_renotes(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+) -> Result<Vec<User>> {
+    let client = state.client_for(&account_id)?;
+    get_renotes(&client, &note_id).await
 }
 
 /// お気に入り登録。
