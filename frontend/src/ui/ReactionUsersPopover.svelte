@@ -53,8 +53,18 @@
     users = null;
     failed = false;
     fetchUsers(acc, nid, key)
-      .then((u) => (users = u))
-      .catch(() => (failed = true));
+      .then((u) => {
+        // Discard stale response if props have changed since fetch initiated
+        if (noteId === nid && reactionKey === key) {
+          users = u;
+        }
+      })
+      .catch(() => {
+        // Discard stale error if props have changed since fetch initiated
+        if (noteId === nid && reactionKey === key) {
+          failed = true;
+        }
+      });
   });
 
   const displayName = (u: User) => u.name ?? u.username;
