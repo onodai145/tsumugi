@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use super::User;
+
 /// リアクションピッカー用の絵文字定義（インスタンス単位でキャッシュ）。
 /// 注意: `Note.reactions` は「絵文字キー→集計数」であり、誰がリアクションしたかは
 /// Misskey は返さない（docs/filter-dsl-design.md §3.4）。
@@ -27,4 +29,13 @@ pub struct ReactionSummary {
     pub reacted_by_me: bool,
     /// カスタム絵文字なら解決した URL
     pub emoji_url: Option<String>,
+}
+
+/// リアクション付与ユーザー一覧のエントリ（`notes/reactions` のレスポンス正規化後）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionUser {
+    pub user: User,
+    /// Misskey形式キー（Unicode生 or :name@host:）
+    pub reaction: String,
 }
