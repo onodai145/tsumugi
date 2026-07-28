@@ -295,23 +295,30 @@
       {#if !hideReactions && reactionList.length > 0}
         <div class="reactions">
           {#each reactionList as [key, count]}
-            <button
-              class="reaction"
-              class:mine={inner.myReaction === key}
-              disabled={!accountId || isRemoteCustomEmoji(key)}
-              title={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
-              onclick={() => react(key)}
+            <!-- disabled な button は mouseenter/mouseleave を発火しないため(WebKitGTK含む)、
+                 hover検知はラッパーの span 側に付与する。クリック不可の挙動自体はbuttonのdisabledのまま維持。 -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <span
+              class="reaction-wrap"
               onmouseenter={(e) => enterHover({ kind: "reaction", key }, e.currentTarget as HTMLElement)}
               onmouseleave={leaveHover}
             >
-              {#if key.startsWith(":")}
-                {@const e = reactionEmoji(key, emojiMap, instanceHost)}
-                <CustomEmoji name={e.name} url={e.url} />
-              {:else}
-                <UnicodeEmoji char={key} />
-              {/if}
-              <span class="rcount">{count}</span>
-            </button>
+              <button
+                class="reaction"
+                class:mine={inner.myReaction === key}
+                disabled={!accountId || isRemoteCustomEmoji(key)}
+                title={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
+                onclick={() => react(key)}
+              >
+                {#if key.startsWith(":")}
+                  {@const e = reactionEmoji(key, emojiMap, instanceHost)}
+                  <CustomEmoji name={e.name} url={e.url} />
+                {:else}
+                  <UnicodeEmoji char={key} />
+                {/if}
+                <span class="rcount">{count}</span>
+              </button>
+            </span>
           {/each}
         </div>
       {/if}
@@ -564,6 +571,9 @@
     flex-wrap: wrap;
     gap: 5px;
     margin-top: 8px;
+  }
+  .reaction-wrap {
+    display: inline-flex;
   }
   .reaction {
     display: inline-flex;

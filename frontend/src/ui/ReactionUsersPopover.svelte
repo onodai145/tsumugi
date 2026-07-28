@@ -5,12 +5,12 @@
   // note+key単位のキャッシュ。モジュールスコープなのでコンポーネントの再マウントを跨いで保持される。
   const cache = new Map<string, Promise<User[]>>();
 
-  function cacheKey(noteId: string, reactionKey: string | null): string {
-    return `${noteId}:${reactionKey ?? "\0renote"}`;
+  function cacheKey(accountId: string, noteId: string, reactionKey: string | null): string {
+    return `${accountId}:${noteId}:${reactionKey ?? "\0renote"}`;
   }
 
   function fetchUsers(accountId: string, noteId: string, reactionKey: string | null): Promise<User[]> {
-    const key = cacheKey(noteId, reactionKey);
+    const key = cacheKey(accountId, noteId, reactionKey);
     let p = cache.get(key);
     if (!p) {
       p =

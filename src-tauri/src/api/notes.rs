@@ -140,11 +140,24 @@ pub async fn get_reactions(
 }
 
 /// Renoteしたユーザー一覧取得。最大100件。
+/// `notes/renotes` は1 Renoteにつき1件返す（同一ユーザーが複数回Renoteした場合は重複しうる）ため、
+/// `id` でユーザーを重複排除する（初出順を保持）。
 pub async fn get_renotes(client: &MisskeyClient, note_id: &str) -> Result<Vec<User>> {
     let raw: Vec<RawNote> = client
         .post("notes/renotes", &json!({ "noteId": note_id, "limit": 100 }))
         .await?;
-    Ok(raw.into_iter().map(|n| n.user.into()).collect())
+    Ok(dedupe_users_by_id(
+        raw.into_iter().map(|n| n.user.into()).collect(),
+    ))
+}
+
+/// ユーザー一覧を `id` で重複排除する。初出順を保持する。
+fn dedupe_users_by_id(users: Vec<User>) -> Vec<User> {
+    let mut seen = std::collections::HashSet::new();
+    users
+        .into_iter()
+        .filter(|u| seen.insert(u.id.clone()))
+        .collect()
 }
 
 /// お気に入り登録。`notes/favorites/create`。
@@ -244,5 +257,36 @@ mod tests {
         // Search はストリーミング無し
         assert!(ColumnKind::Search { query: "x".into() }.stream_request().is_none());
         assert_eq!(ColumnKind::List { list_id: "L".into() }.stream_request().unwrap().0, "userList");
+    }
+
+    fn make_user(id: &str, username: &str) -> User {
+        User {
+            id: id.into(),
+            username: username.into(),
+            host: None,
+            name: None,
+            avatar_url: None,
+            is_bot: false,
+            is_cat: false,
+            followers_count: 0,
+            following_count: 0,
+            notes_count: 0,
+            emojis: std::collections::HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn dedupe_users_by_id_preserves_first_occurrence_order() {
+        let users = vec![
+            make_user("u1", "alice"),
+            make_user("u2", "bob"),
+            make_user("u1", "alice-dup"),
+        ];
+        let deduped = dedupe_users_by_id(users);
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(deduped[0].id, "u1");
+        assert_eq!(deduped[0].username, "alice");
+        assert_eq!(deduped[1].id, "u2");
+        assert_eq!(deduped[1].username, "bob");
     }
 }
