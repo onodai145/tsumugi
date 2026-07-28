@@ -1,8 +1,8 @@
 //! ノート系 REST（timeline 取得・投稿・削除・リアクション）。
 
-use crate::api::normalize::RawNote;
+use crate::api::normalize::{RawNote, RawReactionUser};
 use crate::api::MisskeyClient;
-use crate::domain::{Note, Visibility};
+use crate::domain::{Note, ReactionUser, User, Visibility};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -123,6 +123,28 @@ pub async fn delete_reaction(client: &MisskeyClient, note_id: &str) -> Result<()
         .post("notes/reactions/delete", &json!({ "noteId": note_id }))
         .await?;
     Ok(())
+}
+
+/// リアクション付与ユーザー一覧取得。`reaction_type` を指定すると絵文字キーで絞り込む。最大100件。
+pub async fn get_reactions(
+    client: &MisskeyClient,
+    note_id: &str,
+    reaction_type: Option<&str>,
+) -> Result<Vec<ReactionUser>> {
+    let mut body = json!({ "noteId": note_id, "limit": 100 });
+    if let Some(t) = reaction_type {
+        body["type"] = json!(t);
+    }
+    let raw: Vec<RawReactionUser> = client.post("notes/reactions", &body).await?;
+    Ok(raw.into_iter().map(Into::into).collect())
+}
+
+/// Renoteしたユーザー一覧取得。最大100件。
+pub async fn get_renotes(client: &MisskeyClient, note_id: &str) -> Result<Vec<User>> {
+    let raw: Vec<RawNote> = client
+        .post("notes/renotes", &json!({ "noteId": note_id, "limit": 100 }))
+        .await?;
+    Ok(raw.into_iter().map(|n| n.user.into()).collect())
 }
 
 /// お気に入り登録。`notes/favorites/create`。
