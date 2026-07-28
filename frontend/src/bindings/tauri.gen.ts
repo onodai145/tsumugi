@@ -140,6 +140,10 @@ export const commands = {
 	react: (accountId: string, noteId: string, reaction: string) => typedError<null, Error>(__TAURI_INVOKE("react", { accountId, noteId, reaction })),
 	/**  リアクション解除。 */
 	unreact: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unreact", { accountId, noteId })),
+	/**  リアクション付与ユーザー一覧取得（絵文字ごと、最大100件）。 */
+	getNoteReactions: (accountId: string, noteId: string, reactionType: string | null) => typedError<ReactionUser[], Error>(__TAURI_INVOKE("get_note_reactions", { accountId, noteId, reactionType })),
+	/**  Renoteしたユーザー一覧取得（最大100件）。 */
+	getNoteRenotes: (accountId: string, noteId: string) => typedError<User[], Error>(__TAURI_INVOKE("get_note_renotes", { accountId, noteId })),
 	/**  お気に入り登録。 */
 	favoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("favorite_note", { accountId, noteId })),
 	/**  お気に入り解除。 */
@@ -566,6 +570,13 @@ export type PollInput_Serialize = {
 	choices: string[],
 	multiple: boolean,
 	expiresAt?: number | null,
+};
+
+/**  リアクション付与ユーザー一覧のエントリ（`notes/reactions` のレスポンス正規化後）。 */
+export type ReactionUser = {
+	user: User,
+	/**  Misskey形式キー（Unicode生 or :name@host:） */
+	reaction: string,
 };
 
 /**  id + 表示名の軽量参照（アンテナ/チャンネル等のソース選択用）。 */
