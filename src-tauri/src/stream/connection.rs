@@ -602,7 +602,7 @@ async fn connect_and_run(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let HandleResult::CaptureNote { column_id, note_id } =
-                            handle_text(app, &text, subs, sub_index, captures)
+                            handle_text(app, account_id, &text, subs, sub_index, captures)
                         {
                             apply_capture_add(&mut write, captures, &note_id, &column_id).await;
                         }
@@ -651,6 +651,7 @@ enum HandleResult {
 /// - noteUpdated: そのノートを表示中の全カラムへ ColumnNoteUpdated を emit。
 fn handle_text(
     app: &AppHandle,
+    account_id: &str,
     text: &str,
     subs: &mut HashMap<String, ChannelSub>,
     sub_index: &HashMap<String, String>,
@@ -733,11 +734,50 @@ fn handle_text(
                     }
                     .emit(app);
                 }
+                // 自分の操作は react/unreact コマンド側で既にキャッシュへ反映済み(Issue #89)。
+                // ここで再度適用すると二重カウントになるため、他ユーザーの更新の時だけ反映する。
+                if let Some(state) = app.try_state::<AppState>() {
+                    if !is_own_actor(&state, account_id, actor_id.as_deref()) {
+                        apply_note_update_to_cache(&state, &note_id, &update);
+                    }
+                }
             }
             HandleResult::None
         }
         Incoming::Other => HandleResult::None,
     }
+}
+
+/// actor_id が account_id 自身の userId と一致するか（自分の操作かどうか）。
+/// frontend の #applyNoteUpdate の isMine 判定と同じ役割。
+fn is_own_actor(state: &AppState, account_id: &str, actor_id: Option<&str>) -> bool {
+    let Some(actor_id) = actor_id else {
+        return false;
+    };
+    state
+        .accounts
+        .lock()
+        .unwrap()
+        .list()
+        .iter()
+        .any(|a| a.id == account_id && a.user_id == actor_id)
+}
+
+/// 他ユーザーの reacted/unreacted をキャッシュへ反映する（無ければ何もしない）。
+/// pollVoted/deleted はキャッシュ整合性への影響が小さいため対象外(Issue #89はリアクションのみ報告)。
+fn apply_note_update_to_cache(state: &AppState, note_id: &str, update: &NoteUpdate) {
+    let (NoteUpdate::Reacted { reaction } | NoteUpdate::Unreacted { reaction }) = update else {
+        return;
+    };
+    let Ok(Some(mut note)) = state.cache.get_note(note_id) else {
+        return;
+    };
+    match update {
+        NoteUpdate::Reacted { .. } => note.record_others_reaction(reaction),
+        NoteUpdate::Unreacted { .. } => note.record_others_unreaction(reaction),
+        _ => unreachable!(),
+    }
+    let _ = state.cache.update_note(&note);
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
@@ -867,5 +907,99 @@ mod tests {
     fn map_unknown_is_none() {
         assert!(map_note_update("emojiAdded", &json!({})).is_none());
         assert!(map_note_update("reacted", &json!({})).is_none()); // reaction 欠落
+    }
+
+    fn minimal_note(id: &str) -> Note {
+        Note {
+            id: id.into(),
+            created_at: 0,
+            text: None,
+            cw: None,
+            visibility: crate::domain::Visibility::Public,
+            local_only: false,
+            user: crate::domain::User {
+                id: "author".into(),
+                username: "alice".into(),
+                host: None,
+                name: None,
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 0,
+                following_count: 0,
+                notes_count: 0,
+                emojis: HashMap::new(),
+            },
+            reply_id: None,
+            renote_id: None,
+            renote: None,
+            files: vec![],
+            poll: None,
+            tags: vec![],
+            mentions: vec![],
+            emojis: HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
+            reactions: HashMap::new(),
+            reaction_count: 0,
+            renote_count: 0,
+            reply_count: 0,
+            my_reaction: None,
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
+        }
+    }
+
+    fn state_with_account(account_id: &str, user_id: &str) -> AppState {
+        use crate::domain::Account;
+        use crate::store::SettingsStore;
+        let settings = SettingsStore::new_in_memory();
+        settings
+            .upsert_account(&Account {
+                id: account_id.into(),
+                host: "misskey.io".into(),
+                username: "me".into(),
+                user_id: user_id.into(),
+                display_name: "Me".into(),
+                avatar_url: None,
+            })
+            .unwrap();
+        AppState::new_for_test(settings)
+    }
+
+    #[test]
+    fn is_own_actor_matches_this_accounts_user_id() {
+        let state = state_with_account("acc1", "u-self");
+        assert!(is_own_actor(&state, "acc1", Some("u-self")));
+        assert!(!is_own_actor(&state, "acc1", Some("u-other")));
+        assert!(!is_own_actor(&state, "acc1", None));
+        // 別アカウントIDでは一致しない
+        assert!(!is_own_actor(&state, "acc2", Some("u-self")));
+    }
+
+    #[test]
+    fn apply_note_update_to_cache_increments_and_decrements_others_reaction() {
+        let state = state_with_account("acc1", "u-self");
+        state.cache.cache_note("col1", &minimal_note("n1")).unwrap();
+
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() });
+        let n = state.cache.get_note("n1").unwrap().unwrap();
+        assert_eq!(n.reactions.get("👍"), Some(&1));
+        assert_eq!(n.reaction_count, 1);
+
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() });
+        let n = state.cache.get_note("n1").unwrap().unwrap();
+        assert_eq!(n.reactions.get("👍"), None);
+        assert_eq!(n.reaction_count, 0);
+    }
+
+    #[test]
+    fn apply_note_update_to_cache_is_noop_when_note_not_cached() {
+        let state = state_with_account("acc1", "u-self");
+        // n1 は未キャッシュ。panicせず何もしないこと。
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() });
+        assert!(state.cache.get_note("n1").unwrap().is_none());
     }
 }
