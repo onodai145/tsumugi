@@ -8,6 +8,7 @@
   import { commands, unwrap, formatError } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
   import { ImagePlus, X } from "@lucide/svelte";
+  import { portal } from "../lib/portal";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -78,11 +79,6 @@
     const r = attachTrigger?.getBoundingClientRect();
     if (r) attachMenuPos = { left: r.left, top: r.bottom + 4 };
     showAttachMenu = true;
-  }
-
-  function attachPortal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy: () => node.remove() };
   }
 
   async function chooseLocalUpload() {
@@ -444,7 +440,7 @@
 {#if showAttachMenu && attachMenuPos}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="attach-overlay" use:attachPortal onclick={() => (showAttachMenu = false)} role="presentation">
+  <div class="attach-overlay" use:portal onclick={() => (showAttachMenu = false)} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
