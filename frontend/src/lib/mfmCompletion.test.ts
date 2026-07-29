@@ -80,13 +80,24 @@ describe("matchEmojis", () => {
   it("matches custom emoji by name prefix, case-insensitively", () => {
     const custom = [emoji("Smile_cat"), emoji("smoke"), emoji("wave")];
     const result = matchEmojis("sm", custom);
-    expect(result.map((r) => r.name)).toEqual(["Smile_cat", "smoke"]);
-    expect(result.every((r) => r.kind === "custom")).toBe(true);
+    const customResults = result.filter((r) => r.kind === "custom");
+    expect(customResults.map((r) => r.name)).toEqual(["Smile_cat", "smoke"]);
+  });
+
+  it("ranks all custom matches ahead of any unicode matches", () => {
+    const custom = [emoji("Smile_cat"), emoji("smoke")];
+    const result = matchEmojis("sm", custom);
+    const firstNonCustomIndex = result.findIndex((r) => r.kind !== "custom");
+    const customCount = result.filter((r) => r.kind === "custom").length;
+    expect(customCount).toBe(2);
+    expect(firstNonCustomIndex === -1 || firstNonCustomIndex >= customCount).toBe(true);
   });
 
   it("matches custom emoji by alias prefix too", () => {
     const custom = [emoji("neko", ["cat_face"])];
-    expect(matchEmojis("cat", custom).map((r) => r.name)).toEqual(["neko"]);
+    const result = matchEmojis("cat", custom);
+    const customResults = result.filter((r) => r.kind === "custom");
+    expect(customResults.map((r) => r.name)).toEqual(["neko"]);
   });
 
   it("ranks custom emoji ahead of unicode emoji for the same query", () => {
@@ -154,9 +165,8 @@ describe("buildCompletionItems", () => {
   it("builds emoji items with :name: insert text and a thumbnail", () => {
     const custom = [emoji("neko")];
     const trigger = { kind: "emoji", query: "ne", start: 0, end: 3 } as const;
-    expect(buildCompletionItems(trigger, custom)).toEqual([
-      { key: "custom:neko", label: "neko", insertText: ":neko:", thumbnail: { type: "custom", url: custom[0].url } },
-    ]);
+    const items = buildCompletionItems(trigger, custom);
+    expect(items[0]).toEqual({ key: "custom:neko", label: "neko", insertText: ":neko:", thumbnail: { type: "custom", url: custom[0].url } });
   });
 
   it("builds fnName items with the bare name as insert text", () => {

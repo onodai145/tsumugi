@@ -78,17 +78,18 @@ export function matchEmojis(query: string, customEmojis: EmojiDef[]): EmojiMatch
   const custom: EmojiMatch[] = customEmojis
     .filter((e) => startsWithCI(e.name, query) || e.aliases.some((a) => startsWithCI(a, query)))
     .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, MAX_MATCHES)
     .map((e) => ({ key: `custom:${e.name}`, kind: "custom", name: e.name, url: e.url }));
 
-  if (custom.length > 0) return custom;
+  const remaining = MAX_MATCHES - custom.length;
+  const unicode: EmojiMatch[] =
+    remaining > 0
+      ? UNICODE_EMOJIS.filter((e) => startsWithCI(e.name, query))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .slice(0, remaining)
+          .map((e) => ({ key: `unicode:${e.name}`, kind: "unicode", name: e.name, char: e.char }))
+      : [];
 
-  const unicode: EmojiMatch[] = UNICODE_EMOJIS.filter((e) => startsWithCI(e.name, query))
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, MAX_MATCHES)
-    .map((e) => ({ key: `unicode:${e.name}`, kind: "unicode", name: e.name, char: e.char }));
-
-  return unicode;
+  return [...custom.slice(0, MAX_MATCHES), ...unicode];
 }
 
 export function matchFnNames(query: string): string[] {
