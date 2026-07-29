@@ -9,6 +9,10 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { ImagePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
+  import { tick } from "svelte";
+  import CompletionPopover from "./CompletionPopover.svelte";
+  import { applyCompletion, buildCompletionItems, detectTrigger, type CompletionItem, type Trigger } from "../lib/mfmCompletion";
+  import { getCaretCoordinates } from "../lib/caretPosition";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -107,6 +111,10 @@
   let replyTo = $state<Note | undefined>(undefined);
   let quoteOf = $state<Note | undefined>(undefined);
   let textarea = $state<HTMLTextAreaElement | undefined>(undefined);
+  let cursorPos = $state(0);
+  let suppressAt = $state<number | null>(null);
+  let composing = $state(false);
+  let selectedIndex = $state(0);
   let focused = $state(false);
   // フォーカスが無く、かつ何も入力/添付/展開していない時だけコンパクト表示にする
   // (未送信の内容がある間は縮めない)。
@@ -121,9 +129,38 @@
       !quoteOf,
   );
 
+  const customEmojiList = $derived(accountId ? (app.emojis[accountId] ?? []) : []);
+  const trigger = $derived<Trigger | null>(
+    composing || cursorPos === suppressAt ? null : detectTrigger(text, cursorPos),
+  );
+  const candidates = $derived<CompletionItem[]>(trigger ? buildCompletionItems(trigger, customEmojiList) : []);
+  const popoverOpen = $derived(trigger !== null && candidates.length > 0);
+
+  // クエリが変わって候補集合が変わるたびに選択位置を先頭へ戻す
+  $effect(() => {
+    trigger;
+    selectedIndex = 0;
+  });
+
+  let popoverPos = $state<{ left: number; top: number } | null>(null);
+  $effect(() => {
+    if (!popoverOpen || !trigger || !textarea) {
+      popoverPos = null;
+      return;
+    }
+    const rect = textarea.getBoundingClientRect();
+    const caret = getCaretCoordinates(textarea, trigger.start);
+    popoverPos = { left: rect.left + caret.left, top: rect.top + caret.top + caret.height };
+  });
+
   // アカウントが後から読まれた場合／既定アカウントが変更された場合の追従（手動選択後は止める）
   $effect(() => {
     if (!accountTouched) accountId = app.defaultAccountId();
+  });
+
+  // 補完ポップアップで使うカスタム絵文字を先読みする(ReactionPickerと同じパターン)。
+  $effect(() => {
+    if (accountId) app.loadEmojis(accountId).catch(() => {});
   });
 
   // 返信/引用/新規投稿ショートカット・ボタンからの「開く」要求を消費してこのバーへ反映する。
@@ -150,6 +187,30 @@
 
   function acctOf(u: Note["user"]): string {
     return u.host ? `@${u.username}@${u.host}` : `@${u.username}`;
+  }
+
+  function syncCursor() {
+    const pos = textarea?.selectionStart ?? 0;
+    if (pos !== cursorPos) suppressAt = null;
+    cursorPos = pos;
+  }
+
+  function onTextareaInput() {
+    syncCursor();
+    suppressAt = null;
+  }
+
+  async function confirmCompletion(index: number) {
+    const t = trigger;
+    const item = candidates[index];
+    if (!t || !item) return;
+    const result = applyCompletion(text, t, item);
+    text = result.text;
+    suppressAt = result.cursor;
+    await tick();
+    textarea?.setSelectionRange(result.cursor, result.cursor);
+    textarea?.focus();
+    cursorPos = result.cursor;
   }
 
   function cancelContext() {
@@ -278,7 +339,31 @@
       e.preventDefault();
       if (busy) return;
       submit();
-    } else if (e.key === "Escape" && (replyTo || quoteOf)) {
+      return;
+    }
+    if (popoverOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectedIndex = (selectedIndex + 1) % candidates.length;
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectedIndex = (selectedIndex - 1 + candidates.length) % candidates.length;
+        return;
+      }
+      if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault();
+        confirmCompletion(selectedIndex);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        suppressAt = cursorPos; // ポップアップだけ閉じる(返信/引用のキャンセルは行わない)
+        return;
+      }
+    }
+    if (e.key === "Escape" && (replyTo || quoteOf)) {
       e.preventDefault();
       cancelContext();
     }
@@ -321,10 +406,31 @@
     bind:value={text}
     bind:this={textarea}
     onkeydown={onKey}
+    onkeyup={syncCursor}
+    onclick={syncCursor}
+    oninput={onTextareaInput}
+    oncompositionstart={() => (composing = true)}
+    oncompositionend={() => {
+      composing = false;
+      syncCursor();
+    }}
     onfocus={() => (focused = true)}
-    onblur={() => (focused = false)}
+    onblur={() => {
+      focused = false;
+      suppressAt = cursorPos;
+    }}
     onpaste={handlePaste}
   ></textarea>
+
+  {#if popoverOpen && popoverPos}
+    <CompletionPopover
+      items={candidates}
+      {selectedIndex}
+      left={popoverPos.left}
+      top={popoverPos.top}
+      onpick={confirmCompletion}
+    />
+  {/if}
 
   {#if attachments.length > 0}
     <div class="thumbs">
