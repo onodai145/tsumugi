@@ -36,4 +36,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
   },
+  // vitest実行時、Svelteパッケージがサーバー向けビルドに解決され
+  // mount()が使えなくなる(lifecycle_function_unavailable)ため、
+  // テスト時のみ browser 条件で解決させる。
+  resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
 });
