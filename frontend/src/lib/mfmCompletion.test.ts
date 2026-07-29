@@ -55,8 +55,8 @@ describe("detectTrigger", () => {
   });
 
   it("detects an arg-value trigger for border.style", () => {
-    expect(detectTrigger("$[border.style=so", 18)).toEqual({
-      kind: "argValue", fnName: "border", argName: "style", query: "so", start: 15, end: 18,
+    expect(detectTrigger("$[border.style=so", 17)).toEqual({
+      kind: "argValue", fnName: "border", argName: "style", query: "so", start: 15, end: 17,
     });
   });
 

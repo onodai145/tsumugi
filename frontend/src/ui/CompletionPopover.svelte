@@ -15,6 +15,12 @@
     top: number;
     onpick: (index: number) => void;
   } = $props();
+
+  let itemEls: (HTMLButtonElement | undefined)[] = $state([]);
+
+  $effect(() => {
+    itemEls[selectedIndex]?.scrollIntoView({ block: "nearest" });
+  });
 </script>
 
 <div class="completion-popover" use:portal style={`left:${left}px;top:${top}px`} role="listbox">
@@ -25,6 +31,7 @@
       class:selected={i === selectedIndex}
       role="option"
       aria-selected={i === selectedIndex}
+      bind:this={itemEls[i]}
       onmousedown={(e) => {
         // click ではなく mousedown を使い、かつ preventDefault することで
         // textarea の blur を発生させずに確定できるようにする(blurが先に走ると
@@ -52,6 +59,7 @@
     max-height: 260px;
     overflow-y: auto;
     min-width: 160px;
+    max-width: min(320px, 90vw);
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-radius: 8px;

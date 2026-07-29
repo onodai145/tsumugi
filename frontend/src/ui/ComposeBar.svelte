@@ -115,6 +115,7 @@
   let suppressAt = $state<number | null>(null);
   let composing = $state(false);
   let selectedIndex = $state(0);
+  let selectionMoved = $state(false);
   let focused = $state(false);
   // フォーカスが無く、かつ何も入力/添付/展開していない時だけコンパクト表示にする
   // (未送信の内容がある間は縮めない)。
@@ -140,6 +141,7 @@
   $effect(() => {
     trigger;
     selectedIndex = 0;
+    selectionMoved = false;
   });
 
   let popoverPos = $state<{ left: number; top: number } | null>(null);
@@ -344,15 +346,20 @@
     if (popoverOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        selectedIndex = (selectedIndex + 1) % candidates.length;
+        selectedIndex = Math.min(selectedIndex + 1, candidates.length - 1);
+        selectionMoved = true;
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        selectedIndex = (selectedIndex - 1 + candidates.length) % candidates.length;
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+        selectionMoved = true;
         return;
       }
       if (e.key === "Tab" || e.key === "Enter") {
+        if (e.key === "Enter" && trigger?.kind === "emoji" && !selectionMoved) {
+          return; // 素の ":" や短い顔文字っぽい入力での誤確定(改行のつもりでEnterを押した場合)を防ぐ
+        }
         e.preventDefault();
         confirmCompletion(selectedIndex);
         return;

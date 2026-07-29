@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import CompletionPopover from "./CompletionPopover.svelte";
 import type { CompletionItem } from "../lib/mfmCompletion";
+
+// jsdom は scrollIntoView を実装していないため、選択項目を追従スクロールさせる
+// $effect がエラーにならないよう no-op スタブを補う。
+beforeEach(() => {
+  Element.prototype.scrollIntoView ??= () => {};
+});
 
 afterEach(() => cleanup());
 
