@@ -46,10 +46,8 @@ export function getCaretCoordinates(el: HTMLTextAreaElement, position: number): 
     // textarea の content box 幅を計算して設定する。
     const paddingLeft = parseFloat(computed.paddingLeft) || 0;
     const paddingRight = parseFloat(computed.paddingRight) || 0;
-    const borderLeft = parseFloat(computed.borderLeftWidth) || 0;
-    const borderRight = parseFloat(computed.borderRightWidth) || 0;
     style.boxSizing = "content-box";
-    style.width = `${el.clientWidth - paddingLeft - paddingRight - borderLeft - borderRight}px`;
+    style.width = `${el.clientWidth - paddingLeft - paddingRight}px`;
     style.overflow = "hidden";
 
     div.textContent = el.value.slice(0, position);
