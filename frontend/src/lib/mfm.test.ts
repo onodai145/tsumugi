@@ -1,0 +1,86 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isKnownFn, mfmFn } from "./mfm";
+
+function mockMatchMedia(matches: boolean) {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches,
+    media: query,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }));
+}
+
+describe("isKnownFn", () => {
+  it("returns true for a known function name", () => {
+    expect(isKnownFn("tada")).toBe(true);
+  });
+
+  it("returns false for an unknown function name", () => {
+    expect(isKnownFn("nonexistent")).toBe(false);
+  });
+});
+
+describe("mfmFn", () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns empty class/style for an unknown function", () => {
+    expect(mfmFn("nonexistent")).toEqual({ class: "", style: "" });
+  });
+
+  it("applies font-size scaling for x2/x3/x4", () => {
+    expect(mfmFn("x2").style).toBe("font-size:2em");
+    expect(mfmFn("x3").style).toBe("font-size:3em");
+    expect(mfmFn("x4").style).toBe("font-size:4em");
+  });
+
+  it("builds a tada animation with default timing", () => {
+    const result = mfmFn("tada");
+    expect(result.style).toBe(
+      "font-size:150%;animation:mfm-tada 1s linear infinite both;animation-delay:0s",
+    );
+  });
+
+  it("respects custom speed/delay args for tada", () => {
+    const result = mfmFn("tada", { speed: "2s", delay: "0.5s" });
+    expect(result.style).toBe(
+      "font-size:150%;animation:mfm-tada 2s linear infinite both;animation-delay:0.5s",
+    );
+  });
+
+  it("ignores invalid time args and falls back to defaults", () => {
+    const result = mfmFn("tada", { speed: "not-a-time" });
+    expect(result.style).toBe(
+      "font-size:150%;animation:mfm-tada 1s linear infinite both;animation-delay:0s",
+    );
+  });
+
+  it("suppresses the animation when reduced motion is preferred", () => {
+    mockMatchMedia(true);
+    const result = mfmFn("jelly");
+    expect(result.style).toBe("");
+  });
+
+  it("still applies static styling under reduced motion", () => {
+    mockMatchMedia(true);
+    const result = mfmFn("tada");
+    expect(result.style).toBe("font-size:150%;");
+  });
+
+  it("validates hex colors for fg, falling back to red", () => {
+    expect(mfmFn("fg", { color: "0f0" }).style).toBe("color:#0f0;overflow-wrap:anywhere");
+    expect(mfmFn("fg", { color: "not-a-color" }).style).toBe("color:#f00;overflow-wrap:anywhere");
+  });
+
+  it("applies blur as a class, not an inline style", () => {
+    expect(mfmFn("blur")).toEqual({ class: "mfm-blur", style: "" });
+  });
+});
