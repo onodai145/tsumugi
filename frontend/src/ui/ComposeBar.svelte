@@ -430,9 +430,11 @@
   ></textarea>
 
   {#if popoverOpen && popoverPos}
+    <!-- 絵文字トリガーは矢印キーで選ぶまでEnterで確定しない(誤爆防止)ため、
+         選んでいないのに選択済みに見えないようハイライトも合わせて隠す -->
     <CompletionPopover
       items={candidates}
-      {selectedIndex}
+      selectedIndex={trigger?.kind === "emoji" && !selectionMoved ? -1 : selectedIndex}
       left={popoverPos.left}
       top={popoverPos.top}
       onpick={confirmCompletion}
