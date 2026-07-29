@@ -85,6 +85,10 @@ jobs:
         working-directory: frontend
         run: pnpm check
 
+      - name: vitest
+        working-directory: frontend
+        run: pnpm test
+
   # Android ターゲットがコンパイル・リンクできるかの検証のみ(署名やアーティファクト配布はしない)。
   android-build:
     runs-on: ubuntu-latest
