@@ -147,3 +147,52 @@ describe("matchArgValues", () => {
     expect(matchArgValues("border", "color", "f")).toEqual([]);
   });
 });
+
+import { applyCompletion, buildCompletionItems, type CompletionItem } from "./mfmCompletion";
+
+describe("buildCompletionItems", () => {
+  it("builds emoji items with :name: insert text and a thumbnail", () => {
+    const custom = [emoji("neko")];
+    const trigger = { kind: "emoji", query: "ne", start: 0, end: 3 } as const;
+    expect(buildCompletionItems(trigger, custom)).toEqual([
+      { key: "custom:neko", label: "neko", insertText: ":neko:", thumbnail: { type: "custom", url: custom[0].url } },
+    ]);
+  });
+
+  it("builds fnName items with the bare name as insert text", () => {
+    const trigger = { kind: "fnName", query: "tad", start: 2, end: 5 } as const;
+    expect(buildCompletionItems(trigger, [])).toEqual([
+      { key: "tada", label: "tada", insertText: "tada" },
+    ]);
+  });
+
+  it("builds argName items, appending '=' for value args but not for flags", () => {
+    const trigger = { kind: "argName", fnName: "spin", query: "", start: 0, end: 0 } as const;
+    const items = buildCompletionItems(trigger, []);
+    expect(items.find((i) => i.key === "speed")).toEqual({ key: "speed", label: "speed=", insertText: "speed=" });
+    expect(items.find((i) => i.key === "x")).toEqual({ key: "x", label: "x", insertText: "x" });
+  });
+
+  it("builds argValue items with the bare enum value as insert text", () => {
+    const trigger = { kind: "argValue", fnName: "border", argName: "style", query: "so", start: 0, end: 2 } as const;
+    expect(buildCompletionItems(trigger, [])).toEqual([
+      { key: "solid", label: "solid", insertText: "solid" },
+    ]);
+  });
+});
+
+describe("applyCompletion", () => {
+  it("splices the insert text into the trigger's range and places the cursor after it", () => {
+    const item: CompletionItem = { key: "neko", label: "neko", insertText: ":neko:" };
+    const trigger = { kind: "emoji", query: "ne", start: 6, end: 9 } as const;
+    const result = applyCompletion("hello :ne", trigger, item);
+    expect(result).toEqual({ text: "hello :neko:", cursor: 12 });
+  });
+
+  it("keeps text after the trigger end intact", () => {
+    const item: CompletionItem = { key: "tada", label: "tada", insertText: "tada" };
+    const trigger = { kind: "fnName", query: "ta", start: 2, end: 4 } as const;
+    const result = applyCompletion("$[ta hi]", trigger, item);
+    expect(result).toEqual({ text: "$[tada hi]", cursor: 6 });
+  });
+});

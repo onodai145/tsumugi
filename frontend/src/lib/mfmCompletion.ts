@@ -108,3 +108,52 @@ export function matchArgValues(fnName: string, argName: string, query: string): 
   const values = spec?.enum ?? [];
   return values.filter((v) => startsWithCI(v, query)).slice(0, MAX_MATCHES);
 }
+
+export interface CompletionThumbnail {
+  type: "custom" | "unicode";
+  url?: string;
+  char?: string;
+}
+
+export interface CompletionItem {
+  key: string;
+  label: string;
+  insertText: string;
+  thumbnail?: CompletionThumbnail;
+}
+
+export function buildCompletionItems(trigger: Trigger, customEmojis: EmojiDef[]): CompletionItem[] {
+  switch (trigger.kind) {
+    case "emoji":
+      return matchEmojis(trigger.query, customEmojis).map((m) => ({
+        key: m.key,
+        label: m.name,
+        insertText: `:${m.name}:`,
+        thumbnail:
+          m.kind === "custom" ? { type: "custom" as const, url: m.url } : { type: "unicode" as const, char: m.char },
+      }));
+    case "fnName":
+      return matchFnNames(trigger.query).map((name) => ({ key: name, label: name, insertText: name }));
+    case "argName":
+      return matchArgNames(trigger.fnName, trigger.query).map((spec) => ({
+        key: spec.name,
+        label: spec.hasValue ? `${spec.name}=` : spec.name,
+        insertText: spec.hasValue ? `${spec.name}=` : spec.name,
+      }));
+    case "argValue":
+      return matchArgValues(trigger.fnName, trigger.argName, trigger.query).map((value) => ({
+        key: value,
+        label: value,
+        insertText: value,
+      }));
+  }
+}
+
+export function applyCompletion(
+  text: string,
+  trigger: Trigger,
+  item: CompletionItem,
+): { text: string; cursor: number } {
+  const next = text.slice(0, trigger.start) + item.insertText + text.slice(trigger.end);
+  return { text: next, cursor: trigger.start + item.insertText.length };
+}
