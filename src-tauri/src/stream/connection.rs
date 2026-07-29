@@ -405,6 +405,10 @@ async fn run_account(
     let mut subs: HashMap<String, ChannelSub> = HashMap::new(); // sub_key -> ChannelSub
     let mut sub_index: HashMap<String, String> = HashMap::new(); // sub_id -> sub_key
     let mut captures = CaptureSet::new(CAPTURE_CAP);
+    // followers限定ノート等、noteUpdated(reacted)配信がされない場合のフォールバックとして
+    // reactionタイプの通知に埋め込まれたノートも使ってリアクション反映する(Issue #101)。
+    // noteUpdatedと通知が両方届いた場合の二重加算は (note_id, actor_id, reaction) で防ぐ。
+    let mut reaction_event_dedup = Dedup::new(DEDUP_CAPACITY);
     let mut backoff = BACKOFF_START;
 
     loop {
@@ -422,6 +426,7 @@ async fn run_account(
             &mut subs,
             &mut sub_index,
             &mut captures,
+            &mut reaction_event_dedup,
             &mut cancel,
             &mut cmd_rx,
             &mut connected,
@@ -460,6 +465,7 @@ async fn connect_and_run(
     subs: &mut HashMap<String, ChannelSub>,
     sub_index: &mut HashMap<String, String>,
     captures: &mut CaptureSet,
+    reaction_event_dedup: &mut Dedup,
     cancel: &mut watch::Receiver<bool>,
     cmd_rx: &mut mpsc::Receiver<AccountCommand>,
     connected: &mut bool,
@@ -601,9 +607,15 @@ async fn connect_and_run(
                 last_rx = tokio::time::Instant::now();
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let HandleResult::CaptureNote { column_id, note_id } =
-                            handle_text(app, account_id, &text, subs, sub_index, captures)
-                        {
+                        if let HandleResult::CaptureNote { column_id, note_id } = handle_text(
+                            app,
+                            account_id,
+                            &text,
+                            subs,
+                            sub_index,
+                            captures,
+                            reaction_event_dedup,
+                        ) {
                             apply_capture_add(&mut write, captures, &note_id, &column_id).await;
                         }
                     }
@@ -648,6 +660,7 @@ enum HandleResult {
 /// - channel note: sub_id からカラムを特定し、フィルタ/ミュート適用後に ColumnNote を emit。
 ///   新規なら自動キャプチャのため CaptureNote を返す。
 /// - channel notification: 同様にカラム特定して ColumnNotification を emit。
+///   reaction 通知は埋め込みノートを使って noteUpdated 相当の反映も行う(Issue #101)。
 /// - noteUpdated: そのノートを表示中の全カラムへ ColumnNoteUpdated を emit。
 fn handle_text(
     app: &AppHandle,
@@ -656,6 +669,7 @@ fn handle_text(
     subs: &mut HashMap<String, ChannelSub>,
     sub_index: &HashMap<String, String>,
     captures: &CaptureSet,
+    reaction_event_dedup: &mut Dedup,
 ) -> HandleResult {
     match protocol::parse_incoming(text) {
         Incoming::ChannelNote { channel_id, note } => {
@@ -715,6 +729,37 @@ fn handle_text(
                     return HandleResult::None;
                 }
             }
+            // フォロワー限定ノート等では noteUpdated(reacted) がサーバから配信されないことが
+            // あるため、reaction 通知に埋め込まれたノートをフォールバック経路として使う
+            // (Issue #101)。noteUpdated 経路と両方届いた場合の二重加算は、両経路で共通の
+            // (note_id, actor_id, reaction) キーによる重複排除で防ぐ。
+            if n.kind == "reaction" {
+                if let (Some(note), Some(reaction), Some(actor)) =
+                    (&n.note, &n.reaction, &n.user)
+                {
+                    let note_id = note.id.clone();
+                    let update = NoteUpdate::Reacted { reaction: reaction.clone() };
+                    let actor_id = Some(actor.id.clone());
+                    let key = reaction_event_key(&note_id, actor_id.as_deref(), &update)
+                        .expect("Reacted always yields a dedup key");
+                    if reaction_event_dedup.accept(&key) {
+                        for target_column in captures.columns_for(&note_id) {
+                            let _ = ColumnNoteUpdated {
+                                column_id: target_column,
+                                note_id: note_id.clone(),
+                                update: update.clone(),
+                                actor_id: actor_id.clone(),
+                            }
+                            .emit(app);
+                        }
+                        if let Some(state) = app.try_state::<AppState>() {
+                            if !is_own_actor(&state, &account_id, actor_id.as_deref()) {
+                                apply_note_update_to_cache(&state, &note_id, &update);
+                            }
+                        }
+                    }
+                }
+            }
             let _ = ColumnNotification {
                 column_id: column_id.clone(),
                 notification: n,
@@ -724,6 +769,13 @@ fn handle_text(
         }
         Incoming::NoteUpdated { note_id, kind, body } => {
             if let Some((update, actor_id)) = map_note_update(&kind, &body) {
+                // reaction 通知フォールバック経路(Issue #101)と共通のキーで重複排除する。
+                // Reacted/Unreacted 以外(PollVoted/Deleted)は対象外なのでそのまま処理する。
+                if let Some(key) = reaction_event_key(&note_id, actor_id.as_deref(), &update) {
+                    if !reaction_event_dedup.accept(&key) {
+                        return HandleResult::None;
+                    }
+                }
                 // subNote は接続単位。そのノートを表示中の全カラムへ配る。
                 for column_id in captures.columns_for(&note_id) {
                     let _ = ColumnNoteUpdated {
@@ -745,6 +797,18 @@ fn handle_text(
             HandleResult::None
         }
         Incoming::Other => HandleResult::None,
+    }
+}
+
+/// Reacted/Unreacted の重複排除キー。noteUpdated 経路と reaction 通知フォールバック経路
+/// (Issue #101)の両方で同じイベントが届きうるため、(note_id, actor_id, reaction) で
+/// 共通に重複排除する。actor_id が無い、または対象外の更新種別(PollVoted/Deleted)なら None。
+fn reaction_event_key(note_id: &str, actor_id: Option<&str>, update: &NoteUpdate) -> Option<String> {
+    let actor_id = actor_id?;
+    match update {
+        NoteUpdate::Reacted { reaction } => Some(format!("react:{note_id}:{actor_id}:{reaction}")),
+        NoteUpdate::Unreacted { reaction } => Some(format!("unreact:{note_id}:{actor_id}:{reaction}")),
+        NoteUpdate::PollVoted { .. } | NoteUpdate::Deleted => None,
     }
 }
 
@@ -907,6 +971,33 @@ mod tests {
     fn map_unknown_is_none() {
         assert!(map_note_update("emojiAdded", &json!({})).is_none());
         assert!(map_note_update("reacted", &json!({})).is_none()); // reaction 欠落
+    }
+
+    #[test]
+    fn reaction_event_key_matches_across_reacted_and_unreacted_but_differs_by_actor_or_reaction() {
+        let reacted = NoteUpdate::Reacted { reaction: "👍".into() };
+        let a = reaction_event_key("n1", Some("u1"), &reacted).unwrap();
+        let b = reaction_event_key("n1", Some("u1"), &reacted).unwrap();
+        assert_eq!(a, b); // 同一(note, actor, update)は同じキー = noteUpdated/通知どちらが先でも重複扱いできる
+
+        let diff_actor = reaction_event_key("n1", Some("u2"), &reacted).unwrap();
+        assert_ne!(a, diff_actor);
+
+        let diff_reaction =
+            reaction_event_key("n1", Some("u1"), &NoteUpdate::Reacted { reaction: "🎉".into() }).unwrap();
+        assert_ne!(a, diff_reaction);
+
+        let unreacted = NoteUpdate::Unreacted { reaction: "👍".into() };
+        let c = reaction_event_key("n1", Some("u1"), &unreacted).unwrap();
+        assert_ne!(a, c); // react/unreact は別イベント扱い
+    }
+
+    #[test]
+    fn reaction_event_key_none_without_actor_or_for_untracked_kinds() {
+        let reacted = NoteUpdate::Reacted { reaction: "👍".into() };
+        assert!(reaction_event_key("n1", None, &reacted).is_none());
+        assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::PollVoted { choice: 0 }).is_none());
+        assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::Deleted).is_none());
     }
 
     fn minimal_note(id: &str) -> Note {
