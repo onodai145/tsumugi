@@ -30,7 +30,7 @@ export interface MfmStyle {
   style: string;
 }
 
-const KNOWN_FN = new Set([
+export const KNOWN_FN = new Set([
   "tada",
   "jelly",
   "twitch",
@@ -78,6 +78,59 @@ const BORDER_STYLES = new Set([
   "inset",
   "outset",
 ]);
+
+export interface MfmArgSpec {
+  name: string;
+  hasValue: boolean;
+  enum?: string[];
+}
+
+export const FN_ARGS: Record<string, MfmArgSpec[]> = {
+  tada: [{ name: "speed", hasValue: true }, { name: "delay", hasValue: true }],
+  jelly: [{ name: "speed", hasValue: true }, { name: "delay", hasValue: true }],
+  twitch: [{ name: "speed", hasValue: true }, { name: "delay", hasValue: true }],
+  shake: [{ name: "speed", hasValue: true }, { name: "delay", hasValue: true }],
+  jump: [{ name: "speed", hasValue: true }, { name: "delay", hasValue: true }],
+  bounce: [{ name: "speed", hasValue: true }, { name: "delay", hasValue: true }],
+  rainbow: [{ name: "speed", hasValue: true }, { name: "delay", hasValue: true }],
+  spin: [
+    { name: "speed", hasValue: true },
+    { name: "delay", hasValue: true },
+    { name: "x", hasValue: false },
+    { name: "y", hasValue: false },
+    { name: "left", hasValue: false },
+    { name: "alternate", hasValue: false },
+  ],
+  flip: [{ name: "h", hasValue: false }, { name: "v", hasValue: false }],
+  x2: [],
+  x3: [],
+  x4: [],
+  blur: [],
+  font: [
+    { name: "serif", hasValue: false },
+    { name: "monospace", hasValue: false },
+    { name: "cursive", hasValue: false },
+    { name: "fantasy", hasValue: false },
+    { name: "emoji", hasValue: false },
+    { name: "math", hasValue: false },
+  ],
+  rotate: [{ name: "deg", hasValue: true }],
+  position: [{ name: "x", hasValue: true }, { name: "y", hasValue: true }],
+  scale: [{ name: "x", hasValue: true }, { name: "y", hasValue: true }],
+  fg: [{ name: "color", hasValue: true }],
+  bg: [{ name: "color", hasValue: true }],
+  border: [
+    { name: "color", hasValue: true },
+    {
+      name: "style",
+      hasValue: true,
+      enum: ["hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset"],
+    },
+    { name: "width", hasValue: true },
+    { name: "radius", hasValue: true },
+    { name: "noclip", hasValue: false },
+  ],
+};
 
 /// fn ノードの name/args を描画用の class/style へ。未対応は空（子要素だけ描画される）。
 /// 呼び出し側（MfmNode.svelte）が全ケース共通で `display:inline-block` を付与する。

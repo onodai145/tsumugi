@@ -84,3 +84,46 @@ describe("mfmFn", () => {
     expect(mfmFn("blur")).toEqual({ class: "mfm-blur", style: "" });
   });
 });
+
+import { FN_ARGS, KNOWN_FN } from "./mfm";
+
+describe("FN_ARGS", () => {
+  it("has an entry for every known fn name", () => {
+    for (const name of KNOWN_FN) {
+      expect(FN_ARGS[name]).toBeDefined();
+    }
+  });
+
+  it("marks tada's speed/delay as value args", () => {
+    expect(FN_ARGS.tada).toEqual([
+      { name: "speed", hasValue: true },
+      { name: "delay", hasValue: true },
+    ]);
+  });
+
+  it("marks flip's h/v as flag args (no value)", () => {
+    expect(FN_ARGS.flip).toEqual([
+      { name: "h", hasValue: false },
+      { name: "v", hasValue: false },
+    ]);
+  });
+
+  it("gives border.style a closed enum matching the CSS border-style keywords mfmFn accepts", () => {
+    const style = FN_ARGS.border.find((a) => a.name === "style");
+    expect(style?.enum).toEqual([
+      "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset",
+    ]);
+  });
+
+  it("does not give border.color an enum (free-form hex input)", () => {
+    const color = FN_ARGS.border.find((a) => a.name === "color");
+    expect(color?.enum).toBeUndefined();
+  });
+
+  it("gives x2/x3/x4/blur an empty arg list", () => {
+    expect(FN_ARGS.x2).toEqual([]);
+    expect(FN_ARGS.x3).toEqual([]);
+    expect(FN_ARGS.x4).toEqual([]);
+    expect(FN_ARGS.blur).toEqual([]);
+  });
+});
