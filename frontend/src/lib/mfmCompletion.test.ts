@@ -68,3 +68,82 @@ describe("detectTrigger", () => {
     expect(detectTrigger("$[nonexistent.style=so", 23)).toBeNull();
   });
 });
+
+import { matchArgNames, matchArgValues, matchEmojis, matchFnNames } from "./mfmCompletion";
+import type { EmojiDef } from "../bindings/tauri.gen";
+
+function emoji(name: string, aliases: string[] = []): EmojiDef {
+  return { name, host: null, url: `https://example.com/${name}.png`, category: null, aliases };
+}
+
+describe("matchEmojis", () => {
+  it("matches custom emoji by name prefix, case-insensitively", () => {
+    const custom = [emoji("Smile_cat"), emoji("smoke"), emoji("wave")];
+    const result = matchEmojis("sm", custom);
+    expect(result.map((r) => r.name)).toEqual(["Smile_cat", "smoke"]);
+    expect(result.every((r) => r.kind === "custom")).toBe(true);
+  });
+
+  it("matches custom emoji by alias prefix too", () => {
+    const custom = [emoji("neko", ["cat_face"])];
+    expect(matchEmojis("cat", custom).map((r) => r.name)).toEqual(["neko"]);
+  });
+
+  it("ranks custom emoji ahead of unicode emoji for the same query", () => {
+    const custom = [emoji("smile")];
+    const result = matchEmojis("smi", custom);
+    expect(result[0]).toEqual({ key: "custom:smile", kind: "custom", name: "smile", url: custom[0].url });
+  });
+
+  it("falls back to unicode emoji shortcodes when no custom emoji matches", () => {
+    const result = matchEmojis("grin", []);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.every((r) => r.kind === "unicode")).toBe(true);
+    expect(result[0].char).toBeTruthy();
+  });
+
+  it("caps the total at 10 matches", () => {
+    const custom = Array.from({ length: 20 }, (_, i) => emoji(`smile_${i}`));
+    expect(matchEmojis("smile", custom)).toHaveLength(10);
+  });
+
+  it("returns everything up to the limit for an empty query", () => {
+    const custom = [emoji("a"), emoji("b")];
+    expect(matchEmojis("", custom).length).toBeGreaterThan(0);
+  });
+});
+
+describe("matchFnNames", () => {
+  it("matches known fn names by prefix, sorted", () => {
+    expect(matchFnNames("s")).toEqual(["scale", "shake", "spin"]);
+  });
+
+  it("returns an empty array for no match", () => {
+    expect(matchFnNames("zzz")).toEqual([]);
+  });
+});
+
+describe("matchArgNames", () => {
+  it("matches an fn's arg specs by name prefix", () => {
+    expect(matchArgNames("border", "s")).toEqual([
+      {
+        name: "style", hasValue: true,
+        enum: ["hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset"],
+      },
+    ]);
+  });
+
+  it("returns an empty array for an unknown fn", () => {
+    expect(matchArgNames("nonexistent", "s")).toEqual([]);
+  });
+});
+
+describe("matchArgValues", () => {
+  it("matches border.style's enum by prefix", () => {
+    expect(matchArgValues("border", "style", "d")).toEqual(["dotted", "dashed", "double"]);
+  });
+
+  it("returns an empty array for an arg with no enum", () => {
+    expect(matchArgValues("border", "color", "f")).toEqual([]);
+  });
+});

@@ -59,3 +59,52 @@ function detectEmojiTrigger(text: string, cursor: number): Trigger | null {
 export function detectTrigger(text: string, cursor: number): Trigger | null {
   return detectFnTrigger(text, cursor) ?? detectEmojiTrigger(text, cursor);
 }
+
+const MAX_MATCHES = 10;
+
+function startsWithCI(name: string, query: string): boolean {
+  return name.toLowerCase().startsWith(query.toLowerCase());
+}
+
+export interface EmojiMatch {
+  key: string;
+  kind: "custom" | "unicode";
+  name: string;
+  url?: string;
+  char?: string;
+}
+
+export function matchEmojis(query: string, customEmojis: EmojiDef[]): EmojiMatch[] {
+  const custom: EmojiMatch[] = customEmojis
+    .filter((e) => startsWithCI(e.name, query) || e.aliases.some((a) => startsWithCI(a, query)))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, MAX_MATCHES)
+    .map((e) => ({ key: `custom:${e.name}`, kind: "custom", name: e.name, url: e.url }));
+
+  if (custom.length > 0) return custom;
+
+  const unicode: EmojiMatch[] = UNICODE_EMOJIS.filter((e) => startsWithCI(e.name, query))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, MAX_MATCHES)
+    .map((e) => ({ key: `unicode:${e.name}`, kind: "unicode", name: e.name, char: e.char }));
+
+  return unicode;
+}
+
+export function matchFnNames(query: string): string[] {
+  return [...KNOWN_FN]
+    .filter((name) => startsWithCI(name, query))
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, MAX_MATCHES);
+}
+
+export function matchArgNames(fnName: string, query: string): MfmArgSpec[] {
+  const specs = FN_ARGS[fnName] ?? [];
+  return specs.filter((s) => startsWithCI(s.name, query)).slice(0, MAX_MATCHES);
+}
+
+export function matchArgValues(fnName: string, argName: string, query: string): string[] {
+  const spec = (FN_ARGS[fnName] ?? []).find((s) => s.name === argName);
+  const values = spec?.enum ?? [];
+  return values.filter((v) => startsWithCI(v, query)).slice(0, MAX_MATCHES);
+}
