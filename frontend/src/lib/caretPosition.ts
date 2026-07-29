@@ -7,7 +7,7 @@ const MIRRORED_PROPERTIES = [
   "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
   "fontStyle", "fontVariant", "fontWeight", "fontSize", "lineHeight", "fontFamily",
   "textAlign", "textTransform", "textIndent", "textDecoration",
-  "letterSpacing", "wordSpacing", "tabSize", "whiteSpace", "wordWrap", "wordBreak",
+  "letterSpacing", "wordSpacing", "tabSize", "wordBreak",
 ] as const satisfies readonly (keyof CSSStyleDeclaration)[];
 
 export interface CaretCoordinates {
@@ -21,35 +21,37 @@ export function getCaretCoordinates(el: HTMLTextAreaElement, position: number): 
   div.id = "mfm-completion-caret-mirror";
   document.body.appendChild(div);
 
-  const style = div.style;
-  const computed = window.getComputedStyle(el);
+  try {
+    const style = div.style;
+    const computed = window.getComputedStyle(el);
 
-  style.position = "absolute";
-  style.visibility = "hidden";
-  style.top = "0";
-  style.left = "-9999px";
-  style.whiteSpace = "pre-wrap";
-  style.wordWrap = "break-word";
+    style.position = "absolute";
+    style.visibility = "hidden";
+    style.top = "0";
+    style.left = "-9999px";
+    style.whiteSpace = "pre-wrap";
+    style.wordWrap = "break-word";
 
-  for (const prop of MIRRORED_PROPERTIES) {
-    const value = computed[prop as keyof CSSStyleDeclaration];
-    if (typeof value === "string") {
-      (style as unknown as Record<string, string>)[prop] = value;
+    for (const prop of MIRRORED_PROPERTIES) {
+      const value = computed[prop as keyof CSSStyleDeclaration];
+      if (typeof value === "string") {
+        (style as unknown as Record<string, string>)[prop] = value;
+      }
     }
+
+    div.textContent = el.value.slice(0, position);
+    const marker = document.createElement("span");
+    marker.textContent = el.value.slice(position) || ".";
+    div.appendChild(marker);
+
+    const coords: CaretCoordinates = {
+      left: marker.offsetLeft - el.scrollLeft,
+      top: marker.offsetTop - el.scrollTop,
+      height: marker.offsetHeight,
+    };
+
+    return coords;
+  } finally {
+    document.body.removeChild(div);
   }
-  style.width = computed.width;
-
-  div.textContent = el.value.slice(0, position);
-  const marker = document.createElement("span");
-  marker.textContent = el.value.slice(position) || ".";
-  div.appendChild(marker);
-
-  const coords: CaretCoordinates = {
-    left: marker.offsetLeft - el.scrollLeft,
-    top: marker.offsetTop - el.scrollTop,
-    height: marker.offsetHeight,
-  };
-
-  document.body.removeChild(div);
-  return coords;
 }
