@@ -4,12 +4,14 @@ use crate::api::drive::{
     list_files as api_list_files, list_folders as api_list_folders, upload_bytes as api_upload_bytes,
     upload_file as api_upload_file,
 };
+use crate::api::hashtags::search_hashtags as api_search_hashtags;
 use crate::api::meta::list_emojis;
 use crate::api::notes::{
     create_favorite, create_note, create_reaction, delete_favorite, delete_note, delete_reaction,
     get_reactions, get_renotes, renote as api_renote, vote_poll as api_vote_poll, NoteDraft,
     VisibilityInput,
 };
+use crate::api::users::search_users as api_search_users;
 use crate::domain::{DriveFile, EmojiDef, Note, ReactionUser, SourceItem, User};
 use crate::error::{Error, Result};
 use crate::state::AppState;
@@ -353,6 +355,30 @@ pub async fn list_custom_emojis(
         .unwrap()
         .insert(host, emojis.clone());
     Ok(emojis)
+}
+
+/// メンション補完用のユーザー検索。
+#[tauri::command]
+#[specta::specta]
+pub async fn search_users(
+    state: State<'_, AppState>,
+    account_id: String,
+    query: String,
+) -> Result<Vec<User>> {
+    let client = state.client_for(&account_id)?;
+    api_search_users(&client, &query, 10).await
+}
+
+/// ハッシュタグ補完用のハッシュタグ検索。
+#[tauri::command]
+#[specta::specta]
+pub async fn search_hashtags(
+    state: State<'_, AppState>,
+    account_id: String,
+    query: String,
+) -> Result<Vec<String>> {
+    let client = state.client_for(&account_id)?;
+    api_search_hashtags(&client, &query, 10).await
 }
 
 #[cfg(test)]

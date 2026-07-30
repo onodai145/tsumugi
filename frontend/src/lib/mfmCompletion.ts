@@ -6,12 +6,16 @@ export type Trigger =
   | { kind: "emoji"; query: string; start: number; end: number }
   | { kind: "fnName"; query: string; start: number; end: number }
   | { kind: "argName"; fnName: string; query: string; start: number; end: number }
-  | { kind: "argValue"; fnName: string; argName: string; query: string; start: number; end: number };
+  | { kind: "argValue"; fnName: string; argName: string; query: string; start: number; end: number }
+  | { kind: "mention"; query: string; start: number; end: number }
+  | { kind: "hashtag"; query: string; start: number; end: number };
 
 const IDENT = /^[a-zA-Z0-9_]*$/;
 // 直前が行頭または空白/開き括弧類のときだけ ":" を絵文字トリガーの開始とみなす
 // (英数字に直接くっついた ":"(例: "http:")を誤検出しないため)。
 const EMOJI_TRIGGER = /(?:^|[\s([{"'>])(:[a-zA-Z0-9_+-]*)$/;
+const MENTION_TRIGGER = /(?:^|[\s([{"'>])(@[a-zA-Z0-9_-]+(?:@[a-zA-Z0-9_.-]+)?)$/;
+const HASHTAG_TRIGGER = /(?:^|[\s([{"'>])(#\S+)$/;
 
 function detectFnTrigger(text: string, cursor: number): Trigger | null {
   const head = text.slice(0, cursor);
@@ -56,8 +60,29 @@ function detectEmojiTrigger(text: string, cursor: number): Trigger | null {
   return { kind: "emoji", query: matched.slice(1), start: cursor - matched.length, end: cursor };
 }
 
+function detectMentionTrigger(text: string, cursor: number): Trigger | null {
+  const head = text.slice(0, cursor);
+  const m = head.match(MENTION_TRIGGER);
+  if (!m) return null;
+  const matched = m[1]; // "@query"
+  return { kind: "mention", query: matched.slice(1), start: cursor - matched.length, end: cursor };
+}
+
+function detectHashtagTrigger(text: string, cursor: number): Trigger | null {
+  const head = text.slice(0, cursor);
+  const m = head.match(HASHTAG_TRIGGER);
+  if (!m) return null;
+  const matched = m[1]; // "#query"
+  return { kind: "hashtag", query: matched.slice(1), start: cursor - matched.length, end: cursor };
+}
+
 export function detectTrigger(text: string, cursor: number): Trigger | null {
-  return detectFnTrigger(text, cursor) ?? detectEmojiTrigger(text, cursor);
+  return (
+    detectFnTrigger(text, cursor) ??
+    detectEmojiTrigger(text, cursor) ??
+    detectMentionTrigger(text, cursor) ??
+    detectHashtagTrigger(text, cursor)
+  );
 }
 
 const MAX_MATCHES = 10;
@@ -111,7 +136,7 @@ export function matchArgValues(fnName: string, argName: string, query: string): 
 }
 
 export interface CompletionThumbnail {
-  type: "custom" | "unicode";
+  type: "custom" | "unicode" | "avatar";
   url?: string;
   char?: string;
 }
@@ -123,7 +148,9 @@ export interface CompletionItem {
   thumbnail?: CompletionThumbnail;
 }
 
-export function buildCompletionItems(trigger: Trigger, customEmojis: EmojiDef[]): CompletionItem[] {
+export type SyncTrigger = Exclude<Trigger, { kind: "mention" } | { kind: "hashtag" }>;
+
+export function buildCompletionItems(trigger: SyncTrigger, customEmojis: EmojiDef[]): CompletionItem[] {
   switch (trigger.kind) {
     case "emoji":
       return matchEmojis(trigger.query, customEmojis).map((m) => ({

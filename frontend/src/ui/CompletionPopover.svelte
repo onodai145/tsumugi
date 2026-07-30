@@ -40,7 +40,7 @@
         onpick(i);
       }}
     >
-      {#if item.thumbnail?.type === "custom"}
+      {#if item.thumbnail?.type === "custom" || item.thumbnail?.type === "avatar"}
         <img class="completion-thumb" src={item.thumbnail.url} alt={item.label} />
       {:else if item.thumbnail?.type === "unicode"}
         <span class="completion-thumb completion-thumb-unicode">{item.thumbnail.char}</span>

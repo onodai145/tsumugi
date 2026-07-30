@@ -13,6 +13,7 @@
   import CompletionPopover from "./CompletionPopover.svelte";
   import { applyCompletion, buildCompletionItems, detectTrigger, type CompletionItem, type Trigger } from "../lib/mfmCompletion";
   import { getCaretCoordinates } from "../lib/caretPosition";
+  import { searchHashtagItems, searchMentionItems } from "../lib/mfmSearch";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -116,6 +117,9 @@
   let composing = $state(false);
   let selectedIndex = $state(0);
   let selectionMoved = $state(false);
+  let asyncCandidates = $state<CompletionItem[]>([]);
+  let asyncSearchToken = 0; // 古い応答を無視するための世代カウンタ
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let focused = $state(false);
   // フォーカスが無く、かつ何も入力/添付/展開していない時だけコンパクト表示にする
   // (未送信の内容がある間は縮めない)。
@@ -134,7 +138,33 @@
   const trigger = $derived<Trigger | null>(
     composing || cursorPos === suppressAt ? null : detectTrigger(text, cursorPos),
   );
-  const candidates = $derived<CompletionItem[]>(trigger ? buildCompletionItems(trigger, customEmojiList) : []);
+  $effect(() => {
+    const t = trigger;
+    clearTimeout(debounceTimer);
+    asyncCandidates = [];
+    asyncSearchToken++;
+    if (!t || (t.kind !== "mention" && t.kind !== "hashtag") || t.query.length < 1) return;
+    const token = asyncSearchToken;
+    debounceTimer = setTimeout(async () => {
+      if (!accountId) return;
+      try {
+        const items =
+          t.kind === "mention" ? await searchMentionItems(accountId, t.query) : await searchHashtagItems(accountId, t.query);
+        if (token === asyncSearchToken) asyncCandidates = items;
+      } catch {
+        if (token === asyncSearchToken) asyncCandidates = [];
+      }
+    }, 300);
+    return () => clearTimeout(debounceTimer);
+  });
+
+  const candidates = $derived<CompletionItem[]>(
+    !trigger
+      ? []
+      : trigger.kind === "mention" || trigger.kind === "hashtag"
+        ? asyncCandidates
+        : buildCompletionItems(trigger, customEmojiList),
+  );
   const popoverOpen = $derived(trigger !== null && candidates.length > 0);
 
   // クエリが変わって候補集合が変わるたびに選択位置を先頭へ戻す

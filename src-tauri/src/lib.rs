@@ -79,6 +79,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::list_drive_folders,
             commands::note::save_url_to_file,
             commands::note::read_attachment_preview,
+            commands::note::search_users,
+            commands::note::search_hashtags,
             commands::mute::get_mute,
             commands::mute::set_mute,
             commands::mute::get_notify,
