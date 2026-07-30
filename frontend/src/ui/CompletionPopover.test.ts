@@ -24,6 +24,12 @@ const unicodeItem: CompletionItem = {
   thumbnail: { type: "unicode", char: "😁" },
 };
 const textItem: CompletionItem = { key: "tada", label: "tada", insertText: "tada" };
+const avatarItem: CompletionItem = {
+  key: "user:1",
+  label: "@alice",
+  insertText: "@alice",
+  thumbnail: { type: "avatar", url: "https://example.com/avatar.png" },
+};
 
 describe("CompletionPopover", () => {
   it("renders one row per item with its label", () => {
@@ -39,6 +45,13 @@ describe("CompletionPopover", () => {
       props: { items: [emojiItem], selectedIndex: 0, left: 0, top: 0, onpick: () => {} },
     });
     expect(getByRole("img").getAttribute("src")).toBe("https://example.com/neko.png");
+  });
+
+  it("renders a thumbnail image for an avatar item", () => {
+    const { getByRole } = render(CompletionPopover, {
+      props: { items: [avatarItem], selectedIndex: 0, left: 0, top: 0, onpick: () => {} },
+    });
+    expect(getByRole("img").getAttribute("src")).toBe("https://example.com/avatar.png");
   });
 
   it("renders the raw character for a unicode emoji item (no image)", () => {
