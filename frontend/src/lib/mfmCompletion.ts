@@ -136,7 +136,7 @@ export function matchArgValues(fnName: string, argName: string, query: string): 
 }
 
 export interface CompletionThumbnail {
-  type: "custom" | "unicode";
+  type: "custom" | "unicode" | "avatar";
   url?: string;
   char?: string;
 }
@@ -148,7 +148,9 @@ export interface CompletionItem {
   thumbnail?: CompletionThumbnail;
 }
 
-export function buildCompletionItems(trigger: Trigger, customEmojis: EmojiDef[]): CompletionItem[] {
+export type SyncTrigger = Exclude<Trigger, { kind: "mention" } | { kind: "hashtag" }>;
+
+export function buildCompletionItems(trigger: SyncTrigger, customEmojis: EmojiDef[]): CompletionItem[] {
   switch (trigger.kind) {
     case "emoji":
       return matchEmojis(trigger.query, customEmojis).map((m) => ({
