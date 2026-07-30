@@ -12,6 +12,8 @@ pub mod meta;
 pub mod mutes;
 pub mod notes;
 pub mod notifications;
+pub mod hashtags;
+pub mod users;
 pub mod normalize;
 
 pub use client::MisskeyClient;
