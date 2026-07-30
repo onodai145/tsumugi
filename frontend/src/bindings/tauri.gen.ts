@@ -178,6 +178,10 @@ export const commands = {
 	 *  動画や未知拡張子は `application/octet-stream` を返す(呼び出し側でバッジ表示にフォールバックする想定)。
 	 */
 	readAttachmentPreview: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_attachment_preview", { path })),
+	/**  メンション補完用のユーザー検索。 */
+	searchUsers: (accountId: string, query: string) => typedError<User[], Error>(__TAURI_INVOKE("search_users", { accountId, query })),
+	/**  ハッシュタグ補完用のハッシュタグ検索。 */
+	searchHashtags: (accountId: string, query: string) => typedError<string[], Error>(__TAURI_INVOKE("search_hashtags", { accountId, query })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
