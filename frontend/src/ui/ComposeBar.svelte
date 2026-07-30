@@ -357,8 +357,8 @@
         return;
       }
       if (e.key === "Tab" || e.key === "Enter") {
-        if (e.key === "Enter" && trigger?.kind === "emoji" && !selectionMoved) {
-          return; // 素の ":" や短い顔文字っぽい入力での誤確定(改行のつもりでEnterを押した場合)を防ぐ
+        if (e.key === "Enter" && !selectionMoved) {
+          return; // 矢印キーで明示的に選ぶまでEnterでは確定しない(改行のつもりでEnterを押した場合の誤確定を防ぐ)
         }
         e.preventDefault();
         confirmCompletion(selectedIndex);
@@ -430,11 +430,11 @@
   ></textarea>
 
   {#if popoverOpen && popoverPos}
-    <!-- 絵文字トリガーは矢印キーで選ぶまでEnterで確定しない(誤爆防止)ため、
+    <!-- 矢印キーで選ぶまでEnterで確定しない(誤爆防止)ため、
          選んでいないのに選択済みに見えないようハイライトも合わせて隠す -->
     <CompletionPopover
       items={candidates}
-      selectedIndex={trigger?.kind === "emoji" && !selectionMoved ? -1 : selectedIndex}
+      selectedIndex={selectionMoved ? selectedIndex : -1}
       left={popoverPos.left}
       top={popoverPos.top}
       onpick={confirmCompletion}
