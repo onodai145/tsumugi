@@ -346,13 +346,14 @@
     if (popoverOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        selectedIndex = Math.min(selectedIndex + 1, candidates.length - 1);
+        // 未選択(ハイライト非表示)からの最初の移動は先頭を選ぶ。2回目以降は前後移動。
+        selectedIndex = selectionMoved ? Math.min(selectedIndex + 1, candidates.length - 1) : 0;
         selectionMoved = true;
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        selectedIndex = Math.max(selectedIndex - 1, 0);
+        selectedIndex = selectionMoved ? Math.max(selectedIndex - 1, 0) : candidates.length - 1;
         selectionMoved = true;
         return;
       }
