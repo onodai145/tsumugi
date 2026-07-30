@@ -42,6 +42,37 @@ describe("detectTrigger", () => {
     });
   });
 
+  it("detects a mention trigger at the start of the text", () => {
+    expect(detectTrigger("@ali", 4)).toEqual({ kind: "mention", query: "ali", start: 0, end: 4 });
+  });
+
+  it("detects a mention trigger with a host part as one trigger", () => {
+    expect(detectTrigger("hello @alice@example.com", 24)).toEqual({
+      kind: "mention", query: "alice@example.com", start: 6, end: 24,
+    });
+  });
+
+  it("does not treat an email-address-like '@' as a mention trigger", () => {
+    // "user@" の直前が英数字("r")なので境界外(誤検出しない)
+    expect(detectTrigger("user@example.com", 16)).toBeNull();
+  });
+
+  it("detects a hashtag trigger", () => {
+    expect(detectTrigger("hello #misskey", 14)).toEqual({
+      kind: "hashtag", query: "misskey", start: 6, end: 14,
+    });
+  });
+
+  it("does not treat a '#' glued to a word as a hashtag trigger", () => {
+    expect(detectTrigger("C#lang", 6)).toBeNull();
+  });
+
+  it("still detects a hashtag trigger inside an fn's content (after whitespace)", () => {
+    expect(detectTrigger("$[tada hi #tag", 14)).toEqual({
+      kind: "hashtag", query: "tag", start: 10, end: 14,
+    });
+  });
+
   it("detects an arg-name trigger right after the dot", () => {
     expect(detectTrigger("$[tada.spee", 11)).toEqual({
       kind: "argName", fnName: "tada", query: "spee", start: 7, end: 11,
