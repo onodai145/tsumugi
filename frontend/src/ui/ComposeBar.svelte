@@ -141,11 +141,10 @@
   $effect(() => {
     const t = trigger;
     clearTimeout(debounceTimer);
-    if (!t || (t.kind !== "mention" && t.kind !== "hashtag") || t.query.length < 1) {
-      asyncCandidates = [];
-      return;
-    }
-    const token = ++asyncSearchToken;
+    asyncCandidates = [];
+    asyncSearchToken++;
+    if (!t || (t.kind !== "mention" && t.kind !== "hashtag") || t.query.length < 1) return;
+    const token = asyncSearchToken;
     debounceTimer = setTimeout(async () => {
       if (!accountId) return;
       try {
@@ -156,6 +155,7 @@
         if (token === asyncSearchToken) asyncCandidates = [];
       }
     }, 300);
+    return () => clearTimeout(debounceTimer);
   });
 
   const candidates = $derived<CompletionItem[]>(

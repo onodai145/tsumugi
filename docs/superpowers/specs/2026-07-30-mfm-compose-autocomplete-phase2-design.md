@@ -132,11 +132,13 @@ let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 $effect(() => {
   const t = trigger;
   clearTimeout(debounceTimer);
-  if (!t || (t.kind !== "mention" && t.kind !== "hashtag") || t.query.length < 1) {
-    asyncCandidates = [];
-    return;
-  }
-  const token = ++asyncSearchToken;
+  // トリガーが変わるたびに、非同期/同期を問わず無条件で古い候補と世代トークンを破棄する。
+  // ここを早期returnパスだけに限定すると、別のトリガーに移った直後の300ms窓の間
+  // 直前のトリガーの候補が残り、誤ったトリガー位置に確定挿入されてしまう。
+  asyncCandidates = [];
+  asyncSearchToken++;
+  if (!t || (t.kind !== "mention" && t.kind !== "hashtag") || t.query.length < 1) return;
+  const token = asyncSearchToken;
   debounceTimer = setTimeout(async () => {
     if (!accountId) return;
     try {
@@ -149,6 +151,8 @@ $effect(() => {
       if (token === asyncSearchToken) asyncCandidates = []; // 失敗時は黙って0件扱い(ポップアップは自動的に閉じる)
     }
   }, 300);
+  // アンマウント時にタイマーが残っていると、コンポーネント破棄後にstateを更新しようとする
+  return () => clearTimeout(debounceTimer);
 });
 ```
 

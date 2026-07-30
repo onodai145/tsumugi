@@ -73,6 +73,21 @@ describe("detectTrigger", () => {
     });
   });
 
+  it("does not trigger on a bare '@' with no query", () => {
+    expect(detectTrigger("@", 1)).toBeNull();
+  });
+
+  it("does not trigger on a bare '#' with no query", () => {
+    expect(detectTrigger("#", 1)).toBeNull();
+  });
+
+  it("detects a hashtag trigger with non-ASCII characters (Misskey hashtags allow this)", () => {
+    // "hello " (6 UTF-16 code units) + "#" (1) + "日本語" (3, each a single BMP code unit) = 10
+    expect(detectTrigger("hello #日本語", 10)).toEqual({
+      kind: "hashtag", query: "日本語", start: 6, end: 10,
+    });
+  });
+
   it("detects an arg-name trigger right after the dot", () => {
     expect(detectTrigger("$[tada.spee", 11)).toEqual({
       kind: "argName", fnName: "tada", query: "spee", start: 7, end: 11,

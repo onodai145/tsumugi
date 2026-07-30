@@ -64,6 +64,14 @@ describe("searchMentionItems", () => {
     const items = await searchMentionItems("acc1", "ali");
     expect(items[0].thumbnail).toBeUndefined();
   });
+
+  it("propagates a rejection when the search command fails", async () => {
+    vi.mocked(commands.searchUsers).mockResolvedValue({
+      status: "error",
+      error: { kind: "network", message: "offline" },
+    } as never);
+    await expect(searchMentionItems("acc1", "ali")).rejects.toThrow();
+  });
 });
 
 describe("searchHashtagItems", () => {
@@ -78,5 +86,13 @@ describe("searchHashtagItems", () => {
       { key: "tag:tsumugi", label: "#tsumugi", insertText: "#tsumugi" },
     ]);
     expect(commands.searchHashtags).toHaveBeenCalledWith("acc1", "mi");
+  });
+
+  it("propagates a rejection when the search command fails", async () => {
+    vi.mocked(commands.searchHashtags).mockResolvedValue({
+      status: "error",
+      error: { kind: "network", message: "offline" },
+    } as never);
+    await expect(searchHashtagItems("acc1", "mi")).rejects.toThrow();
   });
 });
