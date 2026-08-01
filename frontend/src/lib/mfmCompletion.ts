@@ -156,7 +156,7 @@ export function buildCompletionItems(trigger: SyncTrigger, customEmojis: EmojiDe
       return matchEmojis(trigger.query, customEmojis).map((m) => ({
         key: m.key,
         label: m.name,
-        insertText: `:${m.name}:`,
+        insertText: m.kind === "custom" ? `:${m.name}:` : (m.char ?? `:${m.name}:`),
         thumbnail:
           m.kind === "custom" ? { type: "custom" as const, url: m.url } : { type: "unicode" as const, char: m.char },
       }));
