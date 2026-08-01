@@ -174,7 +174,23 @@ pub async fn upload_file(
         .file_name()
         .map(|f| f.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".to_string());
+    let filename = ensure_extension(filename, &bytes);
     api_upload_bytes(&state.http, &host, &token, bytes, filename).await
+}
+
+/// ファイル名に拡張子が無ければ、内容の先頭バイト列から `infer` クレートで種別を推定して補う。
+///
+/// `content://` URI 由来のファイル名（Issue #137）は `100006972` のように拡張子を持たない
+/// ため、そのままだとドライブ上で種別が分かりにくい表示になる（アップロード自体は失敗しない
+/// ― Misskey サーバ側も実バイト列を sniff して種別判定するため機能上は問題ない）。
+fn ensure_extension(filename: String, bytes: &[u8]) -> String {
+    if std::path::Path::new(&filename).extension().is_some() {
+        return filename;
+    }
+    match infer::get(bytes) {
+        Some(kind) => format!("{filename}.{}", kind.extension()),
+        None => filename,
+    }
 }
 
 /// ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
@@ -424,5 +440,23 @@ mod tests {
         // 2026-07-25T15:30:45.123Z の Unix ミリ秒
         let millis = 1784993445123;
         assert_eq!(clipboard_filename(millis), "clipboard-20260725-153045-123.png");
+    }
+
+    #[test]
+    fn ensure_extension_appends_sniffed_extension_when_filename_has_none() {
+        // content:// URI 由来のファイル名は "100006972" のように拡張子を持たない
+        let png_bytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+        assert_eq!(ensure_extension("100006972".to_string(), &png_bytes), "100006972.png");
+    }
+
+    #[test]
+    fn ensure_extension_leaves_filename_with_existing_extension_untouched() {
+        let png_bytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+        assert_eq!(ensure_extension("photo.jpg".to_string(), &png_bytes), "photo.jpg");
+    }
+
+    #[test]
+    fn ensure_extension_leaves_filename_unchanged_when_type_undetectable() {
+        assert_eq!(ensure_extension("100006972".to_string(), &[0, 1, 2, 3]), "100006972");
     }
 }
