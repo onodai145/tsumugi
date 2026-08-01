@@ -255,6 +255,10 @@
     const picked = await open({
       multiple: true,
       filters: [{ name: "画像/動画", extensions: ["png", "jpg", "jpeg", "gif", "webp", "mp4", "webm"] }],
+      // Android のフォトピッカー（既定）は選択後の content:// URI から本来のファイル名を
+      // 復元できない既知の制限があるため（Google Issue Tracker #268079113, #330118234）、
+      // 元のファイル名を保つ SAF ドキュメントピッカーを使う。
+      pickerMode: "document",
     });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
