@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { Note } from "../bindings/tauri.gen";
   import Mfm from "../render/Mfm.svelte";
   import MediaGrid from "../render/MediaGrid.svelte";
@@ -122,8 +123,22 @@
     app.votePoll(accountId, inner.id, confirmChoice);
     confirmChoice = null;
   }
+  // 連打対策: リクエスト完了を待つだけだとIPCが速く人間の連打間隔より早く終わってしまうため、
+  // クリックのたびに一定時間はボタンを無効化するクールダウンを設ける。
+  const RENOTE_COOLDOWN_MS = 3000;
+  let renoteBusy = $state(false);
+  let renoteCooldownTimer: ReturnType<typeof setTimeout> | null = null;
+  onDestroy(() => {
+    if (renoteCooldownTimer) clearTimeout(renoteCooldownTimer);
+  });
   function doRenote() {
-    if (accountId) app.renote(accountId, inner.id);
+    if (!accountId || renoteBusy) return;
+    renoteBusy = true;
+    void app.renote(accountId, inner.id);
+    renoteCooldownTimer = setTimeout(() => {
+      renoteBusy = false;
+      renoteCooldownTimer = null;
+    }, RENOTE_COOLDOWN_MS);
   }
 
   // リアクション/Renoteの「誰が」ポップオーバー。ホバーで表示、150msのin/outディレイで
@@ -331,6 +346,7 @@
           {#if canRenote}
             <button
               aria-label="Renote"
+              class:busy={renoteBusy}
               onclick={doRenote}
               onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
               onmouseleave={leaveHover}
@@ -627,6 +643,9 @@
   .actions button.on {
     color: var(--accent);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
+  }
+  .actions button.busy {
+    opacity: 0.5;
   }
   .react-wrap {
     position: relative;
