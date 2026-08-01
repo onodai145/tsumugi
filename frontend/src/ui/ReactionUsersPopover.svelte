@@ -3,7 +3,7 @@
   import Mfm from "../render/Mfm.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
-  import { reactionEmoji } from "../lib/emoji";
+  import { reactionEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { fetchReactionUsers } from "../lib/reactionUsersCache";
 
   let {
@@ -79,7 +79,11 @@
               <div class="avatar placeholder"></div>
             {/if}
             <span class="user-info">
-              <span class="name"><Mfm text={displayName(u)} emojis={u.emojis} simple /></span>
+              <span class="name"><Mfm
+                text={displayName(u)}
+                emojis={proxiedEmojiMap(u.emojis, instanceHost)}
+                simple
+              /></span>
               <span class="acct">{acct(u)}</span>
             </span>
             {#if reactionKey && emoji}

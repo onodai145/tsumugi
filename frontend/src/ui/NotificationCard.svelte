@@ -7,7 +7,7 @@
   import Mfm from "../render/Mfm.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
-  import { reactionEmoji } from "../lib/emoji";
+  import { reactionEmoji, proxiedEmojiMap } from "../lib/emoji";
   import {
     UserPlus,
     MessageCircle,
@@ -26,13 +26,14 @@
 
   const actor = $derived(n.user ? (n.user.name ?? n.user.username) : "");
 
-  // リアクション絵文字の解決用マップ: ローカル絵文字（閲覧インスタンス）＋対象ノートの絵文字。
-  const emojiMap = $derived({
-    ...(accountId ? app.localEmojiUrls(accountId) : {}),
-    ...(n.note?.emojis ?? {}),
-  });
   // カスタム絵文字（:name:）のみ解決。Unicode 絵文字はそのまま表示する。
   const instanceHost = $derived(accountId ? app.accounts.find((a) => a.id === accountId)?.host : undefined);
+  // リアクション絵文字の解決用マップ: ローカル絵文字（閲覧インスタンス、そのままでよい）＋
+  // 対象ノートの絵文字（生URLなのでプロキシ変換）。
+  const emojiMap = $derived({
+    ...(accountId ? app.localEmojiUrls(accountId) : {}),
+    ...proxiedEmojiMap(n.note?.emojis, instanceHost),
+  });
   const reaction = $derived(
     n.type === "reaction" && n.reaction?.startsWith(":")
       ? reactionEmoji(n.reaction, emojiMap, instanceHost)
@@ -74,7 +75,7 @@
       <img class="avatar" src={n.user.avatarUrl} alt="" loading="lazy" />
     {/if}
     <span class="text">
-      {#if actor}<b><Mfm text={actor} emojis={n.user?.emojis ?? {}} simple /></b>{/if}
+      {#if actor}<b><Mfm text={actor} emojis={proxiedEmojiMap(n.user?.emojis, instanceHost)} simple /></b>{/if}
       {labels[n.type] ?? n.type}
       {#if n.type === "reaction" && n.reaction}
         <span class="reaction">

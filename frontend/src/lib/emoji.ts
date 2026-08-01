@@ -1,3 +1,28 @@
+// Misskey APIが返す note.emojis / user.emojis はリモートの生URLをそのまま含む
+// （home instance側で一切書き換えられない）。生URLへ直接アクセスすると、リモート
+// インスタンスのホットリンク拒否・TLS証明書不備・到達不能等で403/404/タイムアウトが
+// 頻発するため、本家クライアント同様にhome instanceのメディアプロキシ(`/proxy/image.webp`)
+// 経由に組み替える。`fallback=1` を付けることで、プロキシ先の取得に失敗した場合も
+// エラーではなくダミー画像にフォールバックする（本家 packages/backend/.../FileServerService.ts
+// の errorHandler 参照）。
+export function proxiedEmojiUrl(url: string, instanceHost: string): string {
+  const params = new URLSearchParams({ url, fallback: "1", emoji: "1" });
+  return `https://${instanceHost}/proxy/image.webp?${params}`;
+}
+
+// name->url マップの値をまとめて proxiedEmojiUrl で変換する。instanceHost が不明な場合は
+// 変換しようがないため、素通しで返す（呼び出し元の表示自体は生URLのまま試みる）。
+export function proxiedEmojiMap(
+  emojis: Record<string, string> | undefined | null,
+  instanceHost: string | undefined,
+): Record<string, string> {
+  if (!emojis) return {};
+  if (!instanceHost) return emojis;
+  const result: Record<string, string> = {};
+  for (const [name, url] of Object.entries(emojis)) result[name] = proxiedEmojiUrl(url, instanceHost);
+  return result;
+}
+
 // リアクション絵文字の解決。キーは :name: / :name@.:（ローカル）/ :name@host:（リモート）。
 // ローカルの `@.` はローカル絵文字マップ（キー=name）に合わせて剥がす。
 //
