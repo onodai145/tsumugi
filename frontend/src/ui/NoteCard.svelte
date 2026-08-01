@@ -12,7 +12,7 @@
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
-  import { reactionEmoji, isRemoteCustomEmoji } from "../lib/emoji";
+  import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail, MoreHorizontal } from "@lucide/svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
@@ -47,14 +47,17 @@
   const isPureRenote = $derived(!note.text && !!note.renote);
   const inner = $derived(isPureRenote ? note.renote! : note);
 
-  // 絵文字 name->url: ローカル絵文字（閲覧インスタンス）をフォールバックに、
-  // note.emojis（リモート＋リアクション絵文字）を上書きで重ねる。
   const emojiAcct = $derived(emojiAccountId ?? accountId);
-  const emojiMap = $derived(
-    emojiAcct ? { ...app.localEmojiUrls(emojiAcct), ...inner.emojis } : inner.emojis,
-  );
   const instanceHost = $derived(
     emojiAcct ? app.accounts.find((a) => a.id === emojiAcct)?.host : undefined,
+  );
+  // 絵文字 name->url: ローカル絵文字（閲覧インスタンス、既にhome instance配信なのでそのまま）を
+  // フォールバックに、note.emojis（リモート＋リアクション絵文字、生URLなのでプロキシ変換）を
+  // 上書きで重ねる。
+  const emojiMap = $derived(
+    emojiAcct
+      ? { ...app.localEmojiUrls(emojiAcct), ...proxiedEmojiMap(inner.emojis, instanceHost) }
+      : inner.emojis,
   );
 
   // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）。
@@ -230,7 +233,11 @@
 >
   {#if isPureRenote}
     <div class="renote-banner">
-      <Repeat2 size={13} /> <Mfm text={displayName(note.user)} emojis={note.user.emojis} simple /> がRenote
+      <Repeat2 size={13} /> <Mfm
+        text={displayName(note.user)}
+        emojis={proxiedEmojiMap(note.user.emojis, instanceHost)}
+        simple
+      /> がRenote
     </div>
   {/if}
   {#if inner.replyId}
@@ -247,7 +254,11 @@
     {/if}
     <div class="body">
       <header class="head">
-        <span class="name"><Mfm text={displayName(inner.user)} emojis={inner.user.emojis} simple /></span>
+        <span class="name"><Mfm
+          text={displayName(inner.user)}
+          emojis={proxiedEmojiMap(inner.user.emojis, instanceHost)}
+          simple
+        /></span>
         <span class="acct">{acct(inner.user)}</span>
         <span class="time" title={new Date(inner.createdAt * 1000).toLocaleString()}>
           {relativeTime(inner.createdAt)}
@@ -303,7 +314,7 @@
         {/if}
         <!-- 引用Renote: 本文ありで renote 先がある場合、中身をネスト表示 -->
         {#if inner.text && inner.renote}
-          <Self note={inner.renote} quoted={true} />
+          <Self note={inner.renote} quoted={true} emojiAccountId={emojiAcct} />
         {/if}
       {/if}
 
