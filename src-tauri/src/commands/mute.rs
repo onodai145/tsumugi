@@ -73,32 +73,43 @@ pub async fn read_audio_data_url(app: AppHandle, path: String) -> Result<String>
     read_file_as_data_url(&app, &path, MAX_NOTIFY_SOUND_BYTES, guess_audio_mime).await
 }
 
-/// ファイルを読み、上限サイズを検査して data URL(base64) にする共通処理。
+/// ファイルを読む共通処理。
 ///
 /// Android は SAF のファイルピッカーが `content://` URI を返し、通常のファイルシステム
 /// パスとして開けない（`std::fs`/`tokio::fs` では ENOENT になる）ため、
 /// `tauri-plugin-fs` 経由でネイティブの ContentResolver ブリッジを使って読む。
-pub(crate) async fn read_file_as_data_url(
+pub(crate) async fn read_file_bytes(
     #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: &AppHandle,
     path: &str,
-    max_bytes: usize,
-    guess_mime: fn(&str) -> &'static str,
-) -> Result<String> {
+) -> Result<Vec<u8>> {
     #[cfg(target_os = "android")]
-    let bytes = {
+    {
         let app = app.clone();
+        let path_owned = path.to_string();
         // "content://..." は Url、それ以外は通常のファイルパスとして解釈される
         // (`FilePath::from_str` は `Infallible` を返すため unwrap で安全)。
         let file_path: tauri_plugin_fs::FilePath = path.parse().unwrap();
         tauri::async_runtime::spawn_blocking(move || app.fs().read(file_path))
             .await
-            .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?
-            .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?
-    };
+            .map_err(|e| Error::Invalid(format!("cannot read file {path_owned}: {e}")))?
+            .map_err(|e| Error::Invalid(format!("cannot read file {path_owned}: {e}")))
+    }
     #[cfg(not(target_os = "android"))]
-    let bytes = tokio::fs::read(path)
-        .await
-        .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?;
+    {
+        tokio::fs::read(path)
+            .await
+            .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))
+    }
+}
+
+/// ファイルを読み、上限サイズを検査して data URL(base64) にする共通処理。
+pub(crate) async fn read_file_as_data_url(
+    app: &AppHandle,
+    path: &str,
+    max_bytes: usize,
+    guess_mime: fn(&str) -> &'static str,
+) -> Result<String> {
+    let bytes = read_file_bytes(app, path).await?;
     if bytes.len() > max_bytes {
         return Err(Error::Invalid(format!(
             "ファイルが大きすぎます（{}MB超）。{}MB以下のファイルを選んでください",

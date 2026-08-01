@@ -7,25 +7,6 @@ use crate::domain::{DriveFile, SourceItem};
 use crate::error::{Error, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::path::Path;
-
-/// ローカルファイルを Misskey ドライブへアップロードし、DriveFile を返す。
-pub async fn upload_file(
-    http: &reqwest::Client,
-    host: &str,
-    token: &str,
-    path: &str,
-) -> Result<DriveFile> {
-    let bytes = tokio::fs::read(path)
-        .await
-        .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))?;
-    let filename = Path::new(path)
-        .file_name()
-        .map(|f| f.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "file".to_string());
-
-    upload_bytes(http, host, token, bytes, filename).await
-}
 
 /// バイト列を Misskey ドライブへアップロードし、DriveFile を返す
 /// （クリップボード貼り付けなど、ファイルパスを経由しない添付用）。
