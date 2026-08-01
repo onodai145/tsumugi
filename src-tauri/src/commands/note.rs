@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 use crate::state::AppState;
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// 投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。
@@ -159,7 +159,10 @@ pub async fn vote_poll(
 ///
 /// Android の SAF ファイルピッカーは `content://` URI を返し `tokio::fs::read` では
 /// 開けないため（Issue #137）、`read_file_bytes` の ContentResolver ブリッジ経由で読み、
-/// バイト列としてアップロードする。
+/// バイト列としてアップロードする。ファイル名も `content://` からは `Path::file_name` で
+/// 取れない（末尾セグメントが `100006972` のような拡張子無しの内部IDになる）ため、
+/// `app.path().file_name()`（Tauri core が Android では ContentResolver 経由で本来の
+/// 表示名を解決する、デスクトップでは `Path::file_name` と同じ）を使う。
 #[tauri::command]
 #[specta::specta]
 pub async fn upload_file(
@@ -170,19 +173,16 @@ pub async fn upload_file(
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
     let bytes = crate::commands::mute::read_file_bytes(&app, &path).await?;
-    let filename = std::path::Path::new(&path)
-        .file_name()
-        .map(|f| f.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "file".to_string());
+    let filename = app.path().file_name(&path).unwrap_or_else(|| "file".to_string());
     let filename = ensure_extension(filename, &bytes);
     api_upload_bytes(&state.http, &host, &token, bytes, filename).await
 }
 
 /// ファイル名に拡張子が無ければ、内容の先頭バイト列から `infer` クレートで種別を推定して補う。
 ///
-/// `content://` URI 由来のファイル名（Issue #137）は `100006972` のように拡張子を持たない
-/// ため、そのままだとドライブ上で種別が分かりにくい表示になる（アップロード自体は失敗しない
-/// ― Misskey サーバ側も実バイト列を sniff して種別判定するため機能上は問題ない）。
+/// 通常は `app.path().file_name()` が本来の拡張子付きファイル名を返すが、ContentResolver が
+/// 表示名を解決できなかった場合のフォールバック（アップロード自体は失敗しない ― Misskey
+/// サーバ側も実バイト列を sniff して種別判定するため機能上は拡張子が無くても問題ない）。
 fn ensure_extension(filename: String, bytes: &[u8]) -> String {
     if std::path::Path::new(&filename).extension().is_some() {
         return filename;

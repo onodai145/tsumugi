@@ -157,7 +157,10 @@ export const commands = {
 	 * 
 	 *  Android の SAF ファイルピッカーは `content://` URI を返し `tokio::fs::read` では
 	 *  開けないため（Issue #137）、`read_file_bytes` の ContentResolver ブリッジ経由で読み、
-	 *  バイト列としてアップロードする。
+	 *  バイト列としてアップロードする。ファイル名も `content://` からは `Path::file_name` で
+	 *  取れない（末尾セグメントが `100006972` のような拡張子無しの内部IDになる）ため、
+	 *  `app.path().file_name()`（Tauri core が Android では ContentResolver 経由で本来の
+	 *  表示名を解決する、デスクトップでは `Path::file_name` と同じ）を使う。
 	 */
 	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
 	/**  クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。 */
