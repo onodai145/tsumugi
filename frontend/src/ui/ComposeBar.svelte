@@ -252,14 +252,12 @@
 
   async function pickFiles() {
     err = null;
-    const picked = await open({
-      multiple: true,
-      filters: [{ name: "画像/動画", extensions: ["png", "jpg", "jpeg", "gif", "webp", "mp4", "webm"] }],
-      // Android のフォトピッカー（既定）は選択後の content:// URI から本来のファイル名を
-      // 復元できない既知の制限があるため（Google Issue Tracker #268079113, #330118234）、
-      // 元のファイル名を保つ SAF ドキュメントピッカーを使う。
-      pickerMode: "document",
-    });
+    // filters は付けない: Misskey のドライブは画像/動画に限らず任意のファイル種別を
+    // 添付できる。加えて Android では画像/動画の MIME タイプに絞ると OS が自動的に
+    // フォトピッカーへリダイレクトし、選択後の content:// URI から本来のファイル名を
+    // 復元できなくなる（Google Issue Tracker #268079113, #330118234）。filters を外して
+    // 汎用の "*/*" にすることで通常のドキュメント選択になり、ファイル名も正しく解決される。
+    const picked = await open({ multiple: true });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     for (const p of paths) {
