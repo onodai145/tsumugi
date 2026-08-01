@@ -69,3 +69,13 @@ Misskey's OpenAPI spec (`/api-doc.json`, snapshotted at `src-tauri/openapi/missk
 ## PR merging
 
 `main` is a protected branch (no direct push, no force push — even for cleanup). When merging a PR, default to a normal merge commit (`gh pr merge --merge`), not squash, unless explicitly told otherwise. Squashing and then wanting a plain merge commit instead requires rewriting already-pushed history, which branch protection blocks outright — there's no clean way to fix it after the fact.
+
+## Release process
+
+1. `git checkout main && git pull origin main` — release branches off up-to-date main.
+2. Decide the next version (semver: bump minor for feature additions since the last tag, patch for fix-only ranges). Check what's shipped since the last tag with `git log <last-tag>..main --oneline`.
+3. `scripts/release.sh X.Y.Z` — creates `release/vX.Y.Z`, bumps the version in `frontend/package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.lock`, generates `CHANGELOG.md` via `git-cliff`, and commits as `chore(release): vX.Y.Z`.
+4. `git push -u origin release/vX.Y.Z` then `gh pr create` — the release branch goes through a PR like any other change, not a direct local merge to main.
+5. Once CI passes, `gh pr merge <N> --merge` (normal merge commit, not squash — see PR merging above).
+6. `git checkout main && git pull origin main`, then tag the merge commit and push it: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+7. Pushing the `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which builds installers for Linux/macOS/Windows plus signed Android APKs and publishes them as a **draft** GitHub Release (`releaseDraft: true`). Actually publishing the release (editing notes, unmarking as draft) is a manual step on GitHub — not automated.
