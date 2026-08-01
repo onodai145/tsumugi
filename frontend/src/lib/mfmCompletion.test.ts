@@ -215,6 +215,17 @@ describe("buildCompletionItems", () => {
     expect(items[0]).toEqual({ key: "custom:neko", label: "neko", insertText: ":neko:", thumbnail: { type: "custom", url: custom[0].url } });
   });
 
+  it("builds unicode emoji items with the actual character as insert text", () => {
+    const trigger = { kind: "emoji", query: "grin", start: 0, end: 5 } as const;
+    const items = buildCompletionItems(trigger, []);
+    expect(items[0]).toEqual({
+      key: "unicode:grin",
+      label: "grin",
+      insertText: "😁",
+      thumbnail: { type: "unicode", char: "😁" },
+    });
+  });
+
   it("builds fnName items with the bare name as insert text", () => {
     const trigger = { kind: "fnName", query: "tad", start: 2, end: 5 } as const;
     expect(buildCompletionItems(trigger, [])).toEqual([
