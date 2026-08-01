@@ -23,6 +23,13 @@ Never run `./target/debug/tsumugi` or `cargo run` directly — Tauri's debug bui
 
 On Linux/Wayland (Hyprland etc.), WebKitGTK's DMABUF renderer can conflict with wlroots compositors and crash rendering with `Gdk Error 71 (protocol error)`. `src-tauri/src/main.rs` sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` by default to work around this; if that doesn't help, fall back to `GDK_BACKEND=x11 cargo tauri dev`.
 
+### Android
+Android build support exists (`src-tauri/tauri.android.conf.json`, `src-tauri/gen/android`). CI (`android-build` job in `.github/workflows/test.yml`) only verifies it compiles and links — no signing or artifact distribution:
+```sh
+cd src-tauri && cargo tauri android build --debug --target aarch64
+```
+Requires NDK r27c. The symlinks inside the NDK toolchain that `setup-ndk` extracts are relative, so they break if the extraction path changes — CI re-points them to absolute paths as a workaround (see the comment above the `android-build` job in `test.yml`).
+
 ## Architecture
 
 ### Rust ↔ TS boundary
@@ -50,3 +57,15 @@ Misskey's OpenAPI spec (`/api-doc.json`, snapshotted at `src-tauri/openapi/missk
 
 ### specta/tauri-specta versions are pinned
 `specta`, `specta-typescript`, and `tauri-specta` are pinned to exact versions (`=2.0.0-rc.25` / `=0.0.12`) in `Cargo.toml`. Don't loosen these without checking that TS binding generation still works — see `docs/phase0-scaffold.md` for context.
+
+## Development workflow
+
+- Never commit directly to `main`. Create a feature branch before touching any file (branch first, edit second — never the other way around).
+- Fixes tied to a GitHub issue go through a PR, not a direct merge. Put `Fixes #N` or `Closes #N` in the PR body — referencing the issue number alone does not auto-close it on merge.
+- After pushing, don't poll CI with Monitor/wait loops; the user checks CI results themselves.
+- Commit messages: subject line only, no body/bullet points (the Co-Authored-By trailer is appended separately).
+- `Agent` calls with `isolation: "worktree"` branch off `main`, not off the current feature branch — don't use that isolation mode for subtasks that depend on in-progress feature-branch changes.
+
+## PR merging
+
+`main` is a protected branch (no direct push, no force push — even for cleanup). When merging a PR, default to a normal merge commit (`gh pr merge --merge`), not squash, unless explicitly told otherwise. Squashing and then wanting a plain merge commit instead requires rewriting already-pushed history, which branch protection blocks outright — there's no clean way to fix it after the fact.
