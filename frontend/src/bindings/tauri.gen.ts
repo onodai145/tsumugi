@@ -152,7 +152,16 @@ export const commands = {
 	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
 	listCustomEmojis: (accountId: string) => typedError<EmojiDef[], Error>(__TAURI_INVOKE("list_custom_emojis", { accountId })),
-	/**  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。 */
+	/**
+	 *  ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。
+	 * 
+	 *  Android の SAF ファイルピッカーは `content://` URI を返し `tokio::fs::read` では
+	 *  開けないため（Issue #137）、`read_file_bytes` の ContentResolver ブリッジ経由で読み、
+	 *  バイト列としてアップロードする。ファイル名も `content://` からは `Path::file_name` で
+	 *  取れない（末尾セグメントが `100006972` のような拡張子無しの内部IDになる）ため、
+	 *  `app.path().file_name()`（Tauri core が Android では ContentResolver 経由で本来の
+	 *  表示名を解決する、デスクトップでは `Path::file_name` と同じ）を使う。
+	 */
 	uploadFile: (accountId: string, path: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_file", { accountId, path })),
 	/**  クリップボードから貼り付けたバイト列をドライブへアップロードし、DriveFile を返す。 */
 	uploadBytes: (accountId: string, filename: string, bytes: number[]) => typedError<DriveFile, Error>(__TAURI_INVOKE("upload_bytes", { accountId, filename, bytes })),

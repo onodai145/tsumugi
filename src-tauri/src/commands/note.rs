@@ -2,7 +2,6 @@
 
 use crate::api::drive::{
     list_files as api_list_files, list_folders as api_list_folders, upload_bytes as api_upload_bytes,
-    upload_file as api_upload_file,
 };
 use crate::api::hashtags::search_hashtags as api_search_hashtags;
 use crate::api::meta::list_emojis;
@@ -17,7 +16,7 @@ use crate::error::{Error, Result};
 use crate::state::AppState;
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// 投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。
@@ -157,15 +156,41 @@ pub async fn vote_poll(
 }
 
 /// ローカルファイルをドライブへアップロードし、DriveFile を返す（投稿添付用）。
+///
+/// Android の SAF ファイルピッカーは `content://` URI を返し `tokio::fs::read` では
+/// 開けないため（Issue #137）、`read_file_bytes` の ContentResolver ブリッジ経由で読み、
+/// バイト列としてアップロードする。ファイル名も `content://` からは `Path::file_name` で
+/// 取れない（末尾セグメントが `100006972` のような拡張子無しの内部IDになる）ため、
+/// `app.path().file_name()`（Tauri core が Android では ContentResolver 経由で本来の
+/// 表示名を解決する、デスクトップでは `Path::file_name` と同じ）を使う。
 #[tauri::command]
 #[specta::specta]
 pub async fn upload_file(
+    app: AppHandle,
     state: State<'_, AppState>,
     account_id: String,
     path: String,
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
-    api_upload_file(&state.http, &host, &token, &path).await
+    let bytes = crate::commands::mute::read_file_bytes(&app, &path).await?;
+    let filename = app.path().file_name(&path).unwrap_or_else(|| "file".to_string());
+    let filename = ensure_extension(filename, &bytes);
+    api_upload_bytes(&state.http, &host, &token, bytes, filename).await
+}
+
+/// ファイル名に拡張子が無ければ、内容の先頭バイト列から `infer` クレートで種別を推定して補う。
+///
+/// 通常は `app.path().file_name()` が本来の拡張子付きファイル名を返すが、ContentResolver が
+/// 表示名を解決できなかった場合のフォールバック（アップロード自体は失敗しない ― Misskey
+/// サーバ側も実バイト列を sniff して種別判定するため機能上は拡張子が無くても問題ない）。
+fn ensure_extension(filename: String, bytes: &[u8]) -> String {
+    if std::path::Path::new(&filename).extension().is_some() {
+        return filename;
+    }
+    match infer::get(bytes) {
+        Some(kind) => format!("{filename}.{}", kind.extension()),
+        None => filename,
+    }
 }
 
 /// ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
@@ -415,5 +440,23 @@ mod tests {
         // 2026-07-25T15:30:45.123Z の Unix ミリ秒
         let millis = 1784993445123;
         assert_eq!(clipboard_filename(millis), "clipboard-20260725-153045-123.png");
+    }
+
+    #[test]
+    fn ensure_extension_appends_sniffed_extension_when_filename_has_none() {
+        // content:// URI 由来のファイル名は "100006972" のように拡張子を持たない
+        let png_bytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+        assert_eq!(ensure_extension("100006972".to_string(), &png_bytes), "100006972.png");
+    }
+
+    #[test]
+    fn ensure_extension_leaves_filename_with_existing_extension_untouched() {
+        let png_bytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+        assert_eq!(ensure_extension("photo.jpg".to_string(), &png_bytes), "photo.jpg");
+    }
+
+    #[test]
+    fn ensure_extension_leaves_filename_unchanged_when_type_undetectable() {
+        assert_eq!(ensure_extension("100006972".to_string(), &[0, 1, 2, 3]), "100006972");
     }
 }
