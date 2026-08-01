@@ -2,6 +2,120 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-08-01
+
+### 🚀 Features
+
+- リリーススクリプトを追加 (#124)
+- 汎用Modalコンポーネントを追加
+- 投稿エラーをモーダル表示に変更
+- UiPrefsにコードハイライト設定を追加
+- ShikiハイライタのシングルトンとhighlightCodeを追加
+- カスタムシンタックステーマのCSS変数反映を追加
+- Storeにコードハイライト設定の読み込み・適用を配線
+- CodeBlock.svelteを追加
+- BlockCodeノードをCodeBlock.svelteで描画するよう変更
+- 設定画面にコードハイライトテーマの選択UIを追加
+- Shiki同梱テーマカードに実際の配色スワッチを追加
+- ReactionUserドメイン型を追加
+- Notes/reactionsレスポンスの正規化を追加
+- Notes/reactions・notes/renotesを叩くAPI関数を追加
+- リアクション・Renoteユーザー一覧取得コマンドを追加
+- リアクション・Renoteユーザー一覧のポップオーバーを追加
+- リアクション・Renoteバッジにユーザー一覧ホバーを配線
+- MFM関数の引数スキーマ(FN_ARGS)を追加
+- MFM補完のトリガー検出(detectTrigger)を実装
+- MFM補完の候補マッチング(match*)を実装
+- MFM補完の候補組み立て(buildCompletionItems)と置換計算(applyCompletion)を実装
+- Textarea内キャレット座標計算(getCaretCoordinates)を追加
+- MFM補完候補ポップアップ(CompletionPopover)を追加
+- ComposeBarにMFM補完ポップアップを配線
+- ユーザー検索/ハッシュタグ検索のRESTラッパーを追加
+- Search_users/search_hashtagsコマンドを追加しTSバインディングを再生成
+- メンション/ハッシュタグのトリガー検出(detectTrigger)を追加
+- CompletionThumbnailにavatar種別を追加しbuildCompletionItemsの引数型をSyncTriggerに限定
+- メンション/ハッシュタグ検索のIPC呼び出し(mfmSearch)を追加
+- CompletionPopoverでavatarサムネイルをcustomと同じimg描画にする
+- ComposeBarにメンション/ハッシュタグの非同期補完を配線
+
+### 🐛 Bug Fixes
+
+- Modal.svelteのEscape無効化とポータル欠如を修正
+- コードハイライトのライトモード無色・言語エイリアス・テーマ背景色の抑制を修正
+- コードハイライトテーマ選択をネイティブselectからテーマカードUIに変更
+- 狭いカラムでのコードブロック横スクロール時の背景・余白崩れを修正
+- ReactionUsersPopoverのpromise解決時に古いprops向けの結果を破棄する
+- 最終レビュー指摘（Renote重複・無効ボタンhover・マルチアカウントキャッシュキー）を修正
+- Renoteホバーの対象をアイコン全体に広げ件数0でも表示できるようにする
+- リアクション・Renoteホバー表示のUXを改善する
+- リアクションをノートキャッシュへ反映し再起動後も消えないようにする
+- フォロワー限定投稿のリアクションをreaction通知経由でも反映する
+- MFM補完のmatchEmojisをカスタム+Unicode結合(remaining枠埋め)に修正
+- GetCaretCoordinatesのwhiteSpace上書きバグとミラー要素リークを修正
+- 最終レビュー指摘(キャレット位置ズレ・Enter誤確定・スクロール追従・矢印キーラップアラウンド)を修正
+- GetCaretCoordinatesのcontent幅計算でborder幅を二重減算していたバグを修正
+- 絵文字候補が未選択のうちはハイライトを出さないようにする
+- Enterによる確定はトリガー種別に関わらず矢印キー選択後のみに統一
+- 未選択状態からの最初の矢印キー操作で先頭/末尾を選ぶよう修正
+- 最終レビュー指摘(asyncCandidatesの古い候補混入・アンマウント時のタイマー未クリア)を修正
+- RNボタンの連打を3秒のクールダウンで抑止 (#140)
+- Android のファイル添付でcontent:// URIを読めず失敗する不具合を修正
+- Content:// 由来の添付ファイル名に拡張子が無い問題をマジックナンバー判定で補完
+- Content:// URIのファイル名解決にTauri coreのPathResolverを使う
+- Androidの添付ピッカーをフォトピッカーからSAFドキュメントピッカーに変更
+- 添付ファイルの選択フィルタを撤廃してAndroidのフォトピッカー自動リダイレクトを回避
+- Unicode絵文字補完の挿入テキストを実際の文字にする
+
+### 💼 Other
+
+- Shikiを依存に追加
+
+### 🚜 Refactor
+
+- ポータル用アクションをlib/portal.tsへ切り出す
+
+### 📚 Documentation
+
+- エラーモーダル化のdesign specを追加
+- エラーモーダル化の実装計画を追加
+- コードブロックのシンタックスハイライト設計を追加
+- コードハイライトの既定値をOS追従(auto)に変更
+- コードブロックのシンタックスハイライト実装計画を追加
+- 計画書をshiki 4.3.1の実APIに合わせて修正
+- リアクション・Renoteユーザー一覧表示のspecを追加
+- リアクション・Renoteユーザー一覧表示の実装計画を追加
+- フロントエンド単体テスト基盤(Vitest)の設計書を追加
+- カバレッジ計測を見送る理由を明記
+- フロントエンド単体テスト基盤(Vitest)の実装計画を追加
+- Svelteコンポーネント単体テスト(Testing Library)の設計書を追加
+- 設計書をMfm.svelte単独スコープ・jest-dom不採用に更新
+- Svelteコンポーネント単体テスト(Testing Library)の実装計画を追加
+- MFM補完(ComposeBar) Phase1設計書を追加
+- MFM補完(ComposeBar) Phase1実装計画を追加
+- MFM補完(ComposeBar) Phase2(メンション/ハッシュタグ)設計書を追加
+- MFM補完(ComposeBar) Phase2実装計画を追加
+- CLAUDE.mdに開発フロー・マージ方針・Androidビルドを追記
+
+### 🎨 Styling
+
+- コードブロックのshikiテーマ切替CSSを追加
+
+### 🧪 Testing
+
+- Vitest基盤を導入しtime.tsのテストを追加
+- Nyaize.tsのテストを追加
+- BackgroundFitMode.tsのテストを追加
+- BackgroundPosition.tsのテストを追加
+- EmojiKey.tsのテストを追加
+- Keymap.tsのテストを追加
+- Mfm.tsのテストを追加
+- Testing Libraryを導入しCustomEmoji.svelteのテストを追加
+- Sparkle.svelteのテストを追加
+- Mfm.svelteのテストを追加
+
+### ⚙️ Miscellaneous Tasks
+
+- Frontend-checkジョブにvitestを追加
 ## [0.7.0] - 2026-07-26
 
 ### 🚀 Features
