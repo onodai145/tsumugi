@@ -726,6 +726,7 @@ fn handle_text(
             if !sub.dedup.accept(&notification.id) {
                 return HandleResult::None;
             }
+            update_last_seen_notification_id(&mut sub.last_seen_notification_id, &notification.id);
             let account_id = sub.mode.account_id().to_string();
             let n: Notification = (*notification).into();
             if let Some(state) = app.try_state::<AppState>() {
