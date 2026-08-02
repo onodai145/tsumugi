@@ -288,6 +288,9 @@ struct ChannelSub {
     params: Value,
     mode: StreamMode,
     dedup: Dedup,
+    /// 通知カラムのみ使用: 直近に受信した通知id。再接続時のギャップ埋め(Issue #147)の
+    /// ウォーターマークとして使う（通知はSQLiteキャッシュを持たないためメモリ上で保持する）。
+    last_seen_notification_id: Option<String>,
 }
 
 /// subNote 購読集合（接続単位・上限付き FIFO）。noteUpdated ルーティングのため
@@ -561,6 +564,7 @@ async fn connect_and_run(
                             params: params.clone(),
                             mode,
                             dedup: Dedup::new(DEDUP_CAPACITY),
+                            last_seen_notification_id: None,
                         });
                         if write
                             .send(Message::Text(protocol::connect(&channel, &sub_id, params).into()))
@@ -805,6 +809,14 @@ fn handle_text(
     }
 }
 
+/// 通知ウォーターマークを、より新しい(=大きい)idの場合だけ更新する。Misskeyのidは
+/// 辞書順ソート可能なULID系のため文字列比較でよい。順序が入れ替わって届いても後退しない。
+fn update_last_seen_notification_id(current: &mut Option<String>, new_id: &str) {
+    if current.as_deref().map(|c| new_id > c).unwrap_or(true) {
+        *current = Some(new_id.to_string());
+    }
+}
+
 /// Reacted/Unreacted の重複排除キー。noteUpdated 経路と reaction 通知フォールバック経路
 /// (Issue #101)の両方で同じイベントが届きうるため、(note_id, actor_id, reaction) で
 /// 共通に重複排除する。actor_id が無い、または対象外の更新種別(PollVoted/Deleted)なら None。
@@ -1041,6 +1053,18 @@ mod tests {
         assert!(reaction_event_key("n1", None, &reacted).is_none());
         assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::PollVoted { choice: 0 }).is_none());
         assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::Deleted).is_none());
+    }
+
+    #[test]
+    fn update_last_seen_notification_id_keeps_max_and_ignores_regressions() {
+        let mut cur: Option<String> = None;
+        update_last_seen_notification_id(&mut cur, "9tj000001");
+        assert_eq!(cur.as_deref(), Some("9tj000001"));
+        // 古いidが後から来ても後退しない（順序が入れ替わって届くケースの保険）
+        update_last_seen_notification_id(&mut cur, "9tj000000");
+        assert_eq!(cur.as_deref(), Some("9tj000001"));
+        update_last_seen_notification_id(&mut cur, "9tj000005");
+        assert_eq!(cur.as_deref(), Some("9tj000005"));
     }
 
     fn minimal_note(id: &str) -> Note {
