@@ -644,6 +644,9 @@ async fn open_stream_and_fetch(
     if matches!(column.kind, ColumnKind::Notifications) {
         let client = state.client_for(&column.account_id)?;
         let raw = fetch_notifications(&client, INITIAL_LIMIT, None).await?;
+        // 初期REST取得で得た最新id(新しい順の先頭)を再接続ギャップ埋めの初期ウォーターマークにする。
+        // ライブ配信で1件も受信しないまま再接続した場合でもギャップ埋めが機能するようにするため。
+        let initial_last_seen_id = raw.first().map(|n| n.id.clone());
         let notifications = filter_notifications(state, &column.account_id, raw);
         state.connections.open_notifications(
             app.clone(),
@@ -651,6 +654,7 @@ async fn open_stream_and_fetch(
             column.account_id.clone(),
             host,
             token,
+            initial_last_seen_id,
         );
         return Ok((vec![], notifications));
     }
@@ -764,6 +768,170 @@ async fn fill_gap(
     collected.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
     collected.truncate(limit.max(0) as usize);
     Ok(collected)
+}
+
+/// フラッピング再接続時に同一カラムへ複数波のギャップ埋めタスクが多重起動されないよう、
+/// 実行中の column_id を記録するガード。Drop で自動的に集合から取り除く（RAII）。
+struct GapFillGuard {
+    app: AppHandle,
+    column_id: String,
+}
+
+impl Drop for GapFillGuard {
+    fn drop(&mut self) {
+        if let Some(state) = self.app.try_state::<AppState>() {
+            state.gap_fill_in_flight.lock().unwrap().remove(&self.column_id);
+        }
+    }
+}
+
+impl GapFillGuard {
+    /// column_id の in-flight 登録を試みる。既に実行中なら None を返す。
+    fn try_acquire(app: &AppHandle, state: &AppState, column_id: &str) -> Option<Self> {
+        let mut inflight = state.gap_fill_in_flight.lock().unwrap();
+        if !inflight.insert(column_id.to_string()) {
+            return None;
+        }
+        drop(inflight);
+        Some(Self {
+            app: app.clone(),
+            column_id: column_id.to_string(),
+        })
+    }
+}
+
+/// Stream再接続時のノートギャップ埋め(Issue #147)。起動時(resume_column)と同じ fill_gap を
+/// 使い、SQLiteキャッシュの最新ノートidを起点にRESTで遡って補完する。初回接続では呼ばれない
+/// 前提（呼び出し判定は stream/connection.rs の is_reconnect 側で行う）。
+pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Some(_guard) = GapFillGuard::try_acquire(app, &state, column_id) else {
+        // 同一カラムの前回ギャップ埋めが実行中(フラッピング再接続対策)。
+        return;
+    };
+    let Ok(column) = load_column(&state, column_id) else {
+        return;
+    };
+    if matches!(column.kind, ColumnKind::Notifications) {
+        return;
+    }
+    let Ok(resolved) =
+        resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await
+    else {
+        return;
+    };
+    let Ok(cached) = state.cache.load_cached(&column.id, 1) else {
+        return;
+    };
+    let Some(newest) = cached.first() else {
+        return;
+    };
+    let newest_known_id = newest.id.clone();
+    let gap_limit = state
+        .settings
+        .load_ui()
+        .map(|p| p.gap_fill_limit)
+        .unwrap_or(0)
+        .max(0);
+    if gap_limit == 0 {
+        return;
+    }
+    let Ok(gap_notes) =
+        fill_gap(&state, &column.account_id, &resolved, &newest_known_id, gap_limit).await
+    else {
+        return;
+    };
+    if gap_notes.is_empty() {
+        return;
+    }
+    let _ = state.cache.cache_notes(&column.id, &gap_notes);
+    let _ = crate::events::ColumnGapFill {
+        column_id: column.id.clone(),
+        notes: gap_notes,
+    }
+    .emit(app);
+}
+
+/// Stream再接続時の通知ギャップ埋め(Issue #147)。通知はSQLiteキャッシュを持たないため、
+/// stream/connection.rs がメモリ上で保持する最終受信通知id(last_seen_id)を起点に、
+/// fill_gap と同構造(until_id で遡り、既知idに追いついたら打ち切り)でREST補完する。
+pub(crate) async fn notification_gap_fill_on_reconnect(
+    app: &AppHandle,
+    column_id: &str,
+    last_seen_id: &str,
+) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Some(_guard) = GapFillGuard::try_acquire(app, &state, column_id) else {
+        // 同一カラムの前回ギャップ埋めが実行中(フラッピング再接続対策)。
+        return;
+    };
+    let Ok(column) = load_column(&state, column_id) else {
+        return;
+    };
+    let Ok(client) = state.client_for(&column.account_id) else {
+        return;
+    };
+    let gap_limit = state
+        .settings
+        .load_ui()
+        .map(|p| p.gap_fill_limit)
+        .unwrap_or(0)
+        .max(0);
+    if gap_limit == 0 {
+        return;
+    }
+
+    let mut collected: Vec<Notification> = Vec::new();
+    let mut until_id: Option<String> = None;
+    for _ in 0..GAP_FILL_MAX_PAGES {
+        if collected.len() as i32 >= gap_limit {
+            break;
+        }
+        let Ok(mut page) =
+            fetch_notifications(&client, GAP_FILL_PAGE_SIZE, until_id.as_deref()).await
+        else {
+            break;
+        };
+        if page.is_empty() {
+            break;
+        }
+        page.sort_by(|a, b| b.id.cmp(&a.id));
+        let oldest_this_page = page.last().map(|n| n.id.clone());
+        let mut hit_known = false;
+        for n in page {
+            if n.id.as_str() <= last_seen_id {
+                hit_known = true;
+                continue;
+            }
+            collected.push(n);
+        }
+        until_id = oldest_this_page;
+        if hit_known {
+            break;
+        }
+    }
+
+    if collected.is_empty() {
+        return;
+    }
+    let mut seen = std::collections::HashSet::new();
+    collected.retain(|n| seen.insert(n.id.clone()));
+    collected.sort_by(|a, b| b.id.cmp(&a.id));
+    collected.truncate(gap_limit.max(0) as usize);
+
+    let notifications = filter_notifications(&state, &column.account_id, collected);
+    if notifications.is_empty() {
+        return;
+    }
+    let _ = crate::events::ColumnNotificationGapFill {
+        column_id: column.id.clone(),
+        notifications,
+    }
+    .emit(app);
 }
 
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、

@@ -34,6 +34,9 @@ pub struct AppState {
     pub server_mutes: Mutex<HashMap<String, HashSet<String>>>,
     pub settings: SettingsStore,
     pub cache: NoteCacheStore,
+    /// 再接続ギャップ埋め(Issue #147)が実行中の column_id 集合。フラッピング再接続で同一
+    /// カラムに対する多重実行を防ぐためのガード（commands/column.rs 側で挿入/削除する）。
+    pub gap_fill_in_flight: Mutex<HashSet<String>>,
 }
 
 impl AppState {
@@ -58,6 +61,7 @@ impl AppState {
             server_mutes: Mutex::new(HashMap::new()),
             settings,
             cache,
+            gap_fill_in_flight: Mutex::new(HashSet::new()),
         }
     }
 
