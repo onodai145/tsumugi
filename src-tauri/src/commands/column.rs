@@ -766,11 +766,45 @@ async fn fill_gap(
     Ok(collected)
 }
 
+/// フラッピング再接続時に同一カラムへ複数波のギャップ埋めタスクが多重起動されないよう、
+/// 実行中の column_id を記録するガード。Drop で自動的に集合から取り除く（RAII）。
+struct GapFillGuard {
+    app: AppHandle,
+    column_id: String,
+}
+
+impl Drop for GapFillGuard {
+    fn drop(&mut self) {
+        if let Some(state) = self.app.try_state::<AppState>() {
+            state.gap_fill_in_flight.lock().unwrap().remove(&self.column_id);
+        }
+    }
+}
+
+impl GapFillGuard {
+    /// column_id の in-flight 登録を試みる。既に実行中なら None を返す。
+    fn try_acquire(app: &AppHandle, state: &AppState, column_id: &str) -> Option<Self> {
+        let mut inflight = state.gap_fill_in_flight.lock().unwrap();
+        if !inflight.insert(column_id.to_string()) {
+            return None;
+        }
+        drop(inflight);
+        Some(Self {
+            app: app.clone(),
+            column_id: column_id.to_string(),
+        })
+    }
+}
+
 /// Stream再接続時のノートギャップ埋め(Issue #147)。起動時(resume_column)と同じ fill_gap を
 /// 使い、SQLiteキャッシュの最新ノートidを起点にRESTで遡って補完する。初回接続では呼ばれない
 /// 前提（呼び出し判定は stream/connection.rs の is_reconnect 側で行う）。
 pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
     let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Some(_guard) = GapFillGuard::try_acquire(app, &state, column_id) else {
+        // 同一カラムの前回ギャップ埋めが実行中(フラッピング再接続対策)。
         return;
     };
     let Ok(column) = load_column(&state, column_id) else {
@@ -825,6 +859,10 @@ pub(crate) async fn notification_gap_fill_on_reconnect(
     last_seen_id: &str,
 ) {
     let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Some(_guard) = GapFillGuard::try_acquire(app, &state, column_id) else {
+        // 同一カラムの前回ギャップ埋めが実行中(フラッピング再接続対策)。
         return;
     };
     let Ok(column) = load_column(&state, column_id) else {
