@@ -30,6 +30,8 @@ cd src-tauri && cargo tauri android build --debug --target aarch64
 ```
 Requires NDK r27c. The symlinks inside the NDK toolchain that `setup-ndk` extracts are relative, so they break if the extraction path changes — CI re-points them to absolute paths as a workaround (see the comment above the `android-build` job in `test.yml`).
 
+If the build fails during Gradle configuration with `A problem occurred configuring project ':buildSrc'` and a cause like `IllegalArgumentException: 26.0.2` (or any JDK version string), it's not an NDK issue — Gradle 8.14.3's bundled Kotlin DSL compiler can't parse newer JDK version strings when evaluating `buildSrc`'s `build.gradle.kts`. Build with an older JDK, e.g. `JAVA_HOME=/usr/lib/jvm/java-21-openjdk cargo tauri android build --debug --target aarch64`.
+
 ## Architecture
 
 ### Rust ↔ TS boundary
