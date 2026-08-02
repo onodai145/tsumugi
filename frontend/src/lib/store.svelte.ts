@@ -806,6 +806,21 @@ class AppStore {
       }),
     );
     this.#unlisten.push(
+      await events.columnNotificationGapFill.listen((e) => {
+        const tab = this.#findTab(e.payload.columnId);
+        if (!tab) return;
+        // Stream再接続時のギャップ埋め結果(Issue #147)。ColumnGapFill(ノート)と同じ理由で、
+        // 通知音/デスクトップ通知は鳴らさない（瞬断中に溜まった通知で誤爆しないため）。
+        const known = new Set(tab.notifications.map((n) => n.id));
+        const merged = [...tab.notifications];
+        for (const n of e.payload.notifications) {
+          if (!known.has(n.id)) merged.push(n);
+        }
+        merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+        tab.notifications = merged.slice(0, MAX_NOTES);
+      }),
+    );
+    this.#unlisten.push(
       await events.columnConnectionState.listen((e) => {
         // タブがまだ #insertTab 前でも(resumeColumn/addColumn の await 解決前に
         // Connected が届くことがある)状態を取りこぼさないよう、まず記録する。
