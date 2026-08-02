@@ -230,6 +230,7 @@ export const events = {
 	columnNote: makeEvent<ColumnNote>("column-note"),
 	columnNoteUpdated: makeEvent<ColumnNoteUpdated>("column-note-updated"),
 	columnNotification: makeEvent<ColumnNotification>("column-notification"),
+	columnNotificationGapFill: makeEvent<ColumnNotificationGapFill>("column-notification-gap-fill"),
 };
 
 /* Types */
@@ -340,6 +341,15 @@ export type ColumnNoteUpdated = {
 export type ColumnNotification = {
 	columnId: string,
 	notification: Notification,
+};
+
+/**
+ *  再接続時の通知ギャップ埋め結果をまとめて反映する(Issue #147)。ノートの ColumnGapFill と
+ *  同じ設計判断で、通知音・デスクトップ通知は鳴らさない（瞬断中に溜まった通知で誤爆しないため）。
+ */
+export type ColumnNotificationGapFill = {
+	columnId: string,
+	notifications: Notification[],
 };
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";

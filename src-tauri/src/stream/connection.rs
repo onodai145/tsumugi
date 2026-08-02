@@ -77,6 +77,9 @@ enum AccountCommand {
         channel: String,
         params: Value,
         mode: StreamMode,
+        /// 通知カラムの初期REST取得で得た最新通知id。再接続ギャップ埋めの
+        /// ウォーターマークをライブ受信前から有効にするための初期値（ノートでは常に None）。
+        initial_last_seen_id: Option<String>,
     },
     /// そのカラムに属する購読を全て外す。
     RemoveChannel { column_id: String },
@@ -139,6 +142,7 @@ impl ConnectionManager {
             channel.to_string(),
             params,
             mode,
+            None,
         );
     }
 
@@ -150,6 +154,7 @@ impl ConnectionManager {
         account_id: String,
         host: String,
         token: String,
+        initial_last_seen_id: Option<String>,
     ) {
         let mode = StreamMode::Notifications {
             account_id: account_id.clone(),
@@ -164,6 +169,7 @@ impl ConnectionManager {
             "main".to_string(),
             serde_json::json!({}),
             mode,
+            initial_last_seen_id,
         );
     }
 
@@ -179,6 +185,7 @@ impl ConnectionManager {
         channel: String,
         params: serde_json::Value,
         mode: StreamMode,
+        initial_last_seen_id: Option<String>,
     ) {
         self.columns
             .lock()
@@ -194,6 +201,7 @@ impl ConnectionManager {
             column_id,
             channel,
             params,
+            initial_last_seen_id,
             mode,
         });
     }
@@ -288,6 +296,9 @@ struct ChannelSub {
     params: Value,
     mode: StreamMode,
     dedup: Dedup,
+    /// 通知カラムのみ使用: 直近に受信した通知id。再接続時のギャップ埋め(Issue #147)の
+    /// ウォーターマークとして使う（通知はSQLiteキャッシュを持たないためメモリ上で保持する）。
+    last_seen_notification_id: Option<String>,
 }
 
 /// subNote 購読集合（接続単位・上限付き FIFO）。noteUpdated ルーティングのため
@@ -410,6 +421,9 @@ async fn run_account(
     // noteUpdatedと通知が両方届いた場合の二重加算は (note_id, actor_id, reaction) で防ぐ。
     let mut reaction_event_dedup = Dedup::new(DEDUP_CAPACITY);
     let mut backoff = BACKOFF_START;
+    // 一度でも接続確立した後の再接続かどうか(Issue #147)。true のときだけ
+    // 再接続ギャップ埋めを行う（初回接続時は open_stream_and_fetch 側のREST初期取得で足りる）。
+    let mut ever_connected = false;
 
     loop {
         if *cancel.borrow() {
@@ -430,6 +444,7 @@ async fn run_account(
             &mut cancel,
             &mut cmd_rx,
             &mut connected,
+            ever_connected,
         )
         .await;
 
@@ -438,6 +453,7 @@ async fn run_account(
         // 後の再接続まで無関係に長い待ち時間を引きずってしまう）。
         if connected {
             backoff = BACKOFF_START;
+            ever_connected = true;
         }
 
         match outcome {
@@ -469,6 +485,7 @@ async fn connect_and_run(
     cancel: &mut watch::Receiver<bool>,
     cmd_rx: &mut mpsc::Receiver<AccountCommand>,
     connected: &mut bool,
+    is_reconnect: bool,
 ) -> RunOutcome {
     let url = format!("wss://{host}/streaming?i={token}");
     // ハンドシェイクに User-Agent を付ける（既定では送られないため）。
@@ -517,6 +534,9 @@ async fn connect_and_run(
     }
     emit_state_all(app, subs, ConnectionState::Connected);
     *connected = true;
+    if is_reconnect {
+        spawn_reconnect_gap_fill(app, subs);
+    }
 
     let mut ping_tick = tokio::time::interval(PING_INTERVAL);
     ping_tick.tick().await; // 直後に即発火する最初のtickは消費するだけ
@@ -544,7 +564,7 @@ async fn connect_and_run(
             }
             cmd = cmd_rx.recv() => {
                 match cmd {
-                    Some(AccountCommand::AddChannel { sub_key, column_id, channel, params, mode }) => {
+                    Some(AccountCommand::AddChannel { sub_key, column_id, channel, params, mode, initial_last_seen_id }) => {
                         // 既存を張り替える場合は先に外す（同じ sub_key のみ。他ソースには影響しない）
                         if let Some(old) = subs.remove(&sub_key) {
                             sub_index.remove(&old.sub_id);
@@ -561,6 +581,7 @@ async fn connect_and_run(
                             params: params.clone(),
                             mode,
                             dedup: Dedup::new(DEDUP_CAPACITY),
+                            last_seen_notification_id: initial_last_seen_id,
                         });
                         if write
                             .send(Message::Text(protocol::connect(&channel, &sub_id, params).into()))
@@ -628,6 +649,42 @@ async fn connect_and_run(
                         log::warn!("[{account_id}] ws read error: {e}");
                         return RunOutcome::Disconnected;
                     }
+                }
+            }
+        }
+    }
+}
+
+/// 再接続確立時、切断中に届いていたはずのノート/通知をRESTで補完する(Issue #147)。
+/// 再接続ループ自体をブロックしないようバックグラウンドタスクとして起動する。
+fn spawn_reconnect_gap_fill(app: &AppHandle, subs: &HashMap<String, ChannelSub>) {
+    let mut seen_columns = HashSet::new();
+    for sub in subs.values() {
+        match &sub.mode {
+            StreamMode::Notes { .. } => {
+                // TQL複数ソースでは複数の ChannelSub が同じ column_id を持つため重複起動しない
+                if seen_columns.insert(sub.column_id.clone()) {
+                    let app = app.clone();
+                    let column_id = sub.column_id.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::commands::column::gap_fill_on_reconnect(&app, &column_id).await;
+                    });
+                }
+            }
+            StreamMode::Notifications { .. } => {
+                // 再接続までに一度も通知を受信していなければウォーターマークが無く、
+                // 補完すべき範囲が定まらないためスキップする。
+                if let Some(last_seen_id) = sub.last_seen_notification_id.clone() {
+                    let app = app.clone();
+                    let column_id = sub.column_id.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::commands::column::notification_gap_fill_on_reconnect(
+                            &app,
+                            &column_id,
+                            &last_seen_id,
+                        )
+                        .await;
+                    });
                 }
             }
         }
@@ -722,6 +779,7 @@ fn handle_text(
             if !sub.dedup.accept(&notification.id) {
                 return HandleResult::None;
             }
+            update_last_seen_notification_id(&mut sub.last_seen_notification_id, &notification.id);
             let account_id = sub.mode.account_id().to_string();
             let n: Notification = (*notification).into();
             if let Some(state) = app.try_state::<AppState>() {
@@ -802,6 +860,14 @@ fn handle_text(
             HandleResult::None
         }
         Incoming::Other => HandleResult::None,
+    }
+}
+
+/// 通知ウォーターマークを、より新しい(=大きい)idの場合だけ更新する。Misskeyのidは
+/// 辞書順ソート可能なULID系のため文字列比較でよい。順序が入れ替わって届いても後退しない。
+fn update_last_seen_notification_id(current: &mut Option<String>, new_id: &str) {
+    if current.as_deref().map(|c| new_id > c).unwrap_or(true) {
+        *current = Some(new_id.to_string());
     }
 }
 
@@ -1041,6 +1107,18 @@ mod tests {
         assert!(reaction_event_key("n1", None, &reacted).is_none());
         assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::PollVoted { choice: 0 }).is_none());
         assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::Deleted).is_none());
+    }
+
+    #[test]
+    fn update_last_seen_notification_id_keeps_max_and_ignores_regressions() {
+        let mut cur: Option<String> = None;
+        update_last_seen_notification_id(&mut cur, "9tj000001");
+        assert_eq!(cur.as_deref(), Some("9tj000001"));
+        // 古いidが後から来ても後退しない（順序が入れ替わって届くケースの保険）
+        update_last_seen_notification_id(&mut cur, "9tj000000");
+        assert_eq!(cur.as_deref(), Some("9tj000001"));
+        update_last_seen_notification_id(&mut cur, "9tj000005");
+        assert_eq!(cur.as_deref(), Some("9tj000005"));
     }
 
     fn minimal_note(id: &str) -> Note {
