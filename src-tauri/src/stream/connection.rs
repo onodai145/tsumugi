@@ -77,6 +77,9 @@ enum AccountCommand {
         channel: String,
         params: Value,
         mode: StreamMode,
+        /// 通知カラムの初期REST取得で得た最新通知id。再接続ギャップ埋めの
+        /// ウォーターマークをライブ受信前から有効にするための初期値（ノートでは常に None）。
+        initial_last_seen_id: Option<String>,
     },
     /// そのカラムに属する購読を全て外す。
     RemoveChannel { column_id: String },
@@ -139,6 +142,7 @@ impl ConnectionManager {
             channel.to_string(),
             params,
             mode,
+            None,
         );
     }
 
@@ -150,6 +154,7 @@ impl ConnectionManager {
         account_id: String,
         host: String,
         token: String,
+        initial_last_seen_id: Option<String>,
     ) {
         let mode = StreamMode::Notifications {
             account_id: account_id.clone(),
@@ -164,6 +169,7 @@ impl ConnectionManager {
             "main".to_string(),
             serde_json::json!({}),
             mode,
+            initial_last_seen_id,
         );
     }
 
@@ -179,6 +185,7 @@ impl ConnectionManager {
         channel: String,
         params: serde_json::Value,
         mode: StreamMode,
+        initial_last_seen_id: Option<String>,
     ) {
         self.columns
             .lock()
@@ -194,6 +201,7 @@ impl ConnectionManager {
             column_id,
             channel,
             params,
+            initial_last_seen_id,
             mode,
         });
     }
@@ -556,7 +564,7 @@ async fn connect_and_run(
             }
             cmd = cmd_rx.recv() => {
                 match cmd {
-                    Some(AccountCommand::AddChannel { sub_key, column_id, channel, params, mode }) => {
+                    Some(AccountCommand::AddChannel { sub_key, column_id, channel, params, mode, initial_last_seen_id }) => {
                         // 既存を張り替える場合は先に外す（同じ sub_key のみ。他ソースには影響しない）
                         if let Some(old) = subs.remove(&sub_key) {
                             sub_index.remove(&old.sub_id);
@@ -573,7 +581,7 @@ async fn connect_and_run(
                             params: params.clone(),
                             mode,
                             dedup: Dedup::new(DEDUP_CAPACITY),
-                            last_seen_notification_id: None,
+                            last_seen_notification_id: initial_last_seen_id,
                         });
                         if write
                             .send(Message::Text(protocol::connect(&channel, &sub_id, params).into()))

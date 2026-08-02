@@ -644,6 +644,9 @@ async fn open_stream_and_fetch(
     if matches!(column.kind, ColumnKind::Notifications) {
         let client = state.client_for(&column.account_id)?;
         let raw = fetch_notifications(&client, INITIAL_LIMIT, None).await?;
+        // 初期REST取得で得た最新id(新しい順の先頭)を再接続ギャップ埋めの初期ウォーターマークにする。
+        // ライブ配信で1件も受信しないまま再接続した場合でもギャップ埋めが機能するようにするため。
+        let initial_last_seen_id = raw.first().map(|n| n.id.clone());
         let notifications = filter_notifications(state, &column.account_id, raw);
         state.connections.open_notifications(
             app.clone(),
@@ -651,6 +654,7 @@ async fn open_stream_and_fetch(
             column.account_id.clone(),
             host,
             token,
+            initial_last_seen_id,
         );
         return Ok((vec![], notifications));
     }
