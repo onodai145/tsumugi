@@ -846,24 +846,31 @@ class AppStore {
       await events.columnNotification.listen((e) => {
         const tab = this.#findTab(e.payload.columnId);
         if (!tab) return;
-        if (tab.notifications.some((n) => n.id === e.payload.notification.id)) return;
-        tab.notifications = [e.payload.notification, ...tab.notifications].slice(0, MAX_NOTES);
+        const n = e.payload.notification;
+        // 再接続ギャップ埋め(columnNotificationGapFill)は tab.notifications に無音で
+        // 先に挿入することがある(Issue #147)。そのため「tab.notifications に既に
+        // 存在するか」を先に見て早期returnすると、ギャップ埋めとレースした本物の
+        // 新着通知(ライブ配信)まで無音/無ログで握り潰されてしまう。
+        // 音/デスクトップ通知/ログは、このタブへのリスト反映の前に判定する。
         // 通知の到着タイミングを Backstage に残す。接続断→再接続のログと突き合わせれば
         // 「通知が謎のタイミングで届く」系の問題を後から追いやすくなる。
-        const n = e.payload.notification;
         const who = n.user ? `@${n.user.username}` : "";
         this.#log("info", `通知を受信: ${n.type}${who ? ` ${who}` : ""} (${tabName(tab)})`);
         // 発火条件は「設定→通知のグローバルスイッチ」と「このタブの通知設定」の両方がON。
         // デスクトップ通知 / 音は「通知IDでグローバルに1回だけ」。通知カラムが複数あると
         // 同じ通知が各カラムに届くため、ここで重複を弾く（このタブが望まない場合は
         // dedup 枠を消費しない＝別タブに同じ通知が来たときそちらで発火できるようにする）。
+        // #markNotified は通知IDでグローバルに1回だけ消費するため、同一通知の重複配信
+        // (ライブ二重配信やギャップ埋めとのレース)でも二重発火はしない。
         const wantsDesktop = this.notify.desktop && tab.notifyDesktop;
         const wantsSound = this.notify.sound && tab.notifySound;
-        if ((wantsDesktop || wantsSound) && this.#markNotified(e.payload.notification.id)) {
+        if ((wantsDesktop || wantsSound) && this.#markNotified(n.id)) {
           this.#logDebug(`通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
-          if (wantsDesktop) void this.#osNotify(e.payload.notification);
+          if (wantsDesktop) void this.#osNotify(n);
           if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
+        if (tab.notifications.some((x) => x.id === n.id)) return;
+        tab.notifications = [n, ...tab.notifications].slice(0, MAX_NOTES);
       }),
     );
   }
