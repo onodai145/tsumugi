@@ -1,11 +1,13 @@
 // ピン留め絵文字/リアクションのキー形式共通ヘルパ。Unicode絵文字はそのまま、
-// カスタム絵文字は ":name:" 形式で表す(リアクション送信時の規約)。
+// 自インスタンスのカスタム絵文字は ":name@.:" 形式で表す。Misskey本家の
+// ReactionService#decodeReaction が note.reactions / myReaction で返す正規形と揃えないと、
+// 自分のリアクションキーだけ別表記になり重複バッジや取り消し判定ズレを起こす(Issue #152)。
 export function isCustomEmojiKey(key: string): boolean {
   return key.startsWith(":") && key.endsWith(":") && key.length > 2;
 }
 
 export function customEmojiKey(name: string): string {
-  return `:${name}:`;
+  return `:${name}@.:`;
 }
 
 // UiPrefs.pinnedEmojis に保存するカスタム絵文字キーはインスタンス(host)を含める
