@@ -413,6 +413,9 @@ async fn run_account(
     // noteUpdatedと通知が両方届いた場合の二重加算は (note_id, actor_id, reaction) で防ぐ。
     let mut reaction_event_dedup = Dedup::new(DEDUP_CAPACITY);
     let mut backoff = BACKOFF_START;
+    // 一度でも接続確立した後の再接続かどうか(Issue #147)。true のときだけ
+    // 再接続ギャップ埋めを行う（初回接続時は open_stream_and_fetch 側のREST初期取得で足りる）。
+    let mut ever_connected = false;
 
     loop {
         if *cancel.borrow() {
@@ -433,6 +436,7 @@ async fn run_account(
             &mut cancel,
             &mut cmd_rx,
             &mut connected,
+            ever_connected,
         )
         .await;
 
@@ -441,6 +445,7 @@ async fn run_account(
         // 後の再接続まで無関係に長い待ち時間を引きずってしまう）。
         if connected {
             backoff = BACKOFF_START;
+            ever_connected = true;
         }
 
         match outcome {
@@ -472,6 +477,7 @@ async fn connect_and_run(
     cancel: &mut watch::Receiver<bool>,
     cmd_rx: &mut mpsc::Receiver<AccountCommand>,
     connected: &mut bool,
+    is_reconnect: bool,
 ) -> RunOutcome {
     let url = format!("wss://{host}/streaming?i={token}");
     // ハンドシェイクに User-Agent を付ける（既定では送られないため）。
@@ -520,6 +526,9 @@ async fn connect_and_run(
     }
     emit_state_all(app, subs, ConnectionState::Connected);
     *connected = true;
+    if is_reconnect {
+        spawn_reconnect_gap_fill(app, subs);
+    }
 
     let mut ping_tick = tokio::time::interval(PING_INTERVAL);
     ping_tick.tick().await; // 直後に即発火する最初のtickは消費するだけ
@@ -633,6 +642,24 @@ async fn connect_and_run(
                         return RunOutcome::Disconnected;
                     }
                 }
+            }
+        }
+    }
+}
+
+/// 再接続確立時、切断中に届いていたはずのノート/通知をRESTで補完する(Issue #147)。
+/// 再接続ループ自体をブロックしないようバックグラウンドタスクとして起動する。
+fn spawn_reconnect_gap_fill(app: &AppHandle, subs: &HashMap<String, ChannelSub>) {
+    let mut seen_columns = HashSet::new();
+    for sub in subs.values() {
+        if let StreamMode::Notes { .. } = &sub.mode {
+            // TQL複数ソースでは複数の ChannelSub が同じ column_id を持つため重複起動しない
+            if seen_columns.insert(sub.column_id.clone()) {
+                let app = app.clone();
+                let column_id = sub.column_id.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::commands::column::gap_fill_on_reconnect(&app, &column_id).await;
+                });
             }
         }
     }

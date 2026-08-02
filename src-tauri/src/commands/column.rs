@@ -766,6 +766,56 @@ async fn fill_gap(
     Ok(collected)
 }
 
+/// Stream再接続時のノートギャップ埋め(Issue #147)。起動時(resume_column)と同じ fill_gap を
+/// 使い、SQLiteキャッシュの最新ノートidを起点にRESTで遡って補完する。初回接続では呼ばれない
+/// 前提（呼び出し判定は stream/connection.rs の is_reconnect 側で行う）。
+pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Ok(column) = load_column(&state, column_id) else {
+        return;
+    };
+    if matches!(column.kind, ColumnKind::Notifications) {
+        return;
+    }
+    let Ok(resolved) =
+        resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await
+    else {
+        return;
+    };
+    let Ok(cached) = state.cache.load_cached(&column.id, 1) else {
+        return;
+    };
+    let Some(newest) = cached.first() else {
+        return;
+    };
+    let newest_known_id = newest.id.clone();
+    let gap_limit = state
+        .settings
+        .load_ui()
+        .map(|p| p.gap_fill_limit)
+        .unwrap_or(0)
+        .max(0);
+    if gap_limit == 0 {
+        return;
+    }
+    let Ok(gap_notes) =
+        fill_gap(&state, &column.account_id, &resolved, &newest_known_id, gap_limit).await
+    else {
+        return;
+    };
+    if gap_notes.is_empty() {
+        return;
+    }
+    let _ = state.cache.cache_notes(&column.id, &gap_notes);
+    let _ = crate::events::ColumnGapFill {
+        column_id: column.id.clone(),
+        notes: gap_notes,
+    }
+    .emit(app);
+}
+
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
