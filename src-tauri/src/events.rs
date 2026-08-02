@@ -30,6 +30,15 @@ pub struct ColumnNotification {
     pub notification: Notification,
 }
 
+/// 再接続時の通知ギャップ埋め結果をまとめて反映する(Issue #147)。ノートの ColumnGapFill と
+/// 同じ設計判断で、通知音・デスクトップ通知は鳴らさない（瞬断中に溜まった通知で誤爆しないため）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnNotificationGapFill {
+    pub column_id: String,
+    pub notifications: Vec<Notification>,
+}
+
 /// キャプチャ中ノートの更新（他者のリアクション/投票/削除）。値のみ更新し、
 /// カラムからの出入りはしない（TQL§6 の方針）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

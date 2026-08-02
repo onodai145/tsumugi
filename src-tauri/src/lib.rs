@@ -100,6 +100,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ColumnNotification,
             events::ColumnConnectionState,
             events::ColumnGapFill,
+            events::ColumnNotificationGapFill,
         ])
 }
 
