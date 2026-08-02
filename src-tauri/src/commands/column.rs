@@ -816,6 +816,82 @@ pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
     .emit(app);
 }
 
+/// Stream再接続時の通知ギャップ埋め(Issue #147)。通知はSQLiteキャッシュを持たないため、
+/// stream/connection.rs がメモリ上で保持する最終受信通知id(last_seen_id)を起点に、
+/// fill_gap と同構造(until_id で遡り、既知idに追いついたら打ち切り)でREST補完する。
+pub(crate) async fn notification_gap_fill_on_reconnect(
+    app: &AppHandle,
+    column_id: &str,
+    last_seen_id: &str,
+) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Ok(column) = load_column(&state, column_id) else {
+        return;
+    };
+    let Ok(client) = state.client_for(&column.account_id) else {
+        return;
+    };
+    let gap_limit = state
+        .settings
+        .load_ui()
+        .map(|p| p.gap_fill_limit)
+        .unwrap_or(0)
+        .max(0);
+    if gap_limit == 0 {
+        return;
+    }
+
+    let mut collected: Vec<Notification> = Vec::new();
+    let mut until_id: Option<String> = None;
+    for _ in 0..GAP_FILL_MAX_PAGES {
+        if collected.len() as i32 >= gap_limit {
+            break;
+        }
+        let Ok(mut page) =
+            fetch_notifications(&client, GAP_FILL_PAGE_SIZE, until_id.as_deref()).await
+        else {
+            break;
+        };
+        if page.is_empty() {
+            break;
+        }
+        page.sort_by(|a, b| b.id.cmp(&a.id));
+        let oldest_this_page = page.last().map(|n| n.id.clone());
+        let mut hit_known = false;
+        for n in page {
+            if n.id.as_str() <= last_seen_id {
+                hit_known = true;
+                continue;
+            }
+            collected.push(n);
+        }
+        until_id = oldest_this_page;
+        if hit_known {
+            break;
+        }
+    }
+
+    if collected.is_empty() {
+        return;
+    }
+    let mut seen = std::collections::HashSet::new();
+    collected.retain(|n| seen.insert(n.id.clone()));
+    collected.sort_by(|a, b| b.id.cmp(&a.id));
+    collected.truncate(gap_limit.max(0) as usize);
+
+    let notifications = filter_notifications(&state, &column.account_id, collected);
+    if notifications.is_empty() {
+        return;
+    }
+    let _ = crate::events::ColumnNotificationGapFill {
+        column_id: column.id.clone(),
+        notifications,
+    }
+    .emit(app);
+}
+
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。

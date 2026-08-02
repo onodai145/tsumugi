@@ -652,14 +652,32 @@ async fn connect_and_run(
 fn spawn_reconnect_gap_fill(app: &AppHandle, subs: &HashMap<String, ChannelSub>) {
     let mut seen_columns = HashSet::new();
     for sub in subs.values() {
-        if let StreamMode::Notes { .. } = &sub.mode {
-            // TQL複数ソースでは複数の ChannelSub が同じ column_id を持つため重複起動しない
-            if seen_columns.insert(sub.column_id.clone()) {
-                let app = app.clone();
-                let column_id = sub.column_id.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::commands::column::gap_fill_on_reconnect(&app, &column_id).await;
-                });
+        match &sub.mode {
+            StreamMode::Notes { .. } => {
+                // TQL複数ソースでは複数の ChannelSub が同じ column_id を持つため重複起動しない
+                if seen_columns.insert(sub.column_id.clone()) {
+                    let app = app.clone();
+                    let column_id = sub.column_id.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::commands::column::gap_fill_on_reconnect(&app, &column_id).await;
+                    });
+                }
+            }
+            StreamMode::Notifications { .. } => {
+                // 再接続までに一度も通知を受信していなければウォーターマークが無く、
+                // 補完すべき範囲が定まらないためスキップする。
+                if let Some(last_seen_id) = sub.last_seen_notification_id.clone() {
+                    let app = app.clone();
+                    let column_id = sub.column_id.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::commands::column::notification_gap_fill_on_reconnect(
+                            &app,
+                            &column_id,
+                            &last_seen_id,
+                        )
+                        .await;
+                    });
+                }
             }
         }
     }
