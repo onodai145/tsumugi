@@ -82,7 +82,7 @@ impl NoteCacheStore {
         let rows = stmt.query_map(params![column_id, limit], |r| r.get::<_, String>(0))?;
         let mut out = Vec::new();
         for payload in rows {
-            out.push(serde_json::from_str::<Note>(&payload?)?);
+            out.extend(deserialize_note_or_warn(&payload?));
         }
         Ok(out)
     }
@@ -96,7 +96,7 @@ impl NoteCacheStore {
             .query_row("SELECT payload FROM note WHERE id = ?1", params![note_id], |r| r.get(0))
             .optional()?;
         Ok(match payload {
-            Some(p) => Some(serde_json::from_str(&p)?),
+            Some(p) => deserialize_note_or_warn(&p),
             None => None,
         })
     }
@@ -214,11 +214,25 @@ impl NoteCacheStore {
         let rows = stmt.query_map(params_ref.as_slice(), |r| r.get::<_, String>(0))?;
         let mut out = Vec::new();
         for payload in rows {
-            out.push(serde_json::from_str::<Note>(&payload?)?);
+            out.extend(deserialize_note_or_warn(&payload?));
         }
         Ok(out)
     }
 }
+
+/// payload の JSON デシリアライズに失敗した行はログを出して None 扱いにする（Issue #150）。
+/// ノートキャッシュは「破棄しても再取得で復元できる」設計（db.rs 冒頭コメント参照）なので、
+/// 型不一致になった旧形式の1行のために呼び出し元をエラーにする必要はなく、未キャッシュ扱いで十分。
+fn deserialize_note_or_warn(payload: &str) -> Option<Note> {
+    match serde_json::from_str::<Note>(payload) {
+        Ok(note) => Some(note),
+        Err(e) => {
+            log::warn!("skipping note cache row with undeserializable payload: {e}");
+            None
+        }
+    }
+}
+
 
 /// `select_sql`（`SELECT id FROM note ...` 形式）にマッチするノートと、その関連テーブル
 /// （note_reaction 等）・column_note を削除する（FK制約は張っていないため手動カスケード）。
@@ -421,6 +435,13 @@ mod tests {
         }
     }
 
+    /// `note.emojis` を配列形式(移行前の旧フォーマット)に差し替えた payload JSON を作る。
+    fn payload_with_array_emojis(n: &Note) -> String {
+        let mut v = serde_json::to_value(n).unwrap();
+        v["emojis"] = serde_json::json!(["old_style_name"]);
+        serde_json::to_string(&v).unwrap()
+    }
+
     #[test]
     fn cache_roundtrip_preserves_note_and_order() {
         let s = store();
@@ -435,10 +456,73 @@ mod tests {
         assert_eq!(got[0].my_reaction.as_deref(), Some("👍"));
     }
 
+    /// 8dc26912 で `Note.emojis` が `Vec<String>` → `HashMap<String,String>` に変わった
+    /// (Issue #150)。それ以前に保存された配列形式の payload が1件混ざっていても、
+    /// その行だけスキップして残りは正常に読めること（カラム全滅にしない）。
+    #[test]
+    fn load_cached_skips_row_with_legacy_array_emojis_payload() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).unwrap();
+        {
+            let conn = s.conn.lock().unwrap();
+            let legacy_payload = payload_with_array_emojis(&note("n1", 100));
+            conn.execute(
+                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
+                params![legacy_payload],
+            )
+            .unwrap();
+        }
+
+        let got = s.load_cached("col1", 10).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+    }
+
+    /// load_cached と同様、search_cache も壊れた行1件で全体を空にしない。
+    #[test]
+    fn search_cache_skips_row_with_legacy_array_emojis_payload() {
+        use crate::filter::{parser, sql};
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).unwrap();
+        {
+            let conn = s.conn.lock().unwrap();
+            let legacy_payload = payload_with_array_emojis(&note("n1", 100));
+            conn.execute(
+                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
+                params![legacy_payload],
+            )
+            .unwrap();
+        }
+
+        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        let expr = parser::parse_predicate("has_files").unwrap();
+        let w = sql::build_where(&expr, &ctx).unwrap();
+        let got = s.search_cache(&w, None, 10).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+    }
+
     #[test]
     fn get_note_returns_none_when_not_cached() {
         let s = store();
         assert!(s.get_note("missing").unwrap().is_none());
+    }
+
+    /// 旧形式(配列)の emojis payload は「読めないので未キャッシュ扱い」とし、
+    /// Err で呼び出し元(react/unreact/noteUpdated反映)を永続的に沈黙させない(Issue #150)。
+    #[test]
+    fn get_note_returns_none_for_row_with_legacy_array_emojis_payload() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
+        {
+            let conn = s.conn.lock().unwrap();
+            let legacy_payload = payload_with_array_emojis(&note("n1", 100));
+            conn.execute(
+                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
+                params![legacy_payload],
+            )
+            .unwrap();
+        }
+
+        assert!(s.get_note("n1").unwrap().is_none());
     }
 
     #[test]
