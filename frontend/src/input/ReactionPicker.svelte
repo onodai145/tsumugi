@@ -66,8 +66,8 @@
   );
 
   function reactionKeyOf(e: { key: string; custom: EmojiDef | null }): string {
-    // リアクション送信は host@own-instance を含まない :name: 形式で行う必要がある
-    // (pinned保存は衝突防止のため :name@host: だが、送信キーは通常の絵文字と揃える)。
+    // customEmojis は常に閲覧アカウントのローカル絵文字なので ":name@.:" 形式で送信する
+    // (Misskey本家が note.reactions/myReaction で返す正規形と揃える。Issue #152)。
     return e.custom ? customEmojiKey(e.custom.name) : e.key;
   }
 </script>

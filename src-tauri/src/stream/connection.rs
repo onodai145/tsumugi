@@ -738,6 +738,11 @@ fn handle_text(
                     (&n.note, &n.reaction, &n.user)
                 {
                     let note_id = note.id.clone();
+                    // reaction 通知の reaction はサーバ側で decodeReaction() を経由しない
+                    // 生の正規化値のため、ローカル絵文字だと ":name:" のようにホスト部が無い。
+                    // noteUpdated(reacted) 経路は decodeReaction() 済みで ":name@.:" になっており、
+                    // 表記が食い違うと reaction_event_key の重複排除が効かず二重加算される。
+                    let reaction = decode_reaction(reaction);
                     let update = NoteUpdate::Reacted { reaction: reaction.clone() };
                     let actor_id = Some(actor.id.clone());
                     let key = reaction_event_key(&note_id, actor_id.as_deref(), &update)
@@ -803,6 +808,19 @@ fn handle_text(
 /// Reacted/Unreacted の重複排除キー。noteUpdated 経路と reaction 通知フォールバック経路
 /// (Issue #101)の両方で同じイベントが届きうるため、(note_id, actor_id, reaction) で
 /// 共通に重複排除する。actor_id が無い、または対象外の更新種別(PollVoted/Deleted)なら None。
+/// Misskey本家の ReactionService#decodeReaction 相当。カスタム絵文字の ":name:" /
+/// ":name@host:" 表記をホスト部込みの正規形 ":name@.:" (ローカル) / ":name@host:" (リモート)
+/// に揃える。Unicode絵文字や既にホスト部を含む表記はそのまま返す(冪等)。
+fn decode_reaction(raw: &str) -> String {
+    let Some(inner) = raw.strip_prefix(':').and_then(|s| s.strip_suffix(':')) else {
+        return raw.to_string();
+    };
+    if inner.is_empty() || inner.contains('@') {
+        return raw.to_string();
+    }
+    format!(":{inner}@.:")
+}
+
 fn reaction_event_key(note_id: &str, actor_id: Option<&str>, update: &NoteUpdate) -> Option<String> {
     let actor_id = actor_id?;
     match update {
@@ -971,6 +989,31 @@ mod tests {
     fn map_unknown_is_none() {
         assert!(map_note_update("emojiAdded", &json!({})).is_none());
         assert!(map_note_update("reacted", &json!({})).is_none()); // reaction 欠落
+    }
+
+    #[test]
+    fn decode_reaction_adds_local_host_suffix() {
+        assert_eq!(decode_reaction(":blobcat:"), ":blobcat@.:");
+    }
+
+    #[test]
+    fn decode_reaction_is_idempotent_and_leaves_other_forms_untouched() {
+        assert_eq!(decode_reaction(":blobcat@.:"), ":blobcat@.:");
+        assert_eq!(decode_reaction(":blobcat@misskey.io:"), ":blobcat@misskey.io:");
+        assert_eq!(decode_reaction("👍"), "👍");
+    }
+
+    #[test]
+    fn decode_reaction_matches_noteupdated_path_for_same_local_custom_emoji() {
+        // Issue #152: reaction 通知(decode前の ":name:")と noteUpdated(decode後の ":name@.:")
+        // が同じキーになっていないと reaction_event_key の重複排除が効かず二重加算される。
+        let (update, _) =
+            map_note_update("reacted", &json!({"reaction":":blobcat@.:","userId":"u2"})).unwrap();
+        let NoteUpdate::Reacted { reaction: from_note_updated } = update else {
+            panic!("expected Reacted");
+        };
+        let from_notification = decode_reaction(":blobcat:");
+        assert_eq!(from_note_updated, from_notification);
     }
 
     #[test]

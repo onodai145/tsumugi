@@ -20,8 +20,8 @@ describe("isCustomEmojiKey", () => {
 });
 
 describe("customEmojiKey", () => {
-  it("wraps the name in colons", () => {
-    expect(customEmojiKey("blob_cat")).toBe(":blob_cat:");
+  it("wraps the name in colons with a local host suffix", () => {
+    expect(customEmojiKey("blob_cat")).toBe(":blob_cat@.:");
   });
 });
 
