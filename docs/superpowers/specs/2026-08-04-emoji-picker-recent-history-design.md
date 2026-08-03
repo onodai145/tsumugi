@@ -25,6 +25,12 @@ pub recent_emojis: Vec<String>,
 - 順序で最新度を表現する（タイムスタンプは持たない）。使用のたびに「既存の同一キーを除去 → 先頭に追加 → 最大16件に切り詰め」を行うことで、重複なく最新順を保つ。
 - 上限は16件（ピン留め既定8件の2倍、2行相当）。
 
+### カスタム絵文字のキー形式（重要）
+
+`recent_emojis`は`pinned_emojis`と同じグローバル設定であり、複数インスタンスのアカウントを跨いで共有される。そのため`emojiKey.ts`の規約に合わせ、カスタム絵文字は**ホスト付き** `:name@host:` 形式（`customEmojiPinKey`）で保存する。
+
+`ReactionPicker`の`onpick`が渡す値はホスト省略の自インスタンス形式 `:name@.:`（`customEmojiKey`）なので、`NoteCard.svelte`の`react()`で記録前に`customEmojiPinKey(name, accountHost)`へ変換する（`ReactionSection.svelte`の`add()`と同じ変換）。Unicode絵文字はそのまま。
+
 ## フロント永続化
 
 `frontend/src/lib/store.svelte.ts`に`setPinnedEmojis`と同じパターンで追加：
@@ -39,14 +45,18 @@ async recordEmojiUsage(key: string) {
 }
 ```
 
-`NoteCard.svelte`の`react()`から呼ぶ：
+`NoteCard.svelte`の`react()`から呼ぶ（キー形式変換込み）：
 
 ```ts
 function react(reaction: string) {
   app.reactPicker = null;
   if (accountId) {
     app.toggleReaction(accountId, inner.id, reaction);
-    app.recordEmojiUsage(reaction);
+    const host = app.accounts.find((a) => a.id === accountId)?.host;
+    const stored = isCustomEmojiKey(reaction) && host
+      ? customEmojiPinKey(parseCustomEmojiPinKey(reaction).name, host)
+      : reaction;
+    app.recordEmojiUsage(stored);
   }
 }
 ```
@@ -55,8 +65,8 @@ function react(reaction: string) {
 
 - 「ピン留め」セクションの直前に「最近使った」セクションを追加。
 - `showPinned`が`true`のときのみ表示する（設定画面のピン留め選択フロー、`showPinned={false}`では出さない）。
-- キー解決は`pinnedEntries`と同じロジック（Unicode文字はそのまま、カスタム絵文字は`customEmojis`から`name`を引いて解決。アカウントのhostと不一致・削除済みは除外）を流用する。
-- **既にピン留め済みのキーは除外**して表示する（同じ絵文字が2箇所に重複して出るのを避ける）。
+- キー解決は`pinnedEntries`と同じロジック（Unicode文字はそのまま、カスタム絵文字は`customEmojis`から`name`を引いて解決。アカウントのhostと不一致・削除済みは除外）を共通ヘルパー関数に抜き出して両セクションで再利用する（`pinnedEmojis`/`recentEmojis`は同じキー形式なので同じ解決ロジックが使える）。
+- **既にピン留め済みのキーは除外**して表示する（`pinned.includes(key)`で判定。同じキー形式のため単純な文字列比較でよい）。
 - 検索中（`queryLower`が非空）は非表示（ピン留めセクションと同じ扱い）。
 - 0件の場合はセクション自体を非表示にする（ピン留めのような「〜がありません」という空状態メッセージは出さない。未使用の状態は単に見えないほうが自然）。
 
