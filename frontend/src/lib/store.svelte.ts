@@ -35,6 +35,7 @@ import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
 import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
+import { withRecentEmojiUsage } from "./recentEmojis";
 import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
 import { isMobilePlatform } from "./platform";
 
@@ -134,6 +135,7 @@ class AppStore {
     backgroundFitMode: "cover",
     backgroundPosition: "center",
     pinnedEmojis: DEFAULT_PINNED_EMOJIS,
+    recentEmojis: [],
     uiMode: "auto",
     defaultAccountId: "",
     emojiStyle: "twemoji",
@@ -1096,6 +1098,7 @@ class AppStore {
       backgroundBlur: prefs.backgroundBlur ?? 0,
       columnOpacity: prefs.columnOpacity ?? 100,
       pinnedEmojis: prefs.pinnedEmojis ?? DEFAULT_PINNED_EMOJIS,
+      recentEmojis: prefs.recentEmojis ?? [],
       defaultAccountId: prefs.defaultAccountId ?? "",
       emojiStyle: prefs.emojiStyle ?? "twemoji",
       gapFillLimit: prefs.gapFillLimit ?? 200,
@@ -1158,6 +1161,14 @@ class AppStore {
   async setPinnedEmojis(list: string[]) {
     await unwrap(commands.setUiPrefs({ ...this.ui, pinnedEmojis: list }));
     this.ui = { ...this.ui, pinnedEmojis: list };
+  }
+
+  /// リアクションピッカーで絵文字を使ったことを記録する（Issue #108）。
+  /// キーは pinnedEmojis と同じ形式（カスタム絵文字はホスト付き ":name@host:"）で渡すこと。
+  async recordEmojiUsage(key: string) {
+    const list = withRecentEmojiUsage(this.ui.recentEmojis ?? [], key);
+    await unwrap(commands.setUiPrefs({ ...this.ui, recentEmojis: list }));
+    this.ui = { ...this.ui, recentEmojis: list };
   }
 
   /// data-theme(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
