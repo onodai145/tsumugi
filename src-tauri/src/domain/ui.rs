@@ -113,6 +113,10 @@ pub struct UiPrefs {
     /// カスタム絵文字は ":name:" 形式で保持する。フロント側で編集し、ここへ永続化する。
     #[serde(default = "default_pinned_emojis")]
     pub pinned_emojis: Vec<String>,
+    /// リアクションピッカーで最近使った絵文字（Issue #108）。キー形式は pinned_emojis と同じ
+    /// （Unicode絵文字はそのまま、カスタム絵文字は ":name@host:" 形式）。先頭が最新。
+    #[serde(default)]
+    pub recent_emojis: Vec<String>,
     /// モバイル版UI(投稿モーダル+FAB)かPC版UI(常時投稿欄)かの表示切替（Issue #51）。
     /// "auto"(OS判定に従う) | "desktop"(強制PC版) | "mobile"(強制モバイル版)。
     #[serde(default = "default_ui_mode")]
@@ -216,6 +220,7 @@ impl Default for UiPrefs {
             background_fit_mode: default_background_fit_mode(),
             background_position: default_background_position(),
             pinned_emojis: default_pinned_emojis(),
+            recent_emojis: Vec::new(),
             ui_mode: default_ui_mode(),
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
@@ -260,6 +265,8 @@ mod tests {
             v.pinned_emojis,
             vec!["👍", "❤️", "😆", "🎉", "🤔", "😢", "😮", "🙏"]
         );
+        // recent_emojis も同様に既定値(追加前は履歴なし)へフォールバックすること。
+        assert!(v.recent_emojis.is_empty());
         // ui_mode も同様に既定値(auto, 追加前のOS判定のみの挙動)へフォールバックすること。
         assert_eq!(v.ui_mode, "auto");
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
@@ -304,6 +311,7 @@ mod tests {
             background_fit_mode: "tile".into(),
             background_position: "top-left".into(),
             pinned_emojis: vec!["👍".into(), ":blob_cat:".into()],
+            recent_emojis: vec![":blob_cat@misskey.io:".into(), "😆".into()],
             ui_mode: "mobile".into(),
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),

@@ -667,6 +667,11 @@ export type UiPrefs = {
 	 */
 	pinnedEmojis?: string[],
 	/**
+	 *  リアクションピッカーで最近使った絵文字（Issue #108）。キー形式は pinned_emojis と同じ
+	 *  （Unicode絵文字はそのまま、カスタム絵文字は ":name@host:" 形式）。先頭が最新。
+	 */
+	recentEmojis?: string[],
+	/**
 	 *  モバイル版UI(投稿モーダル+FAB)かPC版UI(常時投稿欄)かの表示切替（Issue #51）。
 	 *  "auto"(OS判定に従う) | "desktop"(強制PC版) | "mobile"(強制モバイル版)。
 	 */
