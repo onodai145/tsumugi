@@ -7,9 +7,11 @@
   import Modal from "./Modal.svelte";
   import { commands, unwrap, formatError } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ImagePlus, X } from "@lucide/svelte";
+  import { ImagePlus, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
   import { tick } from "svelte";
+  import ReactionPicker from "../input/ReactionPicker.svelte";
+  import { emojiKeyToInsertText } from "../lib/emojiKey";
   import CompletionPopover from "./CompletionPopover.svelte";
   import { applyCompletion, buildCompletionItems, detectTrigger, type CompletionItem, type Trigger } from "../lib/mfmCompletion";
   import { getCaretCoordinates } from "../lib/caretPosition";
@@ -82,6 +84,33 @@
   let showAttachMenu = $state(false);
   let attachMenuPos = $state<{ left: number; top: number } | null>(null);
   let showDrivePicker = $state(false);
+  let showEmojiPicker = $state(false);
+  let emojiPickerTrigger = $state<HTMLElement | undefined>(undefined);
+  let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
+
+  // ボタンをテキストエリア右上に重ねて配置しているため、素直に左揃えで開くと
+  // ポップオーバー(幅300px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
+  // ビューポート内に収まるようクランプする(上下もNoteCardのリアクションピッカーと同様)。
+  const EMOJI_PICKER_W = 300;
+  const EMOJI_PICKER_H = 380;
+  function toggleEmojiPicker() {
+    if (showEmojiPicker) {
+      showEmojiPicker = false;
+      return;
+    }
+    const r = emojiPickerTrigger?.getBoundingClientRect();
+    if (r) {
+      const left = Math.min(
+        Math.max(8, r.right - EMOJI_PICKER_W),
+        window.innerWidth - EMOJI_PICKER_W - 8,
+      );
+      const spaceBelow = window.innerHeight - r.bottom;
+      const top =
+        spaceBelow >= EMOJI_PICKER_H + 8 ? r.bottom + 4 : Math.max(8, r.top - EMOJI_PICKER_H - 4);
+      emojiPickerPos = { left, top };
+    }
+    showEmojiPicker = true;
+  }
 
   function toggleAttachMenu() {
     if (showAttachMenu) {
@@ -138,7 +167,8 @@
       attachments.length === 0 &&
       !usePoll &&
       !replyTo &&
-      !quoteOf,
+      !quoteOf &&
+      !showEmojiPicker,
   );
 
   const customEmojiList = $derived(accountId ? (app.emojis[accountId] ?? []) : []);
@@ -232,6 +262,18 @@
     const pos = textarea?.selectionStart ?? 0;
     if (pos !== cursorPos) suppressAt = null;
     cursorPos = pos;
+  }
+
+  async function insertEmoji(reactionKey: string) {
+    const insertText = emojiKeyToInsertText(reactionKey);
+    const pos = Math.min(textarea?.selectionStart ?? cursorPos, text.length);
+    text = text.slice(0, pos) + insertText + text.slice(pos);
+    const newPos = pos + insertText.length;
+    suppressAt = newPos;
+    await tick();
+    textarea?.setSelectionRange(newPos, newPos);
+    textarea?.focus();
+    cursorPos = newPos;
   }
 
   function onTextareaInput() {
@@ -382,6 +424,11 @@
       submit();
       return;
     }
+    if (showEmojiPicker && e.key === "Escape") {
+      e.preventDefault();
+      showEmojiPicker = false;
+      return;
+    }
     if (popoverOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -417,6 +464,15 @@
   }
 </script>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (showEmojiPicker && e.key === "Escape") {
+      e.preventDefault();
+      showEmojiPicker = false;
+    }
+  }}
+/>
+
 <div class="composewrap">
   <AccountSelect
     bind:value={
@@ -444,30 +500,41 @@
     <input class="cw-input" placeholder="内容警告 (CW)" bind:value={cw} />
   {/if}
 
-  <textarea
-    class="text"
-    class:compact
-    class:expanded
-    rows={expanded ? 4 : 1}
-    placeholder={placeholder}
-    bind:value={text}
-    bind:this={textarea}
-    onkeydown={onKey}
-    onkeyup={syncCursor}
-    onclick={syncCursor}
-    oninput={onTextareaInput}
-    oncompositionstart={() => (composing = true)}
-    oncompositionend={() => {
-      composing = false;
-      syncCursor();
-    }}
-    onfocus={() => (focused = true)}
-    onblur={() => {
-      focused = false;
-      suppressAt = cursorPos;
-    }}
-    onpaste={handlePaste}
-  ></textarea>
+  <div class="text-wrap">
+    <textarea
+      class="text"
+      class:compact
+      class:expanded
+      rows={expanded ? 4 : 1}
+      placeholder={placeholder}
+      bind:value={text}
+      bind:this={textarea}
+      onkeydown={onKey}
+      onkeyup={syncCursor}
+      onclick={syncCursor}
+      oninput={onTextareaInput}
+      oncompositionstart={() => (composing = true)}
+      oncompositionend={() => {
+        composing = false;
+        syncCursor();
+      }}
+      onfocus={() => (focused = true)}
+      onblur={() => {
+        focused = false;
+        suppressAt = cursorPos;
+      }}
+      onpaste={handlePaste}
+    ></textarea>
+    <button
+      class="emoji-trigger"
+      class:active={showEmojiPicker}
+      title="絵文字を挿入"
+      bind:this={emojiPickerTrigger}
+      onmousedown={(e) => e.preventDefault()}
+      onclick={toggleEmojiPicker}
+      disabled={busy || !accountId}
+    ><SmilePlus size={16} /></button>
+  </div>
 
   {#if popoverOpen && popoverPos}
     <!-- 矢印キーで選ぶまでEnterで確定しない(誤爆防止)ため、
@@ -623,6 +690,23 @@
   </div>
 {/if}
 
+{#if showEmojiPicker && emojiPickerPos && accountId}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="attach-overlay" use:portal onclick={() => (showEmojiPicker = false)} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="emoji-picker-pop"
+      style={`left:${emojiPickerPos.left}px;top:${emojiPickerPos.top}px`}
+      onclick={(e) => e.stopPropagation()}
+      role="presentation"
+    >
+      <ReactionPicker accountId={accountId} onpick={insertEmoji} />
+    </div>
+  </div>
+{/if}
+
 {#if showDrivePicker && accountId}
   <DrivePicker {accountId} onSelect={onDriveFilesSelected} onclose={() => (showDrivePicker = false)} />
 {/if}
@@ -668,10 +752,13 @@
     color: var(--text-dim);
     cursor: pointer;
   }
+  .text-wrap {
+    position: relative;
+  }
   .text {
     width: 100%;
     resize: vertical;
-    padding: 6px 8px;
+    padding: 6px 34px 6px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface-2);
@@ -682,6 +769,35 @@
     min-height: 80px;
     box-sizing: border-box;
     transition: min-height 0.12s ease;
+  }
+  .emoji-trigger {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: var(--surface-1);
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0.85;
+  }
+  .emoji-trigger:hover {
+    opacity: 1;
+    color: var(--text);
+    background: var(--surface-3);
+  }
+  .emoji-trigger.active {
+    color: var(--accent);
+    opacity: 1;
+  }
+  .emoji-trigger:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
   /* フォーカスが無く未入力の時はコンパクトに(フォーカス/入力があれば通常サイズへ戻す) */
   .text.compact {
@@ -937,6 +1053,9 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     padding: 4px;
     min-width: 160px;
+  }
+  .emoji-picker-pop {
+    position: fixed;
   }
   .attach-item {
     display: block;

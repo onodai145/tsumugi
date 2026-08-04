@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { customEmojiKey, customEmojiPinKey, isCustomEmojiKey, parseCustomEmojiPinKey } from "./emojiKey";
+import {
+  customEmojiKey,
+  customEmojiPinKey,
+  emojiKeyToInsertText,
+  isCustomEmojiKey,
+  parseCustomEmojiPinKey,
+} from "./emojiKey";
 
 describe("isCustomEmojiKey", () => {
   it("returns true for a custom emoji key", () => {
@@ -48,5 +54,19 @@ describe("parseCustomEmojiPinKey", () => {
       name: "weird@name",
       host: "misskey.io",
     });
+  });
+});
+
+describe("emojiKeyToInsertText", () => {
+  it("converts a custom emoji key into a plain :name: shortcode", () => {
+    expect(emojiKeyToInsertText(":blob_cat@.:")).toBe(":blob_cat:");
+  });
+
+  it("strips the host from a custom emoji key with an explicit host", () => {
+    expect(emojiKeyToInsertText(":blob_cat@misskey.io:")).toBe(":blob_cat:");
+  });
+
+  it("returns a plain unicode emoji unchanged", () => {
+    expect(emojiKeyToInsertText("😺")).toBe("😺");
   });
 });
