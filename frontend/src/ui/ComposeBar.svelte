@@ -251,7 +251,7 @@
 
   async function insertEmoji(reactionKey: string) {
     const insertText = emojiKeyToInsertText(reactionKey);
-    const pos = cursorPos;
+    const pos = Math.min(textarea?.selectionStart ?? cursorPos, text.length);
     text = text.slice(0, pos) + insertText + text.slice(pos);
     const newPos = pos + insertText.length;
     suppressAt = newPos;
@@ -407,6 +407,11 @@
       e.preventDefault();
       if (busy) return;
       submit();
+      return;
+    }
+    if (showEmojiPicker && e.key === "Escape") {
+      e.preventDefault();
+      showEmojiPicker = false;
       return;
     }
     if (popoverOpen) {
