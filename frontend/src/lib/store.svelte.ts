@@ -895,6 +895,12 @@ class AppStore {
       if (n.id === p.noteId) targets.push(n);
       if (n.renote && n.renote.id === p.noteId) targets.push(n.renote);
     }
+    for (const notif of tab.notifications) {
+      const n = notif.note;
+      if (!n) continue;
+      if (n.id === p.noteId) targets.push(n);
+      if (n.renote && n.renote.id === p.noteId) targets.push(n.renote);
+    }
     if (targets.length === 0) return;
 
     const isMine = p.actorId != null && this.#myUserIds().has(p.actorId);
@@ -1545,6 +1551,12 @@ class AppStore {
     const out: Note[] = [];
     for (const t of this.#allTabs()) {
       for (const n of t.notes) {
+        if (n.id === noteId) out.push(n);
+        if (n.renote && n.renote.id === noteId) out.push(n.renote);
+      }
+      for (const notif of t.notifications) {
+        const n = notif.note;
+        if (!n) continue;
         if (n.id === noteId) out.push(n);
         if (n.renote && n.renote.id === noteId) out.push(n.renote);
       }
