@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
-/// docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。
+/// docs/design/filter-dsl-design.md §7。`host` が None ならローカルユーザ。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct User {

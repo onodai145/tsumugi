@@ -1,4 +1,4 @@
-//! TQL のインメモリ評価。docs/filter-dsl-design.md §10。
+//! TQL のインメモリ評価。docs/design/filter-dsl-design.md §10。
 //! Streaming 受信時に `evaluate(&Expr, &Note, &EvalContext) -> bool` で判定する。
 
 use super::ast::*;

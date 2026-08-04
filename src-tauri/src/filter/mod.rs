@@ -1,4 +1,4 @@
-//! TQL(Tsumugi Query Language) フィルタ評価。docs/filter-dsl-design.md。
+//! TQL(Tsumugi Query Language) フィルタ評価。docs/design/filter-dsl-design.md。
 //! 字句解析(token) → 構文解析+型検査(parser) → AST(ast) → インメモリ評価(eval) →
 //! SQL 射影(sql) の分割構成。
 //!

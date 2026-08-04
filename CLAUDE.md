@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-tsumugi: a Misskey multi-column desktop client (Krile-like UX) built on Tauri v2. Rust core (`src-tauri/`) owns all Model-layer logic; the Svelte frontend (`frontend/`) is View/ViewModel only. Design docs live in `docs/` — `docs/misskey-multicolumn-client-design.md` is the authoritative design doc; if any other doc conflicts with it, the design doc wins.
+tsumugi: a Misskey multi-column desktop client (Krile-like UX) built on Tauri v2. Rust core (`src-tauri/`) owns all Model-layer logic; the Svelte frontend (`frontend/`) is View/ViewModel only. Design docs live in `docs/design/` — `docs/design/misskey-multicolumn-client-design.md` is the authoritative design doc; if any other doc conflicts with it, the design doc wins. User-facing documentation lives in `docs/guide/user-guide.md`.
 
 ## Commands
 
@@ -41,7 +41,7 @@ If the build fails during Gradle configuration with `A problem occurred configur
 - `domain/` — normalized domain types shared across the app (Note, User, Account, Column, Reaction, Mute, ...), `specta::Type`-annotated for TS export.
 - `api/` — REST client. **Hand-written, not generated** (see below) — thin typed wrappers per resource (`notes.rs`, `meta.rs`, `drive.rs`, ...) plus `normalize.rs` to convert raw responses into `domain` types. All Misskey REST calls are POST with the token embedded in the JSON body; that's centralized in `client.rs`.
 - `stream/` — Streaming (WebSocket), entirely hand-implemented since it's outside Misskey's OpenAPI spec: `connection.rs` (one WS per account, ping/pong + backoff reconnect), `protocol.rs` (message types), `inbox.rs` (dedupe received notes by note ID, since one shared WS can deliver the same note via multiple channel subscriptions).
-- `filter/` — TQL (Tsumugi Query Language), the per-column filter DSL modeled on Krile's KQL. Designed as a two-stage pipeline: `token` → `parser` (parse + type-check) → `ast` → `eval` (in-memory, for live Streaming notes) / `sql` (SQL projection, intended for cached/backfill queries) — see `docs/filter-dsl-design.md` for the grammar. As of this writing the `sql` stage is not fully wired up yet (`filter/mod.rs` carries `#![allow(dead_code)]` for it) — don't assume cache/backfill filtering goes through SQL projection without checking current wiring. `CompiledFilter` (in `filter/mod.rs`) is compiled once per column at creation time to avoid re-parsing per note.
+- `filter/` — TQL (Tsumugi Query Language), the per-column filter DSL modeled on Krile's KQL. Designed as a two-stage pipeline: `token` → `parser` (parse + type-check) → `ast` → `eval` (in-memory, for live Streaming notes) / `sql` (SQL projection, intended for cached/backfill queries) — see `docs/design/filter-dsl-design.md` for the grammar. As of this writing the `sql` stage is not fully wired up yet (`filter/mod.rs` carries `#![allow(dead_code)]` for it) — don't assume cache/backfill filtering goes through SQL projection without checking current wiring. `CompiledFilter` (in `filter/mod.rs`) is compiled once per column at creation time to avoid re-parsing per note.
 - `store/` — SQLite persistence (settings, note cache) via `rusqlite`.
 - `session/` — account/token management; tokens go through the OS keyring (`keyring` crate), never through the frontend.
 - `commands/` — the `#[tauri::command]` handlers, grouped by resource (`account`, `column`, `note`, `mute`).
@@ -55,10 +55,10 @@ If the build fails during Gradle configuration with `A problem occurred configur
 - `bindings/tauri.gen.ts` — **generated**, do not hand-edit; regenerate via `cargo test` or `cargo tauri dev`.
 
 ### progenitor is not used for REST codegen
-Misskey's OpenAPI spec (`/api-doc.json`, snapshotted at `src-tauri/openapi/misskey-api-doc.json`) is **3.1.0**. `progenitor` depends on the `openapiv3` crate, which only supports OpenAPI 3.0.x, so it fails to parse Misskey's spec (nullable fields expressed as `type: ["string", "null"]`). This was tried and rejected during Phase 1 — see `docs/misskey-multicolumn-client-design.md` §6.1. The REST client is fully hand-written instead (`src-tauri/src/api/`); don't reintroduce a progenitor build step without re-validating against the current spec.
+Misskey's OpenAPI spec (`/api-doc.json`, snapshotted at `src-tauri/openapi/misskey-api-doc.json`) is **3.1.0**. `progenitor` depends on the `openapiv3` crate, which only supports OpenAPI 3.0.x, so it fails to parse Misskey's spec (nullable fields expressed as `type: ["string", "null"]`). This was tried and rejected during Phase 1 — see `docs/design/misskey-multicolumn-client-design.md` §6.1. The REST client is fully hand-written instead (`src-tauri/src/api/`); don't reintroduce a progenitor build step without re-validating against the current spec.
 
 ### specta/tauri-specta versions are pinned
-`specta`, `specta-typescript`, and `tauri-specta` are pinned to exact versions (`=2.0.0-rc.25` / `=0.0.12`) in `Cargo.toml`. Don't loosen these without checking that TS binding generation still works — see `docs/phase0-scaffold.md` for context.
+`specta`, `specta-typescript`, and `tauri-specta` are pinned to exact versions (`=2.0.0-rc.25` / `=0.0.12`) in `Cargo.toml`. Don't loosen these without checking that TS binding generation still works — see `docs/design/phase0-scaffold.md` for context.
 
 ## Development workflow
 
