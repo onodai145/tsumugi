@@ -28,6 +28,8 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+OLD_VERSION="$(grep -m1 '^version = "' src-tauri/Cargo.toml | sed -E 's/^version = "(.*)"$/\1/')"
+
 git checkout -b "release/$TAG"
 
 sed -i "s/^  \"version\": \".*\",\$/  \"version\": \"$VERSION\",/" frontend/package.json
@@ -41,9 +43,12 @@ grep -q "^version = \"$VERSION\"\$" src-tauri/Cargo.toml || { echo "error: faile
 
 (cd src-tauri && cargo update -p tsumugi)
 
+sed -i "/<!-- release-download-links:start -->/,/<!-- release-download-links:end -->/ s/$OLD_VERSION/$VERSION/g" README.md
+grep -q "$VERSION" README.md || { echo "error: failed to bump README.md download links" >&2; exit 1; }
+
 git-cliff --tag "$TAG" --unreleased --prepend CHANGELOG.md
 
-git add frontend/package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock CHANGELOG.md
+git add frontend/package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock CHANGELOG.md README.md
 git commit -m "chore(release): $TAG"
 
 echo "done: release/$TAG committed. Push, open a PR, merge, then tag manually."
