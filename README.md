@@ -4,6 +4,15 @@
 [![Release](https://img.shields.io/github/v/release/onodai145/tsumugi)](https://github.com/onodai145/tsumugi/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/onodai145/tsumugi)](LICENSE)
 [![Vibe Coding](https://img.shields.io/badge/100%25-vibe%20coded-ff69b4)](https://github.com/onodai145/tsumugi)
+[![Powered by Rust](https://img.shields.io/badge/powered%20by-rust-orange?logo=rust)](https://github.com/onodai145/tsumugi)
+[![No AI was harmed](https://img.shields.io/badge/no%20AI-harmed-blue)](https://github.com/onodai145/tsumugi)
+[![Bugs: yes](https://img.shields.io/badge/bugs-yes-red)](https://github.com/onodai145/tsumugi)
+[![Fueled by energy drinks](https://img.shields.io/badge/fueled%20by-energy%20drinks-39ff14)](https://github.com/onodai145/tsumugi)
+[![Works on my machine](https://img.shields.io/badge/works%20on-my%20machine-brightgreen)](https://github.com/onodai145/tsumugi)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/onodai145/tsumugi)
+[![For Krile refugees](https://img.shields.io/badge/for-Krile%20refugees-9cf)](https://github.com/onodai145/tsumugi)
+[![GitHub commit activity](https://img.shields.io/github/commit-activity/m/onodai145/tsumugi)](https://github.com/onodai145/tsumugi/commits/main)
+[![GitHub last commit](https://img.shields.io/github/last-commit/onodai145/tsumugi)](https://github.com/onodai145/tsumugi/commits/main)
 
 上級者向けMisskeyクライアント。
 
