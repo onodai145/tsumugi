@@ -30,6 +30,7 @@
     note,
     quoted = false,
     hideReactions = false,
+    hideActionBanner = false,
     accountId,
     emojiAccountId,
     tabId,
@@ -38,6 +39,7 @@
     note: Note;
     quoted?: boolean;
     hideReactions?: boolean;
+    hideActionBanner?: boolean;
     accountId?: string;
     emojiAccountId?: string;
     tabId?: string;
@@ -243,7 +245,7 @@
   bind:this={el}
   onclick={tabId ? () => app.selectNote(tabId, note.id) : undefined}
 >
-  {#if isPureRenote}
+  {#if isPureRenote && !hideActionBanner}
     <div class="renote-banner">
       <Repeat2 size={13} /> <Mfm
         text={displayName(note.user)}
@@ -252,7 +254,7 @@
       /> がRenote
     </div>
   {/if}
-  {#if inner.replyId}
+  {#if inner.replyId && !hideActionBanner}
     <div class="reply-banner">
       <Reply size={13} /> 返信
     </div>
@@ -326,7 +328,7 @@
         {/if}
         <!-- 引用Renote: 本文ありで renote 先がある場合、中身をネスト表示 -->
         {#if inner.text && inner.renote}
-          <Self note={inner.renote} quoted={true} emojiAccountId={emojiAcct} />
+          <Self note={inner.renote} quoted={true} hideReactions emojiAccountId={emojiAcct} />
         {/if}
       {/if}
 
