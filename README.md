@@ -41,16 +41,20 @@ Misskey マルチカラムデスクトップクライアント（Krile 風 UX）
 Android版はお使いの端末のCPUアーキテクチャに合わせて選択してください（不明な場合は universal 版）。
 <!-- release-download-links:end -->
 
-## 必要環境
+## 開発者向け情報
+
+以下はソースからビルド・開発する人向けの情報。単に使いたいだけなら [ダウンロード](#ダウンロード) を参照。
+
+### 必要環境
 
 - Rust（stable/nightly）, `cargo`
 - Node.js + `pnpm`
 - `cargo-tauri` CLI（`cargo install tauri-cli` もしくは同梱）
 - Linux は `webkit2gtk-4.1` / `libsoup-3.0` / `gtk+-3.0` 等の系ライブラリ
 
-## 起動方法
+### 起動方法
 
-### 開発（ホットリロード）
+#### 開発（ホットリロード）
 
 ```sh
 cargo tauri dev
@@ -69,7 +73,7 @@ cargo tauri dev
 > vite が動いていないと `Could not connect to 127.0.0.1:5173: Connection refused` になる。
 > 開発時は必ず `cargo tauri dev` を使う。
 
-### スタンドアロン（vite 不要の単体アプリ）
+#### スタンドアロン（vite 不要の単体アプリ）
 
 ```sh
 cargo tauri build
@@ -77,37 +81,23 @@ cargo tauri build
 
 release ビルドはフロントを埋め込む（`frontendDist`）ため、生成物は dev サーバ無しで単体起動できる。
 
-## 構成
+### 構成
 
 - `src-tauri/` … Rust コア（api / stream / store / filter / session / commands / domain）
 - `frontend/` … Svelte + Vite（ui / render / input）
 - Rust→TS 型・コマンド・イベントは `tauri-specta` で `frontend/src/bindings/tauri.gen.ts` に自動生成
   （`cargo test` の `generates_frontend_bindings` でも再生成される）
 
-## テスト
+### テスト
 
 ```sh
 cd src-tauri && cargo test           # Rust（実 Misskey 疎通テストは #[ignore]）
 cd frontend  && pnpm exec svelte-check
 ```
 
-## バージョニング / リリース
+### バージョニング / リリース
 
-SemVer（`MAJOR.MINOR.PATCH`）を採用。`v1.0.0` 未満は `MINOR` 更新でも破壊的変更を許容する。
-バージョンは `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `frontend/package.json` / `src-tauri/Cargo.lock`（`cargo update -p tsumugi`）の4箇所を揃えて更新する。
-
-CHANGELOG は [git-cliff](https://git-cliff.org/) で Conventional Commits（`feat:` / `fix:` / `docs:` 等）から自動生成する（設定: [`cliff.toml`](cliff.toml)）。
-
-```sh
-git tag vX.Y.Z
-git-cliff -o CHANGELOG.md   # 全タグ分を再生成
-```
-
-上記のバージョン更新・CHANGELOG生成・`release/vX.Y.Z` ブランチ作成 + コミットは `scripts/release.sh` で自動化できる（PR作成・マージ・タグpushは引き続き手動）。
-
-```sh
-scripts/release.sh X.Y.Z
-```
+[`docs/design/release-process.md`](docs/design/release-process.md) を参照。
 
 ## ライセンス
 
