@@ -153,7 +153,8 @@
       attachments.length === 0 &&
       !usePoll &&
       !replyTo &&
-      !quoteOf,
+      !quoteOf &&
+      !showEmojiPicker,
   );
 
   const customEmojiList = $derived(accountId ? (app.emojis[accountId] ?? []) : []);
@@ -449,6 +450,15 @@
   }
 </script>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (showEmojiPicker && e.key === "Escape") {
+      e.preventDefault();
+      showEmojiPicker = false;
+    }
+  }}
+/>
+
 <div class="composewrap">
   <AccountSelect
     bind:value={
@@ -476,30 +486,40 @@
     <input class="cw-input" placeholder="内容警告 (CW)" bind:value={cw} />
   {/if}
 
-  <textarea
-    class="text"
-    class:compact
-    class:expanded
-    rows={expanded ? 4 : 1}
-    placeholder={placeholder}
-    bind:value={text}
-    bind:this={textarea}
-    onkeydown={onKey}
-    onkeyup={syncCursor}
-    onclick={syncCursor}
-    oninput={onTextareaInput}
-    oncompositionstart={() => (composing = true)}
-    oncompositionend={() => {
-      composing = false;
-      syncCursor();
-    }}
-    onfocus={() => (focused = true)}
-    onblur={() => {
-      focused = false;
-      suppressAt = cursorPos;
-    }}
-    onpaste={handlePaste}
-  ></textarea>
+  <div class="text-wrap">
+    <textarea
+      class="text"
+      class:compact
+      class:expanded
+      rows={expanded ? 4 : 1}
+      placeholder={placeholder}
+      bind:value={text}
+      bind:this={textarea}
+      onkeydown={onKey}
+      onkeyup={syncCursor}
+      onclick={syncCursor}
+      oninput={onTextareaInput}
+      oncompositionstart={() => (composing = true)}
+      oncompositionend={() => {
+        composing = false;
+        syncCursor();
+      }}
+      onfocus={() => (focused = true)}
+      onblur={() => {
+        focused = false;
+        suppressAt = cursorPos;
+      }}
+      onpaste={handlePaste}
+    ></textarea>
+    <button
+      class="emoji-trigger"
+      class:active={showEmojiPicker}
+      title="絵文字を挿入"
+      bind:this={emojiPickerTrigger}
+      onclick={toggleEmojiPicker}
+      disabled={busy || !accountId}
+    ><SmilePlus size={16} /></button>
+  </div>
 
   {#if popoverOpen && popoverPos}
     <!-- 矢印キーで選ぶまでEnterで確定しない(誤爆防止)ため、
@@ -602,14 +622,6 @@
         onclick={toggleAttachMenu}
         disabled={busy}
       ><ImagePlus size={16} /></button>
-      <button
-        class="icon"
-        class:active={showEmojiPicker}
-        title="絵文字を挿入"
-        bind:this={emojiPickerTrigger}
-        onclick={toggleEmojiPicker}
-        disabled={busy || !accountId}
-      ><SmilePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
@@ -725,10 +737,13 @@
     color: var(--text-dim);
     cursor: pointer;
   }
+  .text-wrap {
+    position: relative;
+  }
   .text {
     width: 100%;
     resize: vertical;
-    padding: 6px 8px;
+    padding: 6px 34px 6px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface-2);
@@ -739,6 +754,35 @@
     min-height: 80px;
     box-sizing: border-box;
     transition: min-height 0.12s ease;
+  }
+  .emoji-trigger {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: var(--surface-1);
+    color: var(--text-dim);
+    cursor: pointer;
+    opacity: 0.85;
+  }
+  .emoji-trigger:hover {
+    opacity: 1;
+    color: var(--text);
+    background: var(--surface-3);
+  }
+  .emoji-trigger.active {
+    color: var(--accent);
+    opacity: 1;
+  }
+  .emoji-trigger:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
   /* フォーカスが無く未入力の時はコンパクトに(フォーカス/入力があれば通常サイズへ戻す) */
   .text.compact {
@@ -924,10 +968,6 @@
   }
   .icon:disabled {
     opacity: 0.5;
-  }
-  .icon.active {
-    border-color: var(--accent);
-    color: var(--accent);
   }
   .mini {
     display: inline-flex;
