@@ -8,7 +8,7 @@ tsumugiは、Misskey向けのマルチカラムデスクトップクライアン
 
 開発者向けのビルド手順・必要環境は [README](../../README.md) を参照してください。`cargo tauri build` でスタンドアロンアプリを生成できます。
 
-> **Linux/Wayland環境の注意:** WebKitGTKの描画で問題が出る場合は README のトラブルシューティングを参照してください。
+> **Linux/Wayland環境の注意:** WebKitGTKの描画で問題が出る場合は[トラブルシューティング](#トラブルシューティング)を参照してください。
 
 ## 基本操作
 
@@ -140,8 +140,10 @@ search/user/tag以外のソースでは、タブごとに「デスクトップ�
 
 **Linux/Wayland（Hyprland等）で描画が壊れる／`Gdk Error 71 (protocol error)` が出る**
 
-WebKitGTKのDMABUFレンダラがwlroots系コンポジタと衝突することがあります。tsumugiはLinuxでは既定で`WEBKIT_DISABLE_DMABUF_RENDERER=1`をセットして回避していますが、それでも解決しない場合はX11フォールバックを試してください。
+WebKitGTKのDMABUFレンダラがwlroots系コンポジタと衝突することがあります。tsumugiはLinuxでは既定で`WEBKIT_DISABLE_DMABUF_RENDERER=1`をセットして回避していますが、それでも解決しない場合はX11バックエンドでの起動を試してください。
 
 ```sh
-GDK_BACKEND=x11 cargo tauri dev
+GDK_BACKEND=x11 ./tsumugi
 ```
+
+（開発ビルドを使っている場合は `cargo tauri dev` の前に同様に `GDK_BACKEND=x11` を付けてください。）

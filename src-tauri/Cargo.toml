@@ -42,7 +42,7 @@ url = "2.5.8"
 # (v1ラッパは Android 未対応のため。see session/secrets.rs)。
 keyring-core = "1.0.0"
 
-# Rust -> TS type & command generation (pinned rc; see docs/phase0-scaffold.md)
+# Rust -> TS type & command generation (pinned rc; see docs/design/phase0-scaffold.md)
 specta = { version = "=2.0.0-rc.25", features = ["derive", "uuid", "url"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
