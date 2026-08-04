@@ -516,6 +516,7 @@
       class:active={showEmojiPicker}
       title="絵文字を挿入"
       bind:this={emojiPickerTrigger}
+      onmousedown={(e) => e.preventDefault()}
       onclick={toggleEmojiPicker}
       disabled={busy || !accountId}
     ><SmilePlus size={16} /></button>
