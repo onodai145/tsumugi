@@ -14,6 +14,7 @@
   import { applyCompletion, buildCompletionItems, detectTrigger, type CompletionItem, type Trigger } from "../lib/mfmCompletion";
   import { getCaretCoordinates } from "../lib/caretPosition";
   import { searchHashtagItems, searchMentionItems } from "../lib/mfmSearch";
+  import { pickComposePlaceholder } from "../lib/composePlaceholder";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -29,6 +30,12 @@
   // ユーザが手動でアカウントを切り替えたら、以後は設定→アカウントの既定変更に追従しない
   let accountTouched = $state(false);
   let text = $state("");
+  let placeholder = $state(pickComposePlaceholder());
+  $effect(() => {
+    if (text === "") {
+      placeholder = pickComposePlaceholder();
+    }
+  });
   let cw = $state("");
   let useCw = $state(false);
   let visibility = $state<VisibilityInput>("public");
@@ -442,7 +449,7 @@
     class:compact
     class:expanded
     rows={expanded ? 4 : 1}
-    placeholder="いまどうしてる？（Ctrl+Enter で投稿）"
+    placeholder={placeholder}
     bind:value={text}
     bind:this={textarea}
     onkeydown={onKey}
