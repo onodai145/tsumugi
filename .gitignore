@@ -19,3 +19,4 @@ node_modules
 
 # superpowers subagent-driven-development scratch workspace
 /.superpowers/
+/.worktrees/
