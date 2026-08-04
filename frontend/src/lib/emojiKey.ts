@@ -25,3 +25,12 @@ export function parseCustomEmojiPinKey(key: string): { name: string; host: strin
   if (at === -1) return { name: raw, host: null };
   return { name: raw.slice(0, at), host: raw.slice(at + 1) };
 }
+
+// ReactionPicker.onpick が返すリアクションキー形式(Unicode文字 or ":name@host:")を、
+// 投稿本文へ挿入するMFMショートコード形式に変換する。カスタム絵文字はhost部分を捨てて
+// ":name:" にする(投稿本文中のショートコードにhostは含めない)。Unicodeはそのまま返す。
+export function emojiKeyToInsertText(key: string): string {
+  if (!isCustomEmojiKey(key)) return key;
+  const { name } = parseCustomEmojiPinKey(key);
+  return `:${name}:`;
+}
