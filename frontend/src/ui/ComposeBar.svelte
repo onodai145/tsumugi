@@ -88,13 +88,27 @@
   let emojiPickerTrigger = $state<HTMLElement | undefined>(undefined);
   let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
 
+  // ボタンをテキストエリア右上に重ねて配置しているため、素直に左揃えで開くと
+  // ポップオーバー(幅300px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
+  // ビューポート内に収まるようクランプする(上下もNoteCardのリアクションピッカーと同様)。
+  const EMOJI_PICKER_W = 300;
+  const EMOJI_PICKER_H = 380;
   function toggleEmojiPicker() {
     if (showEmojiPicker) {
       showEmojiPicker = false;
       return;
     }
     const r = emojiPickerTrigger?.getBoundingClientRect();
-    if (r) emojiPickerPos = { left: r.left, top: r.bottom + 4 };
+    if (r) {
+      const left = Math.min(
+        Math.max(8, r.right - EMOJI_PICKER_W),
+        window.innerWidth - EMOJI_PICKER_W - 8,
+      );
+      const spaceBelow = window.innerHeight - r.bottom;
+      const top =
+        spaceBelow >= EMOJI_PICKER_H + 8 ? r.bottom + 4 : Math.max(8, r.top - EMOJI_PICKER_H - 4);
+      emojiPickerPos = { left, top };
+    }
     showEmojiPicker = true;
   }
 
