@@ -7,9 +7,11 @@
   import Modal from "./Modal.svelte";
   import { commands, unwrap, formatError } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ImagePlus, X } from "@lucide/svelte";
+  import { ImagePlus, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
   import { tick } from "svelte";
+  import ReactionPicker from "../input/ReactionPicker.svelte";
+  import { emojiKeyToInsertText } from "../lib/emojiKey";
   import CompletionPopover from "./CompletionPopover.svelte";
   import { applyCompletion, buildCompletionItems, detectTrigger, type CompletionItem, type Trigger } from "../lib/mfmCompletion";
   import { getCaretCoordinates } from "../lib/caretPosition";
@@ -82,6 +84,19 @@
   let showAttachMenu = $state(false);
   let attachMenuPos = $state<{ left: number; top: number } | null>(null);
   let showDrivePicker = $state(false);
+  let showEmojiPicker = $state(false);
+  let emojiPickerTrigger = $state<HTMLElement | undefined>(undefined);
+  let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
+
+  function toggleEmojiPicker() {
+    if (showEmojiPicker) {
+      showEmojiPicker = false;
+      return;
+    }
+    const r = emojiPickerTrigger?.getBoundingClientRect();
+    if (r) emojiPickerPos = { left: r.left, top: r.bottom + 4 };
+    showEmojiPicker = true;
+  }
 
   function toggleAttachMenu() {
     if (showAttachMenu) {
@@ -232,6 +247,18 @@
     const pos = textarea?.selectionStart ?? 0;
     if (pos !== cursorPos) suppressAt = null;
     cursorPos = pos;
+  }
+
+  async function insertEmoji(reactionKey: string) {
+    const insertText = emojiKeyToInsertText(reactionKey);
+    const pos = cursorPos;
+    text = text.slice(0, pos) + insertText + text.slice(pos);
+    const newPos = pos + insertText.length;
+    suppressAt = newPos;
+    await tick();
+    textarea?.setSelectionRange(newPos, newPos);
+    textarea?.focus();
+    cursorPos = newPos;
   }
 
   function onTextareaInput() {
@@ -570,6 +597,14 @@
         onclick={toggleAttachMenu}
         disabled={busy}
       ><ImagePlus size={16} /></button>
+      <button
+        class="icon"
+        class:active={showEmojiPicker}
+        title="絵文字を挿入"
+        bind:this={emojiPickerTrigger}
+        onclick={toggleEmojiPicker}
+        disabled={busy || !accountId}
+      ><SmilePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
@@ -619,6 +654,23 @@
         title={accountId ? undefined : "アカウントを選択してください"}
         onclick={chooseDrivePicker}
       >ドライブから選択</button>
+    </div>
+  </div>
+{/if}
+
+{#if showEmojiPicker && emojiPickerPos && accountId}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="attach-overlay" use:portal onclick={() => (showEmojiPicker = false)} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="emoji-picker-pop"
+      style={`left:${emojiPickerPos.left}px;top:${emojiPickerPos.top}px`}
+      onclick={(e) => e.stopPropagation()}
+      role="presentation"
+    >
+      <ReactionPicker accountId={accountId} onpick={insertEmoji} />
     </div>
   </div>
 {/if}
@@ -868,6 +920,10 @@
   .icon:disabled {
     opacity: 0.5;
   }
+  .icon.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
   .mini {
     display: inline-flex;
     align-items: center;
@@ -937,6 +993,9 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     padding: 4px;
     min-width: 160px;
+  }
+  .emoji-picker-pop {
+    position: fixed;
   }
   .attach-item {
     display: block;
