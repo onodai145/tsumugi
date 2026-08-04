@@ -328,7 +328,7 @@
         {/if}
         <!-- 引用Renote: 本文ありで renote 先がある場合、中身をネスト表示 -->
         {#if inner.text && inner.renote}
-          <Self note={inner.renote} quoted={true} emojiAccountId={emojiAcct} />
+          <Self note={inner.renote} quoted={true} hideReactions emojiAccountId={emojiAcct} />
         {/if}
       {/if}
 

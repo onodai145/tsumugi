@@ -99,4 +99,13 @@ describe("NoteCard action banner", () => {
     const { queryByText } = render(NoteCard, { props: { note, hideActionBanner: true } });
     expect(queryByText("返信")).toBeNull();
   });
+
+  it("does not show the quoted note's own reactions", () => {
+    const note = makeNote({
+      text: "見て",
+      renote: makeNote({ id: "n0", reactions: { "👍": 3 }, reactionCount: 3 }),
+    });
+    const { container } = render(NoteCard, { props: { note } });
+    expect(container.querySelector(".reaction-wrap")).toBeNull();
+  });
 });
