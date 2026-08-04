@@ -97,13 +97,16 @@
   function react(reaction: string) {
     app.reactPicker = null;
     if (accountId) {
+      const wasMine = inner.myReaction === reaction;
       app.toggleReaction(accountId, inner.id, reaction);
-      const host = app.accounts.find((a) => a.id === accountId)?.host;
-      const stored =
-        isCustomEmojiKey(reaction) && host
-          ? customEmojiPinKey(parseCustomEmojiPinKey(reaction).name, host)
-          : reaction;
-      void app.recordEmojiUsage(stored);
+      if (!wasMine) {
+        const host = app.accounts.find((a) => a.id === accountId)?.host;
+        const stored =
+          isCustomEmojiKey(reaction) && host
+            ? customEmojiPinKey(parseCustomEmojiPinKey(reaction).name, host)
+            : reaction;
+        void app.recordEmojiUsage(stored);
+      }
     }
   }
 
