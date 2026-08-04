@@ -46,8 +46,14 @@ describe("pickComposePlaceholder", () => {
     expect(COMPOSE_PLACEHOLDER_BANDS.morning).toContain(result);
   });
 
+  it("has exactly 7 phrases in each band", () => {
+    for (const phrases of Object.values(COMPOSE_PLACEHOLDER_BANDS)) {
+      expect(phrases).toHaveLength(7);
+    }
+  });
+
   it("only ever returns phrases defined in one of the bands", () => {
-    const allPhrases = new Set(Object.values(COMPOSE_PLACEHOLDER_BANDS).flat());
+    const allPhrases = new Set<string>(Object.values(COMPOSE_PLACEHOLDER_BANDS).flat());
     for (let hour = 0; hour < 24; hour++) {
       setHour(hour);
       expect(allPhrases.has(pickComposePlaceholder())).toBe(true);
