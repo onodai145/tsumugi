@@ -502,4 +502,4 @@ sequenceDiagram
 **推奨する次の一手（Phase 0 時点）**: `misskey-client-prompts.md` Phase 1（認証とAPIクライアント）。まず `src-tauri` を Tauri v2 で scaffold し、`openapi/misskey-api-doc.json` を投入して `progenitor` 生成の可否を検証する。
 （その後の実施結果: progenitorはOpenAPI 3.1.0非対応と判明し不採用、手書きラッパで実装済み。§6.1参照）
 
-> ※本書はPhase 0時点の設計スナップショット。上記のprogenitor関連を除き、§1のディレクトリツリー等はPhase 0時点の想定であり、その後の実装で変化した箇所がある（最新の構成は[README.md](../README.md)を参照）。
+> ※本書はPhase 0時点の設計スナップショット。上記のprogenitor関連を除き、§1のディレクトリツリー等はPhase 0時点の想定であり、その後の実装で変化した箇所がある（最新の構成は[README.md](../../README.md)を参照）。

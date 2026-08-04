@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
-/// docs/filter-dsl-design.md §7 / 設計書§5.1。フィルタ評価の対象そのもの。
+/// docs/design/filter-dsl-design.md §7 / 設計書§5.1。フィルタ評価の対象そのもの。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Note {

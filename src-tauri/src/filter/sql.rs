@@ -1,4 +1,4 @@
-//! TQL の SQL 射影。docs/filter-dsl-design.md §10・§11。
+//! TQL の SQL 射影。docs/design/filter-dsl-design.md §10・§11。
 //! AST → SQLite WHERE 句（`cache` ソースの検索用）。`note n JOIN user u` を前提とする。
 //!
 //! 生成物はプレースホルダ `?` とバインド値 [`SqlParam`] の列。context 依存(mine/following/

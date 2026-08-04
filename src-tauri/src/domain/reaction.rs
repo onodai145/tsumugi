@@ -5,7 +5,7 @@ use super::User;
 
 /// リアクションピッカー用の絵文字定義（インスタンス単位でキャッシュ）。
 /// 注意: `Note.reactions` は「絵文字キー→集計数」であり、誰がリアクションしたかは
-/// Misskey は返さない（docs/filter-dsl-design.md §3.4）。
+/// Misskey は返さない（docs/design/filter-dsl-design.md §3.4）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EmojiDef {

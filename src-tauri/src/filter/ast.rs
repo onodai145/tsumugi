@@ -1,4 +1,4 @@
-//! TQL(Tsumugi Query Language) の AST。docs/filter-dsl-design.md §8。
+//! TQL(Tsumugi Query Language) の AST。docs/design/filter-dsl-design.md §8。
 //! `from <sources> where <expr>` を表す。フロントには公開せず Core 内で扱う（specta 不要）。
 
 /// 値・フィールドが取りうる型。パース時の型検査に使う（§8）。

@@ -396,7 +396,7 @@ export type DriveFile = {
 /**
  *  リアクションピッカー用の絵文字定義（インスタンス単位でキャッシュ）。
  *  注意: `Note.reactions` は「絵文字キー→集計数」であり、誰がリアクションしたかは
- *  Misskey は返さない（docs/filter-dsl-design.md §3.4）。
+ *  Misskey は返さない（docs/design/filter-dsl-design.md §3.4）。
  */
 export type EmojiDef = {
 	/**  "blobcat"（: なし） */
@@ -456,7 +456,7 @@ export type MuteConfig = {
 	ngInstances: string[],
 };
 
-/**  docs/filter-dsl-design.md §7 / 設計書§5.1。フィルタ評価の対象そのもの。 */
+/**  docs/design/filter-dsl-design.md §7 / 設計書§5.1。フィルタ評価の対象そのもの。 */
 export type Note = {
 	/**  aid/aidx。数値比較しない */
 	id: string,
@@ -719,7 +719,7 @@ export type UiPrefs = {
 	enableFileLogging?: boolean,
 };
 
-/**  docs/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
+/**  docs/design/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
 export type User = {
 	id: string,
 	/**  @なしのユーザ名 */

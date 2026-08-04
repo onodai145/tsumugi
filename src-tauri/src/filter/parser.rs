@@ -1,4 +1,4 @@
-//! TQL の構文解析（再帰下降）＋型検査。docs/filter-dsl-design.md §1・§8。
+//! TQL の構文解析（再帰下降）＋型検査。docs/design/filter-dsl-design.md §1・§8。
 //!
 //! 実装上のグラマー（§1 を実装容易に精緻化）:
 //!   query   := "from" sources ("where" expr)?

@@ -1,4 +1,4 @@
-//! TQL の字句解析。docs/filter-dsl-design.md §1(EBNF)・§3(演算子)。
+//! TQL の字句解析。docs/design/filter-dsl-design.md §1(EBNF)・§3(演算子)。
 //! 単語演算子(contains/in/startswith/endswith/match)は Ident のままにし、パーサが解釈する。
 
 #[derive(Debug, Clone, PartialEq)]
