@@ -5,9 +5,8 @@
 [![License: MIT](https://img.shields.io/github/license/onodai145/tsumugi)](LICENSE)
 [![Vibe Coding](https://img.shields.io/badge/100%25-vibe%20coded-ff69b4)](https://github.com/onodai145/tsumugi)
 
-Misskey マルチカラムデスクトップクライアント（Krile 風 UX）。Tauri v2 + Rust コア + Svelte フロント。
+上級者向けMisskeyクライアント。
 
-設計は [`docs/design/`](docs/design/) を参照（設計書 / TQL フィルタDSL / ロードマップ）。
 使い方は [`docs/guide/user-guide.md`](docs/guide/user-guide.md) を参照。
 
 ## 特徴
@@ -16,6 +15,7 @@ Misskey マルチカラムデスクトップクライアント（Krile 風 UX）
 - 1カラム内に複数タブを持たせ、タブ単位で TQL（Tsumugi Query Language）による柔軟なフィルタを設定可能
 - 複数のMisskeyアカウントを同時にログインし、投稿やカラムごとに使い分け可能
 - テーマ・フォント・背景画像などの詳細なカスタマイズに対応
+- Krileを使ってた人はなんとなく使えるはず
 
 ## ダウンロード
 
@@ -34,6 +34,8 @@ Misskey マルチカラムデスクトップクライアント（Krile 風 UX）
 ## 開発者向け情報
 
 以下はソースからビルド・開発する人向けの情報。単に使いたいだけなら [ダウンロード](#ダウンロード) を参照。
+
+Tauri v2 + Rust コア + Svelte フロント。設計は [`docs/design/`](docs/design/) を参照（設計書 / TQL フィルタDSL / ロードマップ）。
 
 ### 必要環境
 
