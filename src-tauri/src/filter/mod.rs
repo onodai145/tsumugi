@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 pub mod ast;
+pub mod complete;
 pub mod eval;
 pub mod mute;
 pub mod parser;
