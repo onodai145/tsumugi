@@ -23,12 +23,13 @@
   const pinned = $derived(app.ui.pinnedEmojis ?? DEFAULT_PINNED_EMOJIS);
   const accountHost = $derived(app.accounts.find((a) => a.id === accountId)?.host);
 
-  // ピン留めキー(Unicode文字 or ":name@host:")を描画用の {char} | {name,url} に解決する。
-  // カスタム絵文字はピン留め元インスタンス(host)が今開いているアカウントと一致する場合のみ解決する
+  // ピン留め/使用履歴どちらも同じキー形式(Unicode文字 or ":name@host:")で保持するため、
+  // 描画用の {char} | {name,url} への解決ロジックを共通化する。
+  // カスタム絵文字は保存元インスタンス(host)が今開いているアカウントと一致する場合のみ解決する
   // (複数インスタンスのアカウントを使っている場合、同名だが別絵文字を誤って出すのを防ぐ)。
   // 未解決(host不一致・削除済み等)は表示から除外する。
-  const pinnedEntries = $derived(
-    pinned
+  function resolveEmojiEntries(keys: string[]): { key: string; custom: EmojiDef | null }[] {
+    return keys
       .map((key) => {
         if (isCustomEmojiKey(key)) {
           const { name, host } = parseCustomEmojiPinKey(key);
@@ -38,7 +39,14 @@
         }
         return { key, custom: null as EmojiDef | null };
       })
-      .filter((e): e is { key: string; custom: EmojiDef | null } => e !== null),
+      .filter((e): e is { key: string; custom: EmojiDef | null } => e !== null);
+  }
+
+  const pinnedEntries = $derived(resolveEmojiEntries(pinned));
+
+  // ピン留め済みの絵文字は「最近使った」に重複表示しない。
+  const recentEntries = $derived(
+    resolveEmojiEntries((app.ui.recentEmojis ?? []).filter((key) => !pinned.includes(key))),
   );
 
   // カスタム絵文字のカテゴリ一覧(サーバー管理者が自由記述するため件数不定。未分類は「その他」)。
@@ -92,6 +100,23 @@
         {/if}
       </div>
     {:else}
+      {#if showPinned && recentEntries.length > 0}
+        <section class="section">
+          <h4 class="section-title">最近使った</h4>
+          <div class="flat-grid">
+            {#each recentEntries as e (e.key)}
+              <button class="emoji-btn" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
+                {#if e.custom}
+                  <img src={e.custom.url} alt={e.key} loading="lazy" />
+                {:else}
+                  <UnicodeEmoji char={e.key} />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        </section>
+      {/if}
+
       {#if showPinned}
         <section class="section">
           <h4 class="section-title">ピン留め</h4>

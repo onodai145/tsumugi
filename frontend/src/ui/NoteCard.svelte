@@ -13,6 +13,7 @@
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
+  import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
   import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail, MoreHorizontal } from "@lucide/svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
@@ -95,7 +96,18 @@
 
   function react(reaction: string) {
     app.reactPicker = null;
-    if (accountId) app.toggleReaction(accountId, inner.id, reaction);
+    if (accountId) {
+      const wasMine = inner.myReaction === reaction;
+      app.toggleReaction(accountId, inner.id, reaction);
+      if (!wasMine) {
+        const host = app.accounts.find((a) => a.id === accountId)?.host;
+        const stored =
+          isCustomEmojiKey(reaction) && host
+            ? customEmojiPinKey(parseCustomEmojiPinKey(reaction).name, host)
+            : reaction;
+        void app.recordEmojiUsage(stored);
+      }
+    }
   }
 
   // ノートメニュー(お気に入り/クリップ)。リアクションピッカーと同じ position:fixed
