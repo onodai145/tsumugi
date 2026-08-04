@@ -29,6 +29,7 @@
   let {
     note,
     quoted = false,
+    showActions,
     hideReactions = false,
     hideActionBanner = false,
     accountId,
@@ -38,6 +39,7 @@
   }: {
     note: Note;
     quoted?: boolean;
+    showActions?: boolean;
     hideReactions?: boolean;
     hideActionBanner?: boolean;
     accountId?: string;
@@ -49,6 +51,10 @@
   // 純粋Renote（本文なし＋renote先あり）は「誰が」を出して中身を委譲
   const isPureRenote = $derived(!note.text && !!note.renote);
   const inner = $derived(isPureRenote ? note.renote! : note);
+
+  // quoted はスタイリング(コンパクト表示)専用。アクション表示可否は showActions で制御し、
+  // 未指定時は従来通り !quoted にフォールバックする。
+  const effectiveShowActions = $derived(showActions ?? !quoted);
 
   const emojiAcct = $derived(emojiAccountId ?? accountId);
   const instanceHost = $derived(
@@ -363,7 +369,7 @@
         </div>
       {/if}
 
-      {#if !quoted && accountId}
+      {#if effectiveShowActions && accountId}
         <footer class="actions">
           <button aria-label="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
             <Reply size={15} /> {inner.replyCount || ""}

@@ -109,3 +109,29 @@ describe("NoteCard action banner", () => {
     expect(container.querySelector(".reaction-wrap")).toBeNull();
   });
 });
+
+describe("NoteCard showActions", () => {
+  it("hides the action footer for a quoted note by default even with accountId", () => {
+    const note = makeNote({ id: "n1" });
+    const { queryByLabelText } = render(NoteCard, {
+      props: { note, quoted: true, accountId: "a1" },
+    });
+    expect(queryByLabelText("返信")).toBeNull();
+  });
+
+  it("shows the action footer for a quoted note when showActions is set", () => {
+    const note = makeNote({ id: "n1" });
+    const { getByLabelText } = render(NoteCard, {
+      props: { note, quoted: true, accountId: "a1", showActions: true },
+    });
+    expect(getByLabelText("返信")).toBeTruthy();
+  });
+
+  it("still shows the action footer for a non-quoted note with accountId (unchanged default)", () => {
+    const note = makeNote({ id: "n1" });
+    const { getByLabelText } = render(NoteCard, {
+      props: { note, accountId: "a1" },
+    });
+    expect(getByLabelText("返信")).toBeTruthy();
+  });
+});
