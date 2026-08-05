@@ -158,6 +158,32 @@
     }
   });
 
+  // エキスパートモードではガイドモードのsourceType選択と関係なく、list/antenna/channelの
+  // 実ID補完(TqlCompletionField)のため常にアカウントの一覧を取得しておく。
+  // (ガイドモード用の上の3つのeffectと違い、id自動選択やエラー表示は行わない)
+  $effect(() => {
+    if (uiMode === "expert" && accountId) {
+      app
+        .fetchUserLists(accountId)
+        .then((l) => {
+          lists = l;
+        })
+        .catch(() => {});
+      app
+        .fetchAntennas(accountId)
+        .then((l) => {
+          antennas = l;
+        })
+        .catch(() => {});
+      app
+        .fetchChannels(accountId)
+        .then((l) => {
+          channels = l;
+        })
+        .catch(() => {});
+    }
+  });
+
   // User/Tag 以外は同期的に kind を組める。User は submit 時に acct を解決する。
   function buildKind(): ColumnKind | null {
     switch (sourceType) {
@@ -599,9 +625,6 @@
     background: var(--surface-2);
     color: var(--text);
     font-family: inherit;
-  }
-  input.invalid {
-    border-color: var(--danger);
   }
   .seg {
     display: inline-flex;

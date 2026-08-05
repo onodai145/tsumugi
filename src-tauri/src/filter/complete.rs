@@ -131,6 +131,24 @@ fn source_context(tokens: &[Token]) -> Vec<TqlCompletionItem> {
 }
 
 fn predicate_context(tokens: &[Token]) -> Vec<TqlCompletionItem> {
+    // ドット区切りフィールド(user.followers 等)はトークナイザが Ident/Dot/Ident に
+    // 分解するため、末尾トークン1個だけを見る下の match では扱えない。先にスライス
+    // パターンで拾う。
+    // 完成済み(`user.followers `)→ 演算子候補
+    if let [.., Token::Ident(prefix), Token::Dot, Token::Ident(suffix)] = tokens {
+        let full = format!("{prefix}.{suffix}");
+        if Field::from_name(&full).is_some() {
+            return operator_items();
+        }
+    }
+    // 入力途中(`user.` / `user.fo`。partialは呼び出し側で切り出し済み)→ サフィックス候補。
+    // label/insert はドット以降の断片のみ(前方一致フィルタと置換範囲がドットの直後から
+    // 始まるため、`user.` を含めると絞り込みも挿入も壊れる)。
+    if let [.., Token::Ident(prefix), Token::Dot] = tokens {
+        if prefix == "user" {
+            return dotted_field_items("user");
+        }
+    }
     match tokens.last() {
         None => field_items(),
         Some(Token::AndAnd) | Some(Token::OrOr) | Some(Token::Not) | Some(Token::LParen) => {
@@ -176,6 +194,20 @@ fn field_items() -> Vec<TqlCompletionItem> {
         .map(|f| TqlCompletionItem {
             label: f.to_string(),
             insert: format!("{f} "),
+            kind: TqlCompletionKind::Field,
+        })
+        .collect()
+}
+
+/// `<prefix>.` に続くサフィックス候補(FIELD_NAMES から該当プレフィックスのものを抽出)。
+fn dotted_field_items(prefix: &str) -> Vec<TqlCompletionItem> {
+    let head = format!("{prefix}.");
+    FIELD_NAMES
+        .iter()
+        .filter_map(|f| f.strip_prefix(&head))
+        .map(|suffix| TqlCompletionItem {
+            label: suffix.to_string(),
+            insert: format!("{suffix} "),
             kind: TqlCompletionKind::Field,
         })
         .collect()
@@ -260,6 +292,43 @@ mod tests {
         assert!(labels(&items).contains(&"contains"));
         assert!(labels(&items).contains(&">="));
         assert!(labels(&items).contains(&"&&"));
+    }
+
+    #[test]
+    fn filters_dotted_field_suffixes_by_partial_prefix() {
+        // "from home where user.fo" は23文字
+        let items = complete("from home where user.fo", 23, TqlEditMode::Query);
+        assert!(labels(&items).contains(&"followers"));
+        assert!(labels(&items).contains(&"following"));
+        assert!(!labels(&items).contains(&"has_files"));
+    }
+
+    #[test]
+    fn suggests_operators_after_a_dotted_field_name() {
+        // "from home where user.followers " は31文字
+        let items = complete("from home where user.followers ", 31, TqlEditMode::Query);
+        assert!(labels(&items).contains(&"contains"));
+        assert!(labels(&items).contains(&">="));
+        assert!(labels(&items).contains(&"&&"));
+    }
+
+    #[test]
+    fn suggests_all_dotted_field_suffixes_after_user_dot() {
+        // "from home where user." は21文字
+        let items = complete("from home where user.", 21, TqlEditMode::Query);
+        let got = labels(&items);
+        for expected in [
+            "followers",
+            "following",
+            "notes",
+            "username",
+            "acct",
+            "name",
+            "id",
+        ] {
+            assert!(got.contains(&expected), "missing {expected}: {got:?}");
+        }
+        assert_eq!(got.len(), 7);
     }
 
     #[test]
