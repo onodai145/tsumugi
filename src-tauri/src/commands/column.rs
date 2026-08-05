@@ -476,6 +476,18 @@ pub async fn validate_tql_query(text: String) -> Result<()> {
     Ok(())
 }
 
+/// TQL入力補完。カーソル位置までの部分入力を文脈分類し、候補一覧を返す。
+/// list/antenna/channel の実ID候補はフロント側で別途解決する(このコマンドは構文語彙のみ)。
+#[tauri::command]
+#[specta::specta]
+pub fn tql_complete(
+    text: String,
+    cursor: u32,
+    mode: crate::filter::complete::TqlEditMode,
+) -> Vec<crate::filter::complete::TqlCompletionItem> {
+    crate::filter::complete::complete(&text, cursor as usize, mode)
+}
+
 /// ユーザリスト一覧（List タブ作成用）。
 #[tauri::command]
 #[specta::specta]
