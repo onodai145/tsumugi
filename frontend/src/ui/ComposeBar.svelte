@@ -22,6 +22,7 @@
     VisibilityInput,
     DriveFile,
     Note,
+    SourceItem,
   } from "../bindings/tauri.gen";
 
   // expanded: モバイルの投稿モーダルなど、常に複数行分の入力欄を確保したい文脈向け
@@ -41,6 +42,9 @@
   let cw = $state("");
   let useCw = $state(false);
   let visibility = $state<VisibilityInput>("public");
+  let useChannel = $state(false);
+  let channelId = $state("");
+  let channels = $state<SourceItem[]>([]);
   let localOnly = $state(false);
   const MAX_POLL_CHOICES = 10;
   let usePoll = $state(false);
@@ -232,6 +236,18 @@
     if (accountId) app.loadEmojis(accountId).catch(() => {});
   });
 
+  // チャンネル投稿トグルON時、フォロー中チャンネル一覧を取得する
+  $effect(() => {
+    if (useChannel && accountId) {
+      app
+        .fetchChannels(accountId)
+        .then((l) => {
+          channels = l;
+        })
+        .catch((e) => (err = String(e)));
+    }
+  });
+
   // 返信/引用/新規投稿ショートカット・ボタンからの「開く」要求を消費してこのバーへ反映する。
   // app.compose は一過性のシグナルとして扱い、消費後すぐ null に戻す（次の要求も同じ形で届くため）。
   $effect(() => {
@@ -245,6 +261,9 @@
     }
     replyTo = c.replyTo;
     quoteOf = c.quoteOf;
+    const contextChannelId = c.replyTo?.channelId ?? c.quoteOf?.channelId ?? null;
+    useChannel = contextChannelId !== null;
+    channelId = contextChannelId ?? "";
     // 返信先の @acct を本文へ自動挿入する（本家Misskeyクライアント準拠）。
     // 未入力の時だけ差し込み、既に何か書きかけている場合は上書きしない。
     if (c.replyTo && !text.trim()) {
@@ -391,6 +410,7 @@
         poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt } : null,
         replyId: replyTo?.id ?? null,
         renoteId: quoteOf?.id ?? null,
+        channelId: useChannel && channelId ? channelId : null,
         localOnly,
       };
       await app.postNote(accountId, draft);
@@ -405,6 +425,8 @@
       pollAfterAmount = 1;
       pollAfterUnit = "hour";
       localOnly = false;
+      useChannel = false;
+      channelId = "";
       attachments = [];
       replyTo = undefined;
       quoteOf = undefined;
@@ -629,7 +651,9 @@
 
   <div class="toolbar">
     <div class="tools left">
-      <VisibilitySelect bind:value={visibility} />
+      {#if !useChannel}
+        <VisibilitySelect bind:value={visibility} />
+      {/if}
       <button
         class="icon"
         title="画像を添付"
@@ -639,6 +663,14 @@
       ><ImagePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
+      <button class="mini" class:active={useChannel} onclick={() => (useChannel = !useChannel)}>チャンネル</button>
+      {#if useChannel}
+        {#if channels.length > 0}
+          <Dropdown bind:value={channelId} options={channels.map((c) => ({ value: c.id, label: c.name || c.id }))} />
+        {:else}
+          <span class="hint">フォロー中のチャンネルがありません</span>
+        {/if}
+      {/if}
       <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
     </div>
     <div class="tools right">
@@ -1002,6 +1034,12 @@
     color: var(--accent);
   }
   .lo {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    flex: none;
+    white-space: nowrap;
+  }
+  .hint {
     font-size: 0.78rem;
     color: var(--text-dim);
     flex: none;
