@@ -5,6 +5,7 @@
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
   import { X } from "@lucide/svelte";
+  import TqlCompletionField from "../input/TqlCompletionField.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
 
   // editTab を渡すと「編集」モード（アカウントは固定、ソース/フィルタ/名前を変更）。
@@ -373,14 +374,17 @@
     {#if uiMode === "expert"}
       <label class="field">
         <span>from ... where ...（複数ソースはカンマ区切り。例: from home, list("id") where has_files）</span>
-        <textarea
-          class="tql-input"
-          rows="4"
-          placeholder={'from home, list("...") where has_files && !cw'}
+        <TqlCompletionField
+          mode="query"
           bind:value={tqlText}
+          rows={4}
+          placeholder={'from home, list("...") where has_files && !cw'}
+          invalid={!!tqlErr}
           oninput={onTqlInput}
-          class:invalid={!!tqlErr}
-        ></textarea>
+          {lists}
+          {antennas}
+          {channels}
+        />
       </label>
       {#if tqlErr}<p class="err">TQLエラー: {tqlErr}</p>{/if}
       <p class="hint">
@@ -489,11 +493,12 @@
     {#if sourceType !== "notifications"}
       <label class="field">
         <span>フィルタ（TQL・空欄で全件）</span>
-        <input
-          placeholder={"例: has_files && !cw && reactions >= 5"}
+        <TqlCompletionField
+          mode="predicate"
           bind:value={filterText}
+          placeholder={"例: has_files && !cw && reactions >= 5"}
+          invalid={!!filterErr}
           oninput={onFilterInput}
-          class:invalid={!!filterErr}
         />
       </label>
       <p class="hint">
@@ -620,19 +625,6 @@
   .seg-btn.active {
     background: var(--accent);
     color: #fff;
-  }
-  .tql-input {
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: ui-monospace, "Cascadia Code", "SF Mono", monospace;
-    font-size: 0.82rem;
-    resize: vertical;
-  }
-  .tql-input.invalid {
-    border-color: var(--danger);
   }
   .bg-row {
     display: flex;
