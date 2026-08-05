@@ -42,6 +42,10 @@
   let suppressAt = $state<number | null>(null);
   let composing = $state(false);
   let focused = $state(false);
+  // フォーカスしただけでは補完を出さず、そのフォーカス中に一度でも入力してから出す
+  // (未入力の空欄でカーソル位置0が「from を出すべき文脈」に一致してしまい、
+  // フォーカスした瞬間に補完が出るのは不自然なため)。blur/focusのたびにリセットする。
+  let typedSinceFocus = $state(false);
   let selectedIndex = $state(0);
   let selectionMoved = $state(false);
   let rustItems = $state<TqlCompletionItem[]>([]);
@@ -49,11 +53,8 @@
 
   const idTrigger = $derived(mode === "query" ? detectIdArgTrigger(value, cursorPos) : null);
 
-  // フィールドがフォーカスされていない間は補完を出さない(未入力・未フォーカスの初期状態でも
-  // Query モードは cursorPos=0 が「from を出すべき文脈」に一致してしまうため、
-  // フォーカスなしでポップアップが出ないよう明示的にガードする)。
   const trigger = $derived<TqlTrigger | null>(
-    !focused || composing || cursorPos === suppressAt
+    !focused || !typedSinceFocus || composing || cursorPos === suppressAt
       ? null
       : (idTrigger?.trigger ?? currentWordTrigger(value, cursorPos)),
   );
@@ -65,7 +66,7 @@
   // span に対して表示されうる。ローカルIPCなのでこの窓はサブミリ秒で、応答到着時に
   // 自動的に正しい候補へ差し替わるため、ローディング状態の作り込みはあえて行わない。
   $effect(() => {
-    if (!focused || composing || cursorPos === suppressAt || idTrigger) {
+    if (!focused || !typedSinceFocus || composing || cursorPos === suppressAt || idTrigger) {
       rustItems = [];
       return;
     }
@@ -163,6 +164,7 @@
   function onInputHandler() {
     syncCursor();
     suppressAt = null;
+    typedSinceFocus = true;
     oninput?.();
   }
 </script>
@@ -185,10 +187,12 @@
     }}
     onfocus={() => {
       focused = true;
+      typedSinceFocus = false;
       syncCursor();
     }}
     onblur={() => {
       focused = false;
+      typedSinceFocus = false;
       suppressAt = cursorPos;
     }}
   ></textarea>
@@ -209,10 +213,12 @@
     }}
     onfocus={() => {
       focused = true;
+      typedSinceFocus = false;
       syncCursor();
     }}
     onblur={() => {
       focused = false;
+      typedSinceFocus = false;
       suppressAt = cursorPos;
     }}
   />
