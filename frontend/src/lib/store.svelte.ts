@@ -28,6 +28,8 @@ import type {
   LatestRelease,
   Clip,
   PaneNode,
+  TqlEditMode,
+  TqlCompletionItem,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -1042,6 +1044,11 @@ class AppStore {
   async validateTqlQuery(text: string): Promise<string | null> {
     const r = await commands.validateTqlQuery(text);
     return r.status === "ok" ? null : formatError(r.error);
+  }
+
+  /// TQL入力補完。エラーは返さない(Rust側でVec::new()に握りつぶし済み)。
+  async tqlComplete(text: string, cursor: number, mode: TqlEditMode): Promise<TqlCompletionItem[]> {
+    return commands.tqlComplete(text, cursor, mode);
   }
 
   async fetchUserLists(accountId: string) {
