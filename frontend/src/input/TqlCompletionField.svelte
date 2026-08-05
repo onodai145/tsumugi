@@ -42,10 +42,6 @@
   let suppressAt = $state<number | null>(null);
   let composing = $state(false);
   let focused = $state(false);
-  // フォーカスしただけでは補完を出さず、そのフォーカス中に一度でも入力してから出す
-  // (未入力の空欄でカーソル位置0が「from を出すべき文脈」に一致してしまい、
-  // フォーカスした瞬間に補完が出るのは不自然なため)。blur/focusのたびにリセットする。
-  let typedSinceFocus = $state(false);
   let selectedIndex = $state(0);
   let selectionMoved = $state(false);
   let rustItems = $state<TqlCompletionItem[]>([]);
@@ -53,8 +49,14 @@
 
   const idTrigger = $derived(mode === "query" ? detectIdArgTrigger(value, cursorPos) : null);
 
+  // 欄が空(バックスペースで全消しした場合も含む)の間は補完を出さない。絵文字ピッカー等と
+  // 同様、何か入力されている時だけ補完する(Query モードは空文字だと cursorPos=0 が
+  // 「from を出すべき文脈」に一致してしまうため、focusしただけ/全消しした直後に
+  // 補完が居座らないよう明示的にガードする)。
+  const hasContent = $derived(value.trim().length > 0);
+
   const trigger = $derived<TqlTrigger | null>(
-    !focused || !typedSinceFocus || composing || cursorPos === suppressAt
+    !focused || !hasContent || composing || cursorPos === suppressAt
       ? null
       : (idTrigger?.trigger ?? currentWordTrigger(value, cursorPos)),
   );
@@ -66,7 +68,7 @@
   // span に対して表示されうる。ローカルIPCなのでこの窓はサブミリ秒で、応答到着時に
   // 自動的に正しい候補へ差し替わるため、ローディング状態の作り込みはあえて行わない。
   $effect(() => {
-    if (!focused || !typedSinceFocus || composing || cursorPos === suppressAt || idTrigger) {
+    if (!focused || !hasContent || composing || cursorPos === suppressAt || idTrigger) {
       rustItems = [];
       return;
     }
@@ -164,7 +166,6 @@
   function onInputHandler() {
     syncCursor();
     suppressAt = null;
-    typedSinceFocus = true;
     oninput?.();
   }
 </script>
@@ -187,12 +188,10 @@
     }}
     onfocus={() => {
       focused = true;
-      typedSinceFocus = false;
       syncCursor();
     }}
     onblur={() => {
       focused = false;
-      typedSinceFocus = false;
       suppressAt = cursorPos;
     }}
   ></textarea>
@@ -213,12 +212,10 @@
     }}
     onfocus={() => {
       focused = true;
-      typedSinceFocus = false;
       syncCursor();
     }}
     onblur={() => {
       focused = false;
-      typedSinceFocus = false;
       suppressAt = cursorPos;
     }}
   />
