@@ -110,6 +110,11 @@ export const commands = {
 	 *  list/antenna/channel の id 存在確認や user acct 解決は行わない（実際の解決はカラム作成時）。
 	 */
 	validateTqlQuery: (text: string) => typedError<null, Error>(__TAURI_INVOKE("validate_tql_query", { text })),
+	/**
+	 *  TQL入力補完。カーソル位置までの部分入力を文脈分類し、候補一覧を返す。
+	 *  list/antenna/channel の実ID候補はフロント側で別途解決する(このコマンドは構文語彙のみ)。
+	 */
+	tqlComplete: (text: string, cursor: number, mode: TqlEditMode) => __TAURI_INVOKE<TqlCompletionItem[]>("tql_complete", { text, cursor, mode }),
 	/**  ユーザリスト一覧（List タブ作成用）。 */
 	listUserLists: (accountId: string) => typedError<UserList[], Error>(__TAURI_INVOKE("list_user_lists", { accountId })),
 	/**  アンテナ一覧（Antenna タブ作成用）。 */
@@ -628,6 +633,20 @@ export type ThemeColors = {
 	/**  警告の意味の強調色。追加前のカスタムテーマ読み込み用に既定値を持つ。 */
 	warning?: string,
 };
+
+export type TqlCompletionItem = {
+	label: string,
+	insert: string,
+	kind: TqlCompletionKind,
+};
+
+export type TqlCompletionKind = "keyword" | "source" | "field" | "operator";
+
+export type TqlEditMode = 
+/**  from ... where ... のフルクエリ(エキスパートモードのtextarea) */
+"query" | 
+/**  where 述語のみ(簡単モードのfilter input) */
+"predicate";
 
 /**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。 */
 export type UiPrefs = {
