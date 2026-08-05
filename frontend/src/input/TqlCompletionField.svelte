@@ -138,6 +138,9 @@
       return;
     }
     if (e.key === "Tab" || e.key === "Enter") {
+      if (e.key === "Enter" && !selectionMoved) {
+        return; // 矢印キーで明示的に選ぶまでEnterでは確定しない(改行のつもりでEnterを押した場合の誤確定を防ぐ)
+      }
       e.preventDefault();
       confirmCompletion(selectedIndex);
       return;
