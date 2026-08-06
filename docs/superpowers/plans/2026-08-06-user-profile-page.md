@@ -1654,6 +1654,59 @@ git add frontend/src/ui/FollowListModal.svelte frontend/src/ui/FollowListModal.t
 git commit -m "feat: FollowListModalコンポーネントを追加"
 ```
 
+- [ ] **Step 6: ProfileModal.svelteにFollowListModalを配線する**
+
+Task 12で作成した `frontend/src/ui/ProfileModal.svelte` は、この時点ではまだ存在しなかった `FollowListModal.svelte` への
+importと描画を意図的に省略し、フックだけを残してある(`followListKind` state、統計ボタンのonclick、
+`// NOTE: フォロー中/フォロワー一覧モーダル(FollowListModal.svelte)はTask 13で作成予定。` というコメント)。
+このStepで実際に配線する。
+
+`frontend/src/ui/ProfileModal.svelte` の以下のコメント行(import群の下)を:
+
+```svelte
+  // NOTE: フォロー中/フォロワー一覧モーダル(FollowListModal.svelte)はTask 13で作成予定。
+  // followListKind はここで統計ボタンのクリック状態を保持するが、Task 13でコンポーネントが
+  // 作成され次第この場所で描画を配線する。
+```
+
+以下に置き換える:
+
+```svelte
+  import FollowListModal from "./FollowListModal.svelte";
+```
+
+`</Modal>` 直前(`{/if}` の直後、`</Modal>` の直前)に以下を追加する:
+
+```svelte
+    {#if followListKind}
+      <FollowListModal
+        kind={followListKind}
+        userId={profile.user.id}
+        {accountId}
+        onclose={() => (followListKind = null)}
+      />
+    {/if}
+```
+
+（`profile` は `{#if state.status === "ready"}` 相当のブロック内の `{@const profile = ...}` で束縛されている変数なので、
+このifブロックの中に置くこと。実装済みファイルの実際の変数束縛箇所を確認してから挿入すること。）
+
+- [ ] **Step 7: テストが通ることを確認**
+
+Run: `cd frontend && pnpm vitest run src/ui/ProfileModal.test.ts src/ui/FollowListModal.test.ts`
+Expected: 全件 PASS
+
+Run: `cd frontend && pnpm check`
+Expected: エラーなし
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /home/onodai145/repos/github.com/onodai145/tsumugi
+git add frontend/src/ui/ProfileModal.svelte
+git commit -m "feat: ProfileModalにFollowListModalを配線"
+```
+
 ---
 
 ### Task 14: NoteCard・MfmNodeにクリック導線を追加し、App.svelteでモーダルをマウント
