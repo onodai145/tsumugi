@@ -75,11 +75,18 @@
       void loadMore();
     });
   });
+
+  // Column.svelte のタイムライン無限スクロールと同じ閾値(残り300px)で追加取得する。
+  function onScroll(e: Event) {
+    const el = e.currentTarget as HTMLElement;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
+      void loadMore();
+    }
+  }
 </script>
 
 <Modal title={kind === "followers" ? "フォロワー" : "フォロー中"} {onclose}>
-  {#if err}<p class="err">{err}</p>{/if}
-  <ul class="list">
+  <ul class="list" onscroll={onScroll}>
     {#each users as entry (entry.user.id)}
       <li>
         <button class="row" onclick={() => openProfile({ userId: entry.user.id }, accountId)}>
@@ -101,9 +108,11 @@
         </button>
       </li>
     {/each}
+    {#if busy}<li class="status">読み込み中…</li>{/if}
   </ul>
-  {#if !done}
-    <button class="mini-btn" onclick={loadMore} disabled={busy}>もっと見る</button>
+  {#if err}
+    <p class="err">{err}</p>
+    <button class="mini-btn" onclick={loadMore} disabled={busy}>再試行</button>
   {/if}
 </Modal>
 
@@ -117,6 +126,12 @@
   }
   li + li {
     border-top: 1px solid var(--border);
+  }
+  .status {
+    padding: 10px 16px;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    text-align: center;
   }
   .row {
     display: flex;

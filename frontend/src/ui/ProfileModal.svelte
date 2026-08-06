@@ -121,6 +121,15 @@
   $effect(() => {
     void load();
   });
+
+  // Column.svelte のタイムライン無限スクロールと同じ閾値(残り300px)で追加取得する。
+  function onNotesScroll(e: Event) {
+    if (profileState.status !== "ready") return;
+    const el = e.currentTarget as HTMLElement;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
+      void loadMoreNotes(profileState.profile.user.id);
+    }
+  }
 </script>
 
 <Modal title="プロフィール" {onclose}>
@@ -174,15 +183,14 @@
       <span class="stat-static"><strong>{profile.user.notesCount}</strong> ノート</span>
     </div>
     <button class="mini-btn add-column-btn" onclick={addAsColumn}>カラムとして追加</button>
-    <div class="notes">
+    <div class="notes" onscroll={onNotesScroll}>
       {#each notes as note (note.id)}
         <NoteCard {note} {accountId} />
       {/each}
+      {#if notesBusy}<p class="hint centered">読み込み中…</p>{/if}
       {#if notesErr}
         <p class="err">{notesErr}</p>
         <button class="mini-btn" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</button>
-      {:else if !notesDone}
-        <button class="mini-btn" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>もっと見る</button>
       {/if}
     </div>
     {#if followListKind}
@@ -200,6 +208,10 @@
   .hint {
     color: var(--text-dim);
     font-size: 0.85rem;
+  }
+  .hint.centered {
+    text-align: center;
+    margin: 0;
   }
   .banner {
     display: block;

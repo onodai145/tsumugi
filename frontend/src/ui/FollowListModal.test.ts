@@ -111,7 +111,7 @@ describe("FollowListModal", () => {
   // 修正1の回帰テスト: users/followers・users/following はFollowingレコードのidで
   // ページングする仕様のため、2ページ目のuntilIdにはユーザーID(u2)ではなく
   // 1件目のcursor(f2)を送らなければならない。
-  it("もっと見るクリック時、untilIdにユーザーIDではなくFollowingレコードのcursorを送る", async () => {
+  it("末尾までスクロールすると、untilIdにユーザーIDではなくFollowingレコードのcursorを送る", async () => {
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "get_user_followers" && args?.untilId == null) {
         return Promise.resolve([makeEntry("u2", "bob", "f2")]);
@@ -125,7 +125,15 @@ describe("FollowListModal", () => {
       props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} },
     });
     await waitFor(() => expect(getByText("bob")).toBeTruthy());
-    await fireEvent.click(getByText("もっと見る"));
+    // Modal.svelte は document.body 直下へ portal するため、testing-library の
+    // container(レンダー元のラッパー要素)ではなく document 全体から探す。
+    const list = document.querySelector("ul.list") as HTMLElement;
+    // jsdomはレイアウト計算をしないため、Column.svelteと同じ「残り300px」判定を
+    // 満たす値を手動で設定してからscrollイベントを発火する。
+    Object.defineProperty(list, "scrollTop", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(list, "scrollHeight", { value: 1200, configurable: true });
+    await fireEvent.scroll(list);
     await waitFor(() => expect(getByText("dave")).toBeTruthy());
     expect(invokeMock).toHaveBeenCalledWith(
       "get_user_followers",
