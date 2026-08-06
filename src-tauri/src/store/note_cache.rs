@@ -405,6 +405,8 @@ mod tests {
                 following_count: 3,
                 notes_count: 42,
                 emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
             },
             reply_id: None,
             renote_id: None,

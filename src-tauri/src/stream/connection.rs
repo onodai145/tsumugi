@@ -1141,6 +1141,8 @@ mod tests {
                 following_count: 0,
                 notes_count: 0,
                 emojis: HashMap::new(),
+                bio: None,
+                banner_url: None,
             },
             reply_id: None,
             renote_id: None,

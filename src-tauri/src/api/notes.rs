@@ -288,6 +288,8 @@ mod tests {
             following_count: 0,
             notes_count: 0,
             emojis: std::collections::HashMap::new(),
+            bio: None,
+            banner_url: None,
         }
     }
 

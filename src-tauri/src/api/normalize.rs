@@ -46,6 +46,8 @@ impl From<RawUser> for User {
             following_count: r.following_count,
             notes_count: r.notes_count,
             emojis: r.emojis,
+            bio: None,
+            banner_url: None,
         }
     }
 }
