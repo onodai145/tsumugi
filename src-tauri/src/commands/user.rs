@@ -1,7 +1,7 @@
 //! ユーザープロフィール取得・フォロー操作。
 
 use crate::api;
-use crate::domain::{Account, Note, User};
+use crate::domain::{Account, ColumnKind, Note, User};
 use crate::error::Result;
 use crate::state::AppState;
 use specta::Type;
@@ -41,6 +41,38 @@ pub async fn get_user_profile(
         is_following: if is_self { None } else { raw.is_following },
         is_self,
     })
+}
+
+/// フォローする。
+#[tauri::command]
+#[specta::specta]
+pub async fn follow_user(state: State<'_, AppState>, account_id: String, user_id: String) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    api::users::follow(&client, &user_id).await
+}
+
+/// フォロー解除する。
+#[tauri::command]
+#[specta::specta]
+pub async fn unfollow_user(state: State<'_, AppState>, account_id: String, user_id: String) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    api::users::unfollow(&client, &user_id).await
+}
+
+/// プロフィールモーダルに埋め込むノート一覧。既存の `ColumnKind::User` と同じ
+/// `users/notes` エンドポイントを使う（カラムとして常設せず、都度取得する）。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_user_notes(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+    until_id: Option<String>,
+) -> Result<Vec<Note>> {
+    let client = state.client_for(&account_id)?;
+    let kind = crate::domain::ColumnKind::User { user_id };
+    let (endpoint, body) = kind.rest_request(20, until_id.as_deref()).expect("User kind always has rest_request");
+    api::notes::fetch_notes(&client, endpoint, &body).await
 }
 
 #[cfg(test)]
