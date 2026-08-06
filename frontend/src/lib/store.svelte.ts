@@ -1088,6 +1088,66 @@ class AppStore {
     }
   }
 
+  /// プロフィールモーダル用: ユーザー詳細(bio/バナー/フォロー関係)を取得する。
+  async getUserProfile(accountId: string, userId: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserProfile(accountId, userId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  /// フォローする。
+  async followUser(accountId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.followUser(accountId, userId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  /// フォロー解除する。
+  async unfollowUser(accountId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.unfollowUser(accountId, userId));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  /// プロフィールモーダルに埋め込むノート一覧。
+  async getUserNotes(accountId: string, userId: string, untilId?: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserNotes(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  /// フォロワー一覧。
+  async getUserFollowers(accountId: string, userId: string, untilId?: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserFollowers(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
+  /// フォロー中一覧。
+  async getUserFollowing(accountId: string, userId: string, untilId?: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserFollowing(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#fail(e);
+      throw e;
+    }
+  }
+
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
   async setNotify(config: NotifyConfig) {
     if (config.desktop && !(await isPermissionGranted())) {

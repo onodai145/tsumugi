@@ -188,3 +188,34 @@ describe("notification-only note actions (Issue #50 follow-up)", () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });
+
+describe("app.getUserProfile / followUser / unfollowUser", () => {
+  it("getUserProfileはコマンド結果をそのまま返す", async () => {
+    const profile = { user: makeUser(), isFollowing: false, isSelf: false };
+    invokeMock.mockResolvedValueOnce(profile);
+    const result = await app.getUserProfile(ACCOUNT_ID, "u1");
+    expect(result).toEqual(profile);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "get_user_profile",
+      expect.objectContaining({ accountId: ACCOUNT_ID, userId: "u1" }),
+    );
+  });
+
+  it("followUserはfollow_userコマンドを呼ぶ", async () => {
+    invokeMock.mockResolvedValueOnce({ status: "ok", data: null });
+    await app.followUser(ACCOUNT_ID, "u1");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "follow_user",
+      expect.objectContaining({ accountId: ACCOUNT_ID, userId: "u1" }),
+    );
+  });
+
+  it("unfollowUserはunfollow_userコマンドを呼ぶ", async () => {
+    invokeMock.mockResolvedValueOnce({ status: "ok", data: null });
+    await app.unfollowUser(ACCOUNT_ID, "u1");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "unfollow_user",
+      expect.objectContaining({ accountId: ACCOUNT_ID, userId: "u1" }),
+    );
+  });
+});
