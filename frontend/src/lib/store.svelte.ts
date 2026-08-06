@@ -1088,64 +1088,39 @@ class AppStore {
     }
   }
 
+  // 以下6メソッドは呼び出し元(ProfileModal/FollowListModal)が自前のエラー表示を持つため、
+  // resolveUser等と異なり this.#fail() は呼ばない（呼ぶとコンポーネント内のエラー表示と
+  // 投稿欄下のグローバルエラーバナーに同じエラーが二重に出てしまう）。失敗はそのまま
+  // 呼び出し元へ伝播させる。
+
   /// プロフィールモーダル用: ユーザー詳細(bio/バナー/フォロー関係)を取得する。
   async getUserProfile(accountId: string, userId: string) {
-    try {
-      return await unwrapAcc(accountId, commands.getUserProfile(accountId, userId));
-    } catch (e) {
-      this.#fail(e);
-      throw e;
-    }
+    return await unwrapAcc(accountId, commands.getUserProfile(accountId, userId));
   }
 
   /// フォローする。
   async followUser(accountId: string, userId: string) {
-    try {
-      await unwrapAcc(accountId, commands.followUser(accountId, userId));
-    } catch (e) {
-      this.#fail(e);
-      throw e;
-    }
+    await unwrapAcc(accountId, commands.followUser(accountId, userId));
   }
 
   /// フォロー解除する。
   async unfollowUser(accountId: string, userId: string) {
-    try {
-      await unwrapAcc(accountId, commands.unfollowUser(accountId, userId));
-    } catch (e) {
-      this.#fail(e);
-      throw e;
-    }
+    await unwrapAcc(accountId, commands.unfollowUser(accountId, userId));
   }
 
   /// プロフィールモーダルに埋め込むノート一覧。
   async getUserNotes(accountId: string, userId: string, untilId?: string) {
-    try {
-      return await unwrapAcc(accountId, commands.getUserNotes(accountId, userId, untilId ?? null));
-    } catch (e) {
-      this.#fail(e);
-      throw e;
-    }
+    return await unwrapAcc(accountId, commands.getUserNotes(accountId, userId, untilId ?? null));
   }
 
   /// フォロワー一覧。
   async getUserFollowers(accountId: string, userId: string, untilId?: string) {
-    try {
-      return await unwrapAcc(accountId, commands.getUserFollowers(accountId, userId, untilId ?? null));
-    } catch (e) {
-      this.#fail(e);
-      throw e;
-    }
+    return await unwrapAcc(accountId, commands.getUserFollowers(accountId, userId, untilId ?? null));
   }
 
   /// フォロー中一覧。
   async getUserFollowing(accountId: string, userId: string, untilId?: string) {
-    try {
-      return await unwrapAcc(accountId, commands.getUserFollowing(accountId, userId, untilId ?? null));
-    } catch (e) {
-      this.#fail(e);
-      throw e;
-    }
+    return await unwrapAcc(accountId, commands.getUserFollowing(accountId, userId, untilId ?? null));
   }
 
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
