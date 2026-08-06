@@ -123,8 +123,10 @@
   });
 
   // Column.svelte のタイムライン無限スクロールと同じ閾値(残り300px)で追加取得する。
+  // notesErr が立っている間はスクロールのたびに再試行してしまう(失敗した直後は既に閾値内に
+  // いるため)のを防ぐため、エラー時は無視する。再試行は下の再試行ボタン経由のみとする。
   function onNotesScroll(e: Event) {
-    if (profileState.status !== "ready") return;
+    if (profileState.status !== "ready" || notesErr) return;
     const el = e.currentTarget as HTMLElement;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
       void loadMoreNotes(profileState.profile.user.id);

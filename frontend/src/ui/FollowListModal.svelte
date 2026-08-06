@@ -77,7 +77,10 @@
   });
 
   // Column.svelte のタイムライン無限スクロールと同じ閾値(残り300px)で追加取得する。
+  // err が立っている間はスクロールのたびに再試行してしまう(失敗した直後は既に閾値内にいるため)
+  // のを防ぐため、エラー時は無視する。再試行は下の再試行ボタン経由のみとする。
   function onScroll(e: Event) {
+    if (err) return;
     const el = e.currentTarget as HTMLElement;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
       void loadMore();
