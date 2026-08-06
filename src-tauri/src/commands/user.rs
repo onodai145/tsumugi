@@ -75,6 +75,32 @@ pub async fn get_user_notes(
     api::notes::fetch_notes(&client, endpoint, &body).await
 }
 
+/// フォロワー一覧（ページング）。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_user_followers(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+    until_id: Option<String>,
+) -> Result<Vec<User>> {
+    let client = state.client_for(&account_id)?;
+    api::users::followers(&client, &user_id, until_id.as_deref()).await
+}
+
+/// フォロー中一覧（ページング）。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_user_following(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+    until_id: Option<String>,
+) -> Result<Vec<User>> {
+    let client = state.client_for(&account_id)?;
+    api::users::following(&client, &user_id, until_id.as_deref()).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
