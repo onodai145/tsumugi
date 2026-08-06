@@ -46,3 +46,36 @@ pub async fn unfollow(client: &MisskeyClient, user_id: &str) -> Result<()> {
     let _: serde_json::Value = client.post("following/delete", &json!({ "userId": user_id })).await?;
     Ok(())
 }
+
+/// `users/followers` / `users/following` の1件（Followingオブジェクト）。
+/// 一覧の主体（followers なら相手=follower、following なら相手=followee）のみ使う。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawFollowing {
+    #[serde(default)]
+    followee: Option<RawUser>,
+    #[serde(default)]
+    follower: Option<RawUser>,
+}
+
+const FOLLOW_LIST_PAGE_SIZE: u32 = 20;
+
+/// フォロワー一覧（新しい順、`until_id` でページング）。
+pub async fn followers(client: &MisskeyClient, user_id: &str, until_id: Option<&str>) -> Result<Vec<User>> {
+    let mut body = json!({ "userId": user_id, "limit": FOLLOW_LIST_PAGE_SIZE });
+    if let Some(u) = until_id {
+        body["untilId"] = json!(u);
+    }
+    let raw: Vec<RawFollowing> = client.post("users/followers", &body).await?;
+    Ok(raw.into_iter().filter_map(|f| f.follower).map(Into::into).collect())
+}
+
+/// フォロー中一覧（新しい順、`until_id` でページング）。
+pub async fn following(client: &MisskeyClient, user_id: &str, until_id: Option<&str>) -> Result<Vec<User>> {
+    let mut body = json!({ "userId": user_id, "limit": FOLLOW_LIST_PAGE_SIZE });
+    if let Some(u) = until_id {
+        body["untilId"] = json!(u);
+    }
+    let raw: Vec<RawFollowing> = client.post("users/following", &body).await?;
+    Ok(raw.into_iter().filter_map(|f| f.followee).map(Into::into).collect())
+}
