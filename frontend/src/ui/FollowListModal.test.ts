@@ -72,4 +72,33 @@ describe("FollowListModal", () => {
       ),
     );
   });
+
+  // ProfileModal の同一インスタンスが openProfile() 経由の target 切り替えで再利用されうるため、
+  // FollowListModal も props(userId 等)の変化だけで再マウントされずに再ロードされる必要がある
+  // (kind/userId が変わらない限りloadMore()を再度発火させないと、古いユーザーの一覧が残り続ける)。
+  it("userId propが変わると新しいuserIdで再取得し、古い一覧を破棄する", async () => {
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_user_followers" && args?.userId === "u1") {
+        return Promise.resolve([makeUser("u2", "bob")]);
+      }
+      if (cmd === "get_user_followers" && args?.userId === "u3") {
+        return Promise.resolve([makeUser("u4", "carol")]);
+      }
+      return Promise.resolve(null);
+    });
+    const { rerender, getByText, queryByText } = render(FollowListModal, {
+      props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("bob")).toBeTruthy());
+    invokeMock.mockClear();
+    await rerender({ kind: "followers", userId: "u3", accountId: "acc1", onclose: () => {} });
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "get_user_followers",
+        expect.objectContaining({ accountId: "acc1", userId: "u3" }),
+      ),
+    );
+    await waitFor(() => expect(getByText("carol")).toBeTruthy());
+    expect(queryByText("bob")).toBeNull();
+  });
 });

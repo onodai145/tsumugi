@@ -18,31 +18,54 @@
   let done = $state(false);
   let err = $state<string | null>(null);
 
+  // openProfile() は単一の共有 target/accountId を書き換える設計（profileModal.svelte.ts）で、
+  // FollowListModal の行クリックからも openProfile() を呼ぶ（このファイル下部）。ProfileModal 側の
+  // 同一インスタンスが target 変更で userId を再束縛すると、この FollowListModal も同じインスタンスの
+  // まま kind/userId/accountId だけが変わりうる。そのため世代番号でリクエストを追跡し、古い世代の
+  // 応答が新しい世代の users を汚染しないようにする。
+  let requestGen = 0;
+
   async function loadMore() {
     if (busy || done) return;
     busy = true;
     err = null;
+    const myGen = requestGen;
     try {
       const untilId = users.length > 0 ? users[users.length - 1].id : undefined;
       const page =
         kind === "followers"
           ? await app.getUserFollowers(accountId, userId, untilId)
           : await app.getUserFollowing(accountId, userId, untilId);
+      if (myGen !== requestGen) return; // 世代遅れの応答は無視する
       if (page.length === 0) done = true;
       users = [...users, ...page];
     } catch (e) {
+      if (myGen !== requestGen) return;
       err = String(e);
     } finally {
-      busy = false;
+      if (myGen === requestGen) busy = false;
     }
   }
 
-  // loadMore() は同期部分で users/busy/done を読むため、$effect にそのまま渡すと
-  // それらの state 変化のたびに再発火し、同じページを重複追加する無限ループになる
-  // (ページネーションを無視するモック実装で each_key_duplicate として顕在化した)。
-  // untrack でラップし、マウント時に一度だけ実行する。
+  // loadMore() は同期部分で users/busy/done を読むため、$effect の本体全体をそのまま
+  // 追跡させると、それらの state 変化のたびに再発火し、同じページを重複追加する無限ループに
+  // なる（ページネーションを無視するモック実装で each_key_duplicate として顕在化した）。
+  // 一方で kind/userId/accountId の変化（同一インスタンスが再利用される場合。上記コメント参照）
+  // には反応してリロードする必要があるため、それらの props だけを追跡対象にし、内部の
+  // state リセットと loadMore() 呼び出しは untrack でラップする。
   $effect(() => {
+    const trackedKind = kind;
+    const trackedUserId = userId;
+    const trackedAccountId = accountId;
+    void trackedKind;
+    void trackedUserId;
+    void trackedAccountId;
     untrack(() => {
+      requestGen++;
+      users = [];
+      busy = false;
+      done = false;
+      err = null;
       void loadMore();
     });
   });
