@@ -939,7 +939,9 @@ git commit -m "feat: プロフィールモーダルのグローバル開閉状�
 describe("app.getUserProfile / followUser / unfollowUser", () => {
   it("getUserProfileはコマンド結果をそのまま返す", async () => {
     const profile = { user: makeUser(), isFollowing: false, isSelf: false };
-    invokeMock.mockResolvedValueOnce({ status: "ok", data: profile });
+    // invokeMockはbindings生成コードのtypedError()に渡す前のraw invoke()相当。
+    // typedError側が{status:"ok",data:...}に包むため、ここでは生の戻り値のみを返す。
+    invokeMock.mockResolvedValueOnce(profile);
     const result = await app.getUserProfile(ACCOUNT_ID, "u1");
     expect(result).toEqual(profile);
     expect(invokeMock).toHaveBeenCalledWith(
@@ -949,7 +951,7 @@ describe("app.getUserProfile / followUser / unfollowUser", () => {
   });
 
   it("followUserはfollow_userコマンドを呼ぶ", async () => {
-    invokeMock.mockResolvedValueOnce({ status: "ok", data: null });
+    invokeMock.mockResolvedValueOnce(null);
     await app.followUser(ACCOUNT_ID, "u1");
     expect(invokeMock).toHaveBeenCalledWith(
       "follow_user",
@@ -958,7 +960,7 @@ describe("app.getUserProfile / followUser / unfollowUser", () => {
   });
 
   it("unfollowUserはunfollow_userコマンドを呼ぶ", async () => {
-    invokeMock.mockResolvedValueOnce({ status: "ok", data: null });
+    invokeMock.mockResolvedValueOnce(null);
     await app.unfollowUser(ACCOUNT_ID, "u1");
     expect(invokeMock).toHaveBeenCalledWith(
       "unfollow_user",
@@ -1115,12 +1117,16 @@ function profileResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// invokeMockは生成コードのtypedError()に渡される前のraw invoke()相当。
+// typedError側が{status:"ok",data:...}に包むため、ここでは生の戻り値(コマンドの実際の返り値そのもの)を返す。
+// {status:"ok",data:...}でラップして返すと、typedErrorがそれをさらに包んでしまい
+// (unwrapAccが1段階しか剥がせず)コンポーネントが受け取る値が壊れるので絶対にやらないこと。
 describe("ProfileModal", () => {
   it("マウント時にget_user_profileを呼び、プロフィールを表示する", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_user_profile") return Promise.resolve({ status: "ok", data: profileResponse() });
-      if (cmd === "get_user_notes") return Promise.resolve({ status: "ok", data: [] });
-      return Promise.resolve({ status: "ok", data: null });
+      if (cmd === "get_user_profile") return Promise.resolve(profileResponse());
+      if (cmd === "get_user_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
     });
     const { getByText } = render(ProfileModal, {
       props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
@@ -1132,9 +1138,9 @@ describe("ProfileModal", () => {
   it("自分自身の場合フォローボタンを表示しない", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "get_user_profile")
-        return Promise.resolve({ status: "ok", data: profileResponse({ isSelf: true, isFollowing: null }) });
-      if (cmd === "get_user_notes") return Promise.resolve({ status: "ok", data: [] });
-      return Promise.resolve({ status: "ok", data: null });
+        return Promise.resolve(profileResponse({ isSelf: true, isFollowing: null }));
+      if (cmd === "get_user_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
     });
     const { queryByRole } = render(ProfileModal, {
       props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
@@ -1145,9 +1151,9 @@ describe("ProfileModal", () => {
 
   it("フォローボタンクリックでfollow_userを呼ぶ", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_user_profile") return Promise.resolve({ status: "ok", data: profileResponse() });
-      if (cmd === "get_user_notes") return Promise.resolve({ status: "ok", data: [] });
-      return Promise.resolve({ status: "ok", data: null });
+      if (cmd === "get_user_profile") return Promise.resolve(profileResponse());
+      if (cmd === "get_user_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
     });
     const { getByRole } = render(ProfileModal, {
       props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
@@ -1166,13 +1172,12 @@ describe("ProfileModal", () => {
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "get_user_profile") {
         const userId = args?.userId;
-        return Promise.resolve({
-          status: "ok",
-          data: profileResponse({ user: { ...profileResponse().user, id: userId, username: userId } }),
-        });
+        return Promise.resolve(
+          profileResponse({ user: { ...profileResponse().user, id: userId, username: userId } }),
+        );
       }
-      if (cmd === "get_user_notes") return Promise.resolve({ status: "ok", data: [{ id: "n1" } as Note] });
-      return Promise.resolve({ status: "ok", data: null });
+      if (cmd === "get_user_notes") return Promise.resolve([{ id: "n1" } as Note]);
+      return Promise.resolve(null);
     });
     const { rerender, getByText } = render(ProfileModal, {
       props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
@@ -1182,13 +1187,12 @@ describe("ProfileModal", () => {
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "get_user_profile") {
         const userId = args?.userId;
-        return Promise.resolve({
-          status: "ok",
-          data: profileResponse({ user: { ...profileResponse().user, id: userId, username: userId } }),
-        });
+        return Promise.resolve(
+          profileResponse({ user: { ...profileResponse().user, id: userId, username: userId } }),
+        );
       }
-      if (cmd === "get_user_notes") return Promise.resolve({ status: "ok", data: [] });
-      return Promise.resolve({ status: "ok", data: null });
+      if (cmd === "get_user_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
     });
     await rerender({ target: { userId: "u2" }, accountId: "acc1", onclose: () => {} });
     await waitFor(() =>
@@ -1487,12 +1491,14 @@ function makeUser(id: string, username: string) {
   };
 }
 
+// invokeMockは生成コードのtypedError()に渡される前のraw invoke()相当。
+// typedError側が{status:"ok",data:...}に包むため、ここでは生の戻り値のみを返す
+// ({status:"ok",data:...}でラップして返すと二重ラップになりコンポーネントが壊れた値を受け取る)。
 describe("FollowListModal", () => {
   it("kind=followersでget_user_followersを呼び一覧表示する", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_user_followers")
-        return Promise.resolve({ status: "ok", data: [makeUser("u2", "bob")] });
-      return Promise.resolve({ status: "ok", data: null });
+      if (cmd === "get_user_followers") return Promise.resolve([makeUser("u2", "bob")]);
+      return Promise.resolve(null);
     });
     const { getByText } = render(FollowListModal, {
       props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} },
@@ -1506,8 +1512,8 @@ describe("FollowListModal", () => {
 
   it("kind=followingでget_user_followingを呼ぶ", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_user_following") return Promise.resolve({ status: "ok", data: [] });
-      return Promise.resolve({ status: "ok", data: null });
+      if (cmd === "get_user_following") return Promise.resolve([]);
+      return Promise.resolve(null);
     });
     render(FollowListModal, {
       props: { kind: "following", userId: "u1", accountId: "acc1", onclose: () => {} },
