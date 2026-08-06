@@ -16,6 +16,16 @@ pub struct UserProfile {
     pub is_self: bool,
 }
 
+/// フォロワー/フォロー中一覧の1件。`cursor` は次ページ取得時の `until_id` に使うFollowingレコード
+/// 自身のID（`user.id` ではない）。Misskeyの `users/followers` / `users/following` はFollowingレコード
+/// のIDでページングするため、ユーザーIDをそのままカーソルに使うと2ページ目以降がずれる。
+#[derive(Debug, Clone, serde::Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowListEntry {
+    pub user: User,
+    pub cursor: String,
+}
+
 /// `account_id` に紐づくアカウント自身のプロフィールかどうかを判定する（純粋関数、テスト用に分離）。
 pub(crate) fn is_self_user(accounts: &[Account], account_id: &str, user_id: &str) -> bool {
     accounts
@@ -83,9 +93,10 @@ pub async fn get_user_followers(
     account_id: String,
     user_id: String,
     until_id: Option<String>,
-) -> Result<Vec<User>> {
+) -> Result<Vec<FollowListEntry>> {
     let client = state.client_for(&account_id)?;
-    api::users::followers(&client, &user_id, until_id.as_deref()).await
+    let entries = api::users::followers(&client, &user_id, until_id.as_deref()).await?;
+    Ok(entries.into_iter().map(|(user, cursor)| FollowListEntry { user, cursor }).collect())
 }
 
 /// フォロー中一覧（ページング）。
@@ -96,9 +107,10 @@ pub async fn get_user_following(
     account_id: String,
     user_id: String,
     until_id: Option<String>,
-) -> Result<Vec<User>> {
+) -> Result<Vec<FollowListEntry>> {
     let client = state.client_for(&account_id)?;
-    api::users::following(&client, &user_id, until_id.as_deref()).await
+    let entries = api::users::following(&client, &user_id, until_id.as_deref()).await?;
+    Ok(entries.into_iter().map(|(user, cursor)| FollowListEntry { user, cursor }).collect())
 }
 
 #[cfg(test)]

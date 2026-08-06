@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { User } from "../bindings/tauri.gen";
+  import type { FollowListEntry } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
   import { acct, displayName } from "../lib/userDisplay";
   import { openProfile } from "../lib/profileModal.svelte";
@@ -13,7 +13,7 @@
     onclose,
   }: { kind: "followers" | "following"; userId: string; accountId: string; onclose: () => void } = $props();
 
-  let users = $state<User[]>([]);
+  let users = $state<FollowListEntry[]>([]);
   let busy = $state(false);
   let done = $state(false);
   let err = $state<string | null>(null);
@@ -31,7 +31,7 @@
     err = null;
     const myGen = requestGen;
     try {
-      const untilId = users.length > 0 ? users[users.length - 1].id : undefined;
+      const untilId = users.length > 0 ? users[users.length - 1].cursor : undefined;
       const page =
         kind === "followers"
           ? await app.getUserFollowers(accountId, userId, untilId)
@@ -74,16 +74,16 @@
 <Modal title={kind === "followers" ? "フォロワー" : "フォロー中"} {onclose}>
   {#if err}<p class="err">{err}</p>{/if}
   <ul class="list">
-    {#each users as u (u.id)}
+    {#each users as entry (entry.user.id)}
       <li>
-        <button class="row" onclick={() => openProfile({ userId: u.id }, accountId)}>
-          {#if u.avatarUrl}
-            <img class="avatar" src={u.avatarUrl} alt="" />
+        <button class="row" onclick={() => openProfile({ userId: entry.user.id }, accountId)}>
+          {#if entry.user.avatarUrl}
+            <img class="avatar" src={entry.user.avatarUrl} alt="" />
           {:else}
             <div class="avatar placeholder"></div>
           {/if}
-          <span class="name">{displayName(u)}</span>
-          <span class="acct">{acct(u)}</span>
+          <span class="name">{displayName(entry.user)}</span>
+          <span class="acct">{acct(entry.user)}</span>
         </button>
       </li>
     {/each}

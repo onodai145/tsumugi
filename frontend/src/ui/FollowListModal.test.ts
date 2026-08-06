@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -38,13 +38,19 @@ function makeUser(id: string, username: string) {
   };
 }
 
+// users/followers・users/following はFollowingレコードのidでページングするため、
+// レスポンスは {user, cursor} のペア。cursor はユーザーIDとは別のFollowingレコードID。
+function makeEntry(userId: string, username: string, cursor: string) {
+  return { user: makeUser(userId, username), cursor };
+}
+
 // invokeMockは生成コードのtypedError()に渡される前のraw invoke()相当。
 // typedError側が{status:"ok",data:...}に包むため、ここでは生の戻り値のみを返す
 // ({status:"ok",data:...}でラップして返すと二重ラップになりコンポーネントが壊れた値を受け取る)。
 describe("FollowListModal", () => {
   it("kind=followersでget_user_followersを呼び一覧表示する", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_user_followers") return Promise.resolve([makeUser("u2", "bob")]);
+      if (cmd === "get_user_followers") return Promise.resolve([makeEntry("u2", "bob", "f2")]);
       return Promise.resolve(null);
     });
     const { getByText } = render(FollowListModal, {
@@ -79,10 +85,10 @@ describe("FollowListModal", () => {
   it("userId propが変わると新しいuserIdで再取得し、古い一覧を破棄する", async () => {
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "get_user_followers" && args?.userId === "u1") {
-        return Promise.resolve([makeUser("u2", "bob")]);
+        return Promise.resolve([makeEntry("u2", "bob", "f2")]);
       }
       if (cmd === "get_user_followers" && args?.userId === "u3") {
-        return Promise.resolve([makeUser("u4", "carol")]);
+        return Promise.resolve([makeEntry("u4", "carol", "f4")]);
       }
       return Promise.resolve(null);
     });
@@ -100,5 +106,30 @@ describe("FollowListModal", () => {
     );
     await waitFor(() => expect(getByText("carol")).toBeTruthy());
     expect(queryByText("bob")).toBeNull();
+  });
+
+  // 修正1の回帰テスト: users/followers・users/following はFollowingレコードのidで
+  // ページングする仕様のため、2ページ目のuntilIdにはユーザーID(u2)ではなく
+  // 1件目のcursor(f2)を送らなければならない。
+  it("もっと見るクリック時、untilIdにユーザーIDではなくFollowingレコードのcursorを送る", async () => {
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_user_followers" && args?.untilId == null) {
+        return Promise.resolve([makeEntry("u2", "bob", "f2")]);
+      }
+      if (cmd === "get_user_followers" && args?.untilId === "f2") {
+        return Promise.resolve([makeEntry("u5", "dave", "f5")]);
+      }
+      return Promise.resolve([]);
+    });
+    const { getByText } = render(FollowListModal, {
+      props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("bob")).toBeTruthy());
+    await fireEvent.click(getByText("もっと見る"));
+    await waitFor(() => expect(getByText("dave")).toBeTruthy());
+    expect(invokeMock).toHaveBeenCalledWith(
+      "get_user_followers",
+      expect.objectContaining({ accountId: "acc1", userId: "u1", untilId: "f2" }),
+    );
   });
 });

@@ -238,9 +238,9 @@ export const commands = {
 	 */
 	getUserNotes: (accountId: string, userId: string, untilId: string | null) => typedError<Note[], Error>(__TAURI_INVOKE("get_user_notes", { accountId, userId, untilId })),
 	/**  フォロワー一覧（ページング）。 */
-	getUserFollowers: (accountId: string, userId: string, untilId: string | null) => typedError<User[], Error>(__TAURI_INVOKE("get_user_followers", { accountId, userId, untilId })),
+	getUserFollowers: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_followers", { accountId, userId, untilId })),
 	/**  フォロー中一覧（ページング）。 */
-	getUserFollowing: (accountId: string, userId: string, untilId: string | null) => typedError<User[], Error>(__TAURI_INVOKE("get_user_following", { accountId, userId, untilId })),
+	getUserFollowing: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_following", { accountId, userId, untilId })),
 };
 
 /** Events */
@@ -454,6 +454,16 @@ export type FilterQuery =
 { kind: "keywords"; value: string[] } | 
 /**  Phase 4: TQL クエリ文字列（保存形）。 */
 { kind: "tql"; value: string };
+
+/**
+ *  フォロワー/フォロー中一覧の1件。`cursor` は次ページ取得時の `until_id` に使うFollowingレコード
+ *  自身のID（`user.id` ではない）。Misskeyの `users/followers` / `users/following` はFollowingレコード
+ *  のIDでページングするため、ユーザーIDをそのままカーソルに使うと2ページ目以降がずれる。
+ */
+export type FollowListEntry = {
+	user: User,
+	cursor: string,
+};
 
 export type LatestRelease = {
 	version: string,

@@ -3,6 +3,7 @@
   import type { ProfileTarget } from "../lib/profileModal.svelte";
   import { app } from "../lib/store.svelte";
   import { acct, displayName } from "../lib/userDisplay";
+  import { proxiedEmojiMap } from "../lib/emoji";
   import Modal from "./Modal.svelte";
   import Mfm from "../render/Mfm.svelte";
   import NoteCard from "./NoteCard.svelte";
@@ -10,6 +11,10 @@
 
   let { target, accountId, onclose }: { target: ProfileTarget; accountId: string; onclose: () => void } =
     $props();
+
+  // NoteCard.svelte と同じパターン: リモートユーザーのカスタム絵文字はaccountの接続先
+  // インスタンス経由のプロキシURLで解決する必要がある（生URLのままだと表示されないことがある）。
+  const instanceHost = $derived(app.accounts.find((a) => a.id === accountId)?.host);
 
   type ProfileState =
     | { status: "loading" }
@@ -20,6 +25,7 @@
   let notes = $state<Note[]>([]);
   let notesBusy = $state(false);
   let notesDone = $state(false);
+  let notesErr = $state<string | null>(null);
   let followBusy = $state(false);
   let followErr = $state<string | null>(null);
   let followListKind = $state<"followers" | "following" | null>(null);
@@ -46,6 +52,7 @@
     notes = [];
     notesDone = false;
     notesBusy = false;
+    notesErr = null;
     followErr = null;
     followListKind = null;
     try {
@@ -64,12 +71,16 @@
   async function loadMoreNotes(userId: string, myGen: number = requestGen) {
     if (notesBusy || notesDone) return;
     notesBusy = true;
+    notesErr = null;
     try {
       const untilId = notes.length > 0 ? notes[notes.length - 1].id : undefined;
       const page = await app.getUserNotes(accountId, userId, untilId);
       if (myGen !== requestGen) return; // 世代遅れの応答は profileState/notes に反映しない
       if (page.length === 0) notesDone = true;
       notes = [...notes, ...page];
+    } catch (e) {
+      if (myGen !== requestGen) return;
+      notesErr = String(e);
     } finally {
       if (myGen === requestGen) notesBusy = false;
     }
@@ -130,7 +141,10 @@
         <div class="avatar placeholder"></div>
       {/if}
       <div class="names">
-        <span class="name"><Mfm text={displayName(profile.user)} emojis={profile.user.emojis} simple /></span>
+        <span class="name"
+          ><Mfm text={displayName(profile.user)} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} simple
+          /></span
+        >
         <span class="acct">{acct(profile.user)}</span>
       </div>
       {#if !profile.isSelf}
@@ -141,7 +155,7 @@
     </div>
     {#if followErr}<p class="err">{followErr}</p>{/if}
     {#if profile.user.bio}
-      <p class="bio"><Mfm text={profile.user.bio} emojis={profile.user.emojis} /></p>
+      <p class="bio"><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p>
     {/if}
     <div class="stats">
       <!-- aria-label で明示: "フォロー中" の文字列を含む accessible name にすると
@@ -159,7 +173,10 @@
       {#each notes as note (note.id)}
         <NoteCard {note} {accountId} />
       {/each}
-      {#if !notesDone}
+      {#if notesErr}
+        <p class="err">{notesErr}</p>
+        <button onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</button>
+      {:else if !notesDone}
         <button onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>もっと見る</button>
       {/if}
     </div>
