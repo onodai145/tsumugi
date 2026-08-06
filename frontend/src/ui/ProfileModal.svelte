@@ -6,9 +6,7 @@
   import Modal from "./Modal.svelte";
   import Mfm from "../render/Mfm.svelte";
   import NoteCard from "./NoteCard.svelte";
-  // NOTE: フォロー中/フォロワー一覧モーダル(FollowListModal.svelte)はTask 13で作成予定。
-  // followListKind はここで統計ボタンのクリック状態を保持するが、Task 13でコンポーネントが
-  // 作成され次第この場所で描画を配線する。
+  import FollowListModal from "./FollowListModal.svelte";
 
   let { target, accountId, onclose }: { target: ProfileTarget; accountId: string; onclose: () => void } =
     $props();
@@ -165,6 +163,14 @@
         <button onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>もっと見る</button>
       {/if}
     </div>
+    {#if followListKind}
+      <FollowListModal
+        kind={followListKind}
+        userId={profile.user.id}
+        {accountId}
+        onclose={() => (followListKind = null)}
+      />
+    {/if}
   {/if}
 </Modal>
 
