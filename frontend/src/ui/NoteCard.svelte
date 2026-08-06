@@ -11,6 +11,7 @@
   import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
+  import { acct, displayName } from "../lib/userDisplay";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
@@ -220,10 +221,8 @@
   });
 
   let cwOpen = $state(false);
-  const displayName = (u: Note["user"]) => u.name ?? u.username;
   const VIS_ICON = { public: Globe, home: House, followers: Lock, specified: Mail } as const;
   const VIS_LABEL = { public: "公開", home: "ホーム", followers: "フォロワー", specified: "ダイレクト" } as const;
-  const acct = (u: Note["user"]) => (u.host ? `@${u.username}@${u.host}` : `@${u.username}`);
   // reactions: { key: count } を件数降順に
   const reactionList = $derived(
     Object.entries(inner.reactions).sort((a, b) => b[1] - a[1]),
