@@ -125,16 +125,16 @@
 
 <Modal title="プロフィール" {onclose}>
   {#if profileState.status === "loading"}
-    <p>読み込み中…</p>
+    <p class="hint">読み込み中…</p>
   {:else if profileState.status === "error"}
     <p class="err">{profileState.message}</p>
-    <button onclick={load}>再試行</button>
+    <button class="mini-btn" onclick={load}>再試行</button>
   {:else}
     {@const profile = profileState.profile}
     {#if profile.user.bannerUrl}
       <img class="banner" src={profile.user.bannerUrl} alt="" />
     {/if}
-    <div class="head">
+    <div class="head" class:with-banner={!!profile.user.bannerUrl}>
       {#if profile.user.avatarUrl}
         <img class="avatar" src={profile.user.avatarUrl} alt="" />
       {:else}
@@ -148,7 +148,12 @@
         <span class="acct">{acct(profile.user)}</span>
       </div>
       {#if !profile.isSelf}
-        <button onclick={toggleFollow} disabled={followBusy}>
+        <button
+          class="follow-btn"
+          class:following={profile.isFollowing}
+          onclick={toggleFollow}
+          disabled={followBusy}
+        >
           {profile.isFollowing ? "フォロー解除" : "フォロー"}
         </button>
       {/if}
@@ -160,24 +165,24 @@
     <div class="stats">
       <!-- aria-label で明示: "フォロー中" の文字列を含む accessible name にすると
            フォロー/フォロー解除トグルボタンを name=/フォロー/ で探すクエリと衝突するため -->
-      <button aria-label="following-count" onclick={() => (followListKind = "following")}
-        >フォロー中 {profile.user.followingCount}</button
-      >
-      <button aria-label="followers-count" onclick={() => (followListKind = "followers")}
-        >フォロワー {profile.user.followersCount}</button
-      >
-      <span>ノート {profile.user.notesCount}</span>
+      <button class="stat-btn" aria-label="following-count" onclick={() => (followListKind = "following")}>
+        <strong>{profile.user.followingCount}</strong> フォロー中
+      </button>
+      <button class="stat-btn" aria-label="followers-count" onclick={() => (followListKind = "followers")}>
+        <strong>{profile.user.followersCount}</strong> フォロワー
+      </button>
+      <span class="stat-static"><strong>{profile.user.notesCount}</strong> ノート</span>
     </div>
-    <button onclick={addAsColumn}>カラムとして追加</button>
+    <button class="mini-btn add-column-btn" onclick={addAsColumn}>カラムとして追加</button>
     <div class="notes">
       {#each notes as note (note.id)}
         <NoteCard {note} {accountId} />
       {/each}
       {#if notesErr}
         <p class="err">{notesErr}</p>
-        <button onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</button>
+        <button class="mini-btn" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</button>
       {:else if !notesDone}
-        <button onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>もっと見る</button>
+        <button class="mini-btn" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>もっと見る</button>
       {/if}
     </div>
     {#if followListKind}
@@ -192,48 +197,148 @@
 </Modal>
 
 <style>
+  .hint {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
   .banner {
-    width: 100%;
+    display: block;
+    width: calc(100% + 32px);
     aspect-ratio: 3 / 1;
     object-fit: cover;
-    border-radius: 8px;
+    border-radius: 6px;
+    margin: 0 -16px;
   }
   .head {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: flex-end;
+    gap: 10px;
     margin-top: 8px;
   }
+  .head.with-banner {
+    margin-top: -22px;
+    padding-left: 4px;
+  }
   .avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
     object-fit: cover;
+    flex: none;
+    border: 2px solid var(--surface-1);
   }
   .avatar.placeholder {
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   }
   .names {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-width: 0;
+    gap: 1px;
+  }
+  .name {
+    font-weight: 600;
+    font-size: 0.95rem;
   }
   .acct {
     color: var(--text-dim);
-    font-size: 0.85em;
+    font-size: 0.78rem;
+  }
+  .follow-btn {
+    flex: none;
+    padding: 6px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .follow-btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .follow-btn.following {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .follow-btn.following:hover:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  .follow-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .bio {
+    margin: 10px 0 0;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .stats {
     display: flex;
-    gap: 12px;
-    margin: 8px 0;
+    gap: 4px;
+    margin: 10px 0 0;
+  }
+  .stat-btn {
+    padding: 3px 6px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .stat-btn:hover {
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
+    color: var(--text);
+  }
+  .stat-btn strong,
+  .stat-static strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .stat-static {
+    padding: 3px 6px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+  .add-column-btn {
+    margin-top: 10px;
   }
   .err {
-    color: var(--danger, #d33);
+    margin: 8px 0;
+    color: var(--danger);
+    font-size: 0.82rem;
   }
   .notes {
     max-height: 40vh;
     overflow-y: auto;
-    margin-top: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .mini-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .mini-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  .mini-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

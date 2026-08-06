@@ -82,14 +82,16 @@
           {:else}
             <div class="avatar placeholder"></div>
           {/if}
-          <span class="name">{displayName(entry.user)}</span>
-          <span class="acct">{acct(entry.user)}</span>
+          <span class="user-info">
+            <span class="name">{displayName(entry.user)}</span>
+            <span class="acct">{acct(entry.user)}</span>
+          </span>
         </button>
       </li>
     {/each}
   </ul>
   {#if !done}
-    <button onclick={loadMore} disabled={busy}>もっと見る</button>
+    <button class="mini-btn" onclick={loadMore} disabled={busy}>もっと見る</button>
   {/if}
 </Modal>
 
@@ -106,26 +108,66 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    padding: 6px 0;
+    padding: 6px 4px;
     background: none;
     border: none;
+    border-radius: 6px;
     cursor: pointer;
     text-align: left;
   }
+  .row:hover {
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
+  }
   .avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
     object-fit: cover;
+    flex: none;
   }
   .avatar.placeholder {
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
+  }
+  .user-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+  }
+  .name {
+    font-weight: 600;
+    font-size: 0.86rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .acct {
     color: var(--text-dim);
-    font-size: 0.85em;
+    font-size: 0.76rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .err {
-    color: var(--danger, #d33);
+    margin: 0 0 8px;
+    color: var(--danger);
+    font-size: 0.82rem;
+  }
+  .mini-btn {
+    margin-top: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .mini-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  .mini-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>
