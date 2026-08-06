@@ -6,6 +6,7 @@ pub mod clip;
 pub mod column;
 pub mod mute;
 pub mod note;
+pub mod user;
 
 // lib.rs は commands::<mod>::* をフルパス参照するため、この再エクスポートは今は未使用。
 #[allow(unused_imports)]
