@@ -510,6 +510,7 @@ export type NoteDraft_Deserialize = {
 	poll: PollInput_Deserialize | null,
 	replyId: string | null,
 	renoteId: string | null,
+	channelId: string | null,
 	localOnly?: boolean,
 };
 
@@ -522,6 +523,7 @@ export type NoteDraft_Serialize = {
 	poll?: PollInput_Serialize | null,
 	replyId?: string | null,
 	renoteId?: string | null,
+	channelId?: string | null,
 	localOnly: boolean,
 };
 

@@ -3,7 +3,10 @@
   import type { Component } from "svelte";
   import { Globe, House, Lock, Mail } from "@lucide/svelte";
 
-  let { value = $bindable() }: { value: VisibilityInput } = $props();
+  let {
+    value = $bindable(),
+    disabled = false,
+  }: { value: VisibilityInput; disabled?: boolean } = $props();
 
   const OPTIONS: { v: VisibilityInput; label: string; icon: Component; desc: string }[] = [
     { v: "public", label: "公開", icon: Globe, desc: "誰でも見られます" },
@@ -12,7 +15,9 @@
     { v: "specified", label: "ダイレクト", icon: Mail, desc: "指定した相手のみ" },
   ];
 
-  const current = $derived(OPTIONS.find((o) => o.v === value) ?? OPTIONS[0]);
+  // disabled中(チャンネル投稿選択中など)はサーバー側で強制される "公開" を表示する。
+  // value 自体は上書きしない(disabled解除で元の選択に戻すため)。
+  const current = $derived(OPTIONS.find((o) => o.v === (disabled ? "public" : value)) ?? OPTIONS[0]);
 
   let open = $state(false);
   let trigger = $state<HTMLElement | null>(null);
@@ -21,6 +26,7 @@
   const MENU_H = 200;
 
   function toggle() {
+    if (disabled) return;
     if (open) {
       open = false;
       return;
@@ -51,6 +57,7 @@
   onclick={toggle}
   title={`公開範囲: ${current.label}`}
   type="button"
+  disabled={disabled}
 >
   <span class="ico"><current.icon size={14} /></span>
   <span class="label">{current.label}</span>
@@ -94,6 +101,13 @@
   }
   .trigger:hover {
     border-color: var(--accent);
+  }
+  .trigger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .trigger:disabled:hover {
+    border-color: var(--border);
   }
   .ico {
     display: inline-flex;

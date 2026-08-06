@@ -35,6 +35,8 @@ pub struct NoteDraft {
     pub reply_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub renote_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
     #[serde(default)]
     pub local_only: bool,
 }
@@ -201,8 +203,22 @@ mod tests {
         assert!(v.get("cw").is_none());
         assert!(v.get("replyId").is_none());
         assert!(v.get("renoteId").is_none());
+        assert!(v.get("channelId").is_none());
         // 空の fileIds は送らない
         assert!(v.get("fileIds").is_none());
+    }
+
+    #[test]
+    fn channel_post_serializes_channel_id() {
+        let d = NoteDraft {
+            text: Some("channel post".into()),
+            channel_id: Some("ch1".into()),
+            visibility: VisibilityInput::Public,
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&d).unwrap();
+        assert_eq!(v["text"], "channel post");
+        assert_eq!(v["channelId"], "ch1");
     }
 
     #[test]

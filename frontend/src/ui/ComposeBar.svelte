@@ -22,6 +22,7 @@
     VisibilityInput,
     DriveFile,
     Note,
+    SourceItem,
   } from "../bindings/tauri.gen";
 
   // expanded: モバイルの投稿モーダルなど、常に複数行分の入力欄を確保したい文脈向け
@@ -41,6 +42,20 @@
   let cw = $state("");
   let useCw = $state(false);
   let visibility = $state<VisibilityInput>("public");
+  let useChannel = $state(false);
+  let channelId = $state("");
+  let channels = $state<SourceItem[]>([]);
+  let channelsLoading = $state(false);
+  let channelsError = $state(false);
+  // 選択中チャンネルが取得済み一覧に含まれない場合(未フォローチャンネルへの返信など)、
+  // 表示名は分からないがIDだけで選択済み扱いにするための合成オプションを補う。
+  // (Dropdown は options.find(o => o.value === value) で一致を探すため、
+  //  補わないと「選択…」のまま表示され、開いて別チャンネルへ誤って切り替えてしまう)
+  const channelOptions = $derived(
+    channelId && !channels.some((c) => c.id === channelId)
+      ? [...channels.map((c) => ({ value: c.id, label: c.name || c.id })), { value: channelId, label: channelId }]
+      : channels.map((c) => ({ value: c.id, label: c.name || c.id })),
+  );
   let localOnly = $state(false);
   const MAX_POLL_CHOICES = 10;
   let usePoll = $state(false);
@@ -232,6 +247,31 @@
     if (accountId) app.loadEmojis(accountId).catch(() => {});
   });
 
+  // チャンネル投稿トグルON時、フォロー中チャンネル一覧を取得する
+  $effect(() => {
+    if (useChannel && accountId) {
+      channelsLoading = true;
+      channelsError = false;
+      app
+        .fetchChannels(accountId)
+        .then((l) => {
+          channels = l;
+        })
+        .catch(() => {
+          channelsError = true;
+        })
+        .finally(() => {
+          channelsLoading = false;
+        });
+    }
+  });
+
+  // アカウント切替時にchannelIdをリセットする処理(下の別effect)が、返信/引用コンテキストの
+  // 自動選択を誤って打ち消さないようにするための「最後にaccountId+channelIdを同期し終えた
+  // アカウント」の記録。$stateにせず素のクロージャ変数にすることで、この値自体の変化が
+  // リアクティブな再実行トリガーにならないようにしている。
+  let lastSyncedAccountId: string | null = null;
+
   // 返信/引用/新規投稿ショートカット・ボタンからの「開く」要求を消費してこのバーへ反映する。
   // app.compose は一過性のシグナルとして扱い、消費後すぐ null に戻す（次の要求も同じ形で届くため）。
   $effect(() => {
@@ -245,6 +285,12 @@
     }
     replyTo = c.replyTo;
     quoteOf = c.quoteOf;
+    const contextChannelId = c.replyTo?.channelId ?? c.quoteOf?.channelId ?? null;
+    useChannel = contextChannelId !== null;
+    channelId = contextChannelId ?? "";
+    // accountIdとchannelIdをこのeffectが一体で同期したことを記録する
+    // (下のアカウント切替リセットeffectが、この直後にchannelIdを"" に巻き戻さないように)。
+    lastSyncedAccountId = accountId;
     // 返信先の @acct を本文へ自動挿入する（本家Misskeyクライアント準拠）。
     // 未入力の時だけ差し込み、既に何か書きかけている場合は上書きしない。
     if (c.replyTo && !text.trim()) {
@@ -252,6 +298,19 @@
     }
     app.compose = null;
     textarea?.focus();
+  });
+
+  // アカウントが(上記の返信/引用同期以外の理由で、例えばアカウント選択欄からの手動切替で)
+  // 変わった場合は、他アカウントのチャンネルIDを持ち越さないようリセットする。
+  $effect(() => {
+    if (accountId !== lastSyncedAccountId) {
+      channelId = "";
+      // 別アカウントのチャンネル一覧を再取得(下のfetchChannels effect)が終わるまでの間、
+      // 前アカウントの一覧を表示し続けて誤選択を招かないようクリアしておく。
+      channels = [];
+      channelsError = false;
+      lastSyncedAccountId = accountId;
+    }
   });
 
   function acctOf(u: Note["user"]): string {
@@ -351,6 +410,10 @@
       err = "アカウントを選択してください";
       return;
     }
+    if (useChannel && !channelId) {
+      err = "チャンネルを選択してください";
+      return;
+    }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
     if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
     let expiresAt: number | null = null;
@@ -391,7 +454,8 @@
         poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt } : null,
         replyId: replyTo?.id ?? null,
         renoteId: quoteOf?.id ?? null,
-        localOnly,
+        channelId: useChannel && channelId ? channelId : null,
+        localOnly: useChannel || localOnly,
       };
       await app.postNote(accountId, draft);
       text = "";
@@ -405,6 +469,8 @@
       pollAfterAmount = 1;
       pollAfterUnit = "hour";
       localOnly = false;
+      useChannel = false;
+      channelId = "";
       attachments = [];
       replyTo = undefined;
       quoteOf = undefined;
@@ -629,7 +695,7 @@
 
   <div class="toolbar">
     <div class="tools left">
-      <VisibilitySelect bind:value={visibility} />
+      <VisibilitySelect bind:value={visibility} disabled={useChannel} />
       <button
         class="icon"
         title="画像を添付"
@@ -639,7 +705,28 @@
       ><ImagePlus size={16} /></button>
       <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
-      <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
+      <button class="mini" class:active={useChannel} onclick={() => (useChannel = !useChannel)}>チャンネル</button>
+      {#if useChannel}
+        {#if channelsLoading}
+          <span class="lo">読み込み中…</span>
+        {:else if channelsError}
+          <span class="lo">読み込みに失敗しました</span>
+        {:else if channelOptions.length > 0}
+          <div class="channel-select">
+            <Dropdown bind:value={channelId} options={channelOptions} />
+          </div>
+        {:else}
+          <span class="lo">フォロー中のチャンネルがありません</span>
+        {/if}
+      {/if}
+      <label class="lo">
+        <input
+          type="checkbox"
+          checked={useChannel || localOnly}
+          disabled={useChannel}
+          onchange={(e) => (localOnly = e.currentTarget.checked)}
+        /> 連合なし
+      </label>
     </div>
     <div class="tools right">
       <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
@@ -823,6 +910,14 @@
   .poll {
     display: flex;
     flex-direction: column;
+    gap: 5px;
+  }
+  .channel-select {
+    width: 140px;
+  }
+  .channel-select :global(.trigger) {
+    padding: 5px 8px;
+    font-size: 0.82rem;
     gap: 5px;
   }
   .poll-choice-row {
