@@ -226,6 +226,21 @@ export const commands = {
 	createClip: (accountId: string, name: string) => typedError<Clip, Error>(__TAURI_INVOKE("create_clip", { accountId, name })),
 	/**  ノートをクリップへ追加する。 */
 	addNoteToClip: (accountId: string, clipId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("add_note_to_clip", { accountId, clipId, noteId })),
+	/**  ユーザープロフィール（bio/バナー/フォロー関係フラグ込み）を取得する。 */
+	getUserProfile: (accountId: string, userId: string) => typedError<UserProfile, Error>(__TAURI_INVOKE("get_user_profile", { accountId, userId })),
+	/**  フォローする。 */
+	followUser: (accountId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("follow_user", { accountId, userId })),
+	/**  フォロー解除する。 */
+	unfollowUser: (accountId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("unfollow_user", { accountId, userId })),
+	/**
+	 *  プロフィールモーダルに埋め込むノート一覧。既存の `ColumnKind::User` と同じ
+	 *  `users/notes` エンドポイントを使う（カラムとして常設せず、都度取得する）。
+	 */
+	getUserNotes: (accountId: string, userId: string, untilId: string | null) => typedError<Note[], Error>(__TAURI_INVOKE("get_user_notes", { accountId, userId, untilId })),
+	/**  フォロワー一覧（ページング）。 */
+	getUserFollowers: (accountId: string, userId: string, untilId: string | null) => typedError<User[], Error>(__TAURI_INVOKE("get_user_followers", { accountId, userId, untilId })),
+	/**  フォロー中一覧（ページング）。 */
+	getUserFollowing: (accountId: string, userId: string, untilId: string | null) => typedError<User[], Error>(__TAURI_INVOKE("get_user_following", { accountId, userId, untilId })),
 };
 
 /** Events */
@@ -760,12 +775,23 @@ export type User = {
 	 *  既存キャッシュ済みJSON(このフィールド追加前に保存されたもの)との後方互換のため default。
 	 */
 	emojis?: { [key in string]: string },
+	/**  自己紹介（Misskeyの`description`）。UserLiteコンテキスト（ノート本文の著者等）では取得されない。 */
+	bio?: string | null,
+	/**  バナー画像URL。同上、UserLiteコンテキストでは取得されない。 */
+	bannerUrl?: string | null,
 };
 
 /**  ユーザリスト（List カラムのソース選択用）。 */
 export type UserList = {
 	id: string,
 	name: string,
+};
+
+/**  プロフィールモーダル用のレスポンス。`is_following` は自分自身の場合 `None`。 */
+export type UserProfile = {
+	user: User,
+	isFollowing: boolean | null,
+	isSelf: boolean,
 };
 
 /**  Specified = direct */

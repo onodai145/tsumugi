@@ -29,3 +29,8 @@ pub use note::{
 };
 #[allow(unused_imports)]
 pub use mute::{get_mute, get_notify, set_mute, set_notify};
+#[allow(unused_imports)]
+pub use user::{
+    follow_user, get_user_followers, get_user_following, get_user_notes, get_user_profile,
+    unfollow_user, UserProfile,
+};
