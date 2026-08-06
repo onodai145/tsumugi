@@ -30,6 +30,11 @@ pub struct RawUser {
     /// 表示名(`name`)中のカスタム絵文字 {name: url}。
     #[serde(default)]
     pub emojis: HashMap<String, String>,
+    /// Misskey側のフィールド名は `description`。UserDetailed系レスポンスにのみ存在。
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub banner_url: Option<String>,
 }
 
 impl From<RawUser> for User {
@@ -46,8 +51,8 @@ impl From<RawUser> for User {
             following_count: r.following_count,
             notes_count: r.notes_count,
             emojis: r.emojis,
-            bio: None,
-            banner_url: None,
+            bio: r.description,
+            banner_url: r.banner_url,
         }
     }
 }
@@ -383,5 +388,32 @@ mod tests {
         assert_eq!(u.acct(), "@bob@remote.example");
         assert_eq!(u.followers_count, 12);
         assert!(u.is_cat);
+    }
+
+    #[test]
+    fn raw_user_maps_description_to_bio_and_carries_banner_url() {
+        let json = r#"{
+            "id":"u1","username":"alice","host":null,"name":"Alice",
+            "avatarUrl":null,"isBot":false,"isCat":false,
+            "followersCount":0,"followingCount":0,"notesCount":0,
+            "description":"hello world","bannerUrl":"https://example.com/banner.png"
+        }"#;
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        let user: User = raw.into();
+        assert_eq!(user.bio, Some("hello world".to_string()));
+        assert_eq!(user.banner_url, Some("https://example.com/banner.png".to_string()));
+    }
+
+    #[test]
+    fn raw_user_without_description_or_banner_defaults_to_none() {
+        let json = r#"{
+            "id":"u1","username":"alice","host":null,"name":"Alice",
+            "avatarUrl":null,"isBot":false,"isCat":false,
+            "followersCount":0,"followingCount":0,"notesCount":0
+        }"#;
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        let user: User = raw.into();
+        assert_eq!(user.bio, None);
+        assert_eq!(user.banner_url, None);
     }
 }
