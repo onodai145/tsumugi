@@ -45,6 +45,8 @@
   let useChannel = $state(false);
   let channelId = $state("");
   let channels = $state<SourceItem[]>([]);
+  let channelsLoading = $state(false);
+  let channelsError = $state(false);
   // 選択中チャンネルが取得済み一覧に含まれない場合(未フォローチャンネルへの返信など)、
   // 表示名は分からないがIDだけで選択済み扱いにするための合成オプションを補う。
   // (Dropdown は options.find(o => o.value === value) で一致を探すため、
@@ -248,12 +250,19 @@
   // チャンネル投稿トグルON時、フォロー中チャンネル一覧を取得する
   $effect(() => {
     if (useChannel && accountId) {
+      channelsLoading = true;
+      channelsError = false;
       app
         .fetchChannels(accountId)
         .then((l) => {
           channels = l;
         })
-        .catch((e) => (err = String(e)));
+        .catch(() => {
+          channelsError = true;
+        })
+        .finally(() => {
+          channelsLoading = false;
+        });
     }
   });
 
@@ -299,6 +308,7 @@
       // 別アカウントのチャンネル一覧を再取得(下のfetchChannels effect)が終わるまでの間、
       // 前アカウントの一覧を表示し続けて誤選択を招かないようクリアしておく。
       channels = [];
+      channelsError = false;
       lastSyncedAccountId = accountId;
     }
   });
@@ -445,7 +455,7 @@
         replyId: replyTo?.id ?? null,
         renoteId: quoteOf?.id ?? null,
         channelId: useChannel && channelId ? channelId : null,
-        localOnly,
+        localOnly: useChannel || localOnly,
       };
       await app.postNote(accountId, draft);
       text = "";
@@ -685,9 +695,7 @@
 
   <div class="toolbar">
     <div class="tools left">
-      {#if !useChannel}
-        <VisibilitySelect bind:value={visibility} />
-      {/if}
+      <VisibilitySelect bind:value={visibility} disabled={useChannel} />
       <button
         class="icon"
         title="画像を添付"
@@ -699,13 +707,26 @@
       <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
       <button class="mini" class:active={useChannel} onclick={() => (useChannel = !useChannel)}>チャンネル</button>
       {#if useChannel}
-        {#if channelOptions.length > 0}
-          <Dropdown bind:value={channelId} options={channelOptions} />
+        {#if channelsLoading}
+          <span class="lo">読み込み中…</span>
+        {:else if channelsError}
+          <span class="lo">読み込みに失敗しました</span>
+        {:else if channelOptions.length > 0}
+          <div class="channel-select">
+            <Dropdown bind:value={channelId} options={channelOptions} />
+          </div>
         {:else}
           <span class="lo">フォロー中のチャンネルがありません</span>
         {/if}
       {/if}
-      <label class="lo"><input type="checkbox" bind:checked={localOnly} /> 連合なし</label>
+      <label class="lo">
+        <input
+          type="checkbox"
+          checked={useChannel || localOnly}
+          disabled={useChannel}
+          onchange={(e) => (localOnly = e.currentTarget.checked)}
+        /> 連合なし
+      </label>
     </div>
     <div class="tools right">
       <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
@@ -889,6 +910,14 @@
   .poll {
     display: flex;
     flex-direction: column;
+    gap: 5px;
+  }
+  .channel-select {
+    width: 140px;
+  }
+  .channel-select :global(.trigger) {
+    padding: 5px 8px;
+    font-size: 0.82rem;
     gap: 5px;
   }
   .poll-choice-row {
