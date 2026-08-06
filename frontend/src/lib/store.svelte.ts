@@ -374,6 +374,12 @@ class AppStore {
     this.error = msg;
     this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
   }
+  /// Backstage へは記録するが、バナー表示はしない。呼び出し元が自前のエラーUIを持つ場合に使う
+  /// （#failをそのまま使うと、コンポーネント内表示と投稿欄下のバナーにエラーが二重に出てしまう）。
+  #logFailure(e: unknown) {
+    const msg = String(e);
+    this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
+  }
   clearLogs() {
     this.logs = [];
   }
@@ -1089,38 +1095,67 @@ class AppStore {
   }
 
   // 以下6メソッドは呼び出し元(ProfileModal/FollowListModal)が自前のエラー表示を持つため、
-  // resolveUser等と異なり this.#fail() は呼ばない（呼ぶとコンポーネント内のエラー表示と
-  // 投稿欄下のグローバルエラーバナーに同じエラーが二重に出てしまう）。失敗はそのまま
-  // 呼び出し元へ伝播させる。
+  // resolveUser等と異なり this.#fail()（バナー表示）は呼ばない。Backstageへの記録はしつつ、
+  // 失敗はそのまま呼び出し元へ伝播させ、表示はコンポーネント内のエラーUIのみに一本化する。
 
   /// プロフィールモーダル用: ユーザー詳細(bio/バナー/フォロー関係)を取得する。
   async getUserProfile(accountId: string, userId: string) {
-    return await unwrapAcc(accountId, commands.getUserProfile(accountId, userId));
+    try {
+      return await unwrapAcc(accountId, commands.getUserProfile(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
   }
 
   /// フォローする。
   async followUser(accountId: string, userId: string) {
-    await unwrapAcc(accountId, commands.followUser(accountId, userId));
+    try {
+      await unwrapAcc(accountId, commands.followUser(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
   }
 
   /// フォロー解除する。
   async unfollowUser(accountId: string, userId: string) {
-    await unwrapAcc(accountId, commands.unfollowUser(accountId, userId));
+    try {
+      await unwrapAcc(accountId, commands.unfollowUser(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
   }
 
   /// プロフィールモーダルに埋め込むノート一覧。
   async getUserNotes(accountId: string, userId: string, untilId?: string) {
-    return await unwrapAcc(accountId, commands.getUserNotes(accountId, userId, untilId ?? null));
+    try {
+      return await unwrapAcc(accountId, commands.getUserNotes(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
   }
 
   /// フォロワー一覧。
   async getUserFollowers(accountId: string, userId: string, untilId?: string) {
-    return await unwrapAcc(accountId, commands.getUserFollowers(accountId, userId, untilId ?? null));
+    try {
+      return await unwrapAcc(accountId, commands.getUserFollowers(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
   }
 
   /// フォロー中一覧。
   async getUserFollowing(accountId: string, userId: string, untilId?: string) {
-    return await unwrapAcc(accountId, commands.getUserFollowing(accountId, userId, untilId ?? null));
+    try {
+      return await unwrapAcc(accountId, commands.getUserFollowing(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
   }
 
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
