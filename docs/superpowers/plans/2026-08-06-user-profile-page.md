@@ -672,18 +672,20 @@ pub use user::{
 
 - [ ] **Step 2: `lib.rs` の `specta_builder()` に登録**
 
-`src-tauri/src/lib.rs` の `specta_builder()` 内、既存の `commands::mute::...` 等が並んでいる `.commands(tauri_specta::collect_commands![...])` マクロ呼び出しを見つけ、その引数リストに以下を追加する（既存コマンドと同じカンマ区切りの並びに揃える）:
+`specta_builder()` は `.commands(collect_commands![...])` の1箇所だけでコマンドを列挙しており（`tauri::generate_handler!` の並行登録は無い。invoke_handlerへの登録は `specta_builder()` の戻り値を経由して行われるため、ここに追加するだけでTSエクスポートと実行時ハンドラ登録の両方に反映される）、`src-tauri/src/lib.rs:22-97` の `collect_commands![` マクロの引数リストの末尾（`commands::clip::add_note_to_clip,` の直後、`])` の直前）に追加する:
 
 ```rust
-        commands::user::get_user_profile,
-        commands::user::follow_user,
-        commands::user::unfollow_user,
-        commands::user::get_user_notes,
-        commands::user::get_user_followers,
-        commands::user::get_user_following,
+            commands::clip::list_clips,
+            commands::clip::create_clip,
+            commands::clip::add_note_to_clip,
+            commands::user::get_user_profile,
+            commands::user::follow_user,
+            commands::user::unfollow_user,
+            commands::user::get_user_notes,
+            commands::user::get_user_followers,
+            commands::user::get_user_following,
+        ])
 ```
-
-同じファイル内で `tauri::generate_handler![...]` にも同じコマンド一覧が並んでいる箇所があれば、同様に追加する（`specta_builder()` 呼び出し元付近を確認し、Tauri起動時のハンドラ登録とspectaのTSエクスポート対象の両方に同じコマンドが列挙されているのが既存パターン）。
 
 - [ ] **Step 3: TSバインディングを再生成して確認**
 
@@ -1069,6 +1071,7 @@ git commit -m "feat: AppStoreにプロフィール取得・フォロー操作メ
 ```ts
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/svelte";
+import type { Note } from "../bindings/tauri.gen";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -1158,6 +1161,43 @@ describe("ProfileModal", () => {
       ),
     );
   });
+
+  it("target propが変わったら前のユーザーのノート一覧を引き継がない", async () => {
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_user_profile") {
+        const userId = args?.userId;
+        return Promise.resolve({
+          status: "ok",
+          data: profileResponse({ user: { ...profileResponse().user, id: userId, username: userId } }),
+        });
+      }
+      if (cmd === "get_user_notes") return Promise.resolve({ status: "ok", data: [{ id: "n1" } as Note] });
+      return Promise.resolve({ status: "ok", data: null });
+    });
+    const { rerender, getByText } = render(ProfileModal, {
+      props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("u1")).toBeTruthy());
+    invokeMock.mockClear();
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_user_profile") {
+        const userId = args?.userId;
+        return Promise.resolve({
+          status: "ok",
+          data: profileResponse({ user: { ...profileResponse().user, id: userId, username: userId } }),
+        });
+      }
+      if (cmd === "get_user_notes") return Promise.resolve({ status: "ok", data: [] });
+      return Promise.resolve({ status: "ok", data: null });
+    });
+    await rerender({ target: { userId: "u2" }, accountId: "acc1", onclose: () => {} });
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "get_user_notes",
+        expect.objectContaining({ userId: "u2", untilId: null }),
+      ),
+    );
+  });
 });
 ```
 
@@ -1205,7 +1245,14 @@ Expected: FAIL（`./ProfileModal.svelte` が存在しない）
   }
 
   async function load() {
+    // target が変わって同じコンポーネントインスタンスが再利用されるケース（FollowListModalの
+    // 行クリック→openProfile→App.svelte側propsのみ更新）があるため、前のユーザーの状態を必ず捨てる。
     state = { status: "loading" };
+    notes = [];
+    notesDone = false;
+    notesBusy = false;
+    followErr = null;
+    followListKind = null;
     try {
       const userId = await resolveUserId();
       const profile = await app.getUserProfile(accountId, userId);
@@ -1305,7 +1352,7 @@ Expected: FAIL（`./ProfileModal.svelte` が存在しない）
     <button onclick={addAsColumn}>カラムとして追加</button>
     <div class="notes">
       {#each notes as note (note.id)}
-        <NoteCard {note} />
+        <NoteCard {note} {accountId} />
       {/each}
       {#if !notesDone}
         <button onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>もっと見る</button>
@@ -1818,7 +1865,7 @@ Run: `cargo tauri dev`（**`cargo run` や `./target/debug/tsumugi` を直接実
 - [ ] **Step 2: 動作確認項目**
 
 1. タイムライン上のノートのアバター、または表示名/acctをクリック → プロフィールモーダルが開き、バナー・アバター・bio・フォロー統計・ノート一覧が表示される。
-2. 他人のプロフィールでフォロー/フォロー解除ボタンが動作する（Misskeyサーバー側の実フォロー状態が変わることを確認）。
+2. 他人のプロフィールでフォロー/フォロー解除ボタンが動作する（Misskeyサーバー側の実フォロー状態が変わることを確認）。**実サーバーに繋ぐ場合、フォロー対象は自分のサブアカウント等にすること — 見知らぬ他人を実際にフォローしてしまわないよう注意し、確認後は必ずフォロー解除で元に戻す。**
 3. 自分自身のノートのアバターをクリック → フォローボタンが表示されない。
 4. ノート本文中の `@mention` をクリック → 該当ユーザーのプロフィールモーダルが開く（ローカル・リモート両方）。
 5. 「フォロー中」「フォロワー」の数字をクリック → 一覧モーダルが開き、行クリックでさらにそのユーザーのプロフィールに遷移する。
@@ -1835,3 +1882,4 @@ Run: `cargo tauri dev`（**`cargo run` や `./target/debug/tsumugi` を直接実
 - **Spec coverage:** spec の全項目（bio/banner表示、フォロー中/フォロワー数・ボタン、自分自身は非表示、埋め込みノート一覧、カラム追加導線、フォロー中/フォロワー一覧、NoteCard/mention両方の起点）に対応するタスクあり。
 - **Placeholder scan:** TBD/TODO等なし。全ステップに実コードあり。
 - **Type consistency:** `UserProfile { user: User; isFollowing: boolean | null; isSelf: boolean }`（TS側camelCase化後）を Task 5 で定義し、Task 12 のProfileModalで一貫して使用。`ProfileTarget` は Task 10 で定義し Task 12-14 で一貫して使用。
+- **advisorレビュー反映済み:** (1) `ProfileModal.load()` が `notes`/`notesDone`/`followListKind` 等をリセットしていなかった不具合を修正（FollowListModal経由でtargetが変わっても前ユーザーの状態が残るバグ）、リグレッションテストも追加。(2) Task 8 は `lib.rs:22-97` の実コードを確認した上で正確な追記位置に修正（`generate_handler!` の並行登録は存在しない）。(3) 埋め込みノート一覧の `NoteCard` に `accountId` を渡すよう修正（渡し忘れると返信/リアクション操作ができない読み取り専用表示になってしまう）。(4) Task 15 に実サーバーでの誤フォロー防止の注意書きを追加。
