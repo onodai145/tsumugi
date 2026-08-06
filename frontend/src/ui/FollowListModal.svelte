@@ -98,20 +98,22 @@
 <style>
   .list {
     list-style: none;
-    margin: 0;
+    margin: 4px -16px 0;
     padding: 0;
-    max-height: 50vh;
+    max-height: 55vh;
     overflow-y: auto;
+  }
+  li + li {
+    border-top: 1px solid var(--border);
   }
   .row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
-    padding: 6px 4px;
+    padding: 9px 16px;
     background: none;
     border: none;
-    border-radius: 6px;
     cursor: pointer;
     text-align: left;
   }
@@ -119,9 +121,9 @@
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
   }
   .avatar {
-    width: 34px;
-    height: 34px;
-    border-radius: 6px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
     object-fit: cover;
     flex: none;
   }
@@ -132,18 +134,18 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    gap: 1px;
+    gap: 2px;
   }
   .name {
     font-weight: 600;
-    font-size: 0.86rem;
+    font-size: 0.88rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .acct {
     color: var(--text-dim);
-    font-size: 0.76rem;
+    font-size: 0.78rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
