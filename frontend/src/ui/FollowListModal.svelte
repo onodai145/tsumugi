@@ -3,8 +3,10 @@
   import type { FollowListEntry } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
   import { acct, displayName } from "../lib/userDisplay";
+  import { proxiedEmojiMap } from "../lib/emoji";
   import { openProfile } from "../lib/profileModal.svelte";
   import Modal from "./Modal.svelte";
+  import Mfm from "../render/Mfm.svelte";
 
   let {
     kind,
@@ -12,6 +14,10 @@
     accountId,
     onclose,
   }: { kind: "followers" | "following"; userId: string; accountId: string; onclose: () => void } = $props();
+
+  // ProfileModal/NoteCard と同じパターン: リモートユーザーのカスタム絵文字はaccountの
+  // 接続先インスタンス経由のプロキシURLで解決する必要がある。
+  const instanceHost = $derived(app.accounts.find((a) => a.id === accountId)?.host);
 
   let users = $state<FollowListEntry[]>([]);
   let busy = $state(false);
@@ -83,7 +89,13 @@
             <div class="avatar placeholder"></div>
           {/if}
           <span class="user-info">
-            <span class="name">{displayName(entry.user)}</span>
+            <span class="name"
+              ><Mfm
+                text={displayName(entry.user)}
+                emojis={proxiedEmojiMap(entry.user.emojis, instanceHost)}
+                simple
+              /></span
+            >
             <span class="acct">{acct(entry.user)}</span>
           </span>
         </button>
@@ -114,8 +126,10 @@
     padding: 9px 16px;
     background: none;
     border: none;
+    color: var(--text);
     cursor: pointer;
     text-align: left;
+    font-family: inherit;
   }
   .row:hover {
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
@@ -123,7 +137,7 @@
   .avatar {
     width: 40px;
     height: 40px;
-    border-radius: 50%;
+    border-radius: 8px;
     object-fit: cover;
     flex: none;
   }
