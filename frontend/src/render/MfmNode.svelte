@@ -8,6 +8,7 @@
   import { ExternalLink } from "@lucide/svelte";
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
+  import { openProfile } from "../lib/profileModal.svelte";
 
   // nyaize: 投稿者が isCat のとき本文テキストを にゃん語化する（本家 :nyaize="'respect'" 相当）。
   // link/quote/plain の中身は本家同様 nyaize しない（disableNyaize）。
@@ -91,7 +92,14 @@
   <!-- 本家準拠: リンクラベル内は nyaize しない（disableNyaize） -->
   <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{#each children as c}<Self node={c} {emojis} />{/each}<ExternalLink class="mfm-link-icon" size={12} /></a>
 {:else if node.type === "mention"}
-  <span class="mfm-mention">{p.acct}</span>
+  <span
+    class="mfm-mention"
+    onclick={() => openProfile({ username: p.username, host: p.host ?? null })}
+    role="button"
+    tabindex="0"
+    onkeydown={(e) => e.key === "Enter" && openProfile({ username: p.username, host: p.host ?? null })}
+    style="cursor: pointer"
+  >{p.acct}</span>
 {:else if node.type === "hashtag"}
   <span class="mfm-hashtag">#{p.hashtag}</span>
 {:else if node.type === "emojiCode"}

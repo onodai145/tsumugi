@@ -14,8 +14,10 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
 
 const { default: NoteCard } = await import("./NoteCard.svelte");
+const { openProfile } = await import("../lib/profileModal.svelte");
 
 afterEach(() => cleanup());
 
@@ -133,5 +135,15 @@ describe("NoteCard showActions", () => {
       props: { note, accountId: "a1" },
     });
     expect(getByLabelText("返信")).toBeTruthy();
+  });
+});
+
+describe("プロフィール導線", () => {
+  it("アバタークリックでopenProfileが呼ばれる", () => {
+    const note = makeNote();
+    const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
+    const avatar = container.querySelector(".avatar") as HTMLElement;
+    avatar.click();
+    expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
   });
 });
