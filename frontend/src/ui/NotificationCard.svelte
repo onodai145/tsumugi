@@ -8,6 +8,7 @@
   import { relativeTime } from "../lib/time";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji, proxiedEmojiMap } from "../lib/emoji";
+  import { openProfile } from "../lib/profileModal.svelte";
   import {
     UserPlus,
     MessageCircle,
@@ -72,10 +73,27 @@
   <div class="head">
     <span class="icon"><IconComp size={15} /></span>
     {#if n.user?.avatarUrl}
-      <img class="avatar" src={n.user.avatarUrl} alt="" loading="lazy" />
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <img
+        class="avatar"
+        src={n.user.avatarUrl}
+        alt=""
+        loading="lazy"
+        onclick={() => n.user && openProfile({ userId: n.user.id }, accountId)}
+        style="cursor: pointer"
+      />
     {/if}
     <span class="text">
-      {#if actor}<b><Mfm text={actor} emojis={proxiedEmojiMap(n.user?.emojis, instanceHost)} simple /></b>{/if}
+      {#if actor}<b
+          class="actor"
+          onclick={() => n.user && openProfile({ userId: n.user.id }, accountId)}
+          role="button"
+          tabindex="0"
+          onkeydown={(e) => e.key === "Enter" && n.user && openProfile({ userId: n.user.id }, accountId)}
+          style="cursor: pointer"
+          ><Mfm text={actor} emojis={proxiedEmojiMap(n.user?.emojis, instanceHost)} simple /></b
+        >{/if}
       {labels[n.type] ?? n.type}
       {#if n.type === "reaction" && n.reaction}
         <span class="reaction">

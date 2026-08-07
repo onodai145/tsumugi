@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import type { Note, Notification, User } from "../bindings/tauri.gen";
 
 // store.svelte.ts が起動時に @tauri-apps/plugin-os の platform() を呼ぶため、
@@ -16,6 +16,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 const { default: NotificationCard } = await import("./NotificationCard.svelte");
+const { closeProfile, currentProfileTarget, currentProfileAccountId } = await import("../lib/profileModal.svelte");
 
 afterEach(() => cleanup());
 
@@ -102,5 +103,40 @@ describe("NotificationCard note actions", () => {
       props: { notification, accountId: "a1" },
     });
     expect(container.querySelector(".note-preview")).toBeNull();
+  });
+});
+
+// 通知欄からもノート同様にプロフィールへ遷移できるようにする要望(Issue #91 follow-up)の回帰テスト。
+// note を持たない通知種別(follow等)にはNoteCardのアバター/名前クリック導線がないため、
+// NotificationCard自身のactor行(アバター/表示名)にopenProfile導線が必要。
+describe("NotificationCard profile navigation", () => {
+  afterEach(() => closeProfile());
+
+  it("アバタークリックでプロフィールモーダルを開く(note無しのfollow通知)", async () => {
+    const notification = makeNotification({
+      type: "follow",
+      note: null,
+      user: makeUser({ id: "u9", name: "Carol", avatarUrl: "https://example.com/carol.png" }),
+    });
+    const { container } = render(NotificationCard, {
+      props: { notification, accountId: "a1" },
+    });
+    const avatar = container.querySelector(".avatar") as HTMLElement;
+    await fireEvent.click(avatar);
+    expect(currentProfileTarget()).toEqual({ userId: "u9" });
+    expect(currentProfileAccountId()).toBe("a1");
+  });
+
+  it("表示名クリックでプロフィールモーダルを開く", async () => {
+    const notification = makeNotification({
+      type: "reaction",
+      user: makeUser({ id: "u9", name: "Carol" }),
+    });
+    const { container } = render(NotificationCard, {
+      props: { notification, accountId: "a1" },
+    });
+    const actor = container.querySelector(".actor") as HTMLElement;
+    await fireEvent.click(actor);
+    expect(currentProfileTarget()).toEqual({ userId: "u9" });
   });
 });
