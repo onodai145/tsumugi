@@ -188,3 +188,48 @@ describe("notification-only note actions (Issue #50 follow-up)", () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });
+
+describe("app.getUserProfile / followUser / unfollowUser", () => {
+  it("getUserProfileはコマンド結果をそのまま返す", async () => {
+    const profile = { user: makeUser(), isFollowing: false, isSelf: false };
+    invokeMock.mockResolvedValueOnce(profile);
+    const result = await app.getUserProfile(ACCOUNT_ID, "u1");
+    expect(result).toEqual(profile);
+    expect(invokeMock).toHaveBeenCalledWith(
+      "get_user_profile",
+      expect.objectContaining({ accountId: ACCOUNT_ID, userId: "u1" }),
+    );
+  });
+
+  it("followUserはfollow_userコマンドを呼ぶ", async () => {
+    invokeMock.mockResolvedValueOnce({ status: "ok", data: null });
+    await app.followUser(ACCOUNT_ID, "u1");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "follow_user",
+      expect.objectContaining({ accountId: ACCOUNT_ID, userId: "u1" }),
+    );
+  });
+
+  it("unfollowUserはunfollow_userコマンドを呼ぶ", async () => {
+    invokeMock.mockResolvedValueOnce({ status: "ok", data: null });
+    await app.unfollowUser(ACCOUNT_ID, "u1");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "unfollow_user",
+      expect.objectContaining({ accountId: ACCOUNT_ID, userId: "u1" }),
+    );
+  });
+
+  // ProfileModal/FollowListModal は自前のエラー表示を持つため、これらのメソッドは失敗時に
+  // グローバルバナー(app.error)を出さずBackstageログ(app.logs)にのみ記録する必要がある
+  // (投稿欄の下に重複してエラーが出る、というユーザー報告への修正の回帰テスト)。
+  it("getUserProfileが失敗してもapp.errorは変化せずBackstageに記録される", async () => {
+    app.error = null;
+    const logsBefore = app.logs.length;
+    invokeMock.mockRejectedValueOnce(new Error("boom"));
+    await expect(app.getUserProfile(ACCOUNT_ID, "u1")).rejects.toThrow("boom");
+    expect(app.error).toBeNull();
+    expect(app.logs.length).toBe(logsBefore + 1);
+    // #log は新しいログを先頭に追加するため、最新エントリはlogs[0]。
+    expect(app.logs[0].level).toBe("error");
+  });
+});

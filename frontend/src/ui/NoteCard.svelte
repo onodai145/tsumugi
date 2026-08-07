@@ -11,10 +11,12 @@
   import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
+  import { acct, displayName } from "../lib/userDisplay";
   import { app } from "../lib/store.svelte";
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
   import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail, MoreHorizontal } from "@lucide/svelte";
+  import { openProfile } from "../lib/profileModal.svelte";
 
   // ノートは content-visibility:auto で contain され fixed の包含ブロック＆クリップ源に
   // なるため、ピッカーは body 直下へ portal して封じ込めを脱出させる。
@@ -220,10 +222,8 @@
   });
 
   let cwOpen = $state(false);
-  const displayName = (u: Note["user"]) => u.name ?? u.username;
   const VIS_ICON = { public: Globe, home: House, followers: Lock, specified: Mail } as const;
   const VIS_LABEL = { public: "公開", home: "ホーム", followers: "フォロワー", specified: "ダイレクト" } as const;
-  const acct = (u: Note["user"]) => (u.host ? `@${u.username}@${u.host}` : `@${u.username}`);
   // reactions: { key: count } を件数降順に
   const reactionList = $derived(
     Object.entries(inner.reactions).sort((a, b) => b[1] - a[1]),
@@ -268,18 +268,45 @@
 
   <div class="row">
     {#if inner.user.avatarUrl}
-      <img class="avatar" src={inner.user.avatarUrl} alt="" loading="lazy" />
+      <img
+        class="avatar"
+        src={inner.user.avatarUrl}
+        alt=""
+        loading="lazy"
+        onclick={() => openProfile({ userId: inner.user.id }, accountId)}
+        style="cursor: pointer"
+      />
     {:else}
-      <div class="avatar placeholder"></div>
+      <div
+        class="avatar placeholder"
+        onclick={() => openProfile({ userId: inner.user.id }, accountId)}
+        role="button"
+        tabindex="0"
+        onkeydown={(e) => e.key === "Enter" && openProfile({ userId: inner.user.id }, accountId)}
+      ></div>
     {/if}
     <div class="body">
       <header class="head">
-        <span class="name"><Mfm
+        <span
+          class="name"
+          onclick={() => openProfile({ userId: inner.user.id }, accountId)}
+          role="button"
+          tabindex="0"
+          onkeydown={(e) => e.key === "Enter" && openProfile({ userId: inner.user.id }, accountId)}
+          style="cursor: pointer"
+        ><Mfm
           text={displayName(inner.user)}
           emojis={proxiedEmojiMap(inner.user.emojis, instanceHost)}
           simple
         /></span>
-        <span class="acct">{acct(inner.user)}</span>
+        <span
+          class="acct"
+          onclick={() => openProfile({ userId: inner.user.id }, accountId)}
+          role="button"
+          tabindex="0"
+          onkeydown={(e) => e.key === "Enter" && openProfile({ userId: inner.user.id }, accountId)}
+          style="cursor: pointer"
+        >{acct(inner.user)}</span>
         <span class="time" title={new Date(inner.createdAt * 1000).toLocaleString()}>
           {relativeTime(inner.createdAt)}
         </span>

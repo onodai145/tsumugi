@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import Mfm from "./Mfm.svelte";
+import { openProfile } from "../lib/profileModal.svelte";
+
+vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
 
 // MfmNode.svelte は UnicodeEmoji.svelte / CodeBlock.svelte を静的importしており、
 // それらが ../lib/store.svelte 経由で ../lib/platform.ts の platform() を
@@ -80,6 +83,20 @@ describe("Mfm", () => {
   it("renders a mention", () => {
     const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
     expect(container.querySelector("span.mfm-mention")?.textContent).toBe("@alice@example.com");
+  });
+
+  it("mentionクリックでopenProfileが呼ばれる", () => {
+    const { container } = render(Mfm, { props: { text: "@alice@example.com hi" } });
+    const mention = container.querySelector("span.mfm-mention") as HTMLElement;
+    mention.click();
+    expect(openProfile).toHaveBeenCalledWith({ username: "alice", host: "example.com" });
+  });
+
+  it("ローカルユーザーへのmentionはhost:nullで呼ばれる", () => {
+    const { container } = render(Mfm, { props: { text: "@bob hi" } });
+    const mention = container.querySelector("span.mfm-mention") as HTMLElement;
+    mention.click();
+    expect(openProfile).toHaveBeenCalledWith({ username: "bob", host: null });
   });
 
   it("renders a hashtag", () => {

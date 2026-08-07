@@ -1,8 +1,18 @@
 //! Misskey の生 JSON レスポンスを domain 型へ正規化する。
 
 use crate::domain::{DriveFile, Note, Notification, Poll, PollChoice, ReactionUser, User, Visibility};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
+
+/// followers/following/notes の各カウント用デシリアライザ。リモートユーザーで未解決の場合、
+/// Misskey は `-1` を返すことがある（`u32` では表現できずデシリアライズが失敗していた）。
+/// 負値は「不明」として 0 に丸める。
+fn deserialize_count<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(i64::deserialize(deserializer)?.max(0) as u32)
+}
 
 /// Misskey の User オブジェクト（`i` / `me` / miauth の user）を受ける生型。
 /// UserLite にしか無いフィールドもあるため、集計値は `#[serde(default)]`。
@@ -21,15 +31,20 @@ pub struct RawUser {
     pub is_bot: bool,
     #[serde(default)]
     pub is_cat: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_count")]
     pub followers_count: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_count")]
     pub following_count: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_count")]
     pub notes_count: u32,
     /// 表示名(`name`)中のカスタム絵文字 {name: url}。
     #[serde(default)]
     pub emojis: HashMap<String, String>,
+    /// Misskey側のフィールド名は `description`。UserDetailed系レスポンスにのみ存在。
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub banner_url: Option<String>,
 }
 
 impl From<RawUser> for User {
@@ -46,6 +61,8 @@ impl From<RawUser> for User {
             following_count: r.following_count,
             notes_count: r.notes_count,
             emojis: r.emojis,
+            bio: r.description,
+            banner_url: r.banner_url,
         }
     }
 }
@@ -381,5 +398,46 @@ mod tests {
         assert_eq!(u.acct(), "@bob@remote.example");
         assert_eq!(u.followers_count, 12);
         assert!(u.is_cat);
+    }
+
+    #[test]
+    fn raw_user_maps_description_to_bio_and_carries_banner_url() {
+        let json = r#"{
+            "id":"u1","username":"alice","host":null,"name":"Alice",
+            "avatarUrl":null,"isBot":false,"isCat":false,
+            "followersCount":0,"followingCount":0,"notesCount":0,
+            "description":"hello world","bannerUrl":"https://example.com/banner.png"
+        }"#;
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        let user: User = raw.into();
+        assert_eq!(user.bio, Some("hello world".to_string()));
+        assert_eq!(user.banner_url, Some("https://example.com/banner.png".to_string()));
+    }
+
+    #[test]
+    fn raw_user_without_description_or_banner_defaults_to_none() {
+        let json = r#"{
+            "id":"u1","username":"alice","host":null,"name":"Alice",
+            "avatarUrl":null,"isBot":false,"isCat":false,
+            "followersCount":0,"followingCount":0,"notesCount":0
+        }"#;
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        let user: User = raw.into();
+        assert_eq!(user.bio, None);
+        assert_eq!(user.banner_url, None);
+    }
+
+    /// リモートユーザーで未解決の場合、Misskeyはfollowers/following/notesCountに-1を返すことがある。
+    /// u32では負値をそのままデシリアライズできないため、0に丸めて受け付けられることを確認する。
+    #[test]
+    fn raw_user_clamps_negative_counts_to_zero() {
+        let json = r#"{
+            "id":"u1","username":"alice","host":"remote.example",
+            "followersCount":-1,"followingCount":-1,"notesCount":-1
+        }"#;
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        assert_eq!(raw.followers_count, 0);
+        assert_eq!(raw.following_count, 0);
+        assert_eq!(raw.notes_count, 0);
     }
 }

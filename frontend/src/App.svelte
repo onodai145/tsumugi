@@ -10,6 +10,8 @@
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
+  import ProfileModal from "./ui/ProfileModal.svelte";
+  import { currentProfileTarget, currentProfileAccountId, closeProfile } from "./lib/profileModal.svelte";
   import { buildKeymap, eventToChord } from "./lib/keymap";
   import { Settings as SettingsIcon, Pencil } from "@lucide/svelte";
 
@@ -203,6 +205,13 @@
       onAddAccount={addAccountFromSettings}
       onReauth={startReauth}
       onclose={() => (showSettings = false)}
+    />
+  {/if}
+  {#if currentProfileTarget()}
+    <ProfileModal
+      target={currentProfileTarget()!}
+      accountId={currentProfileAccountId() ?? app.defaultAccountId()}
+      onclose={closeProfile}
     />
   {/if}
 </div>

@@ -14,8 +14,10 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
 
 const { default: NoteCard } = await import("./NoteCard.svelte");
+const { openProfile } = await import("../lib/profileModal.svelte");
 
 afterEach(() => cleanup());
 
@@ -133,5 +135,40 @@ describe("NoteCard showActions", () => {
       props: { note, accountId: "a1" },
     });
     expect(getByLabelText("返信")).toBeTruthy();
+  });
+});
+
+describe("プロフィール導線", () => {
+  it("アバタークリックでopenProfileが呼ばれる（プレースホルダー: avatarUrl未設定）", () => {
+    const note = makeNote();
+    const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
+    const avatar = container.querySelector(".avatar") as HTMLElement;
+    avatar.click();
+    expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
+  });
+
+  it("アバタークリックでopenProfileが呼ばれる（imgタグ: avatarUrl設定あり）", () => {
+    const note = makeNote({ user: makeUser({ avatarUrl: "https://example.com/a.png" }) });
+    const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
+    const avatar = container.querySelector("img.avatar") as HTMLElement;
+    expect(avatar).toBeTruthy();
+    avatar.click();
+    expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
+  });
+
+  it("表示名クリックでopenProfileが呼ばれる", () => {
+    const note = makeNote();
+    const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
+    const name = container.querySelector(".name") as HTMLElement;
+    name.click();
+    expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
+  });
+
+  it("acctクリックでopenProfileが呼ばれる", () => {
+    const note = makeNote();
+    const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
+    const acctEl = container.querySelector(".acct") as HTMLElement;
+    acctEl.click();
+    expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
   });
 });

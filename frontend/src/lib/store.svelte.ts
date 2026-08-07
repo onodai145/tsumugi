@@ -374,6 +374,12 @@ class AppStore {
     this.error = msg;
     this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
   }
+  /// Backstage へは記録するが、バナー表示はしない。呼び出し元が自前のエラーUIを持つ場合に使う
+  /// （#failをそのまま使うと、コンポーネント内表示と投稿欄下のバナーにエラーが二重に出てしまう）。
+  #logFailure(e: unknown) {
+    const msg = String(e);
+    this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
+  }
   clearLogs() {
     this.logs = [];
   }
@@ -1084,6 +1090,81 @@ class AppStore {
       return await unwrapAcc(accountId, commands.resolveUserAcct(accountId, acct));
     } catch (e) {
       this.#fail(e);
+      throw e;
+    }
+  }
+
+  /// プロフィールモーダル用: acct（@user@host）から userId を解決する。resolveUser と異なり
+  /// this.#fail()（バナー表示）は呼ばない。ProfileModal は自前のエラー表示を持つため。
+  async resolveUserSilently(accountId: string, acct: string) {
+    try {
+      return await unwrapAcc(accountId, commands.resolveUserAcct(accountId, acct));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  // 以下6メソッドは呼び出し元(ProfileModal/FollowListModal)が自前のエラー表示を持つため、
+  // resolveUser等と異なり this.#fail()（バナー表示）は呼ばない。Backstageへの記録はしつつ、
+  // 失敗はそのまま呼び出し元へ伝播させ、表示はコンポーネント内のエラーUIのみに一本化する。
+
+  /// プロフィールモーダル用: ユーザー詳細(bio/バナー/フォロー関係)を取得する。
+  async getUserProfile(accountId: string, userId: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserProfile(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// フォローする。
+  async followUser(accountId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.followUser(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// フォロー解除する。
+  async unfollowUser(accountId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.unfollowUser(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// プロフィールモーダルに埋め込むノート一覧。
+  async getUserNotes(accountId: string, userId: string, untilId?: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserNotes(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// フォロワー一覧。
+  async getUserFollowers(accountId: string, userId: string, untilId?: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserFollowers(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// フォロー中一覧。
+  async getUserFollowing(accountId: string, userId: string, untilId?: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getUserFollowing(accountId, userId, untilId ?? null));
+    } catch (e) {
+      this.#logFailure(e);
       throw e;
     }
   }

@@ -94,6 +94,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::clip::list_clips,
             commands::clip::create_clip,
             commands::clip::add_note_to_clip,
+            commands::user::get_user_profile,
+            commands::user::follow_user,
+            commands::user::unfollow_user,
+            commands::user::get_user_notes,
+            commands::user::get_user_followers,
+            commands::user::get_user_following,
         ])
         .events(collect_events![
             events::ColumnNote,

@@ -23,6 +23,12 @@ pub struct User {
     /// 既存キャッシュ済みJSON(このフィールド追加前に保存されたもの)との後方互換のため default。
     #[serde(default)]
     pub emojis: HashMap<String, String>,
+    /// 自己紹介（Misskeyの`description`）。UserLiteコンテキスト（ノート本文の著者等）では取得されない。
+    #[serde(default)]
+    pub bio: Option<String>,
+    /// バナー画像URL。同上、UserLiteコンテキストでは取得されない。
+    #[serde(default)]
+    pub banner_url: Option<String>,
 }
 
 impl User {
@@ -51,5 +57,18 @@ mod tests {
         }"#;
         let u: User = serde_json::from_str(json).unwrap();
         assert!(u.emojis.is_empty());
+    }
+
+    /// bio/bannerUrl フィールド追加前に保存されたキャッシュ済みJSONを読み込めること。
+    #[test]
+    fn deserializes_without_bio_or_banner_for_backward_compat() {
+        let json = r#"{
+            "id":"u1","username":"alice","host":null,"name":"Alice",
+            "avatarUrl":null,"isBot":false,"isCat":false,
+            "followersCount":0,"followingCount":0,"notesCount":0
+        }"#;
+        let u: User = serde_json::from_str(json).unwrap();
+        assert_eq!(u.bio, None);
+        assert_eq!(u.banner_url, None);
     }
 }
