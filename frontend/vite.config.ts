@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import path from "node:path";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
@@ -40,5 +41,10 @@ export default defineConfig({
   // vitest実行時、Svelteパッケージがサーバー向けビルドに解決され
   // mount()が使えなくなる(lifecycle_function_unavailable)ため、
   // テスト時のみ browser 条件で解決させる。
-  resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
+  resolve: {
+    alias: {
+      $lib: path.resolve(__dirname, "./src/lib"),
+    },
+    ...(process.env.VITEST ? { conditions: ["browser"] } : undefined),
+  },
 });
