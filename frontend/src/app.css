@@ -31,6 +31,36 @@
   text-rendering: optimizeLegibility;
 }
 
+@theme {
+  --color-background: var(--surface-1);
+  --color-foreground: var(--text);
+
+  --color-card: var(--surface-2);
+  --color-card-foreground: var(--text);
+
+  --color-popover: var(--surface-3);
+  --color-popover-foreground: var(--text);
+
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--surface-1);
+
+  --color-secondary: var(--surface-3);
+  --color-secondary-foreground: var(--text);
+
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--text-dim);
+
+  --color-accent: var(--surface-3);
+  --color-accent-foreground: var(--text);
+
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--surface-1);
+
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+}
+
 /* data-theme 未指定(=auto)のときのみ OS 設定に追従。明示指定は下の [data-theme] が優先。 */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
