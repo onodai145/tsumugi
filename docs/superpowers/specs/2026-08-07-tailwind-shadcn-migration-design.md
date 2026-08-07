@@ -35,26 +35,40 @@ shadcn-svelteはコンポーネントをリポジトリに直接コピーする�
 
 ### テーマ変数の移行
 
-Rust側 `ThemeColors` 構造体のフィールド名を、shadcn標準命名(`background`/`foreground`/`card`/`primary`/`secondary`/`muted`/`accent`/`destructive`/`border`/`input`/`ring`等)に変更する。これに伴い:
+**Rust側 `ThemeColors` 構造体・`settings.json`のデータ形式・`CustomSyntaxTheme`(シンタックスハイライト用の別テーマ変数体系、`--shiki-*`)は一切変更しない。**
 
-- `frontend/src/lib/theme.ts`の13プリセットを新フィールド名で作り直す。プリセットの`id`/`name`(例: `tokyo-night`, `dracula`)は維持し、ユーザーから見た選択状態が変わらないようにする
-- `src-tauri/src/domain/ui.rs`の`ThemeColors`構造体を新フィールド名に変更(specta経由で`frontend/src/bindings/tauri.gen.ts`が再生成される)
-- **後方互換マイグレーション**: `settings.json`に保存済みの旧フィールド名(`surface1`等)のカスタムテーマを、新フィールド名へ変換してデシリアライズするフォールバック処理をRust側に追加する。値が欠損する場合は既存の`success`/`info`バックフィルと同様、妥当なデフォルト値を補う。ユーザーが保存したカスタムテーマ設定を壊さないことを最優先とする
+検討の結果、`ThemeColors`のフィールド(`surface1/surface2/surface3`等11個)からshadcn標準のトークン集合(`background`/`card`/`popover`/`muted`/`secondary`とそれぞれの`-foreground`ペア等、実質18種類前後)への変換は、対応関係が一意に定まらず(例: `surface1/2/3`のどれを`background`/`card`/`popover`に割り当てるか)、`primary-foreground`のように旧構造体に対応フィールドが存在しないトークンもある非可逆な変換になることが判明した。ビルトインプリセットは手動で作り直せるが、ユーザーが独自に作成したカスタムテーマは近似値への置き換えになり「保存済みのユーザーテーマを壊さない」という要件と両立しない。そのためRust側のデータモデルは変更せず、CSS層でのみブリッジする方針とする。
+
+- Tailwind v4の`@theme`ディレクティブ(`frontend/src/app.css`)で、shadcn標準のCSS変数名を既存の`--surface-*`等の変数にマッピングする。例:
+  ```css
+  @theme {
+    --color-background: var(--surface-1);
+    --color-card: var(--surface-2);
+    --color-popover: var(--surface-3);
+    --color-primary: var(--accent);
+    --color-destructive: var(--danger);
+    --color-foreground: var(--text);
+    --color-muted-foreground: var(--text-dim);
+    --color-border: var(--border);
+  }
+  ```
+  具体的な対応表は実装タスクの中で`--surface-1/2/3`, `--border`, `--text`, `--text-dim`, `--accent`, `--success`, `--info`, `--danger`, `--warning`の9変数を基に確定する。`-foreground`系トークンで対応する原色がないものは、既存の`--text`/`--surface-*`から妥当な組み合わせを選ぶ(新しいRustフィールドは追加しない)。
+- `frontend/src/lib/theme.ts`の13プリセット・`PRESETS`配列・`ThemeColors`型・`applyThemeColors()`は変更不要(そのまま動く)
+- Rust側 `src-tauri/src/domain/ui.rs`・`src-tauri/src/store/settings.rs`のテスト・マイグレーションコードは変更不要
 - ダーク/ライト切替を`data-theme`属性ベースからshadcn標準の`.dark`クラスベースに変更する。`store.svelte.ts`の`#applyTheme()`と`app.css`のセレクタ(`:root[data-theme="dark"]`等)を書き換える。auto(OS追従)/light/darkの3状態という挙動自体は変えない
 
 ## エラーハンドリング
 
-- 旧フィールド名のカスタムテーマJSONを読み込んだ際、新フィールドへの変換に失敗する値があってもクラッシュせず、デフォルト値にフォールバックする(既存パターンを踏襲)
-- 選択中のカスタムテーマ/プリセットが見つからない場合の挙動(auto にフォールバックして保存し直す)は現状のロジックをそのまま維持する
+- Rust側のデータモデル・デシリアライズ処理は変更しないため、既存のカスタムテーマ関連の後方互換フォールバック(欠損値のデフォルト補完、選択中テーマが見つからない場合に auto へフォールバックして保存し直す等)はそのまま現行ロジックを維持する
 
 ## テスト
 
-- Rust: `src-tauri/src/store/settings.rs`の既存後方互換テスト(`theme_colors_deserializes_legacy_json_without_success_info`等)を新フィールド名向けに更新し、「旧フィールド名JSON→新フィールド名への変換」を検証するテストを追加する
+- Rust: `src-tauri/src/store/settings.rs`の既存テストは変更不要(データモデル自体を変更しないため)。念のため`cd src-tauri && cargo test`が全て通ることを確認する
 - フロントエンド: 既存の`*.test.ts`(`NoteCard.test.ts`, `ProfileModal.test.ts`, `FollowListModal.test.ts`, `CompletionPopover.test.ts`)は挙動テストであり、Tailwindクラスへの書き換え後もそのまま通ることを確認する
 - `cd frontend && pnpm check`(svelte-check + tsc)が通ることを確認する
 - 手動確認: `cargo tauri dev`で以下を目視確認する
   - テーマ切替(auto/light/dark、13プリセット、カスタムテーマ)が期待通り反映される
-  - 既存の(移行前に作成された)カスタムテーマが壊れずに読み込める
+  - 既存の(移行前に作成された)カスタムテーマがそのまま読み込める(データモデル不変のため原理的に壊れないが、CSSブリッジ経由で正しく表示されることを目視確認する)
   - 主要画面(カラム、設定、コンポーズバー、各種モーダル)の見た目に崩れがない
 
 ## スコープ外
