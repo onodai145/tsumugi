@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
 
 // Tauri 推奨の dev サーバ設定。
 // host/port を IPv4(127.0.0.1) に固定し、strictPort でポートずれを防ぐ。
@@ -9,7 +10,7 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [tailwindcss(), svelte()],
   clearScreen: false,
   // 依存を起動時に事前バンドルし、実行時の再最適化→フルリロードを防ぐ
   // （再最適化が vite-plugin-svelte の仮想CSSモジュール読込を壊すため）
