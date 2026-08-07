@@ -40,7 +40,7 @@
   async function resolveUserId(): Promise<string> {
     if ("userId" in target) return target.userId;
     const acctStr = target.host ? `${target.username}@${target.host}` : target.username;
-    const u = await app.resolveUser(accountId, acctStr);
+    const u = await app.resolveUserSilently(accountId, acctStr);
     return u.id;
   }
 

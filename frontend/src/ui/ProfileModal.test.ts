@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
@@ -177,5 +177,28 @@ describe("ProfileModal", () => {
         expect.objectContaining({ userId: "u2", untilId: null }),
       ),
     );
+  });
+
+  // 修正2の回帰テスト: ノート取得失敗直後はスクロール閾値内にいるため、notesErrを見ずに
+  // スクロールイベントでloadMoreNotesを再度呼ぶと再試行が連続発火してしまう。
+  // 再試行はエラー表示下の再試行ボタン経由のみに限定する。
+  it("ノート取得エラー中はスクロールイベントで再取得しない", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_user_profile") return Promise.resolve(profileResponse());
+      if (cmd === "get_user_notes") return Promise.reject(new Error("network error"));
+      return Promise.resolve(null);
+    });
+    const { getByText } = render(ProfileModal, {
+      props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("Error: network error")).toBeTruthy());
+    invokeMock.mockClear();
+    const notesEl = document.querySelector(".notes") as HTMLElement;
+    Object.defineProperty(notesEl, "scrollTop", { value: 500, configurable: true });
+    Object.defineProperty(notesEl, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(notesEl, "scrollHeight", { value: 1200, configurable: true });
+    await fireEvent.scroll(notesEl);
+    await fireEvent.scroll(notesEl);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });

@@ -1094,6 +1094,17 @@ class AppStore {
     }
   }
 
+  /// プロフィールモーダル用: acct（@user@host）から userId を解決する。resolveUser と異なり
+  /// this.#fail()（バナー表示）は呼ばない。ProfileModal は自前のエラー表示を持つため。
+  async resolveUserSilently(accountId: string, acct: string) {
+    try {
+      return await unwrapAcc(accountId, commands.resolveUserAcct(accountId, acct));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
   // 以下6メソッドは呼び出し元(ProfileModal/FollowListModal)が自前のエラー表示を持つため、
   // resolveUser等と異なり this.#fail()（バナー表示）は呼ばない。Backstageへの記録はしつつ、
   // 失敗はそのまま呼び出し元へ伝播させ、表示はコンポーネント内のエラーUIのみに一本化する。

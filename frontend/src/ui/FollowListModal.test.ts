@@ -130,7 +130,7 @@ describe("FollowListModal", () => {
     const list = document.querySelector("ul.list") as HTMLElement;
     // jsdomはレイアウト計算をしないため、Column.svelteと同じ「残り300px」判定を
     // 満たす値を手動で設定してからscrollイベントを発火する。
-    Object.defineProperty(list, "scrollTop", { value: 1000, configurable: true });
+    Object.defineProperty(list, "scrollTop", { value: 500, configurable: true });
     Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
     Object.defineProperty(list, "scrollHeight", { value: 1200, configurable: true });
     await fireEvent.scroll(list);
@@ -139,5 +139,29 @@ describe("FollowListModal", () => {
       "get_user_followers",
       expect.objectContaining({ accountId: "acc1", userId: "u1", untilId: "f2" }),
     );
+  });
+
+  // 修正2の回帰テスト: 取得失敗直後はユーザーが既にスクロール閾値内にいるため、
+  // errを見ずにスクロールイベントで再度loadMoreを呼ぶと再試行が連続発火してしまう。
+  // 再試行はエラー表示下の再試行ボタン経由のみに限定する。
+  it("エラー中はスクロールイベントで再取得しない", async () => {
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_user_followers" && args?.untilId == null) {
+        return Promise.reject(new Error("network error"));
+      }
+      return Promise.resolve([]);
+    });
+    const { getByText } = render(FollowListModal, {
+      props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("Error: network error")).toBeTruthy());
+    invokeMock.mockClear();
+    const list = document.querySelector("ul.list") as HTMLElement;
+    Object.defineProperty(list, "scrollTop", { value: 500, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(list, "scrollHeight", { value: 1200, configurable: true });
+    await fireEvent.scroll(list);
+    await fireEvent.scroll(list);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });
