@@ -165,6 +165,9 @@ class AppStore {
   #loggedUpdateVersion: string | null = null;
   // ノートキャッシュの間引き（Issue #6）。起動時と数時間おきに実行する。
   #pruneTimer: ReturnType<typeof setInterval> | null = null;
+  // theme="auto"時、OSのprefers-color-scheme変化にライブ追従するためのmatchMediaリスナー解除関数。
+  // #applyTheme が呼ばれるたびに前回分を解除してから張り直すことで、リスナーの多重登録を防ぐ。
+  #themeMediaCleanup: (() => void) | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -1265,13 +1268,28 @@ class AppStore {
     this.ui = { ...this.ui, recentEmojis: list };
   }
 
-  /// data-theme(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
+  /// テーマ(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
   #applyTheme(theme: string) {
     const root = document.documentElement;
+    root.classList.remove("light", "dark");
+
+    if (this.#themeMediaCleanup) {
+      this.#themeMediaCleanup();
+      this.#themeMediaCleanup = null;
+    }
+
     if (theme === "light" || theme === "dark") {
-      root.dataset.theme = theme;
-    } else {
-      delete root.dataset.theme;
+      root.classList.add(theme);
+    } else if (theme === "auto") {
+      // Tailwindの `@custom-variant dark (&:is(.dark *));` はクラスの有無で判定するため、
+      // CSS変数側(@media prefers-color-scheme)とは別に、OSがdark選好のときだけ明示的に
+      // .dark を付与する（light側はクラスなしがデフォルトなので付与しない）。
+      // OS設定がライブで変わるケースにも追従できるよう change イベントも購読する。
+      const mql = window.matchMedia("(prefers-color-scheme: dark)");
+      const sync = () => root.classList.toggle("dark", mql.matches);
+      sync();
+      mql.addEventListener("change", sync);
+      this.#themeMediaCleanup = () => mql.removeEventListener("change", sync);
     }
 
     const presetId = parseThemeRef(theme, "preset:");

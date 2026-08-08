@@ -1,6 +1,8 @@
 /// <reference types="vitest/config" />
+import path from "node:path";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
 
 // Tauri 推奨の dev サーバ設定。
 // host/port を IPv4(127.0.0.1) に固定し、strictPort でポートずれを防ぐ。
@@ -9,7 +11,7 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [tailwindcss(), svelte()],
   clearScreen: false,
   // 依存を起動時に事前バンドルし、実行時の再最適化→フルリロードを防ぐ
   // （再最適化が vite-plugin-svelte の仮想CSSモジュール読込を壊すため）
@@ -39,5 +41,10 @@ export default defineConfig({
   // vitest実行時、Svelteパッケージがサーバー向けビルドに解決され
   // mount()が使えなくなる(lifecycle_function_unavailable)ため、
   // テスト時のみ browser 条件で解決させる。
-  resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
+  resolve: {
+    alias: {
+      $lib: path.resolve(__dirname, "./src/lib"),
+    },
+    ...(process.env.VITEST ? { conditions: ["browser"] } : undefined),
+  },
 });

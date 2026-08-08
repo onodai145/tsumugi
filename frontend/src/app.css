@@ -1,3 +1,18 @@
+/* Preflight(`@import "tailwindcss";`が含むグローバルリセット)は既存コンポーネントが
+   前提とする img/svg 等のデフォルト表示(inline等)を書き換えてしまい、絵文字/アイコン表示が
+   崩れる恐れがある。本プランはコンポーネント未移行の基盤整備のみのため、utilities/theme
+   だけを読み込みPreflightは意図的に除外する。将来コンポーネント移行プランでPreflight導入の
+   是非を判断すること。`@import "tailwindcss";`が暗黙に宣言するlayer順序
+   (theme, base, components, utilities)はここでも明示しておく必要がある
+   （layer化しないとutilitiesが既存コンポーネントの<style>より優先されてしまうため）。 */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "shadcn-svelte/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
 :root {
   --surface-1: #ffffff;
   --surface-2: #f3f4f6;
@@ -25,9 +40,39 @@
   text-rendering: optimizeLegibility;
 }
 
-/* data-theme 未指定(=auto)のときのみ OS 設定に追従。明示指定は下の [data-theme] が優先。 */
+@theme {
+  --color-background: var(--surface-1);
+  --color-foreground: var(--text);
+
+  --color-card: var(--surface-2);
+  --color-card-foreground: var(--text);
+
+  --color-popover: var(--surface-3);
+  --color-popover-foreground: var(--text);
+
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--surface-1);
+
+  --color-secondary: var(--surface-3);
+  --color-secondary-foreground: var(--text);
+
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--text-dim);
+
+  --color-accent: var(--surface-3);
+  --color-accent-foreground: var(--text);
+
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--surface-1);
+
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+}
+
+/* .light/.dark 未指定(=auto)のときのみ OS 設定に追従。明示指定は下の .dark が優先。 */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not(.light) {
     --surface-1: #16181d;
     --surface-2: #1d2026;
     --surface-3: #2a2e37;
@@ -38,7 +83,7 @@
   }
 }
 /* テーマを明示的に dark 指定した場合は OS 設定に関わらずダーク */
-:root[data-theme="dark"] {
+:root.dark {
   --surface-1: #16181d;
   --surface-2: #1d2026;
   --surface-3: #2a2e37;
@@ -168,7 +213,7 @@ a:hover {
 }
 
 /* ---- shiki "auto"（OS追従）テーマのライト/ダーク切替。
-   app.css 冒頭の :root / prefers-color-scheme / [data-theme] パターンと同じ条件で、
+   app.css 冒頭の :root / prefers-color-scheme / .dark パターンと同じ条件で、
    shikiのデュアルテーマ出力（--shiki-light / --shiki-dark 等）のどちらを使うか決める。
    shiki:<id> / custom:<id> は codeToHtml 自身が <pre class="shiki"> に直接
    color/background-color をインラインで出力するため、ここでは触れない
@@ -181,19 +226,19 @@ a:hover {
   background-color: var(--shiki-light-bg);
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .mfm-codeblock .shiki,
-  :root:not([data-theme="light"]) .mfm-codeblock .shiki span {
+  :root:not(.light) .mfm-codeblock .shiki,
+  :root:not(.light) .mfm-codeblock .shiki span {
     color: var(--shiki-dark);
   }
-  :root:not([data-theme="light"]) .mfm-codeblock .shiki {
+  :root:not(.light) .mfm-codeblock .shiki {
     background-color: var(--shiki-dark-bg);
   }
 }
-:root[data-theme="dark"] .mfm-codeblock .shiki,
-:root[data-theme="dark"] .mfm-codeblock .shiki span {
+:root.dark .mfm-codeblock .shiki,
+:root.dark .mfm-codeblock .shiki span {
   color: var(--shiki-dark);
 }
-:root[data-theme="dark"] .mfm-codeblock .shiki {
+:root.dark .mfm-codeblock .shiki {
   background-color: var(--shiki-dark-bg);
 }
 
@@ -464,3 +509,4 @@ a:hover {
     filter: hue-rotate(360deg) contrast(150%) saturate(150%);
   }
 }
+

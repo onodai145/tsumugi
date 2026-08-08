@@ -3,5 +3,15 @@
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
-  ]
+  ],
+  "compilerOptions": {
+    // この solution-style ルートconfigの compilerOptions は tsc -b / svelte-check からは
+    // 読まれず実TSビルドには無関係。$lib エイリアスはおそらく shadcn-svelte CLI が自身の
+    // エイリアス解決のために参照しているためここに残している（削除しない）。
+    "baseUrl": ".",
+    "paths": {
+      "$lib": ["./src/lib"],
+      "$lib/*": ["./src/lib/*"]
+    }
+  }
 }
