@@ -57,7 +57,7 @@
 </script>
 
 <section
-  class="group relative flex flex-none flex-col h-full border-r border-border col-bg"
+  class="column-root relative flex flex-none flex-col h-full border-r border-border col-bg"
   style={stretch ? "flex:1 1 0;min-width:0" : group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
   class:opacity-55={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
@@ -97,9 +97,8 @@
           "flex cursor-grab items-center active:cursor-grabbing",
           {
             "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
-            "opacity-65": t.id !== group.activeTabId,
-            "opacity-40": app.draggingTabId === t.id,
           },
+          app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
         ]}
         draggable="true"
         ondragstart={(e) => {
@@ -123,20 +122,15 @@
           title={`${tabName(t)}（ダブルクリックで編集）`}
         >
           <span
-            class={[
-              "h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground",
-              {
-                "bg-[var(--success)]": t.state === "connected",
-                "bg-[var(--warning)]": t.state === "connecting" || t.state === "reconnecting",
-                "bg-destructive": t.state === "error",
-              },
-            ]}
+            class="h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground data-[state=connected]:bg-[var(--success)] data-[state=connecting]:bg-[var(--warning)] data-[state=reconnecting]:bg-[var(--warning)] data-[state=error]:bg-destructive"
             data-state={t.state}
           ></span>{tabName(t)}
         </button>
         <button
-          class="inline-flex border-none bg-transparent py-0 pr-0 pl-1 text-muted-foreground"
-          class:hidden={t.id !== group.activeTabId}
+          class={[
+            t.id === group.activeTabId ? "inline-flex" : "hidden",
+            "border-none bg-transparent py-0 pr-1 text-muted-foreground",
+          ]}
           title="タブを閉じる"
           onclick={() => app.closeTab(t.id)}
         ><X size={12} /></button>
@@ -188,7 +182,10 @@
 
 <style>
   /* 背景画像設定時にカラムを透けさせるための不透明度(--column-opacity)。Tailwindに
-     color-mix()のユーティリティが無いため、この2つの背景だけはCSSに残す。 */
+     color-mix()のユーティリティが無いことに加えて、Svelteのコンポーネントスコープ
+     CSSはunlayeredで注入される(Tailwindのutilitiesレイヤーより優先度が高い)ため、
+     この2つの背景は<style>に残す必要がある。逆に言うと、.col-bg/.tabbar-bgが付いた
+     要素に後からbg-*系のTailwindクラスを足しても無効化される点に注意。 */
   .col-bg {
     background: color-mix(in srgb, var(--surface-1) var(--column-opacity, 100%), transparent);
   }
@@ -196,9 +193,10 @@
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
     border-top-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
-  /* キーボードフォーカス中のカラムは上端をはっきり表示。.group/.focusedは同一コンポーネント
-     テンプレート内の要素なのでSvelteのスコープ付きCSSがそのまま効く(:global()不要)。 */
-  .group.focused .tabbar-bg {
+  /* キーボードフォーカス中のカラムは上端をはっきり表示。.column-root/.focusedは同一
+     コンポーネントテンプレート内の要素なのでSvelteのスコープ付きCSSがそのまま効く
+     (:global()不要)。*/
+  .column-root.focused .tabbar-bg {
     border-top-color: var(--accent);
   }
 </style>

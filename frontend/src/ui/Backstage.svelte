@@ -43,7 +43,7 @@
   });
 </script>
 
-<div class="flex flex-col flex-none border-t border-border bg-card" class:open>
+<div class="flex flex-col flex-none border-t border-border bg-card">
   {#if open}
     <div class="h-[min(38vh,320px)] overflow-y-auto border-b border-border bg-background font-mono text-[0.76rem]">
       {#if app.logs.length === 0}
