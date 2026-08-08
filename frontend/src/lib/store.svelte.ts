@@ -1265,13 +1265,12 @@ class AppStore {
     this.ui = { ...this.ui, recentEmojis: list };
   }
 
-  /// data-theme(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
+  /// テーマ(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
   #applyTheme(theme: string) {
     const root = document.documentElement;
+    root.classList.remove("light", "dark");
     if (theme === "light" || theme === "dark") {
-      root.dataset.theme = theme;
-    } else {
-      delete root.dataset.theme;
+      root.classList.add(theme);
     }
 
     const presetId = parseThemeRef(theme, "preset:");

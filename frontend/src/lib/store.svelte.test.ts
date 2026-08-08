@@ -233,3 +233,28 @@ describe("app.getUserProfile / followUser / unfollowUser", () => {
     expect(app.logs[0].level).toBe("error");
   });
 });
+
+describe("#applyTheme (Issue #170: data-theme属性から.darkクラスへ移行)", () => {
+  afterEach(() => {
+    document.documentElement.classList.remove("dark", "light");
+  });
+
+  it("theme='dark'のとき<html>にdarkクラスが付与される", async () => {
+    await app.setUiPrefs({ ...app.ui, theme: "dark" });
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.classList.contains("light")).toBe(false);
+  });
+
+  it("theme='light'のとき<html>にlightクラスが付与される", async () => {
+    await app.setUiPrefs({ ...app.ui, theme: "light" });
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+  });
+
+  it("theme='auto'のとき<html>にdark/lightどちらのクラスも付与されない", async () => {
+    await app.setUiPrefs({ ...app.ui, theme: "dark" });
+    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(document.documentElement.classList.contains("light")).toBe(false);
+  });
+});
