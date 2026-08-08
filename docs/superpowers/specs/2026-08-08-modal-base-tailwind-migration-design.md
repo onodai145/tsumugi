@@ -54,4 +54,4 @@ CSS/レイアウトの置き換えのみのため、エラーハンドリング�
 
 - `ProfileModal.svelte`/`FollowListModal.svelte`(`Modal.svelte`使用)は別バッチ
 - `AddColumnModal.svelte`(独立構造、706行)は別バッチ
-- shadcn Dialogプリミティブへの置き換えは行わない
+- shadcn Dialogプリミティブへの置き換えは行わない。理由: (1)現在の独自portal実装は`role="dialog"`/`aria-modal`/Escape/外側クリックを備えており壊れていない、(2)モーダル的なUI(`AddColumnModal`の独自ダイアログ、`DrivePicker`、各種ポップオーバー等)が今後のバッチにも点在しており、Dialogプリミティブ化はそれら全体を棚卸ししてから一括で検討したほうが手戻りが少ない。Issue #174の全バッチ完了後、別Issueとして再検討する
