@@ -4,6 +4,7 @@
   import type { LogLevel } from "../lib/store.svelte";
   import type { Component } from "svelte";
   import { Circle, Check, TriangleAlert, X, ChevronUp, ChevronDown, Database, Activity, Clock } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let { onReauth }: { onReauth: (accountId: string) => void } = $props();
 
@@ -42,20 +43,30 @@
   });
 </script>
 
-<div class="backstage" class:open>
+<div class="flex flex-col flex-none border-t border-border bg-card">
   {#if open}
-    <div class="log-panel">
+    <div class="h-[min(38vh,320px)] overflow-y-auto border-b border-border bg-background font-mono text-[0.76rem]">
       {#if app.logs.length === 0}
-        <div class="empty">ログはまだありません</div>
+        <div class="p-3.5 text-center text-muted-foreground">ログはまだありません</div>
       {:else}
         {#each app.logs as l (l.id)}
           {@const Ic = icon[l.level]}
-          <div class="log-row" data-level={l.level}>
-            <span class="ic" data-level={l.level}><Ic size={12} /></span>
-            <span class="ts">{hhmmss(l.at)}</span>
-            <span class="msg">{l.text}</span>
+          <div class="flex items-baseline gap-2 px-2.5 py-0.5 hover:bg-card" data-level={l.level}>
+            <span
+              class={[
+                "inline-flex flex-none",
+                {
+                  "text-[var(--success)]": l.level === "success",
+                  "text-[var(--warning)]": l.level === "warn",
+                  "text-destructive": l.level === "error",
+                  "text-muted-foreground": l.level === "info",
+                },
+              ]}
+            ><Ic size={12} /></span>
+            <span class="flex-none text-muted-foreground">{hhmmss(l.at)}</span>
+            <span class="flex-1 break-words">{l.text}</span>
             {#if l.reauthAccountId}
-              <button class="reauth" onclick={() => onReauth(l.reauthAccountId!)}>再認証</button>
+              <Button variant="outline" size="xs" onclick={() => onReauth(l.reauthAccountId!)}>再認証</Button>
             {/if}
           </div>
         {/each}
@@ -63,175 +74,43 @@
     </div>
   {/if}
 
-  <div class="bar">
-    <button class="toggle" onclick={() => (open = !open)} title="操作ログ (Backstage)">
+  <div
+    class="flex min-h-6 items-center gap-2 pt-[3px] pr-[max(8px,env(safe-area-inset-right))] pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))] text-[0.76rem]"
+  >
+    <Button variant="outline" size="xs" onclick={() => (open = !open)} title="操作ログ (Backstage)">
       {#if open}<ChevronDown size={13} />{:else}<ChevronUp size={13} />{/if} ログ
-      {#if errorCount > 0}<span class="badge">{errorCount}</span>{/if}
-    </button>
-    <div class="tail" data-level={latest?.level ?? "info"}>
+      {#if errorCount > 0}<span class="rounded-lg bg-destructive px-[5px] text-[0.68rem] leading-[1.4] text-white">{errorCount}</span>{/if}
+    </Button>
+    <div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden whitespace-nowrap" data-level={latest?.level ?? "info"}>
       {#if latest}
         {@const LatestIc = icon[latest.level]}
-        <span class="ic" data-level={latest.level}><LatestIc size={12} /></span>
-        <span class="tail-ts">{hhmmss(latest.at)}</span>
-        <span class="tail-msg">{latest.text}</span>
+        <span
+          class={[
+            "inline-flex flex-none",
+            {
+              "text-[var(--success)]": latest.level === "success",
+              "text-[var(--warning)]": latest.level === "warn",
+              "text-destructive": latest.level === "error",
+              "text-muted-foreground": latest.level === "info",
+            },
+          ]}
+        ><LatestIc size={12} /></span>
+        <span class="flex-none text-muted-foreground">{hhmmss(latest.at)}</span>
+        <span class="overflow-hidden text-ellipsis">{latest.text}</span>
       {:else}
-        <span class="tail-msg dim">操作すると、ここに履歴が表示されます</span>
+        <span class="overflow-hidden text-ellipsis text-muted-foreground">操作すると、ここに履歴が表示されます</span>
       {/if}
     </div>
     {#if open && app.logs.length > 0}
-      <button class="clear" onclick={() => app.clearLogs()}>クリア</button>
+      <Button variant="ghost" size="xs" class="flex-none text-muted-foreground" onclick={() => app.clearLogs()}>クリア</Button>
     {/if}
-    <div class="stats" title="DB件数 / 流速(件・分) / 起動からの経過時間">
-      <span class="stat"><Database size={12} />{app.noteCount.toLocaleString()}件</span>
-      <span class="stat"><Activity size={12} />{app.noteRatePerMin}件/分</span>
-      <span class="stat"><Clock size={12} />{elapsed}</span>
+    <div
+      class="flex flex-none items-center gap-2.5 whitespace-nowrap text-muted-foreground [font-variant-numeric:tabular-nums]"
+      title="DB件数 / 流速(件・分) / 起動からの経過時間"
+    >
+      <span class="inline-flex items-center gap-0.5"><Database size={12} />{app.noteCount.toLocaleString()}件</span>
+      <span class="inline-flex items-center gap-0.5"><Activity size={12} />{app.noteRatePerMin}件/分</span>
+      <span class="inline-flex items-center gap-0.5"><Clock size={12} />{elapsed}</span>
     </div>
   </div>
 </div>
-
-<style>
-  .backstage {
-    flex: none;
-    border-top: 1px solid var(--border);
-    background: var(--surface-2);
-    display: flex;
-    flex-direction: column;
-  }
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px max(8px, env(safe-area-inset-right)) max(3px, env(safe-area-inset-bottom))
-      max(8px, env(safe-area-inset-left));
-    min-height: 24px;
-    font-size: 0.76rem;
-  }
-  .toggle {
-    flex: none;
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-    color: var(--text);
-    border-radius: 4px;
-    padding: 2px 8px;
-    cursor: pointer;
-    font-size: 0.74rem;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-  .toggle:hover {
-    border-color: var(--accent);
-  }
-  .badge {
-    background: var(--danger);
-    color: #fff;
-    border-radius: 8px;
-    padding: 0 5px;
-    font-size: 0.68rem;
-    line-height: 1.4;
-  }
-  .tail {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .tail-ts {
-    color: var(--text-dim);
-    flex: none;
-  }
-  .tail-msg {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .tail-msg.dim {
-    color: var(--text-dim);
-  }
-  .clear {
-    flex: none;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 0.74rem;
-  }
-  .clear:hover {
-    color: var(--accent);
-  }
-  .stats {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-  .stat {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-  }
-  .log-panel {
-    height: min(38vh, 320px);
-    overflow-y: auto;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-1);
-    font-family: ui-monospace, monospace;
-    font-size: 0.76rem;
-  }
-  .log-row {
-    display: flex;
-    gap: 8px;
-    padding: 2px 10px;
-    align-items: baseline;
-  }
-  .log-row:hover {
-    background: var(--surface-2);
-  }
-  .ts {
-    color: var(--text-dim);
-    flex: none;
-  }
-  .msg {
-    word-break: break-word;
-    flex: 1;
-  }
-  .reauth {
-    flex: none;
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--accent);
-    border-radius: 4px;
-    padding: 1px 8px;
-    cursor: pointer;
-    font-size: 0.72rem;
-  }
-  .reauth:hover {
-    border-color: var(--accent);
-  }
-  .ic {
-    display: inline-flex;
-    flex: none;
-  }
-  .ic[data-level="success"] {
-    color: var(--success);
-  }
-  .ic[data-level="warn"] {
-    color: var(--warning);
-  }
-  .ic[data-level="error"] {
-    color: var(--danger);
-  }
-  .ic[data-level="info"] {
-    color: var(--text-dim);
-  }
-  .empty {
-    padding: 14px;
-    text-align: center;
-    color: var(--text-dim);
-  }
-</style>

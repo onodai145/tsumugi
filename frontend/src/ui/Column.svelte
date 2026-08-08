@@ -4,6 +4,7 @@
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
   import { X, GripVertical } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let {
     group,
@@ -56,9 +57,9 @@
 </script>
 
 <section
-  class="column"
+  class="column-root relative flex flex-none flex-col h-full border-r border-border col-bg"
   style={stretch ? "flex:1 1 0;min-width:0" : group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
-  class:dragging={app.draggingGroupId === group.id}
+  class:opacity-55={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
   ondragover={(e) => {
     e.preventDefault();
@@ -68,7 +69,7 @@
 >
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="tabbar"
+    class="tabbar-bg flex min-h-[26px] items-stretch gap-px overflow-x-auto border-b border-border border-t-2"
     ondragover={(e) => {
       if (app.draggingTabId) {
         e.preventDefault();
@@ -78,7 +79,7 @@
   >
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <span
-      class="grip"
+      class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing"
       draggable="true"
       ondragstart={(e) => {
         e.dataTransfer?.setData("text/plain", group.id);
@@ -92,9 +93,13 @@
     {#each group.tabs as t (t.id)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="tab"
-        class:active={t.id === group.activeTabId}
-        class:tabdrag={app.draggingTabId === t.id}
+        class={[
+          "flex cursor-grab items-center active:cursor-grabbing",
+          {
+            "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
+          },
+          app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
+        ]}
         draggable="true"
         ondragstart={(e) => {
           e.dataTransfer?.setData("text/plain", t.id);
@@ -111,29 +116,39 @@
         }}
       >
         <button
-          class="tab-btn"
+          class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-[0.76rem] text-foreground"
           onclick={() => app.setActiveTab(group.id, t.id)}
           ondblclick={() => onEditTab(t)}
           title={`${tabName(t)}（ダブルクリックで編集）`}
         >
-          <span class="tab-dot" data-state={t.state}></span>{tabName(t)}
+          <span
+            class="h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground data-[state=connected]:bg-[var(--success)] data-[state=connecting]:bg-[var(--warning)] data-[state=reconnecting]:bg-[var(--warning)] data-[state=error]:bg-destructive"
+            data-state={t.state}
+          ></span>{tabName(t)}
         </button>
-        <button class="tab-close" title="タブを閉じる" onclick={() => app.closeTab(t.id)}><X size={12} /></button>
+        <button
+          class={[
+            t.id === group.activeTabId ? "inline-flex" : "hidden",
+            "border-none bg-transparent py-0 pr-1 text-muted-foreground",
+          ]}
+          title="タブを閉じる"
+          onclick={() => app.closeTab(t.id)}
+        ><X size={12} /></button>
       </div>
     {/each}
 
-    <button class="tab-add" title="タブを追加" onclick={() => onAddTab(group.id)}>＋</button>
-    <button class="tab-add" title="下に分割" onclick={() => onSplitDown(group.id)}>⬓</button>
+    <Button variant="ghost" size="icon-xs" class="text-muted-foreground" title="タブを追加" onclick={() => onAddTab(group.id)}>＋</Button>
+    <Button variant="ghost" size="icon-xs" class="text-muted-foreground" title="下に分割" onclick={() => onSplitDown(group.id)}>⬓</Button>
   </div>
 
   {#if activeTab}
-    <div class="notes" onscroll={onScroll}>
+    <div class="flex-1 overflow-y-auto" onscroll={onScroll}>
       {#if isNotif}
         {#each activeTab.notifications as n (n.id)}
           <NotificationCard notification={n} accountId={activeTab.accountId} />
         {/each}
         {#if activeTab.notifications.length === 0 && !activeTab.loadingMore}
-          <div class="empty">まだ通知がありません</div>
+          <div class="p-3.5 text-center text-[0.82rem] text-muted-foreground">まだ通知がありません</div>
         {/if}
       {:else}
         {#each activeTab.notes as note (note.id)}
@@ -145,16 +160,17 @@
           />
         {/each}
         {#if activeTab.notes.length === 0 && !activeTab.loadingMore}
-          <div class="empty">まだノートがありません</div>
+          <div class="p-3.5 text-center text-[0.82rem] text-muted-foreground">まだノートがありません</div>
         {/if}
       {/if}
-      {#if activeTab.loadingMore}<div class="loading">読み込み中…</div>{/if}
+      {#if activeTab.loadingMore}<div class="p-3.5 text-center text-[0.82rem] text-muted-foreground">読み込み中…</div>{/if}
     </div>
   {/if}
 
   {#if !stretch && !group.auto}
     <div
-      class="resize"
+      class="absolute right-[-3px] top-0 h-full w-1.5 cursor-col-resize hover:bg-[color-mix(in_srgb,var(--color-primary)_40%,transparent)]"
+      style="z-index:5"
       onpointerdown={onResizeDown}
       onpointermove={onResizeMove}
       onpointerup={onResizeUp}
@@ -165,138 +181,22 @@
 </section>
 
 <style>
-  .column {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    flex: none;
-    height: 100%;
-    border-right: 1px solid var(--border);
-    /* 背景画像設定時にカラムを透けさせるための不透明度。未設定なら 100%(不透明)のまま */
+  /* 背景画像設定時にカラムを透けさせるための不透明度(--column-opacity)。Tailwindに
+     color-mix()のユーティリティが無いことに加えて、Svelteのコンポーネントスコープ
+     CSSはunlayeredで注入される(Tailwindのutilitiesレイヤーより優先度が高い)ため、
+     この2つの背景は<style>に残す必要がある。逆に言うと、.col-bg/.tabbar-bgが付いた
+     要素に後からbg-*系のTailwindクラスを足しても無効化される点に注意。 */
+  .col-bg {
     background: color-mix(in srgb, var(--surface-1) var(--column-opacity, 100%), transparent);
   }
-  .column.dragging {
-    opacity: 0.55;
-  }
-  .tabbar {
-    display: flex;
-    align-items: stretch;
-    gap: 1px;
+  .tabbar-bg {
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
-    border-bottom: 1px solid var(--border);
-    border-top: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    overflow-x: auto;
-    min-height: 26px;
+    border-top-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
-  /* キーボードフォーカス中のカラムは上端をはっきり表示 */
-  .column.focused .tabbar {
+  /* キーボードフォーカス中のカラムは上端をはっきり表示。.column-root/.focusedは同一
+     コンポーネントテンプレート内の要素なのでSvelteのスコープ付きCSSがそのまま効く
+     (:global()不要)。*/
+  .column-root.focused .tabbar-bg {
     border-top-color: var(--accent);
-  }
-  .grip {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    /* 幅をタブバーの高さに合わせ、正方形のタップ/クリック領域にする(横に細長いと押しづらい) */
-    width: 26px;
-    flex: none;
-    color: var(--text-dim);
-    cursor: grab;
-    user-select: none;
-  }
-  .grip:active {
-    cursor: grabbing;
-  }
-  .tab {
-    display: flex;
-    align-items: center;
-  }
-  .tab {
-    cursor: grab;
-  }
-  .tab:active {
-    cursor: grabbing;
-  }
-  .tab.active {
-    box-shadow: inset 0 -2px 0 var(--accent);
-  }
-  .tab:not(.active) {
-    opacity: 0.65;
-  }
-  .tab.tabdrag {
-    opacity: 0.4;
-  }
-  .tab-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.76rem;
-    padding: 2px 6px;
-    white-space: nowrap;
-  }
-  .tab-close {
-    display: inline-flex;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0 4px 0 0;
-  }
-  .tab:not(.active) .tab-close {
-    display: none;
-  }
-  .tab-add {
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0 8px;
-    font-size: 0.85rem;
-  }
-  .tab-add:hover {
-    color: var(--accent);
-  }
-  .tab-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--text-dim);
-    flex: none;
-  }
-  .tab-dot[data-state="connected"] {
-    background: var(--success);
-  }
-  .tab-dot[data-state="connecting"],
-  .tab-dot[data-state="reconnecting"] {
-    background: var(--warning);
-  }
-  .tab-dot[data-state="error"] {
-    background: var(--danger);
-  }
-  .notes {
-    overflow-y: auto;
-    flex: 1;
-  }
-  .loading,
-  .empty {
-    padding: 14px;
-    text-align: center;
-    color: var(--text-dim);
-    font-size: 0.82rem;
-  }
-  .resize {
-    position: absolute;
-    top: 0;
-    right: -3px;
-    width: 6px;
-    height: 100%;
-    cursor: col-resize;
-    z-index: 5;
-  }
-  .resize:hover {
-    background: color-mix(in srgb, var(--accent) 40%, transparent);
   }
 </style>

@@ -13,6 +13,21 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Preflightを除外しているため、<button>要素はブラウザ標準の背景・枠線・カーソルを
+   引きずったままになる。shadcn-svelteのButtonプリミティブ(ghost/outline等の各variant)
+   はPreflightで素の見た目が既に消えている前提で作られているため、これが無いと
+   hover時以外は素のブラウザボタンの箱がそのまま見えてしまう(Issue #174で発覚)。
+   img/svgのdisplayには触れず、buttonのみ最小限リセットする。 */
+@layer base {
+  button {
+    border: 0;
+    background-color: transparent;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+}
+
 :root {
   --surface-1: #ffffff;
   --surface-2: #f3f4f6;
