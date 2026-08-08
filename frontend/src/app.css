@@ -1,4 +1,13 @@
-@import "tailwindcss";
+/* Preflight(`@import "tailwindcss";`が含むグローバルリセット)は既存コンポーネントが
+   前提とする img/svg 等のデフォルト表示(inline等)を書き換えてしまい、絵文字/アイコン表示が
+   崩れる恐れがある。本プランはコンポーネント未移行の基盤整備のみのため、utilities/theme
+   だけを読み込みPreflightは意図的に除外する。将来コンポーネント移行プランでPreflight導入の
+   是非を判断すること。`@import "tailwindcss";`が暗黙に宣言するlayer順序
+   (theme, base, components, utilities)はここでも明示しておく必要がある
+   （layer化しないとutilitiesが既存コンポーネントの<style>より優先されてしまうため）。 */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
 

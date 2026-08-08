@@ -234,27 +234,107 @@ describe("app.getUserProfile / followUser / unfollowUser", () => {
   });
 });
 
+// jsdomはmatchMediaを実装していないため、"(prefers-color-scheme: dark)"に対してのみ
+// 指定のmatchesを返すスタブを用意する。addEventListener("change", ...)は登録したリスナーを
+// 保持し、テストからdispatchChange()で疑似的なOS設定変化を発火できるようにする。
+function mockPrefersColorSchemeDark(matches: boolean) {
+  const changeListeners: Array<(e: { matches: boolean }) => void> = [];
+  const mql = {
+    matches,
+    media: "(prefers-color-scheme: dark)",
+    addEventListener: (type: string, listener: (e: { matches: boolean }) => void) => {
+      if (type === "change") changeListeners.push(listener);
+    },
+    removeEventListener: (type: string, listener: (e: { matches: boolean }) => void) => {
+      if (type !== "change") return;
+      const i = changeListeners.indexOf(listener);
+      if (i !== -1) changeListeners.splice(i, 1);
+    },
+    dispatchEvent: () => false,
+  };
+  vi.stubGlobal("matchMedia", (query: string) => {
+    if (query === "(prefers-color-scheme: dark)") return mql;
+    return { matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false };
+  });
+  return {
+    dispatchChange: (nextMatches: boolean) => {
+      mql.matches = nextMatches;
+      for (const listener of changeListeners) listener({ matches: nextMatches });
+    },
+    listenerCount: () => changeListeners.length,
+  };
+}
+
 describe("#applyTheme (Issue #170: data-theme属性から.darkクラスへ移行)", () => {
   afterEach(() => {
     document.documentElement.classList.remove("dark", "light");
+    vi.unstubAllGlobals();
   });
 
   it("theme='dark'のとき<html>にdarkクラスが付与される", async () => {
+    mockPrefersColorSchemeDark(false);
     await app.setUiPrefs({ ...app.ui, theme: "dark" });
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.classList.contains("light")).toBe(false);
   });
 
   it("theme='light'のとき<html>にlightクラスが付与される", async () => {
+    mockPrefersColorSchemeDark(false);
     await app.setUiPrefs({ ...app.ui, theme: "light" });
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
-  it("theme='auto'のとき<html>にdark/lightどちらのクラスも付与されない", async () => {
+  it("theme='auto'のときOSがdark選好なら<html>にdarkクラスが付与される", async () => {
+    mockPrefersColorSchemeDark(true);
+    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.classList.contains("light")).toBe(false);
+  });
+
+  it("theme='auto'のときOSがdark選好でなければ<html>にdark/lightどちらのクラスも付与されない", async () => {
+    mockPrefersColorSchemeDark(false);
     await app.setUiPrefs({ ...app.ui, theme: "dark" });
     await app.setUiPrefs({ ...app.ui, theme: "auto" });
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(document.documentElement.classList.contains("light")).toBe(false);
+  });
+
+  it("theme='preset:*'のとき<html>にdark/lightどちらのクラスも付与されない(プリセット/カスタムテーマは既存動作を維持)", async () => {
+    mockPrefersColorSchemeDark(true);
+    await app.setUiPrefs({ ...app.ui, theme: "preset:tokyo-night" });
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(document.documentElement.classList.contains("light")).toBe(false);
+  });
+
+  it("light→darkへの直接遷移でdarkが付与されlightは外れる", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, theme: "light" });
+    await app.setUiPrefs({ ...app.ui, theme: "dark" });
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.classList.contains("light")).toBe(false);
+  });
+
+  it("theme='auto'適用中にOS設定がライブでdarkに変わると<html>にdarkクラスが付与される", async () => {
+    const { dispatchChange } = mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    dispatchChange(true);
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("#applyThemeを繰り返し呼んでもmatchMediaのchangeリスナーは多重登録されない", async () => {
+    const { listenerCount } = mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    expect(listenerCount()).toBe(1);
+  });
+
+  it("theme='auto'から他テーマへ切り替えるとmatchMediaのchangeリスナーが解除される", async () => {
+    const { listenerCount } = mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    expect(listenerCount()).toBe(1);
+    await app.setUiPrefs({ ...app.ui, theme: "light" });
+    expect(listenerCount()).toBe(0);
   });
 });
