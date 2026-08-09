@@ -9,6 +9,7 @@
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
   import { openProfile } from "../lib/profileModal.svelte";
+  import { app } from "../lib/store.svelte";
 
   // nyaize: 投稿者が isCat のとき本文テキストを にゃん語化する（本家 :nyaize="'respect'" 相当）。
   // link/quote/plain の中身は本家同様 nyaize しない（disableNyaize）。
@@ -22,7 +23,11 @@
   const p = $derived((node as any).props ?? {});
   const children = $derived<MfmNode[]>((node as any).children ?? []);
   // fn ノード（$[name.args ...]）の装飾。本家は全 fn に一律 display:inline-block を付与する。
-  const fn = $derived(node.type === "fn" ? mfmFn(p.name, p.args ?? {}) : { class: "", style: "" });
+  const fn = $derived(
+    node.type === "fn"
+      ? mfmFn(p.name, p.args ?? {}, app.ui.mfmAnimationEnabled ?? true)
+      : { class: "", style: "" },
+  );
   const fnKnown = $derived(node.type !== "fn" || isKnownFn(p.name));
 
   // $[ruby base reading]。本家準拠: 子が単一テキストなら空白で base/rt を分割、

@@ -134,10 +134,16 @@ export const FN_ARGS: Record<string, MfmArgSpec[]> = {
 
 /// fn ノードの name/args を描画用の class/style へ。未対応は空（子要素だけ描画される）。
 /// 呼び出し側（MfmNode.svelte）が全ケース共通で `display:inline-block` を付与する。
-export function mfmFn(name: string, args: Args = {}): MfmStyle {
+/// animationsEnabled: 設定→表示の「MFMアニメーション」トグル（Issue #175: このアプリは
+/// WebKitGTKのDMABUFレンダラーを無効化しており(wlroots環境でのクラッシュ回避)、Wayland環境
+/// ではWPEのネストされたコンポジタ経由のGL描画→実コンポジタへのコピー/同期という二重の合成
+/// パイプラインにフォールバックする。無限ループのCSSアニメーションは毎フレームこの
+/// オーバーヘッドを発生させ続け、画面内に1件あるだけでもCPU使用率が跳ね上がるため、
+/// OSのprefers-reduced-motionとは別にアプリ側でも止められるようにする）。
+export function mfmFn(name: string, args: Args = {}, animationsEnabled: boolean = true): MfmStyle {
   let style = "";
   let cls = "";
-  const reduced = prefersReducedMotion();
+  const reduced = prefersReducedMotion() || !animationsEnabled;
 
   switch (name) {
     case "tada": {
