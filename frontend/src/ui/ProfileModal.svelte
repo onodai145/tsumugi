@@ -8,6 +8,7 @@
   import Mfm from "../render/Mfm.svelte";
   import NoteCard from "./NoteCard.svelte";
   import FollowListModal from "./FollowListModal.svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let { target, accountId, onclose }: { target: ProfileTarget; accountId: string; onclose: () => void } =
     $props();
@@ -136,63 +137,68 @@
 
 <Modal title="プロフィール" {onclose}>
   {#if profileState.status === "loading"}
-    <p class="hint">読み込み中…</p>
+    <p class="text-[0.85rem] text-muted-foreground">読み込み中…</p>
   {:else if profileState.status === "error"}
-    <p class="err">{profileState.message}</p>
-    <button class="mini-btn" onclick={load}>再試行</button>
+    <p class="my-2 text-[0.82rem] text-destructive">{profileState.message}</p>
+    <Button variant="outline" size="sm" onclick={load}>再試行</Button>
   {:else}
     {@const profile = profileState.profile}
     {#if profile.user.bannerUrl}
-      <img class="banner" src={profile.user.bannerUrl} alt="" />
+      <img class="block aspect-[3/1] w-[calc(100%+32px)] -mx-4 rounded-md object-cover" src={profile.user.bannerUrl} alt="" />
     {/if}
-    <div class="head" class:with-banner={!!profile.user.bannerUrl}>
+    <div class={profile.user.bannerUrl ? "flex items-end gap-2.5 -mt-[22px] pl-1" : "mt-2 flex items-end gap-2.5"}>
       {#if profile.user.avatarUrl}
-        <img class="avatar" src={profile.user.avatarUrl} alt="" />
+        <img class="h-14 w-14 flex-none rounded-[10px] border-2 border-background object-cover" src={profile.user.avatarUrl} alt="" />
       {:else}
-        <div class="avatar placeholder"></div>
+        <div class="avatar-ph h-14 w-14 flex-none rounded-[10px] border-2 border-background"></div>
       {/if}
-      <div class="names">
-        <span class="name"
+      <div class="flex min-w-0 flex-1 flex-col gap-px">
+        <span class="text-[0.95rem] font-semibold"
           ><Mfm text={displayName(profile.user)} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} simple
           /></span
         >
-        <span class="acct">{acct(profile.user)}</span>
+        <span class="text-[0.78rem] text-muted-foreground">{acct(profile.user)}</span>
       </div>
       {#if !profile.isSelf}
-        <button
-          class="follow-btn"
-          class:following={profile.isFollowing}
-          onclick={toggleFollow}
+        <Button
+          size="sm"
+          variant={profile.isFollowing ? "outline" : "default"}
+          class="flex-none rounded-full {profile.isFollowing ? 'hover:border-destructive hover:text-destructive' : ''}"
           disabled={followBusy}
+          onclick={toggleFollow}
         >
           {profile.isFollowing ? "フォロー解除" : "フォロー"}
-        </button>
+        </Button>
       {/if}
     </div>
-    {#if followErr}<p class="err">{followErr}</p>{/if}
+    {#if followErr}<p class="my-2 text-[0.82rem] text-destructive">{followErr}</p>{/if}
     {#if profile.user.bio}
-      <p class="bio"><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p>
+      <p class="mt-2.5 whitespace-pre-wrap break-words text-[0.88rem] leading-normal"
+        ><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p
+      >
     {/if}
-    <div class="stats">
+    <div class="mt-2.5 flex gap-1">
       <!-- aria-label で明示: "フォロー中" の文字列を含む accessible name にすると
            フォロー/フォロー解除トグルボタンを name=/フォロー/ で探すクエリと衝突するため -->
-      <button class="stat-btn" aria-label="following-count" onclick={() => (followListKind = "following")}>
-        <strong>{profile.user.followingCount}</strong> フォロー中
-      </button>
-      <button class="stat-btn" aria-label="followers-count" onclick={() => (followListKind = "followers")}>
-        <strong>{profile.user.followersCount}</strong> フォロワー
-      </button>
-      <span class="stat-static"><strong>{profile.user.notesCount}</strong> ノート</span>
+      <Button variant="ghost" size="xs" aria-label="following-count" onclick={() => (followListKind = "following")}>
+        <strong class="font-semibold text-foreground">{profile.user.followingCount}</strong> フォロー中
+      </Button>
+      <Button variant="ghost" size="xs" aria-label="followers-count" onclick={() => (followListKind = "followers")}>
+        <strong class="font-semibold text-foreground">{profile.user.followersCount}</strong> フォロワー
+      </Button>
+      <span class="px-1.5 py-[3px] text-[0.78rem] text-muted-foreground"
+        ><strong class="font-semibold text-foreground">{profile.user.notesCount}</strong> ノート</span
+      >
     </div>
-    <button class="mini-btn add-column-btn" onclick={addAsColumn}>カラムとして追加</button>
-    <div class="notes" onscroll={onNotesScroll}>
+    <Button variant="outline" size="sm" class="mt-2.5" onclick={addAsColumn}>カラムとして追加</Button>
+    <div class="mt-3 flex max-h-[40vh] flex-col gap-2 overflow-y-auto border-t border-border pt-2.5" onscroll={onNotesScroll}>
       {#each notes as note (note.id)}
         <NoteCard {note} {accountId} />
       {/each}
-      {#if notesBusy}<p class="hint centered">読み込み中…</p>{/if}
+      {#if notesBusy}<p class="m-0 text-center text-[0.85rem] text-muted-foreground">読み込み中…</p>{/if}
       {#if notesErr}
-        <p class="err">{notesErr}</p>
-        <button class="mini-btn" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</button>
+        <p class="my-2 text-[0.82rem] text-destructive">{notesErr}</p>
+        <Button variant="outline" size="sm" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</Button>
       {/if}
     </div>
     {#if followListKind}
@@ -207,152 +213,7 @@
 </Modal>
 
 <style>
-  .hint {
-    color: var(--text-dim);
-    font-size: 0.85rem;
-  }
-  .hint.centered {
-    text-align: center;
-    margin: 0;
-  }
-  .banner {
-    display: block;
-    width: calc(100% + 32px);
-    aspect-ratio: 3 / 1;
-    object-fit: cover;
-    border-radius: 6px;
-    margin: 0 -16px;
-  }
-  .head {
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
-    margin-top: 8px;
-  }
-  .head.with-banner {
-    margin-top: -22px;
-    padding-left: 4px;
-  }
-  .avatar {
-    width: 56px;
-    height: 56px;
-    border-radius: 10px;
-    object-fit: cover;
-    flex: none;
-    border: 2px solid var(--surface-1);
-  }
-  .avatar.placeholder {
+  .avatar-ph {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
-  }
-  .names {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-width: 0;
-    gap: 1px;
-  }
-  .name {
-    font-weight: 600;
-    font-size: 0.95rem;
-  }
-  .acct {
-    color: var(--text-dim);
-    font-size: 0.78rem;
-  }
-  .follow-btn {
-    flex: none;
-    padding: 6px 16px;
-    border: 1px solid var(--accent);
-    border-radius: 999px;
-    background: var(--accent);
-    color: #fff;
-    font-size: 0.82rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .follow-btn:hover:not(:disabled) {
-    filter: brightness(1.08);
-  }
-  .follow-btn.following {
-    background: transparent;
-    color: var(--text);
-    border-color: var(--border);
-  }
-  .follow-btn.following:hover:not(:disabled) {
-    border-color: var(--danger);
-    color: var(--danger);
-  }
-  .follow-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .bio {
-    margin: 10px 0 0;
-    font-size: 0.88rem;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .stats {
-    display: flex;
-    gap: 4px;
-    margin: 10px 0 0;
-  }
-  .stat-btn {
-    padding: 3px 6px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-dim);
-    font-size: 0.78rem;
-    cursor: pointer;
-  }
-  .stat-btn:hover {
-    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
-    color: var(--text);
-  }
-  .stat-btn strong,
-  .stat-static strong {
-    color: var(--text);
-    font-weight: 600;
-  }
-  .stat-static {
-    padding: 3px 6px;
-    font-size: 0.78rem;
-    color: var(--text-dim);
-  }
-  .add-column-btn {
-    margin-top: 10px;
-  }
-  .err {
-    margin: 8px 0;
-    color: var(--danger);
-    font-size: 0.82rem;
-  }
-  .notes {
-    max-height: 40vh;
-    overflow-y: auto;
-    margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .mini-btn {
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.8rem;
-  }
-  .mini-btn:hover:not(:disabled) {
-    border-color: var(--accent);
-  }
-  .mini-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
 </style>
