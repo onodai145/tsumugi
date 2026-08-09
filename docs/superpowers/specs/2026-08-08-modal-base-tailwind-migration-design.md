@@ -33,7 +33,7 @@ shadcn-svelteのDialogプリミティブへの置き換えは行わない(フォ
 - `ConfirmDialog.svelte`のキャンセルボタン: `Button variant="secondary" size="sm"`
 - `ConfirmDialog.svelte`の確定ボタン: `Button variant={danger ? "destructive" : "default"} size="sm"`
 
-確定ボタンは元々`color: #fff`のハードコードだったが、Buttonの`default`/`destructive`バリアントが持つテーマ追従の文字色(`primary-foreground`/`destructive-foreground`)にそのまま任せる。ダークテーマでも適切なコントラストになるようshadcn標準の配色ロジックを優先する。
+確定ボタンは元々`color: #fff`のハードコードだったが、Buttonの`default`/`destructive`バリアントの配色にそのまま任せる。`default`は`bg-primary text-primary-foreground`(塗りつぶし、テーマ追従の白系文字)。`destructive`は実装を確認したところ`destructive-foreground`への参照は無く、`bg-destructive/10 text-destructive`(薄い赤トーン、塗りつぶしではない)になる — shadcn標準のそのままの見た目として受け入れる(最終レビューで判明、2026-08-09時点でdanger propを使う呼び出し箇所は無いため実害なし)。
 
 ## エラーハンドリング
 
