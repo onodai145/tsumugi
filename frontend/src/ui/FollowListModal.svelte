@@ -7,6 +7,7 @@
   import { openProfile } from "../lib/profileModal.svelte";
   import Modal from "./Modal.svelte";
   import Mfm from "../render/Mfm.svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let {
     kind,
@@ -89,119 +90,49 @@
 </script>
 
 <Modal title={kind === "followers" ? "フォロワー" : "フォロー中"} {onclose}>
-  <ul class="list" onscroll={onScroll}>
+  <ul class="-mx-4 mt-1 max-h-[55vh] list-none overflow-y-auto p-0" onscroll={onScroll}>
     {#each users as entry (entry.user.id)}
       <li>
-        <button class="row" onclick={() => openProfile({ userId: entry.user.id }, accountId)}>
+        <button
+          class="list-row flex w-full items-center gap-2.5 px-4 py-[9px] text-left text-foreground"
+          onclick={() => openProfile({ userId: entry.user.id }, accountId)}
+        >
           {#if entry.user.avatarUrl}
-            <img class="avatar" src={entry.user.avatarUrl} alt="" />
+            <img class="h-10 w-10 flex-none rounded-lg object-cover" src={entry.user.avatarUrl} alt="" />
           {:else}
-            <div class="avatar placeholder"></div>
+            <div class="avatar-ph h-10 w-10 flex-none rounded-lg"></div>
           {/if}
-          <span class="user-info">
-            <span class="name"
+          <span class="flex min-w-0 flex-col gap-0.5">
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.88rem] font-semibold"
               ><Mfm
                 text={displayName(entry.user)}
                 emojis={proxiedEmojiMap(entry.user.emojis, instanceHost)}
                 simple
               /></span
             >
-            <span class="acct">{acct(entry.user)}</span>
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.78rem] text-muted-foreground"
+              >{acct(entry.user)}</span
+            >
           </span>
         </button>
       </li>
     {/each}
-    {#if busy}<li class="status">読み込み中…</li>{/if}
+    {#if busy}<li class="p-2.5 text-center text-[0.8rem] text-muted-foreground">読み込み中…</li>{/if}
   </ul>
   {#if err}
-    <p class="err">{err}</p>
-    <button class="mini-btn" onclick={loadMore} disabled={busy}>再試行</button>
+    <p class="my-2 text-[0.82rem] text-destructive">{err}</p>
+    <Button variant="outline" size="sm" onclick={loadMore} disabled={busy}>再試行</Button>
   {/if}
 </Modal>
 
 <style>
-  .list {
-    list-style: none;
-    margin: 4px -16px 0;
-    padding: 0;
-    max-height: 55vh;
-    overflow-y: auto;
-  }
   li + li {
     border-top: 1px solid var(--border);
   }
-  .status {
-    padding: 10px 16px;
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    text-align: center;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 9px 16px;
-    background: none;
-    border: none;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font-family: inherit;
-  }
-  .row:hover {
+  .list-row:hover {
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
   }
-  .avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    object-fit: cover;
-    flex: none;
-  }
-  .avatar.placeholder {
+  .avatar-ph {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
-  }
-  .user-info {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    gap: 2px;
-  }
-  .name {
-    font-weight: 600;
-    font-size: 0.88rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .acct {
-    color: var(--text-dim);
-    font-size: 0.78rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .err {
-    margin: 0 0 8px;
-    color: var(--danger);
-    font-size: 0.82rem;
-  }
-  .mini-btn {
-    margin-top: 8px;
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.8rem;
-  }
-  .mini-btn:hover:not(:disabled) {
-    border-color: var(--accent);
-  }
-  .mini-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
 </style>
