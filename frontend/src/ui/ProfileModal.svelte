@@ -191,7 +191,11 @@
       >
     </div>
     <Button variant="outline" size="sm" class="mt-2.5" onclick={addAsColumn}>カラムとして追加</Button>
-    <div class="mt-3 flex max-h-[40vh] flex-col gap-2 overflow-y-auto border-t border-border pt-2.5" onscroll={onNotesScroll}>
+    <div
+      class="mt-3 flex max-h-[40vh] flex-col gap-2 overflow-y-auto border-t border-border pt-2.5"
+      data-testid="profile-notes-scroll"
+      onscroll={onNotesScroll}
+    >
       {#each notes as note (note.id)}
         <NoteCard {note} {accountId} />
       {/each}

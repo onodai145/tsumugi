@@ -193,7 +193,7 @@ describe("ProfileModal", () => {
     });
     await waitFor(() => expect(getByText("Error: network error")).toBeTruthy());
     invokeMock.mockClear();
-    const notesEl = document.querySelector(".notes") as HTMLElement;
+    const notesEl = document.querySelector('[data-testid="profile-notes-scroll"]') as HTMLElement;
     Object.defineProperty(notesEl, "scrollTop", { value: 500, configurable: true });
     Object.defineProperty(notesEl, "clientHeight", { value: 400, configurable: true });
     Object.defineProperty(notesEl, "scrollHeight", { value: 1200, configurable: true });

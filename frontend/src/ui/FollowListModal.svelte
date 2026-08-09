@@ -90,7 +90,11 @@
 </script>
 
 <Modal title={kind === "followers" ? "フォロワー" : "フォロー中"} {onclose}>
-  <ul class="-mx-4 mt-1 max-h-[55vh] list-none overflow-y-auto p-0" onscroll={onScroll}>
+  <ul
+    class="-mx-4 mt-1 max-h-[55vh] list-none overflow-y-auto p-0"
+    data-testid="follow-list-scroll"
+    onscroll={onScroll}
+  >
     {#each users as entry (entry.user.id)}
       <li>
         <button

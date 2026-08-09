@@ -127,7 +127,7 @@ describe("FollowListModal", () => {
     await waitFor(() => expect(getByText("bob")).toBeTruthy());
     // Modal.svelte は document.body 直下へ portal するため、testing-library の
     // container(レンダー元のラッパー要素)ではなく document 全体から探す。
-    const list = document.querySelector("ul.list") as HTMLElement;
+    const list = document.querySelector('[data-testid="follow-list-scroll"]') as HTMLElement;
     // jsdomはレイアウト計算をしないため、Column.svelteと同じ「残り300px」判定を
     // 満たす値を手動で設定してからscrollイベントを発火する。
     Object.defineProperty(list, "scrollTop", { value: 500, configurable: true });
@@ -156,7 +156,7 @@ describe("FollowListModal", () => {
     });
     await waitFor(() => expect(getByText("Error: network error")).toBeTruthy());
     invokeMock.mockClear();
-    const list = document.querySelector("ul.list") as HTMLElement;
+    const list = document.querySelector('[data-testid="follow-list-scroll"]') as HTMLElement;
     Object.defineProperty(list, "scrollTop", { value: 500, configurable: true });
     Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
     Object.defineProperty(list, "scrollHeight", { value: 1200, configurable: true });
