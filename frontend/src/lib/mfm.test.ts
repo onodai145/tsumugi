@@ -75,6 +75,21 @@ describe("mfmFn", () => {
     expect(result.style).toBe("font-size:150%;");
   });
 
+  it("suppresses the animation when animationsEnabled is false (Issue #175)", () => {
+    const result = mfmFn("jelly", {}, false);
+    expect(result.style).toBe("");
+  });
+
+  it("still applies static styling when animationsEnabled is false", () => {
+    const result = mfmFn("tada", {}, false);
+    expect(result.style).toBe("font-size:150%;");
+  });
+
+  it("applies the animation when animationsEnabled defaults to true and motion is not reduced", () => {
+    const result = mfmFn("jelly");
+    expect(result.style).toBe("animation:mfm-rubberBand 1s linear infinite both;animation-delay:0s");
+  });
+
   it("validates hex colors for fg, falling back to red", () => {
     expect(mfmFn("fg", { color: "0f0" }).style).toBe("color:#0f0;overflow-wrap:anywhere");
     expect(mfmFn("fg", { color: "not-a-color" }).style).toBe("color:#f00;overflow-wrap:anywhere");

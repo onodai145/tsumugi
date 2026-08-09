@@ -23,6 +23,7 @@
     (app.ui.backgroundPosition as BackgroundPosition) ?? "center",
   );
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
+  let mfmAnimationEnabled = $state(app.ui.mfmAnimationEnabled ?? true);
   let uiMode = $state(app.ui.uiMode ?? "auto");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
@@ -275,6 +276,7 @@
         backgroundPosition,
         uiMode,
         emojiStyle,
+        mfmAnimationEnabled,
         gapFillLimit: gapLimit,
         mediaThumbnailHeight: thumbHeight,
       });
@@ -500,6 +502,16 @@
   </p>
 </div>
 
+<label class="checkbox-row"
+  ><input type="checkbox" bind:checked={mfmAnimationEnabled} /> MFMアニメーション($[shake]等)を有効にする</label
+>
+<p class="hint">
+  他人の投稿に含まれる装飾($[shake]/$[spin]/$[rainbow]等)のアニメーション表示です。
+  このアプリはWebKitGTKのハードウェアアクセラレーションを無効化しているため、アニメーションの
+  描画コストが高くCPU使用率が上がることがあります。気になる場合はOFFにしてください
+  （静的な装飾は残ります）。
+</p>
+
 <div class="field">
   <span>フォント</span>
   <div class="seg">
@@ -603,6 +615,13 @@
     gap: 6px;
     margin-bottom: 12px;
     font-size: 0.82rem;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
   }
   .field > span {
     color: var(--text-dim);

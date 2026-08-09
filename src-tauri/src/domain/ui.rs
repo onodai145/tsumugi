@@ -161,6 +161,13 @@ pub struct UiPrefs {
     /// （Issue #12: 「謎のタイミングで通知が来る」の調査用）。切替はアプリ再起動後に反映される。
     #[serde(default)]
     pub enable_file_logging: bool,
+    /// MFM装飾関数($[shake]/$[spin]/$[rainbow]等)のCSSアニメーションを有効にするか。
+    /// このアプリはWebKitGTKのDMABUFレンダラーを無効化しており(wlroots環境でのクラッシュ回避、
+    /// main.rs参照)、ソフトウェア合成になるため無限ループのCSSアニメーションの描画コストが高い。
+    /// 画面内に1件でもあるとCPU使用率が跳ね上がるため、OSのprefers-reduced-motionとは別に
+    /// アプリ側でも無効化できるようにする（Issue #175）。既定はON(従来動作維持)。
+    #[serde(default = "default_mfm_animation_enabled")]
+    pub mfm_animation_enabled: bool,
 }
 
 fn default_column_opacity() -> i32 {
@@ -206,6 +213,10 @@ fn default_code_highlight_theme() -> String {
     "auto".into()
 }
 
+fn default_mfm_animation_enabled() -> bool {
+    true
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -233,6 +244,7 @@ impl Default for UiPrefs {
             note_cache_max_age_days: 0,
             note_cache_max_size_mb: 0,
             enable_file_logging: false,
+            mfm_animation_enabled: default_mfm_animation_enabled(),
         }
     }
 }
@@ -354,6 +366,7 @@ mod tests {
                 punctuation: "#d4d4d4".into(),
                 link: "#569cd6".into(),
             }],
+            mfm_animation_enabled: false,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -365,5 +378,12 @@ mod tests {
         let v: UiPrefs =
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert!(v.custom_themes.is_empty());
+    }
+
+    #[test]
+    fn mfm_animation_enabled_defaults_to_true_for_legacy_json() {
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert!(v.mfm_animation_enabled);
     }
 }
