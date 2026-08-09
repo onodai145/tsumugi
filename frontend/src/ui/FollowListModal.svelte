@@ -117,10 +117,10 @@
         </button>
       </li>
     {/each}
-    {#if busy}<li class="p-2.5 text-center text-[0.8rem] text-muted-foreground">読み込み中…</li>{/if}
+    {#if busy}<li class="px-4 py-2.5 text-center text-[0.8rem] text-muted-foreground">読み込み中…</li>{/if}
   </ul>
   {#if err}
-    <p class="my-2 text-[0.82rem] text-destructive">{err}</p>
+    <p class="mb-2 text-[0.82rem] text-destructive">{err}</p>
     <Button variant="outline" size="sm" onclick={loadMore} disabled={busy}>再試行</Button>
   {/if}
 </Modal>
