@@ -91,7 +91,7 @@
 
 <Modal title={kind === "followers" ? "フォロワー" : "フォロー中"} {onclose}>
   <ul
-    class="-mx-4 mt-1 max-h-[55vh] list-none overflow-y-auto p-0"
+    class="-mx-4 mt-1 mb-0 max-h-[55vh] list-none overflow-y-auto p-0"
     data-testid="follow-list-scroll"
     onscroll={onScroll}
   >
@@ -124,8 +124,8 @@
     {#if busy}<li class="px-4 py-2.5 text-center text-[0.8rem] text-muted-foreground">読み込み中…</li>{/if}
   </ul>
   {#if err}
-    <p class="mb-2 text-[0.82rem] text-destructive">{err}</p>
-    <Button variant="outline" size="sm" onclick={loadMore} disabled={busy}>再試行</Button>
+    <p class="mt-0 mb-2 text-[0.82rem] text-destructive">{err}</p>
+    <Button variant="outline" size="sm" class="mt-2" onclick={loadMore} disabled={busy}>再試行</Button>
   {/if}
 </Modal>
 

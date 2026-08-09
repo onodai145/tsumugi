@@ -173,7 +173,7 @@
     </div>
     {#if followErr}<p class="my-2 text-[0.82rem] text-destructive">{followErr}</p>{/if}
     {#if profile.user.bio}
-      <p class="mt-2.5 whitespace-pre-wrap break-words text-[0.88rem] leading-normal"
+      <p class="mt-2.5 mb-0 whitespace-pre-wrap break-words text-[0.88rem] leading-normal"
         ><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p
       >
     {/if}
