@@ -765,10 +765,14 @@ export type UiPrefs = {
 	enableFileLogging?: boolean,
 	/**
 	 *  MFM装飾関数($[shake]/$[spin]/$[rainbow]等)のCSSアニメーションを有効にするか。
-	 *  このアプリはWebKitGTKのDMABUFレンダラーを無効化しており(wlroots環境でのクラッシュ回避、
-	 *  main.rs参照)、ソフトウェア合成になるため無限ループのCSSアニメーションの描画コストが高い。
-	 *  画面内に1件でもあるとCPU使用率が跳ね上がるため、OSのprefers-reduced-motionとは別に
-	 *  アプリ側でも無効化できるようにする（Issue #175）。既定はON(従来動作維持)。
+	 *  このアプリはWebKitGTKのDMABUFレンダラーを無効化している(wlroots環境でのクラッシュ回避、
+	 *  main.rs参照)。この場合Wayland環境ではWPEのネストされたコンポジタ経由のEGL/GLパスに
+	 *  フォールバックする（完全なソフトウェアレンダリングではなく引き続きGPUを使う）が、
+	 *  WebKit自身の小さなWaylandコンポジタで描画した内容をさらに実コンポジタへコピー/同期する
+	 *  二重の合成パイプラインになるため、無限ループのCSSアニメーションは毎フレームこの
+	 *  オーバーヘッドを発生させ続け、画面内に1件でもあるとCPU使用率が跳ね上がる。
+	 *  OSのprefers-reduced-motionとは別に、アプリ側でも無効化できるようにする（Issue #175）。
+	 *  既定はON(従来動作維持)。
 	 */
 	mfmAnimationEnabled?: boolean,
 };
