@@ -429,7 +429,7 @@
               <Quote size={15} />
             </button>
           {/if}
-          <div class="relative">
+          <div class="relative inline-flex h-6 items-center">
             <button
               type="button"
               bind:this={pickerBtn}
@@ -458,7 +458,7 @@
               </div>
             {/if}
           </div>
-          <div class="relative">
+          <div class="relative inline-flex h-6 items-center">
             <button
               type="button"
               bind:this={noteMenuBtn}
