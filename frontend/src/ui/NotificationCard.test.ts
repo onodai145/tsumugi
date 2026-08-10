@@ -102,7 +102,7 @@ describe("NotificationCard note actions", () => {
     const { container } = render(NotificationCard, {
       props: { notification, accountId: "a1" },
     });
-    expect(container.querySelector(".note-preview")).toBeNull();
+    expect(container.querySelector('[data-testid="notification-note-preview"]')).toBeNull();
   });
 });
 
@@ -121,7 +121,7 @@ describe("NotificationCard profile navigation", () => {
     const { container } = render(NotificationCard, {
       props: { notification, accountId: "a1" },
     });
-    const avatar = container.querySelector(".avatar") as HTMLElement;
+    const avatar = container.querySelector('[data-testid="notification-avatar"]') as HTMLElement;
     await fireEvent.click(avatar);
     expect(currentProfileTarget()).toEqual({ userId: "u9" });
     expect(currentProfileAccountId()).toBe("a1");
@@ -135,7 +135,7 @@ describe("NotificationCard profile navigation", () => {
     const { container } = render(NotificationCard, {
       props: { notification, accountId: "a1" },
     });
-    const actor = container.querySelector(".actor") as HTMLElement;
+    const actor = container.querySelector('[data-testid="notification-actor"]') as HTMLElement;
     await fireEvent.click(actor);
     expect(currentProfileTarget()).toEqual({ userId: "u9" });
   });
