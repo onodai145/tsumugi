@@ -53,7 +53,9 @@
 <style>
   .completion-popover {
     position: fixed;
-    z-index: 60;
+    /* Modal.svelte/ConfirmDialog.svelte(z-[1000])より前面に出す必要がある。
+       AddColumnModal(唯一のTqlCompletionField呼び出し元)が共通Modalを使うようになったため。 */
+    z-index: 1010;
     display: flex;
     flex-direction: column;
     max-height: 260px;
