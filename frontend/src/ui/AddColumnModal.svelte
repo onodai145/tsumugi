@@ -4,9 +4,10 @@
   import type { TabView } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
-  import { X } from "@lucide/svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
+  import Modal from "./Modal.svelte";
+  import { Button } from "$lib/components/ui/button";
 
   // editTab を渡すと「編集」モード（アカウントは固定、ソース/フィルタ/名前を変更）。
   let {
@@ -361,346 +362,219 @@
   }
 </script>
 
-<div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
-    <header class="head">
-      <span>{isEdit ? "タブを編集" : groupId ? "タブを追加" : "カラムを追加"}</span>
-      <button class="x" onclick={onclose}><X size={16} /></button>
-    </header>
-
-    <div class="field">
-      <span>入力方法</span>
-      <div class="seg">
-        <button
-          type="button"
-          class="seg-btn"
-          class:active={uiMode === "guided"}
-          onclick={() => (uiMode = "guided")}
-        >簡単</button>
-        <button
-          type="button"
-          class="seg-btn"
-          class:active={uiMode === "expert"}
-          onclick={switchToExpert}
-        >エキスパート(TQL)</button>
-      </div>
+<Modal title={isEdit ? "タブを編集" : groupId ? "タブを追加" : "カラムを追加"} {onclose}>
+  <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <span class="text-muted-foreground">入力方法</span>
+    <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
+      <button
+        type="button"
+        class={uiMode === "guided"
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground"}
+        onclick={() => (uiMode = "guided")}
+      >簡単</button>
+      <button
+        type="button"
+        class={uiMode === "expert"
+          ? "bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground"
+          : "bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground"}
+        onclick={switchToExpert}
+      >エキスパート(TQL)</button>
     </div>
-
-    <div class="field">
-      <span>アカウント{isEdit ? "（変更不可）" : ""}</span>
-      <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel disabled={isEdit} />
-    </div>
-
-    <label class="field">
-      <span>名前（空欄で自動）</span>
-      <input placeholder={edit?.title ?? "自動でつけます"} bind:value={name} />
-    </label>
-
-    {#if uiMode === "expert"}
-      <label class="field">
-        <span>from ... where ...（複数ソースはカンマ区切り。例: from home, list("id") where has_files）</span>
-        <TqlCompletionField
-          mode="query"
-          bind:value={tqlText}
-          rows={4}
-          placeholder={'from home, list("...") where has_files && !cw'}
-          invalid={!!tqlErr}
-          oninput={onTqlInput}
-          {lists}
-          {antennas}
-          {channels}
-        />
-      </label>
-      {#if tqlErr}<p class="err">TQLエラー: {tqlErr}</p>{/if}
-      <p class="hint">
-        ソース: <code>home</code> / <code>local</code> / <code>hybrid</code> / <code>global</code> /
-        <code>list("id")</code> / <code>antenna("id")</code> / <code>channel("id")</code> /
-        <code>user("@acct")</code> / <code>tag("name")</code> / <code>search("q")</code> /
-        <code>cache</code>（ローカルキャッシュ検索）。list/antenna/channel は生IDが必要です。
-      </p>
-    {/if}
-
-    {#if uiMode === "guided"}
-    <div class="field">
-      <span>ソース</span>
-      <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} />
-    </div>
-
-    {#if sourceType === "list"}
-      <div class="field">
-        <span>リスト</span>
-        {#if lists.length > 0}
-          <Dropdown bind:value={listId} options={lists.map((l) => ({ value: l.id, label: l.name || l.id }))} />
-        {:else}
-          <span class="hint">リストがありません（Misskey 側で作成してください）</span>
-        {/if}
-      </div>
-    {/if}
-
-    {#if sourceType === "antenna"}
-      <div class="field">
-        <span>アンテナ</span>
-        {#if antennas.length > 0}
-          <Dropdown bind:value={antennaId} options={antennas.map((a) => ({ value: a.id, label: a.name || a.id }))} />
-        {:else}
-          <span class="hint">アンテナがありません（Misskey 側で作成してください）</span>
-        {/if}
-      </div>
-    {/if}
-
-    {#if sourceType === "channel"}
-      <div class="field">
-        <span>チャンネル（フォロー中）</span>
-        {#if channels.length > 0}
-          <Dropdown bind:value={channelId} options={channels.map((c) => ({ value: c.id, label: c.name || c.id }))} />
-        {:else}
-          <span class="hint">フォロー中のチャンネルがありません</span>
-        {/if}
-      </div>
-    {/if}
-
-    {#if sourceType === "user"}
-      <label class="field">
-        <span>ユーザ（@user@host。ローカルは @host 省略可）</span>
-        <input
-          placeholder={editUserId ? "空欄で現在のユーザを維持" : "@alice@misskey.example"}
-          bind:value={userAcct}
-        />
-      </label>
-    {/if}
-
-    {#if sourceType === "tag"}
-      <label class="field">
-        <span>ハッシュタグ（# は省略可）</span>
-        <input placeholder="misskey" bind:value={tagText} />
-      </label>
-    {/if}
-
-    {#if sourceType === "search"}
-      <label class="field">
-        <span>検索語</span>
-        <input placeholder="キーワード" bind:value={searchQuery} />
-      </label>
-    {/if}
-
-    {#if sourceType !== "search" && sourceType !== "user" && sourceType !== "tag"}
-      <div class="field">
-        <span>このタブの通知</span>
-        <label class="check-row"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
-        <label class="check-row"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
-      </div>
-      {#if notifySound}
-        <div class="field">
-          <span>通知音の種類</span>
-          <Dropdown bind:value={soundMode} options={soundModeOptions} />
-          {#if soundMode === "custom"}
-            <div class="bg-row">
-              <button type="button" class="mini-btn" disabled={pickingSound} onclick={pickSound}>
-                {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-              </button>
-              {#if notifySoundChoice.startsWith("data:")}
-                <button type="button" class="mini-btn" onclick={() => playNotifySound(notifySoundChoice)}>試聴</button>
-              {/if}
-            </div>
-          {:else if soundMode !== "inherit"}
-            <button type="button" class="mini-btn" onclick={() => playNotifySound(soundMode)}>試聴</button>
-          {/if}
-        </div>
-      {/if}
-      <p class="hint">
-        {sourceType === "notifications" ? "通知カラムへの新着" : "このタブに新着ノート"}が届いたら発火します。
-        設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。
-      </p>
-    {:else}
-      <p class="hint">このソースはライブ更新（ストリーミング）に対応していないため通知は鳴りません。</p>
-    {/if}
-
-    {#if sourceType !== "notifications"}
-      <label class="field">
-        <span>フィルタ（TQL・空欄で全件）</span>
-        <TqlCompletionField
-          mode="predicate"
-          bind:value={filterText}
-          placeholder={"例: has_files && !cw && reactions >= 5"}
-          invalid={!!filterErr}
-          oninput={onFilterInput}
-        />
-      </label>
-      <p class="hint">
-        例: <code>has_files</code> / <code>!bot && local</code> /
-        <code>reactions &gt;= 10</code> / <code>text -&gt; "rust"</code>
-      </p>
-      {#if filterErr}<p class="err">TQLエラー: {filterErr}</p>{/if}
-    {/if}
-    {/if}
-
-    {#if uiMode === "expert"}
-      <div class="field">
-        <span>このタブの通知</span>
-        <label class="check-row"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
-        <label class="check-row"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
-      </div>
-      {#if notifySound}
-        <div class="field">
-          <span>通知音の種類</span>
-          <Dropdown bind:value={soundMode} options={soundModeOptions} />
-          {#if soundMode === "custom"}
-            <div class="bg-row">
-              <button type="button" class="mini-btn" disabled={pickingSound} onclick={pickSound}>
-                {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-              </button>
-              {#if notifySoundChoice.startsWith("data:")}
-                <button type="button" class="mini-btn" onclick={() => playNotifySound(notifySoundChoice)}>試聴</button>
-              {/if}
-            </div>
-          {:else if soundMode !== "inherit"}
-            <button type="button" class="mini-btn" onclick={() => playNotifySound(soundMode)}>試聴</button>
-          {/if}
-        </div>
-      {/if}
-      <p class="hint">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
-    {/if}
-
-    <div class="actions">
-      <button class="submit" disabled={busy || !!filterErr || !!tqlErr} onclick={submit}>
-        {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
-      </button>
-    </div>
-    {#if submitErr}<p class="err">{submitErr}</p>{/if}
   </div>
-</div>
 
-<style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    display: grid;
-    place-items: start center;
-    padding-top: 8vh;
-    z-index: 50;
-  }
-  .modal {
-    width: min(480px, 92vw);
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 16px;
-  }
-  .head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-weight: 600;
-    margin-bottom: 12px;
-  }
-  .x {
-    display: inline-flex;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 10px;
-    font-size: 0.85rem;
-  }
-  .field > span:first-child {
-    color: var(--text-dim);
-  }
-  .check-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.85rem;
-  }
-  input {
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-  }
-  .seg {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-    width: fit-content;
-  }
-  .seg-btn {
-    padding: 6px 14px;
-    border: none;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.82rem;
-    border-right: 1px solid var(--border);
-  }
-  .seg-btn:last-child {
-    border-right: none;
-  }
-  .seg-btn.active {
-    background: var(--accent);
-    color: #fff;
-  }
-  .bg-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .mini-btn {
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.8rem;
-  }
-  .mini-btn:hover {
-    border-color: var(--accent);
-  }
-  .mini-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .hint {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    margin: 0 0 8px;
-  }
-  .hint code {
-    background: var(--surface-3);
-    padding: 0 4px;
-    border-radius: 4px;
-  }
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 6px;
-  }
-  .submit {
-    padding: 8px 20px;
-    border: none;
-    border-radius: 8px;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .submit:disabled {
-    opacity: 0.5;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 8px 0 0;
-    word-break: break-word;
-  }
-</style>
+  <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <span class="text-muted-foreground">アカウント{isEdit ? "（変更不可）" : ""}</span>
+    <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel disabled={isEdit} />
+  </div>
+
+  <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <span class="text-muted-foreground">名前（空欄で自動）</span>
+    <input
+      class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+      placeholder={edit?.title ?? "自動でつけます"}
+      bind:value={name}
+    />
+  </label>
+
+  {#if uiMode === "expert"}
+    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">from ... where ...（複数ソースはカンマ区切り。例: from home, list("id") where has_files）</span>
+      <TqlCompletionField
+        mode="query"
+        bind:value={tqlText}
+        rows={4}
+        placeholder={'from home, list("...") where has_files && !cw'}
+        invalid={!!tqlErr}
+        oninput={onTqlInput}
+        {lists}
+        {antennas}
+        {channels}
+      />
+    </label>
+    {#if tqlErr}<p class="mb-0 mt-2 text-[0.82rem] text-destructive break-words">TQLエラー: {tqlErr}</p>{/if}
+    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">
+      ソース: <code class="rounded bg-accent px-1">home</code> / <code class="rounded bg-accent px-1">local</code> / <code class="rounded bg-accent px-1">hybrid</code> / <code class="rounded bg-accent px-1">global</code> /
+      <code class="rounded bg-accent px-1">list("id")</code> / <code class="rounded bg-accent px-1">antenna("id")</code> / <code class="rounded bg-accent px-1">channel("id")</code> /
+      <code class="rounded bg-accent px-1">user("@acct")</code> / <code class="rounded bg-accent px-1">tag("name")</code> / <code class="rounded bg-accent px-1">search("q")</code> /
+      <code class="rounded bg-accent px-1">cache</code>（ローカルキャッシュ検索）。list/antenna/channel は生IDが必要です。
+    </p>
+  {/if}
+
+  {#if uiMode === "guided"}
+  <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <span class="text-muted-foreground">ソース</span>
+    <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} />
+  </div>
+
+  {#if sourceType === "list"}
+    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">リスト</span>
+      {#if lists.length > 0}
+        <Dropdown bind:value={listId} options={lists.map((l) => ({ value: l.id, label: l.name || l.id }))} />
+      {:else}
+        <span class="text-[0.75rem] text-muted-foreground">リストがありません（Misskey 側で作成してください）</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if sourceType === "antenna"}
+    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">アンテナ</span>
+      {#if antennas.length > 0}
+        <Dropdown bind:value={antennaId} options={antennas.map((a) => ({ value: a.id, label: a.name || a.id }))} />
+      {:else}
+        <span class="text-[0.75rem] text-muted-foreground">アンテナがありません（Misskey 側で作成してください）</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if sourceType === "channel"}
+    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">チャンネル（フォロー中）</span>
+      {#if channels.length > 0}
+        <Dropdown bind:value={channelId} options={channels.map((c) => ({ value: c.id, label: c.name || c.id }))} />
+      {:else}
+        <span class="text-[0.75rem] text-muted-foreground">フォロー中のチャンネルがありません</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if sourceType === "user"}
+    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">ユーザ（@user@host。ローカルは @host 省略可）</span>
+      <input
+        class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+        placeholder={editUserId ? "空欄で現在のユーザを維持" : "@alice@misskey.example"}
+        bind:value={userAcct}
+      />
+    </label>
+  {/if}
+
+  {#if sourceType === "tag"}
+    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">ハッシュタグ（# は省略可）</span>
+      <input
+        class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+        placeholder="misskey"
+        bind:value={tagText}
+      />
+    </label>
+  {/if}
+
+  {#if sourceType === "search"}
+    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">検索語</span>
+      <input
+        class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+        placeholder="キーワード"
+        bind:value={searchQuery}
+      />
+    </label>
+  {/if}
+
+  {#if sourceType !== "search" && sourceType !== "user" && sourceType !== "tag"}
+    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">このタブの通知</span>
+      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
+      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
+    </div>
+    {#if notifySound}
+      <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+        <span class="text-muted-foreground">通知音の種類</span>
+        <Dropdown bind:value={soundMode} options={soundModeOptions} />
+        {#if soundMode === "custom"}
+          <div class="flex items-center gap-2.5">
+            <Button type="button" variant="outline" size="xs" disabled={pickingSound} onclick={pickSound}>
+              {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
+            </Button>
+            {#if notifySoundChoice.startsWith("data:")}
+              <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
+            {/if}
+          </div>
+        {:else if soundMode !== "inherit"}
+          <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundMode)}>試聴</Button>
+        {/if}
+      </div>
+    {/if}
+    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">
+      {sourceType === "notifications" ? "通知カラムへの新着" : "このタブに新着ノート"}が届いたら発火します。
+      設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。
+    </p>
+  {:else}
+    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">このソースはライブ更新（ストリーミング）に対応していないため通知は鳴りません。</p>
+  {/if}
+
+  {#if sourceType !== "notifications"}
+    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">フィルタ（TQL・空欄で全件）</span>
+      <TqlCompletionField
+        mode="predicate"
+        bind:value={filterText}
+        placeholder={"例: has_files && !cw && reactions >= 5"}
+        invalid={!!filterErr}
+        oninput={onFilterInput}
+      />
+    </label>
+    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">
+      例: <code class="rounded bg-accent px-1">has_files</code> / <code class="rounded bg-accent px-1">!bot && local</code> /
+      <code class="rounded bg-accent px-1">reactions &gt;= 10</code> / <code class="rounded bg-accent px-1">text -&gt; "rust"</code>
+    </p>
+    {#if filterErr}<p class="mb-0 mt-2 text-[0.82rem] text-destructive break-words">TQLエラー: {filterErr}</p>{/if}
+  {/if}
+  {/if}
+
+  {#if uiMode === "expert"}
+    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <span class="text-muted-foreground">このタブの通知</span>
+      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
+      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
+    </div>
+    {#if notifySound}
+      <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+        <span class="text-muted-foreground">通知音の種類</span>
+        <Dropdown bind:value={soundMode} options={soundModeOptions} />
+        {#if soundMode === "custom"}
+          <div class="flex items-center gap-2.5">
+            <Button type="button" variant="outline" size="xs" disabled={pickingSound} onclick={pickSound}>
+              {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
+            </Button>
+            {#if notifySoundChoice.startsWith("data:")}
+              <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
+            {/if}
+          </div>
+        {:else if soundMode !== "inherit"}
+          <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundMode)}>試聴</Button>
+        {/if}
+      </div>
+    {/if}
+    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
+  {/if}
+
+  <div class="mt-1.5 flex justify-end">
+    <Button disabled={busy || !!filterErr || !!tqlErr} onclick={submit}>
+      {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
+    </Button>
+  </div>
+  {#if submitErr}<p class="mb-0 mt-2 text-[0.82rem] text-destructive break-words">{submitErr}</p>{/if}
+</Modal>
