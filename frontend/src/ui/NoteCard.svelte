@@ -406,15 +406,15 @@
 
       {#if effectiveShowActions && accountId}
         <footer class="actions mt-2 flex items-center gap-[14px] text-[0.8rem] text-muted-foreground">
-          <button type="button" class="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground" aria-label="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
+          <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground" aria-label="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
             <Reply size={15} /> {inner.replyCount || ""}
           </button>
           {#if canRenote}
             <button
               type="button"
               class={renoteBusy
-                ? "inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground opacity-50"
-                : "inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground"}
+                ? "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground opacity-50"
+                : "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"}
               aria-label="Renote"
               onclick={doRenote}
               onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
@@ -425,7 +425,7 @@
                 <span>{inner.renoteCount}</span>
               {/if}
             </button>
-            <button type="button" class="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground" aria-label="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
+            <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground" aria-label="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
               <Quote size={15} />
             </button>
           {/if}
@@ -434,8 +434,8 @@
               type="button"
               bind:this={pickerBtn}
               class={showPicker
-                ? "on inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground"
-                : "inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground"}
+                ? "on inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"
+                : "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"}
               aria-label="リアクション"
               onclick={togglePicker}
             >
@@ -463,8 +463,8 @@
               type="button"
               bind:this={noteMenuBtn}
               class={noteMenuOpen
-                ? "on inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground"
-                : "inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.82rem] leading-none text-muted-foreground"}
+                ? "on inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"
+                : "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"}
               aria-label="その他"
               onclick={() => {
                 app.reactPicker = null;
