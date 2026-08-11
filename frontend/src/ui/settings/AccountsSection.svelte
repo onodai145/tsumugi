@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
   import type { Account } from "../../bindings/tauri.gen";
+  import { Button } from "$lib/components/ui/button";
 
   let {
     onAddAccount,
@@ -34,166 +35,54 @@
   }
 </script>
 
-<h3 class="title">アカウント</h3>
+<h3 class="mb-3.5 mt-0 text-base font-semibold">アカウント</h3>
 
 {#if app.accounts.length === 0}
-  <p class="hint">ログイン中のアカウントはありません。</p>
+  <p class="mb-3.5 mt-0 text-[0.76rem] text-muted-foreground">ログイン中のアカウントはありません。</p>
 {:else}
-  <ul class="list">
+  <ul class="m-0 mb-3 flex list-none flex-col gap-1.5 p-0">
     {#each app.accounts as a (a.id)}
-      <li class="item">
+      <li class="flex items-center gap-2.5 rounded-lg border border-border bg-muted p-2">
         {#if a.avatarUrl}
-          <img class="avatar" src={a.avatarUrl} alt="" />
+          <img class="h-[34px] w-[34px] flex-none rounded-lg object-cover" src={a.avatarUrl} alt="" />
         {:else}
-          <div class="avatar ph">{(a.displayName || a.username).charAt(0)}</div>
+          <div class="grid h-[34px] w-[34px] flex-none place-items-center rounded-lg bg-accent font-bold text-muted-foreground">{(a.displayName || a.username).charAt(0)}</div>
         {/if}
-        <div class="meta">
-          <div class="name">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge">既定</span>{/if}</div>
-          <div class="handle">@{a.username}@{a.host}</div>
+        <div class="min-w-0 flex-1">
+          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.86rem] font-semibold">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge ml-1.5 rounded px-1.5 py-px text-[0.68rem] font-semibold text-primary">既定</span>{/if}</div>
+          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.76rem] text-muted-foreground">@{a.username}@{a.host}</div>
         </div>
         {#if confirmId === a.id}
-          <div class="confirm">
+          <div class="flex flex-none items-center gap-1.5 text-[0.78rem] text-muted-foreground">
             <span>削除？</span>
-            <button class="del" disabled={busyId === a.id} onclick={() => remove(a.id)}>
+            <Button type="button" variant="destructive" size="xs" disabled={busyId === a.id} onclick={() => remove(a.id)}>
               {busyId === a.id ? "…" : "はい"}
-            </button>
-            <button class="ghost" onclick={() => (confirmId = null)}>いいえ</button>
+            </Button>
+            <Button type="button" variant="outline" size="xs" onclick={() => (confirmId = null)}>いいえ</Button>
           </div>
         {:else}
           {#if a.id !== app.defaultAccountId()}
-            <button class="ghost" onclick={() => makeDefault(a.id)}>既定に設定</button>
+            <Button type="button" variant="outline" size="xs" onclick={() => makeDefault(a.id)}>既定に設定</Button>
           {/if}
-          <button class="ghost" onclick={() => onReauth(a)}>再認証</button>
-          <button class="ghost" onclick={() => (confirmId = a.id)}>削除</button>
+          <Button type="button" variant="outline" size="xs" onclick={() => onReauth(a)}>再認証</Button>
+          <Button type="button" variant="outline" size="xs" onclick={() => (confirmId = a.id)}>削除</Button>
         {/if}
       </li>
     {/each}
   </ul>
 {/if}
 
-<p class="hint">
-  アカウントを削除すると、そのアカウントのカラム（タブ）も表示されなくなり、保存済みトークンは keyring から破棄されます。
+<p class="mb-3.5 mt-0 text-[0.76rem] text-muted-foreground">
+  アカウントを削除すると、そのアカウントのカラム(タブ)も表示されなくなり、保存済みトークンは keyring から破棄されます。
 </p>
 
-<div class="actions">
-  <button class="add" onclick={onAddAccount}>＋ アカウントを追加</button>
+<div class="flex justify-start">
+  <Button type="button" variant="outline" class="border-primary text-primary hover:text-primary" onclick={onAddAccount}>＋ アカウントを追加</Button>
 </div>
-{#if err}<p class="err">{err}</p>{/if}
+{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
 
 <style>
-  .title {
-    margin: 0 0 14px;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-  .list {
-    list-style: none;
-    margin: 0 0 12px;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-  }
-  .avatar {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    flex: none;
-    object-fit: cover;
-  }
-  .avatar.ph {
-    display: grid;
-    place-items: center;
-    background: var(--surface-3);
-    color: var(--text-dim);
-    font-weight: 700;
-  }
-  .meta {
-    flex: 1;
-    min-width: 0;
-  }
-  .name {
-    font-size: 0.86rem;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .handle {
-    font-size: 0.76rem;
-    color: var(--text-dim);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
   .default-badge {
-    margin-left: 6px;
-    padding: 1px 6px;
-    border-radius: 4px;
     background: color-mix(in srgb, var(--accent) 22%, transparent);
-    color: var(--accent);
-    font-size: 0.68rem;
-    font-weight: 600;
-  }
-  .confirm {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.78rem;
-    color: var(--text-dim);
-    flex: none;
-  }
-  .ghost {
-    padding: 5px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-1);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.78rem;
-  }
-  .del {
-    padding: 5px 10px;
-    border: none;
-    border-radius: 6px;
-    background: var(--danger);
-    color: #fff;
-    cursor: pointer;
-    font-size: 0.78rem;
-  }
-  .del:disabled {
-    opacity: 0.5;
-  }
-  .hint {
-    font-size: 0.76rem;
-    color: var(--text-dim);
-    margin: 0 0 14px;
-  }
-  .actions {
-    display: flex;
-    justify-content: flex-start;
-  }
-  .add {
-    padding: 7px 16px;
-    border: 1px solid var(--accent);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--accent);
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 8px 0 0;
   }
 </style>

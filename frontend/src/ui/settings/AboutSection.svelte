@@ -16,88 +16,39 @@
   });
 </script>
 
-<div class="about">
-  <h2 class="app-name">tsumugi</h2>
-  <p class="desc">Misskey マルチカラムデスクトップクライアント</p>
+<div class="flex flex-col gap-1">
+  <h2 class="m-0 text-[1.2rem] font-bold">tsumugi</h2>
+  <p class="mb-3 mt-0 text-[0.85rem] text-muted-foreground">Misskey マルチカラムデスクトップクライアント</p>
 
   {#if app.updateAvailable}
-    <button class="update-banner" onclick={() => openUrl(app.updateAvailable!.url)}>
-      新しいバージョン v{app.updateAvailable.version} が公開されています（クリックで開く）
+    <button
+      type="button"
+      class="update-banner mb-3 mt-1 block w-full rounded-lg border border-primary px-2.5 py-2 text-left font-[inherit] text-[0.82rem] text-foreground"
+      onclick={() => openUrl(app.updateAvailable!.url)}
+    >
+      新しいバージョン v{app.updateAvailable.version} が公開されています(クリックで開く)
     </button>
   {/if}
 
-  <dl class="info">
-    <dt>バージョン</dt>
-    <dd>{appVersion ?? "…"}</dd>
+  <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+    <dt class="text-[0.82rem] text-muted-foreground">バージョン</dt>
+    <dd class="m-0 break-all text-[0.85rem]">{appVersion ?? "…"}</dd>
 
-    <dt>コミット</dt>
-    <dd>{commitHash ?? "…"}</dd>
+    <dt class="text-[0.82rem] text-muted-foreground">コミット</dt>
+    <dd class="m-0 break-all text-[0.85rem]">{commitHash ?? "…"}</dd>
 
-    <dt>ライセンス</dt>
-    <dd>MIT</dd>
+    <dt class="text-[0.82rem] text-muted-foreground">ライセンス</dt>
+    <dd class="m-0 break-all text-[0.85rem]">MIT</dd>
 
-    <dt>リポジトリ</dt>
-    <dd>
-      <button class="link" onclick={() => openUrl(REPO_URL)}>{REPO_URL}</button>
+    <dt class="text-[0.82rem] text-muted-foreground">リポジトリ</dt>
+    <dd class="m-0 break-all text-[0.85rem]">
+      <button type="button" class="border-0 bg-transparent p-0 text-left text-[0.85rem] text-primary hover:underline" onclick={() => openUrl(REPO_URL)}>{REPO_URL}</button>
     </dd>
   </dl>
 </div>
 
 <style>
-  .about {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .app-name {
-    font-size: 1.2rem;
-    font-weight: 700;
-    margin: 0;
-  }
-  .desc {
-    margin: 0 0 12px;
-    color: var(--text-dim);
-    font-size: 0.85rem;
-  }
   .update-banner {
-    display: block;
-    width: 100%;
-    text-align: left;
-    margin: 4px 0 12px;
-    padding: 8px 10px;
-    border: 1px solid var(--accent);
-    border-radius: 8px;
     background: color-mix(in srgb, var(--accent) 15%, transparent);
-    color: var(--text);
-    font-size: 0.82rem;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .info {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 6px 16px;
-    margin: 0;
-  }
-  .info dt {
-    color: var(--text-dim);
-    font-size: 0.82rem;
-  }
-  .info dd {
-    margin: 0;
-    font-size: 0.85rem;
-    word-break: break-all;
-  }
-  .link {
-    border: none;
-    background: transparent;
-    color: var(--accent);
-    cursor: pointer;
-    padding: 0;
-    font-size: 0.85rem;
-    text-align: left;
-  }
-  .link:hover {
-    text-decoration: underline;
   }
 </style>

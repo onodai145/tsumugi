@@ -87,22 +87,27 @@
   }
 </script>
 
-<h3 class="title">リアクション</h3>
-<p class="hint">絵文字ピッカーの「ピン留め」タブに表示する絵文字を編集できます（本家Misskeyのピン留め絵文字に相当）。ドラッグで並べ替えられます。</p>
+<h3 class="mb-1.5 mt-0 text-base font-semibold">リアクション</h3>
+<p class="mb-3.5 mt-0 text-[0.8rem] text-muted-foreground">絵文字ピッカーの「ピン留め」タブに表示する絵文字を編集できます(本家Misskeyのピン留め絵文字に相当)。ドラッグで並べ替えられます。</p>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="list" onpointermove={onPointerMove} onpointerup={onPointerEnd} onpointercancel={onPointerEnd}>
+<div class="list flex flex-wrap items-center gap-2" onpointermove={onPointerMove} onpointerup={onPointerEnd} onpointercancel={onPointerEnd}>
   {#each displayOrder as key, i (key)}
     {@const custom = isCustomEmojiKey(key) ? customEmojiByName(parseCustomEmojiPinKey(key).name) : null}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="chip" class:dragging={draggingIndex === i} data-chip-index={i}>
-      <span class="grip" onpointerdown={(e) => onPointerDown(i, e)} title="ドラッグで並べ替え">
+    <div
+      class={draggingIndex === i
+        ? "flex items-center gap-1 rounded-lg border border-border bg-muted px-1.5 py-1 opacity-40"
+        : "flex items-center gap-1 rounded-lg border border-border bg-muted px-1.5 py-1"}
+      data-chip-index={i}
+    >
+      <span class="-my-1 flex touch-none cursor-grab items-center justify-center p-2 text-muted-foreground" onpointerdown={(e) => onPointerDown(i, e)} title="ドラッグで並べ替え">
         <GripVertical size={12} />
       </span>
-      <span class="glyph">
+      <span class="flex text-[1.2rem] leading-none">
         {#if isCustomEmojiKey(key)}
           {#if custom}
-            <img src={custom.url} alt={key} />
+            <img class="h-[1.3em] w-[1.3em] object-contain" src={custom.url} alt={key} />
           {:else}
             {parseCustomEmojiPinKey(key).name}
           {/if}
@@ -110,111 +115,20 @@
           <UnicodeEmoji char={key} />
         {/if}
       </span>
-      <button class="icon-btn" onclick={() => remove(i)} title="削除"><X size={12} /></button>
+      <button type="button" class="flex rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground" onclick={() => remove(i)} title="削除"><X size={12} /></button>
     </div>
   {/each}
-  <button class="add-btn" onclick={() => (picking = !picking)} title="ピン留めを追加">
+  <button type="button" class="flex h-[34px] w-[34px] items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary" onclick={() => (picking = !picking)} title="ピン留めを追加">
     <Plus size={16} />
   </button>
 </div>
 {#if pinned.length === 0}
-  <p class="hint">ピン留めがありません。「＋」から追加できます。</p>
+  <p class="mb-3.5 mt-0 text-[0.8rem] text-muted-foreground">ピン留めがありません。「＋」から追加できます。</p>
 {/if}
 
 {#if picking}
-  <div class="picker-wrap">
+  <div class="mt-3">
     <ReactionPicker {accountId} showPinned={false} onpick={add} />
   </div>
 {/if}
-{#if err}<p class="err">{err}</p>{/if}
-
-<style>
-  .title {
-    margin: 0 0 6px;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-  .hint {
-    margin: 0 0 14px;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-  .list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-  }
-  .chip {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 6px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-  }
-  .chip.dragging {
-    opacity: 0.4;
-  }
-  .grip {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-dim);
-    cursor: grab;
-    touch-action: none;
-    /* アイコン自体は小さいが、実サイズのpaddingで当たり判定を広げる
-       (負のmarginで打ち消す方式は隣接する削除ボタン等と当たり判定が
-       重なってしまうため使わない)。 */
-    padding: 8px;
-    margin: -4px 0;
-  }
-  .glyph {
-    font-size: 1.2rem;
-    line-height: 1;
-    display: flex;
-  }
-  .glyph img {
-    height: 1.3em;
-    width: 1.3em;
-    object-fit: contain;
-  }
-  .icon-btn {
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 2px;
-    border-radius: 4px;
-    display: flex;
-  }
-  .icon-btn:hover {
-    background: var(--surface-3);
-    color: var(--text);
-  }
-  .add-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border: 1px dashed var(--border);
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .add-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .picker-wrap {
-    margin-top: 12px;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 8px 0 0;
-  }
-</style>
+{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}

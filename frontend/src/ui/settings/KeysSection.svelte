@@ -8,6 +8,7 @@
     isModifierOnly,
     type KeyAction,
   } from "../../lib/keymap";
+  import { Button } from "$lib/components/ui/button";
 
   let capturing = $state<KeyAction | null>(null);
   let err = $state<string | null>(null);
@@ -90,36 +91,36 @@
   }
 </script>
 
-<div class="head">
-  <h3 class="title">キー操作</h3>
-  <button class="reset-all" disabled={busy || Object.keys(overrides).length === 0} onclick={resetAll}>
+<div class="mb-2 flex items-center justify-between">
+  <h3 class="m-0 text-base font-semibold">キー操作</h3>
+  <Button type="button" variant="outline" size="xs" disabled={busy || Object.keys(overrides).length === 0} onclick={resetAll}>
     すべて既定に戻す
-  </button>
+  </Button>
 </div>
-<p class="hint">
-  「変更」を押して割り当てたいキーを押してください（Esc でキャンセル）。タイムライン上でフォーカス中カラムの選択ノートを操作します。
+<p class="my-1.5 mb-2.5 text-[0.76rem] text-muted-foreground">
+  「変更」を押して割り当てたいキーを押してください(Esc でキャンセル)。タイムライン上でフォーカス中カラムの選択ノートを操作します。
 </p>
 
-<table>
+<table class="my-1.5 w-full border-collapse text-[0.84rem]">
   <tbody>
     {#each ACTIONS as a (a.action)}
       <tr>
-        <td class="kbd">
+        <td class="w-[34%] whitespace-nowrap border-b border-border px-1.5 py-[5px] align-middle">
           {#if capturing === a.action}
-            <span class="capturing">キー入力待ち…</span>
+            <span class="text-[0.8rem] text-primary">キー入力待ち…</span>
           {:else}
-            <kbd>{prettyChord(effectiveChord(a.action, overrides))}</kbd>
-            {#if isCustom(a.action)}<span class="tag">変更済</span>{/if}
+            <kbd class="inline-block rounded-[5px] border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{prettyChord(effectiveChord(a.action, overrides))}</kbd>
+            {#if isCustom(a.action)}<span class="ml-1.5 text-[0.68rem] text-primary">変更済</span>{/if}
           {/if}
         </td>
-        <td class="desc">{a.label}</td>
-        <td class="ops">
+        <td class="border-b border-border px-1.5 py-[5px] align-middle text-foreground">{a.label}</td>
+        <td class="w-[22%] whitespace-nowrap border-b border-border px-1.5 py-[5px] text-right align-middle">
           {#if capturing === a.action}
-            <button class="ghost" onclick={cancel}>キャンセル</button>
+            <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-[0.76rem] text-foreground" onclick={cancel}>キャンセル</button>
           {:else}
-            <button class="ghost" disabled={busy} onclick={() => startCapture(a.action)}>変更</button>
+            <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-[0.76rem] text-foreground disabled:cursor-default disabled:opacity-40" disabled={busy} onclick={() => startCapture(a.action)}>変更</button>
             {#if isCustom(a.action)}
-              <button class="ghost" disabled={busy} onclick={() => resetOne(a.action)}>既定</button>
+              <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-[0.76rem] text-foreground disabled:cursor-default disabled:opacity-40" disabled={busy} onclick={() => resetOne(a.action)}>既定</button>
             {/if}
           {/if}
         </td>
@@ -128,120 +129,19 @@
   </tbody>
 </table>
 
-{#if err}<p class="err">{err}</p>{/if}
+{#if err}<p class="my-1.5 text-[0.82rem] text-destructive">{err}</p>{/if}
 
-<div class="fixed">
-  <div class="fixed-label">固定（変更不可）</div>
-  <table>
+<div class="mt-3.5">
+  <div class="mb-0.5 text-[0.74rem] text-muted-foreground">固定(変更不可)</div>
+  <table class="my-1.5 w-full border-collapse text-[0.84rem]">
     <tbody>
       {#each fixed as f (f.combo)}
         <tr>
-          <td class="kbd"><kbd>{f.combo}</kbd></td>
-          <td class="desc">{f.desc}</td>
-          <td class="ops"></td>
+          <td class="w-[34%] whitespace-nowrap border-b border-border px-1.5 py-[5px] align-middle"><kbd class="inline-block rounded-[5px] border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{f.combo}</kbd></td>
+          <td class="border-b border-border px-1.5 py-[5px] align-middle text-foreground">{f.desc}</td>
+          <td class="w-[22%] whitespace-nowrap border-b border-border px-1.5 py-[5px] text-right align-middle"></td>
         </tr>
       {/each}
     </tbody>
   </table>
 </div>
-
-<style>
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  .title {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-  .reset-all {
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-    color: var(--text);
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 0.76rem;
-    cursor: pointer;
-  }
-  .reset-all:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.84rem;
-    margin: 6px 0;
-  }
-  td {
-    padding: 5px 6px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
-  }
-  .kbd {
-    width: 34%;
-    white-space: nowrap;
-  }
-  .ops {
-    width: 22%;
-    text-align: right;
-    white-space: nowrap;
-  }
-  kbd {
-    display: inline-block;
-    padding: 2px 7px;
-    border: 1px solid var(--border);
-    border-bottom-width: 2px;
-    border-radius: 5px;
-    background: var(--surface-2);
-    font-family: ui-monospace, monospace;
-    font-size: 0.78rem;
-  }
-  .tag {
-    margin-left: 6px;
-    font-size: 0.68rem;
-    color: var(--accent);
-  }
-  .capturing {
-    color: var(--accent);
-    font-size: 0.8rem;
-  }
-  .desc {
-    color: var(--text);
-  }
-  .ghost {
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-    color: var(--text);
-    border-radius: 6px;
-    padding: 3px 9px;
-    font-size: 0.76rem;
-    cursor: pointer;
-    margin-left: 4px;
-  }
-  .ghost:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  .hint {
-    font-size: 0.76rem;
-    color: var(--text-dim);
-    margin: 6px 0 10px;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 6px 0;
-  }
-  .fixed {
-    margin-top: 14px;
-  }
-  .fixed-label {
-    font-size: 0.74rem;
-    color: var(--text-dim);
-    margin-bottom: 2px;
-  }
-</style>
