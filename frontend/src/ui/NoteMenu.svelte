@@ -61,140 +61,54 @@
   }
 </script>
 
-<div class="menu">
-  <button class="item" onclick={toggleFavorite}>
+<div class="w-[200px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
+  <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-[5px] px-2 py-1.5 text-left text-[0.82rem] text-foreground hover:bg-muted" onclick={toggleFavorite}>
     <Star size={14} />
     {note.isFavoritedByMe ? "お気に入り解除" : "お気に入り登録"}
   </button>
 
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="item-wrap" role="presentation" bind:this={clipRowEl} onmouseenter={openClipSubmenu}>
-    <button class="item" onclick={openClipSubmenu}>
+  <div class="relative" role="presentation" bind:this={clipRowEl} onmouseenter={openClipSubmenu}>
+    <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-[5px] px-2 py-1.5 text-left text-[0.82rem] text-foreground hover:bg-muted" onclick={openClipSubmenu}>
       <Paperclip size={14} />
       クリップに追加
-      <ChevronRight size={14} class="chevron" />
+      <ChevronRight size={14} class="ml-auto" />
     </button>
 
     {#if clipSubmenuOpen}
-      <div class="submenu" class:submenu-left={submenuSide === "left"}>
+      <div
+        class={submenuSide === "left"
+          ? "absolute right-full top-0 max-h-[280px] w-[200px] overflow-y-auto rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+          : "absolute left-full top-0 max-h-[280px] w-[200px] overflow-y-auto rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"}
+      >
         {#if creatingClip}
-          <div class="create-row">
+          <div class="flex gap-1 p-1">
             <input
-              class="name-input"
+              class="box-border min-w-0 flex-1 rounded-[5px] border border-border bg-muted px-1.5 py-1 text-[0.82rem] text-foreground"
               placeholder="クリップ名"
               bind:value={newClipName}
               onkeydown={(e) => e.key === "Enter" && confirmCreateClip()}
             />
-            <button class="confirm-btn" disabled={!newClipName.trim()} onclick={confirmCreateClip}>
+            <button type="button" class="rounded-[5px] bg-primary px-2 py-1 text-[0.78rem] text-primary-foreground disabled:cursor-default disabled:opacity-50" disabled={!newClipName.trim()} onclick={confirmCreateClip}>
               作成
             </button>
           </div>
         {:else}
           {#if clipsLoading}
-            <span class="hint">読み込み中…</span>
+            <span class="block px-2 py-1.5 text-[0.78rem] text-muted-foreground">読み込み中…</span>
           {:else if clipsError}
-            <span class="hint">読み込みに失敗しました</span>
+            <span class="block px-2 py-1.5 text-[0.78rem] text-muted-foreground">読み込みに失敗しました</span>
           {:else if clips && clips.length === 0}
-            <span class="hint">クリップがありません</span>
+            <span class="block px-2 py-1.5 text-[0.78rem] text-muted-foreground">クリップがありません</span>
           {:else if clips}
             {#each clips as clip (clip.id)}
-              <button class="item" onclick={() => pickClip(clip)}>{clip.name}</button>
+              <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-[5px] px-2 py-1.5 text-left text-[0.82rem] text-foreground hover:bg-muted" onclick={() => pickClip(clip)}>{clip.name}</button>
             {/each}
           {/if}
-          <button class="item new-clip" onclick={startCreateClip}>＋ 新規クリップを作成</button>
+          <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-[5px] px-2 py-1.5 text-left text-[0.82rem] text-primary hover:bg-muted" onclick={startCreateClip}>＋ 新規クリップを作成</button>
         {/if}
       </div>
     {/if}
   </div>
 </div>
-
-<style>
-  .menu {
-    width: 200px;
-    padding: 4px;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  }
-  .item-wrap {
-    position: relative;
-  }
-  .item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    padding: 6px 8px;
-    background: transparent;
-    border: none;
-    color: var(--text);
-    font-size: 0.82rem;
-    text-align: left;
-    cursor: pointer;
-    border-radius: 5px;
-    box-sizing: border-box;
-  }
-  .item:hover {
-    background: var(--surface-2);
-  }
-  .item :global(.chevron) {
-    margin-left: auto;
-  }
-  .submenu {
-    position: absolute;
-    left: 100%;
-    top: 0;
-    width: 200px;
-    max-height: 280px;
-    overflow-y: auto;
-    padding: 4px;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  }
-  .submenu.submenu-left {
-    left: auto;
-    right: 100%;
-  }
-  .new-clip {
-    color: var(--accent);
-  }
-  .hint {
-    display: block;
-    padding: 6px 8px;
-    font-size: 0.78rem;
-    color: var(--text-dim);
-  }
-  .create-row {
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-  }
-  .name-input {
-    flex: 1;
-    min-width: 0;
-    padding: 4px 6px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-size: 0.82rem;
-    box-sizing: border-box;
-  }
-  .confirm-btn {
-    padding: 4px 8px;
-    border: none;
-    border-radius: 5px;
-    background: var(--accent);
-    color: var(--surface-1);
-    font-size: 0.78rem;
-    cursor: pointer;
-  }
-  .confirm-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-</style>

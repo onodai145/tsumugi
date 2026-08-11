@@ -69,14 +69,15 @@
   const IconComp = $derived(icons[n.type] ?? Bell);
 </script>
 
-<article class="notif">
-  <div class="head">
-    <span class="icon"><IconComp size={15} /></span>
+<article class="border-b border-border px-3 py-2 [content-visibility:auto] [contain-intrinsic-size:auto_80px]">
+  <div class="flex items-center gap-2 text-[0.86rem]">
+    <span class="inline-flex flex-none text-muted-foreground"><IconComp size={15} /></span>
     {#if n.user?.avatarUrl}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <img
-        class="avatar"
+        class="h-6 w-6 flex-none rounded-md object-cover"
+        data-testid="notification-avatar"
         src={n.user.avatarUrl}
         alt=""
         loading="lazy"
@@ -84,9 +85,9 @@
         style="cursor: pointer"
       />
     {/if}
-    <span class="text">
+    <span class="min-w-0 flex-1">
       {#if actor}<b
-          class="actor"
+          data-testid="notification-actor"
           onclick={() => n.user && openProfile({ userId: n.user.id }, accountId)}
           role="button"
           tabindex="0"
@@ -96,17 +97,17 @@
         >{/if}
       {labels[n.type] ?? n.type}
       {#if n.type === "reaction" && n.reaction}
-        <span class="reaction">
+        <span class="ml-0.5">
           {#if reaction}
             <CustomEmoji name={reaction.name} url={reaction.url} />
           {:else}<UnicodeEmoji char={n.reaction} />{/if}
         </span>
       {/if}
     </span>
-    <span class="time">{relativeTime(n.createdAt)}</span>
+    <span class="text-[0.78rem] text-muted-foreground">{relativeTime(n.createdAt)}</span>
   </div>
   {#if n.note}
-    <div class="note-preview">
+    <div class="ml-[30px]" data-testid="notification-note-preview">
       <NoteCard
         note={n.note}
         quoted={true}
@@ -119,44 +120,3 @@
     </div>
   {/if}
 </article>
-
-<style>
-  .notif {
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    content-visibility: auto;
-    contain-intrinsic-size: auto 80px;
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.86rem;
-  }
-  .icon {
-    display: inline-flex;
-    color: var(--text-dim);
-    flex: none;
-  }
-  .avatar {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
-    object-fit: cover;
-    flex: none;
-  }
-  .text {
-    flex: 1;
-    min-width: 0;
-  }
-  .reaction {
-    margin-left: 2px;
-  }
-  .time {
-    color: var(--text-dim);
-    font-size: 0.78rem;
-  }
-  .note-preview {
-    margin-left: 30px;
-  }
-</style>

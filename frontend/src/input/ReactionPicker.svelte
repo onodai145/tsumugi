@@ -80,34 +80,34 @@
   }
 </script>
 
-<div class="picker">
-  <input class="search" placeholder="絵文字を検索…" bind:value={query} />
-  <div class="scroll">
+<div class="w-[300px] rounded-[10px] border border-border bg-background p-2 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
+  <input class="mb-1.5 box-border w-full rounded-md border border-border bg-muted px-2 py-1.5 text-foreground" placeholder="絵文字を検索…" bind:value={query} />
+  <div class="max-h-[320px] overflow-y-auto overflow-x-hidden">
     {#if queryLower}
-      <div class="flat-grid">
+      <div class="flex flex-wrap gap-0.5">
         {#each customMatches as e (e.name)}
-          <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
-            <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
+          <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
+            <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.url} alt={`:${e.name}:`} loading="lazy" />
           </button>
         {/each}
         {#each unicodeMatches as e (e.char)}
-          <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
+          <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
             <UnicodeEmoji char={e.char} />
           </button>
         {/each}
         {#if unicodeMatches.length === 0 && customMatches.length === 0}
-          <span class="none">絵文字がありません</span>
+          <span class="p-2 text-[0.8rem] text-muted-foreground">絵文字がありません</span>
         {/if}
       </div>
     {:else}
       {#if showPinned && recentEntries.length > 0}
-        <section class="section">
-          <h4 class="section-title">最近使った</h4>
-          <div class="flat-grid">
+        <section class="mb-1">
+          <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">最近使った</h4>
+          <div class="flex flex-wrap gap-0.5">
             {#each recentEntries as e (e.key)}
-              <button class="emoji-btn" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
+              <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
                 {#if e.custom}
-                  <img src={e.custom.url} alt={e.key} loading="lazy" />
+                  <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.custom.url} alt={e.key} loading="lazy" />
                 {:else}
                   <UnicodeEmoji char={e.key} />
                 {/if}
@@ -118,52 +118,52 @@
       {/if}
 
       {#if showPinned}
-        <section class="section">
-          <h4 class="section-title">ピン留め</h4>
-          <div class="flat-grid">
+        <section class="mb-1">
+          <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">ピン留め</h4>
+          <div class="flex flex-wrap gap-0.5">
             {#each pinnedEntries as e (e.key)}
-              <button class="emoji-btn" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
+              <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
                 {#if e.custom}
-                  <img src={e.custom.url} alt={e.key} loading="lazy" />
+                  <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.custom.url} alt={e.key} loading="lazy" />
                 {:else}
                   <UnicodeEmoji char={e.key} />
                 {/if}
               </button>
             {/each}
             {#if pinnedEntries.length === 0}
-              <span class="none">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
+              <span class="p-2 text-[0.8rem] text-muted-foreground">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
             {/if}
           </div>
         </section>
       {/if}
 
-      <section class="section">
-        <h4 class="section-title">カスタム絵文字</h4>
+      <section class="mb-1">
+        <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">カスタム絵文字</h4>
         {#each customByCategory as group (group.category ?? "")}
-          <details class="category" open={customByCategory.length <= 1}>
-            <summary>{group.category ?? "その他"}（{group.emojis.length}）</summary>
-            <div class="flat-grid">
+          <details open={customByCategory.length <= 1}>
+            <summary class="cursor-pointer px-0.5 py-1 text-[0.72rem] text-muted-foreground">{group.category ?? "その他"}（{group.emojis.length}）</summary>
+            <div class="flex flex-wrap gap-0.5">
               {#each group.emojis as e (e.name)}
-                <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
-                  <img src={e.url} alt={`:${e.name}:`} loading="lazy" />
+                <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
+                  <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.url} alt={`:${e.name}:`} loading="lazy" />
                 </button>
               {/each}
             </div>
           </details>
         {/each}
         {#if customByCategory.length === 0}
-          <span class="none">カスタム絵文字がありません</span>
+          <span class="p-2 text-[0.8rem] text-muted-foreground">カスタム絵文字がありません</span>
         {/if}
       </section>
 
-      <section class="section">
-        <h4 class="section-title">絵文字</h4>
+      <section class="mb-1">
+        <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">絵文字</h4>
         {#each UNICODE_EMOJI_CATEGORIES as c (c.index)}
-          <details class="category">
-            <summary>{c.label}</summary>
-            <div class="flat-grid">
+          <details>
+            <summary class="cursor-pointer px-0.5 py-1 text-[0.72rem] text-muted-foreground">{c.label}</summary>
+            <div class="flex flex-wrap gap-0.5">
               {#each UNICODE_EMOJIS.filter((e) => e.category === c.index) as e (e.char)}
-                <button class="emoji-btn" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
+                <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
                   <UnicodeEmoji char={e.char} />
                 </button>
               {/each}
@@ -174,72 +174,3 @@
     {/if}
   </div>
 </div>
-
-<style>
-  .picker {
-    width: 300px;
-    padding: 8px;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  }
-  .search {
-    width: 100%;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    margin-bottom: 6px;
-    box-sizing: border-box;
-  }
-  .scroll {
-    max-height: 320px;
-    overflow-y: auto;
-    overflow-x: hidden;
-  }
-  .section {
-    margin-bottom: 4px;
-  }
-  .section-title {
-    margin: 6px 0 4px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: var(--text-dim);
-  }
-  .category summary {
-    cursor: pointer;
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    padding: 4px 2px;
-  }
-  .flat-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-  }
-  .emoji-btn {
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 6px;
-    font-size: 1.1rem;
-    line-height: 1;
-  }
-  .emoji-btn:hover {
-    background: var(--surface-3);
-  }
-  .emoji-btn img {
-    height: 1.4em;
-    width: 1.4em;
-    object-fit: contain;
-    display: block;
-  }
-  .none {
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    padding: 8px;
-  }
-</style>

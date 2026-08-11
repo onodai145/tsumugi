@@ -62,32 +62,32 @@
 </script>
 
 {#if !hideWhenEmpty}
-  <div class="popover" style={`left:${left}px;top:${top}px`}>
+  <div class="fixed z-[1010] min-w-[160px] max-w-[240px] max-h-[280px] overflow-y-auto rounded-md border border-border bg-muted p-1 shadow-[0_4px_16px_rgba(0,0,0,0.25)]" style={`left:${left}px;top:${top}px`}>
     {#if failed}
-      <div class="status">取得に失敗しました</div>
+      <div class="px-2 py-1.5 text-[0.8rem] text-muted-foreground">取得に失敗しました</div>
     {:else if users === null}
-      <div class="status">読み込み中…</div>
+      <div class="px-2 py-1.5 text-[0.8rem] text-muted-foreground">読み込み中…</div>
     {:else if users.length === 0}
-      <div class="status">なし</div>
+      <div class="px-2 py-1.5 text-[0.8rem] text-muted-foreground">なし</div>
     {:else}
-      <ul>
+      <ul class="m-0 list-none p-0">
         {#each users as u (u.id)}
-          <li>
+          <li class="flex items-center gap-1.5 px-1.5 py-[3px] text-[0.8rem]">
             {#if u.avatarUrl}
-              <img class="avatar" src={u.avatarUrl} alt="" loading="lazy" />
+              <img class="h-5 w-5 flex-shrink-0 rounded-full object-cover" src={u.avatarUrl} alt="" loading="lazy" />
             {:else}
-              <div class="avatar placeholder"></div>
+              <div class="h-5 w-5 flex-shrink-0 rounded-full bg-border"></div>
             {/if}
-            <span class="user-info">
-              <span class="name"><Mfm
+            <span class="flex min-w-0 flex-1 flex-col">
+              <span class="overflow-hidden text-ellipsis whitespace-nowrap text-foreground"><Mfm
                 text={displayName(u)}
                 emojis={proxiedEmojiMap(u.emojis, instanceHost)}
                 simple
               /></span>
-              <span class="acct">{acct(u)}</span>
+              <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.72rem] text-muted-foreground">{acct(u)}</span>
             </span>
             {#if reactionKey && emoji}
-              <span class="row-emoji">
+              <span class="ml-auto inline-flex flex-shrink-0 items-center">
                 {#if reactionKey.startsWith(":")}
                   <CustomEmoji name={emoji.name} url={emoji.url} showTitle={false} />
                 {:else}
@@ -99,81 +99,8 @@
         {/each}
       </ul>
       {#if moreCount > 0}
-        <div class="more">他{moreCount}件</div>
+        <div class="px-1.5 py-[3px] text-[0.74rem] text-muted-foreground">他{moreCount}件</div>
       {/if}
     {/if}
   </div>
 {/if}
-
-<style>
-  .popover {
-    position: fixed;
-    z-index: 1000;
-    min-width: 160px;
-    max-width: 240px;
-    max-height: 280px;
-    overflow-y: auto;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-    padding: 4px;
-  }
-  .status {
-    padding: 6px 8px;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  li {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 6px;
-    font-size: 0.8rem;
-  }
-  .avatar {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    object-fit: cover;
-  }
-  .avatar.placeholder {
-    background: var(--border);
-  }
-  .user-info {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-  }
-  .name {
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .acct {
-    color: var(--text-dim);
-    font-size: 0.72rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .row-emoji {
-    flex-shrink: 0;
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-  }
-  .more {
-    padding: 3px 6px;
-    font-size: 0.74rem;
-    color: var(--text-dim);
-  }
-</style>

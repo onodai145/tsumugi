@@ -245,14 +245,16 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <article
-  class="note"
-  class:quoted
-  class:selected={selected && !quoted}
+  class={quoted
+    ? "select-none rounded-sm border border-border px-[7px] py-[5px] mt-1.5 [-webkit-user-select:none] [content-visibility:visible]"
+    : selected
+      ? "selected select-none border-b border-border px-[9px] py-1.5 [-webkit-user-select:none] [content-visibility:auto] [contain-intrinsic-size:auto_92px]"
+      : "select-none border-b border-border px-[9px] py-1.5 [-webkit-user-select:none] [content-visibility:auto] [contain-intrinsic-size:auto_92px]"}
   bind:this={el}
   onclick={tabId ? () => app.selectNote(tabId, note.id) : undefined}
 >
   {#if isPureRenote && !hideActionBanner}
-    <div class="renote-banner">
+    <div class="mb-0.5 inline-flex items-center gap-1 text-[0.74rem] text-[var(--success)]">
       <Repeat2 size={13} /> <Mfm
         text={displayName(note.user)}
         emojis={proxiedEmojiMap(note.user.emojis, instanceHost)}
@@ -261,15 +263,16 @@
     </div>
   {/if}
   {#if inner.replyId && !hideActionBanner}
-    <div class="reply-banner">
+    <div class="mb-0.5 inline-flex items-center gap-1 text-[0.74rem] text-[var(--info)]">
       <Reply size={13} /> 返信
     </div>
   {/if}
 
-  <div class="row">
+  <div class="flex gap-[7px]">
     {#if inner.user.avatarUrl}
       <img
-        class="avatar"
+        class="h-[34px] w-[34px] flex-none rounded-[5px] object-cover"
+        data-testid="note-avatar"
         src={inner.user.avatarUrl}
         alt=""
         loading="lazy"
@@ -278,17 +281,19 @@
       />
     {:else}
       <div
-        class="avatar placeholder"
+        class="avatar h-[34px] w-[34px] flex-none rounded-[5px]"
+        data-testid="note-avatar"
         onclick={() => openProfile({ userId: inner.user.id }, accountId)}
         role="button"
         tabindex="0"
         onkeydown={(e) => e.key === "Enter" && openProfile({ userId: inner.user.id }, accountId)}
       ></div>
     {/if}
-    <div class="body">
-      <header class="head">
+    <div class="min-w-0 flex-1">
+      <header class="flex flex-wrap items-baseline gap-[5px]">
         <span
-          class="name"
+          class="text-[0.86rem] font-semibold"
+          data-testid="note-name"
           onclick={() => openProfile({ userId: inner.user.id }, accountId)}
           role="button"
           tabindex="0"
@@ -300,26 +305,27 @@
           simple
         /></span>
         <span
-          class="acct"
+          class="text-[0.76rem] text-muted-foreground"
+          data-testid="note-acct"
           onclick={() => openProfile({ userId: inner.user.id }, accountId)}
           role="button"
           tabindex="0"
           onkeydown={(e) => e.key === "Enter" && openProfile({ userId: inner.user.id }, accountId)}
           style="cursor: pointer"
         >{acct(inner.user)}</span>
-        <span class="time" title={new Date(inner.createdAt * 1000).toLocaleString()}>
+        <span class="ml-auto text-[0.76rem] text-muted-foreground" title={new Date(inner.createdAt * 1000).toLocaleString()}>
           {relativeTime(inner.createdAt)}
         </span>
         {#if inner.visibility !== "public"}
           {@const VisIcon = VIS_ICON[inner.visibility]}
-          <span class="vis" title={VIS_LABEL[inner.visibility]}><VisIcon size={12} /></span>
+          <span class="inline-flex items-center rounded-[3px] border border-border p-0.5 text-[0.76rem] text-muted-foreground" title={VIS_LABEL[inner.visibility]}><VisIcon size={12} /></span>
         {/if}
       </header>
 
       {#if inner.cw}
-        <div class="cw">
-          <span class="cw-text"><Mfm text={inner.cw} emojis={emojiMap} nyaize={inner.user.isCat} /></span>
-          <button class="cw-toggle" onclick={() => (cwOpen = !cwOpen)}>
+        <div class="mt-0.5">
+          <span class="text-[0.9rem] [-webkit-user-select:text] select-text"><Mfm text={inner.cw} emojis={emojiMap} nyaize={inner.user.isCat} /></span>
+          <button type="button" class="cw-toggle ml-2 rounded-md border border-border px-2 py-px text-[0.8rem] text-foreground" onclick={() => (cwOpen = !cwOpen)}>
             {cwOpen ? "隠す" : `続きを見る${inner.text ? "" : ""}`}
           </button>
         </div>
@@ -327,27 +333,29 @@
 
       {#if !inner.cw || cwOpen}
         {#if inner.text}
-          <div class="text"><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
+          <div class="mt-px whitespace-pre-wrap break-words text-[0.9rem] leading-[1.42] [-webkit-user-select:text] select-text"><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
         {/if}
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
         {/if}
         {#if inner.poll}
-          <div class="poll">
+          <div class="mt-2 flex flex-col gap-1">
             {#each inner.poll.choices as choice, i}
               <button
-                class="poll-choice"
-                class:voted={choice.isVoted}
+                type="button"
+                class={choice.isVoted
+                  ? "poll-choice flex w-full items-center justify-between rounded-md px-2 py-[5px] text-left font-[inherit] text-[0.88rem] text-foreground outline outline-1 outline-primary disabled:cursor-default"
+                  : "poll-choice flex w-full items-center justify-between rounded-md px-2 py-[5px] text-left font-[inherit] text-[0.88rem] text-foreground disabled:cursor-default"}
                 disabled={!accountId || pollExpired || pollAlreadyVoted || choice.isVoted}
                 onclick={() => requestVote(i)}
               >
-                <span class="poll-text">{choice.text}</span>
-                <span class="poll-votes">{choice.votes}</span>
+                <span>{choice.text}</span>
+                <span>{choice.votes}</span>
               </button>
             {/each}
           </div>
           {#if pollExpired}
-            <p class="poll-hint">投票は締め切られました</p>
+            <p class="mt-1 mb-0 text-[0.78rem] text-muted-foreground">投票は締め切られました</p>
           {/if}
           {#if confirmChoice !== null}
             <ConfirmDialog
@@ -359,26 +367,26 @@
             />
           {/if}
         {/if}
-        <!-- 引用Renote: 本文ありで renote 先がある場合、中身をネスト表示 -->
         {#if inner.text && inner.renote}
           <Self note={inner.renote} quoted={true} hideReactions emojiAccountId={emojiAcct} />
         {/if}
       {/if}
 
       {#if !hideReactions && reactionList.length > 0}
-        <div class="reactions">
+        <div class="mt-2 flex flex-wrap gap-[5px]">
           {#each reactionList as [key, count]}
-            <!-- disabled な button は mouseenter/mouseleave を発火しないため(WebKitGTK含む)、
-                 hover検知はラッパーの span 側に付与する。クリック不可の挙動自体はbuttonのdisabledのまま維持。 -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <span
-              class="reaction-wrap"
+              class="inline-flex"
+              data-testid="note-reaction-wrap"
               onmouseenter={(e) => enterHover({ kind: "reaction", key }, e.currentTarget as HTMLElement)}
               onmouseleave={leaveHover}
             >
               <button
-                class="reaction"
-                class:mine={inner.myReaction === key}
+                type="button"
+                class={inner.myReaction === key
+                  ? "reaction mine inline-flex items-center gap-[3px] rounded-[3px] border border-primary px-[7px] py-px text-[0.85rem] text-foreground disabled:cursor-default disabled:opacity-60"
+                  : "reaction inline-flex items-center gap-[3px] rounded-[3px] border border-border px-[7px] py-px text-[0.85rem] text-foreground disabled:cursor-default disabled:opacity-60"}
                 disabled={!accountId || isRemoteCustomEmoji(key)}
                 aria-label={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
                 onclick={() => react(key)}
@@ -389,7 +397,7 @@
                 {:else}
                   <UnicodeEmoji char={key} showTitle={false} />
                 {/if}
-                <span class="rcount">{count}</span>
+                <span class="text-muted-foreground">{count}</span>
               </button>
             </span>
           {/each}
@@ -397,14 +405,17 @@
       {/if}
 
       {#if effectiveShowActions && accountId}
-        <footer class="actions">
-          <button aria-label="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
+        <footer class="actions mt-2 flex items-center gap-[14px] text-[0.8rem] text-muted-foreground">
+          <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground" aria-label="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
             <Reply size={15} /> {inner.replyCount || ""}
           </button>
           {#if canRenote}
             <button
+              type="button"
+              class={renoteBusy
+                ? "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground opacity-50"
+                : "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"}
               aria-label="Renote"
-              class:busy={renoteBusy}
               onclick={doRenote}
               onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
               onmouseleave={leaveHover}
@@ -414,15 +425,18 @@
                 <span>{inner.renoteCount}</span>
               {/if}
             </button>
-            <button aria-label="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
+            <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground" aria-label="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
               <Quote size={15} />
             </button>
           {/if}
-          <div class="react-wrap">
+          <div class="relative inline-flex h-6 items-center">
             <button
+              type="button"
               bind:this={pickerBtn}
+              class={showPicker
+                ? "on inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"
+                : "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"}
               aria-label="リアクション"
-              class:on={showPicker}
               onclick={togglePicker}
             >
               <SmilePlus size={15} /> {inner.reactionCount || ""}
@@ -430,11 +444,11 @@
             {#if showPicker && pickerPos}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="picker-overlay" use:portal onclick={() => (app.reactPicker = null)} role="presentation">
+              <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (app.reactPicker = null)} role="presentation">
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
-                  class="picker-pop"
+                  class="fixed"
                   style={`left:${pickerPos.left}px;top:${pickerPos.top}px`}
                   onclick={(e) => e.stopPropagation()}
                   role="presentation"
@@ -444,11 +458,14 @@
               </div>
             {/if}
           </div>
-          <div class="menu-wrap">
+          <div class="relative inline-flex h-6 items-center">
             <button
+              type="button"
               bind:this={noteMenuBtn}
+              class={noteMenuOpen
+                ? "on inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"
+                : "inline-flex h-6 items-center gap-1 rounded-md px-1 text-[0.82rem] leading-none text-muted-foreground"}
               aria-label="その他"
-              class:on={noteMenuOpen}
               onclick={() => {
                 app.reactPicker = null;
                 noteMenuOpen = !noteMenuOpen;
@@ -459,11 +476,11 @@
             {#if noteMenuOpen && noteMenuPos}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="picker-overlay" use:portal onclick={() => (noteMenuOpen = false)} role="presentation">
+              <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (noteMenuOpen = false)} role="presentation">
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
-                  class="picker-pop"
+                  class="fixed"
                   style={`left:${noteMenuPos.left}px;top:${noteMenuPos.top}px`}
                   onclick={(e) => e.stopPropagation()}
                   role="presentation"
@@ -500,223 +517,31 @@
 </article>
 
 <style>
-  .note {
-    padding: 6px 9px;
-    border-bottom: 1px solid var(--border);
-    /* 仮想化-lite: 画面外は描画スキップ */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 92px;
-    /* ドラッグ選択で本文以外(ユーザー名/時刻/ボタン等)まで巻き込まれないよう既定で不可に。
-       WebKitGTK(Linuxのwebview)は無印字プロパティを反映しないため -webkit- 併記が必須。 */
-    -webkit-user-select: none;
-    user-select: none;
-  }
-  .note.quoted {
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    margin-top: 6px;
-    padding: 5px 7px;
-    content-visibility: visible;
-  }
-  .note.selected {
+  .selected {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     box-shadow: inset 3px 0 0 var(--accent);
   }
-  .renote-banner {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.74rem;
-    color: var(--success);
-    margin-bottom: 2px;
-  }
-  .reply-banner {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.74rem;
-    color: var(--info);
-    margin-bottom: 2px;
-  }
-  .row {
-    display: flex;
-    gap: 7px;
-  }
   .avatar {
-    width: 34px;
-    height: 34px;
-    border-radius: 5px;
-    object-fit: cover;
-    flex: none;
-  }
-  .avatar.placeholder {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   }
-  .body {
-    min-width: 0;
-    flex: 1;
-  }
-  .head {
-    display: flex;
-    align-items: baseline;
-    gap: 5px;
-    flex-wrap: wrap;
-  }
-  .name {
-    font-weight: 600;
-    font-size: 0.86rem;
-  }
-  .acct,
-  .time,
-  .vis {
-    color: var(--text-dim);
-    font-size: 0.76rem;
-  }
-  .time {
-    margin-left: auto;
-  }
-  .vis {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-  }
-  .text {
-    margin-top: 1px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    line-height: 1.42;
-    font-size: 0.9rem;
-    -webkit-user-select: text;
-    user-select: text;
-  }
-  .cw {
-    margin-top: 2px;
-  }
-  .cw-text {
-    font-size: 0.9rem;
-    -webkit-user-select: text;
-    user-select: text;
-  }
   .cw-toggle {
-    margin-left: 8px;
-    font-size: 0.8rem;
-    border: 1px solid var(--border);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
-    color: var(--text);
-    border-radius: 6px;
-    padding: 1px 8px;
-    cursor: pointer;
-  }
-  .poll {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
   }
   .poll-choice {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-    padding: 5px 8px;
-    border: none;
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
-    color: var(--text);
-    border-radius: 6px;
-    font-size: 0.88rem;
-    font-family: inherit;
-    cursor: pointer;
-    text-align: left;
   }
   .poll-choice:hover:not(:disabled) {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   }
-  .poll-choice:disabled {
-    cursor: default;
-  }
-  .poll-choice.voted {
-    outline: 1px solid var(--accent);
-  }
-  .poll-hint {
-    margin: 4px 0 0;
-    font-size: 0.78rem;
-    color: var(--text-dim);
-  }
-  .reactions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 8px;
-  }
-  .reaction-wrap {
-    display: inline-flex;
-  }
   .reaction {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 1px 7px;
-    /* カラムと同じ不透明度を適用(背景画像設定時にカラムだけ透けてリアクションだけ
-       不透明のまま浮いて見えるのを防ぐ)。既定100%なら見た目は従来どおり不透明。 */
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
-    border: 1px solid var(--border);
-    border-radius:  3px;
-    font-size: 0.85rem;
-    color: var(--text);
-    cursor: pointer;
-  }
-  .reaction:disabled {
-    cursor: default;
-    opacity: 0.6;
   }
   .reaction.mine {
-    border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-  .rcount {
-    color: var(--text-dim);
-  }
-  .actions {
-    display: flex;
-    gap: 14px;
-    align-items: center;
-    margin-top: 8px;
-    color: var(--text-dim);
-    font-size: 0.8rem;
-  }
-  .actions button {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: transparent;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 0.82rem;
-    padding: 2px 4px;
-    border-radius: 6px;
   }
   .actions button:hover,
   .actions button.on {
     color: var(--accent);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
-  }
-  .actions button.busy {
-    opacity: 0.5;
-  }
-  .react-wrap {
-    position: relative;
-  }
-  .menu-wrap {
-    position: relative;
-  }
-  .picker-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-  }
-  .picker-pop {
-    position: fixed;
   }
 </style>

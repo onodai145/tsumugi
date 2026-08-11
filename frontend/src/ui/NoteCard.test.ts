@@ -108,7 +108,7 @@ describe("NoteCard action banner", () => {
       renote: makeNote({ id: "n0", reactions: { "👍": 3 }, reactionCount: 3 }),
     });
     const { container } = render(NoteCard, { props: { note } });
-    expect(container.querySelector(".reaction-wrap")).toBeNull();
+    expect(container.querySelector('[data-testid="note-reaction-wrap"]')).toBeNull();
   });
 });
 
@@ -142,7 +142,7 @@ describe("プロフィール導線", () => {
   it("アバタークリックでopenProfileが呼ばれる（プレースホルダー: avatarUrl未設定）", () => {
     const note = makeNote();
     const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
-    const avatar = container.querySelector(".avatar") as HTMLElement;
+    const avatar = container.querySelector('[data-testid="note-avatar"]') as HTMLElement;
     avatar.click();
     expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
   });
@@ -150,7 +150,7 @@ describe("プロフィール導線", () => {
   it("アバタークリックでopenProfileが呼ばれる（imgタグ: avatarUrl設定あり）", () => {
     const note = makeNote({ user: makeUser({ avatarUrl: "https://example.com/a.png" }) });
     const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
-    const avatar = container.querySelector("img.avatar") as HTMLElement;
+    const avatar = container.querySelector('img[data-testid="note-avatar"]') as HTMLElement;
     expect(avatar).toBeTruthy();
     avatar.click();
     expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
@@ -159,7 +159,7 @@ describe("プロフィール導線", () => {
   it("表示名クリックでopenProfileが呼ばれる", () => {
     const note = makeNote();
     const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
-    const name = container.querySelector(".name") as HTMLElement;
+    const name = container.querySelector('[data-testid="note-name"]') as HTMLElement;
     name.click();
     expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
   });
@@ -167,7 +167,7 @@ describe("プロフィール導線", () => {
   it("acctクリックでopenProfileが呼ばれる", () => {
     const note = makeNote();
     const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
-    const acctEl = container.querySelector(".acct") as HTMLElement;
+    const acctEl = container.querySelector('[data-testid="note-acct"]') as HTMLElement;
     acctEl.click();
     expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
   });
