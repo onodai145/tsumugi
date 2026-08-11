@@ -172,7 +172,9 @@
 
 {#if mode === "query"}
   <textarea
-    class:invalid
+    class={invalid
+      ? 'rounded-lg border border-destructive bg-muted px-2.5 py-2 font-[ui-monospace,"Cascadia_Code","SF_Mono",monospace] text-[0.82rem] text-foreground resize-y'
+      : 'rounded-lg border border-border bg-muted px-2.5 py-2 font-[ui-monospace,"Cascadia_Code","SF_Mono",monospace] text-[0.82rem] text-foreground resize-y'}
     {rows}
     {placeholder}
     bind:value
@@ -197,7 +199,9 @@
   ></textarea>
 {:else}
   <input
-    class:invalid
+    class={invalid
+      ? "rounded-lg border border-destructive bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+      : "rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"}
     {placeholder}
     bind:value
     bind:this={el}
@@ -230,28 +234,3 @@
     onpick={confirmCompletion}
   />
 {/if}
-
-<style>
-  textarea {
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: ui-monospace, "Cascadia Code", "SF Mono", monospace;
-    font-size: 0.82rem;
-    resize: vertical;
-  }
-  input {
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-  }
-  textarea.invalid,
-  input.invalid {
-    border-color: var(--danger);
-  }
-</style>
