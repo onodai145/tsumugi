@@ -289,212 +289,252 @@
   }
 </script>
 
-<h3 class="title">表示</h3>
+<h3 class="mb-3.5 mt-0 text-base font-semibold">表示</h3>
 
-<div class="field">
-  <span>UIモード</span>
-  <div class="seg">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">UIモード</span>
+  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each uiModes as m (m.id)}
-      <button class="seg-btn" class:active={uiMode === m.id} onclick={() => (uiMode = m.id)}>{m.label}</button>
+      <button
+        type="button"
+        class={uiMode === m.id
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+        onclick={() => (uiMode = m.id)}
+      >{m.label}</button>
     {/each}
   </div>
-  <p class="hint">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
+  <p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
 </div>
 
-<div class="field">
-  <span>テーマ</span>
-  <div class="seg">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">テーマ</span>
+  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each themes as t (t.id)}
-      <button class="seg-btn" class:active={theme === t.id} onclick={() => (theme = t.id)}>{t.label}</button>
+      <button
+        type="button"
+        class={theme === t.id
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+        onclick={() => (theme = t.id)}
+      >{t.label}</button>
     {/each}
   </div>
 </div>
 
 {#snippet swatchStrip(colors: ThemeColors)}
-  <span class="swatch-strip">
+  <span class="flex h-[30px] w-full flex-none">
     {#each THEME_VAR_KEYS as v (v.key)}
-      <span class="sw" style={`background:${colors[v.key]}`}></span>
+      <span class="h-full flex-1" style={`background:${colors[v.key]}`}></span>
     {/each}
   </span>
 {/snippet}
 
-<div class="field">
-  <span>プリセットテーマ</span>
-  <div class="theme-grid">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">プリセットテーマ</span>
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     {#each PRESETS as p (p.id)}
       {@const isActive = theme === `preset:${p.id}`}
-      <button class="theme-card" class:active={isActive} onclick={() => (theme = `preset:${p.id}`)}>
+      <button
+        type="button"
+        class={isActive
+          ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
+          : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+        onclick={() => (theme = `preset:${p.id}`)}
+      >
         {@render swatchStrip(p.colors)}
-        <span class="theme-card-name">
+        <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
           {p.name}
-          {#if isActive}<Check size={13} class="theme-card-check" />{/if}
+          {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
         </span>
       </button>
     {/each}
   </div>
 </div>
 
-<div class="field">
-  <span>カスタムテーマ</span>
-  <div class="theme-grid">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">カスタムテーマ</span>
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     {#each customThemes as t (t.id)}
       {@const isActive = theme === `custom:${t.id}`}
-      <div class="theme-card-wrap">
-        <button class="theme-card" class:active={isActive} onclick={() => (theme = `custom:${t.id}`)}>
+      <div class="flex flex-col gap-1">
+        <button
+          type="button"
+          class={isActive
+            ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
+            : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+          onclick={() => (theme = `custom:${t.id}`)}
+        >
           {@render swatchStrip(t.colors)}
-          <span class="theme-card-name">
+          <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
             {t.name}
-            {#if isActive}<Check size={13} class="theme-card-check" />{/if}
+            {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
           </span>
         </button>
-        <div class="theme-card-actions">
-          <button class="icon-btn" title="編集" onclick={() => startEditTheme(t)}><Pencil size={13} /></button>
-          <button class="icon-btn" title="削除" onclick={() => removeCustomTheme(t.id)}><Trash2 size={13} /></button>
+        <div class="flex gap-1">
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="編集" onclick={() => startEditTheme(t)}><Pencil size={13} /></button>
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="削除" onclick={() => removeCustomTheme(t.id)}><Trash2 size={13} /></button>
         </div>
       </div>
     {/each}
   </div>
-  <button class="mini-btn add-theme" onclick={startCreateTheme}><Plus size={13} /> 新規作成</button>
+  <button type="button" class="mt-2 inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={startCreateTheme}><Plus size={13} /> 新規作成</button>
 
   {#if editingTheme}
-    <div class="theme-editor">
-      <input type="text" class="theme-name-input" placeholder="テーマ名" bind:value={editingTheme.name} />
+    <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
+      <input type="text" class="rounded-md border border-border bg-background px-2.5 py-[7px] font-[inherit] text-foreground" placeholder="テーマ名" bind:value={editingTheme.name} />
       {#each THEME_VAR_KEYS as v (v.key)}
-        <div class="color-row">
-          <span class="color-label">{colorLabels[v.key]}</span>
-          <span class="swatch" style={`background:${editingTheme.colors[v.key]}`}></span>
-          <input type="text" class="hex-input" bind:value={editingTheme.colors[v.key]} />
+        <div class="flex items-center gap-2">
+          <span class="w-20 flex-none text-[0.8rem] text-muted-foreground">{colorLabels[v.key]}</span>
+          <span class="h-[22px] w-[22px] flex-none rounded-[5px] border border-border" style={`background:${editingTheme.colors[v.key]}`}></span>
+          <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-[0.82rem] text-foreground" bind:value={editingTheme.colors[v.key]} />
         </div>
       {/each}
-      {#if editErr}<p class="err">{editErr}</p>{/if}
-      <div class="editor-actions">
-        <button class="mini-btn" onclick={cancelEditTheme}><X size={13} /> キャンセル</button>
-        <button class="save" onclick={saveCustomTheme}>このテーマを保存</button>
+      {#if editErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{editErr}</p>{/if}
+      <div class="mt-1 flex justify-end gap-2">
+        <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={cancelEditTheme}><X size={13} /> キャンセル</button>
+        <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white" onclick={saveCustomTheme}>このテーマを保存</button>
       </div>
     </div>
   {/if}
 </div>
 
-<div class="field">
-  <span>コードハイライトテーマ</span>
-  <div class="theme-grid">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">コードハイライトテーマ</span>
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     <button
-      class="theme-card"
-      class:active={codeHighlightTheme === "auto"}
+      type="button"
+      class={codeHighlightTheme === "auto"
+        ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
+        : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
       onclick={() => (codeHighlightTheme = "auto")}
     >
-      <span class="theme-card-name">
-        自動（OSに合わせる）
-        {#if codeHighlightTheme === "auto"}<Check size={13} class="theme-card-check" />{/if}
+      <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
+        自動(OSに合わせる)
+        {#if codeHighlightTheme === "auto"}<Check size={13} class="flex-none text-primary" />{/if}
       </span>
     </button>
     {#each BUNDLED_SHIKI_THEMES as t (t.id)}
       {@const isActive = codeHighlightTheme === `shiki:${t.id}`}
-      <button class="theme-card" class:active={isActive} onclick={() => (codeHighlightTheme = `shiki:${t.id}`)}>
-        <span class="swatch-strip">
-          <span class="sw" style={`background:${t.swatch.bg}`}></span>
-          <span class="sw" style={`background:${t.swatch.fg}`}></span>
-          <span class="sw" style={`background:${t.swatch.accent}`}></span>
+      <button
+        type="button"
+        class={isActive
+          ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
+          : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+        onclick={() => (codeHighlightTheme = `shiki:${t.id}`)}
+      >
+        <span class="flex h-[30px] w-full flex-none">
+          <span class="h-full flex-1" style={`background:${t.swatch.bg}`}></span>
+          <span class="h-full flex-1" style={`background:${t.swatch.fg}`}></span>
+          <span class="h-full flex-1" style={`background:${t.swatch.accent}`}></span>
         </span>
-        <span class="theme-card-name">
+        <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
           {t.label}
-          {#if isActive}<Check size={13} class="theme-card-check" />{/if}
+          {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
         </span>
       </button>
     {/each}
   </div>
 </div>
 
-<div class="field">
-  <span>カスタムシンタックステーマ</span>
-  <div class="theme-grid">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">カスタムシンタックステーマ</span>
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     {#each customSyntaxThemes as t (t.id)}
       {@const isActive = codeHighlightTheme === `custom:${t.id}`}
-      <div class="theme-card-wrap">
+      <div class="flex flex-col gap-1">
         <button
-          class="theme-card"
-          class:active={isActive}
+          type="button"
+          class={isActive
+            ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
+            : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
           onclick={() => (codeHighlightTheme = `custom:${t.id}`)}
         >
-          <span class="swatch-strip">
+          <span class="flex h-[30px] w-full flex-none">
             {#each SYNTAX_VAR_KEYS as v (v.key)}
-              <span class="sw" style={`background:${t[v.key]}`}></span>
+              <span class="h-full flex-1" style={`background:${t[v.key]}`}></span>
             {/each}
           </span>
-          <span class="theme-card-name">
+          <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
             {t.name}
-            {#if isActive}<Check size={13} class="theme-card-check" />{/if}
+            {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
           </span>
         </button>
-        <div class="theme-card-actions">
-          <button class="icon-btn" title="編集" onclick={() => startEditSyntaxTheme(t)}><Pencil size={13} /></button>
-          <button class="icon-btn" title="削除" onclick={() => removeCustomSyntaxTheme(t.id)}><Trash2 size={13} /></button>
+        <div class="flex gap-1">
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="編集" onclick={() => startEditSyntaxTheme(t)}><Pencil size={13} /></button>
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="削除" onclick={() => removeCustomSyntaxTheme(t.id)}><Trash2 size={13} /></button>
         </div>
       </div>
     {/each}
   </div>
-  <button class="mini-btn add-theme" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</button>
+  <button type="button" class="mt-2 inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</button>
 
   {#if editingSyntaxTheme}
-    <div class="theme-editor">
-      <input type="text" class="theme-name-input" placeholder="テーマ名" bind:value={editingSyntaxTheme.name} />
+    <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
+      <input type="text" class="rounded-md border border-border bg-background px-2.5 py-[7px] font-[inherit] text-foreground" placeholder="テーマ名" bind:value={editingSyntaxTheme.name} />
       {#each SYNTAX_VAR_KEYS as v (v.key)}
-        <div class="color-row">
-          <span class="color-label">{syntaxColorLabels[v.key]}</span>
-          <span class="swatch" style={`background:${editingSyntaxTheme[v.key]}`}></span>
-          <input type="text" class="hex-input" bind:value={editingSyntaxTheme[v.key]} />
+        <div class="flex items-center gap-2">
+          <span class="w-20 flex-none text-[0.8rem] text-muted-foreground">{syntaxColorLabels[v.key]}</span>
+          <span class="h-[22px] w-[22px] flex-none rounded-[5px] border border-border" style={`background:${editingSyntaxTheme[v.key]}`}></span>
+          <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-[0.82rem] text-foreground" bind:value={editingSyntaxTheme[v.key]} />
         </div>
       {/each}
-      {#if syntaxEditErr}<p class="err">{syntaxEditErr}</p>{/if}
-      <div class="editor-actions">
-        <button class="mini-btn" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</button>
-        <button class="save" onclick={saveCustomSyntaxTheme}>このテーマを保存</button>
+      {#if syntaxEditErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{syntaxEditErr}</p>{/if}
+      <div class="mt-1 flex justify-end gap-2">
+        <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</button>
+        <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white" onclick={saveCustomSyntaxTheme}>このテーマを保存</button>
       </div>
     </div>
   {/if}
 </div>
 
-<label class="field">
-  <span>新規カラムの既定幅（px, 220〜720）</span>
-  <input type="number" min="220" max="720" step="10" bind:value={width} />
+<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <span class="text-muted-foreground">新規カラムの既定幅(px, 220〜720)</span>
+  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="220" max="720" step="10" bind:value={width} />
 </label>
-<p class="hint">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
+<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
 
-<label class="field">
-  <span>起動時のギャップ埋め（件, 0〜1000。0で無効）</span>
-  <input type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
+<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <span class="text-muted-foreground">起動時のギャップ埋め(件, 0〜1000。0で無効)</span>
+  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
 </label>
-<p class="hint">
+<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">
   アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
   0にすると従来どおりキャッシュのみ表示します。
 </p>
 
-<label class="field">
-  <span>メディアサムネイルの高さ上限（px, 80〜600）</span>
-  <input type="number" min="80" max="600" step="20" bind:value={mediaThumbnailHeight} />
+<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <span class="text-muted-foreground">メディアサムネイルの高さ上限(px, 80〜600)</span>
+  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="80" max="600" step="20" bind:value={mediaThumbnailHeight} />
 </label>
-<p class="hint">
+<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">
   ノートに添付された画像/動画のサムネイル最大高さです。小さくするとノートを詰めて表示でき、
   大きくすると画像を大きく見られます。
 </p>
 
-<div class="field">
-  <span>絵文字のスタイル</span>
-  <div class="seg">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">絵文字のスタイル</span>
+  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each emojiStyles as s (s.id)}
-      <button class="seg-btn" class:active={emojiStyle === s.id} onclick={() => (emojiStyle = s.id)}>
+      <button
+        type="button"
+        class={emojiStyle === s.id
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+        onclick={() => (emojiStyle = s.id)}
+      >
         {#if emojiPreviewUrl(s.id)}
-          <img class="emoji-style-thumb" src={emojiPreviewUrl(s.id)} alt="" />
+          <img class="mr-1 h-[1.2em] w-[1.2em] object-contain align-[-0.25em]" src={emojiPreviewUrl(s.id)} alt="" />
         {/if}
         {s.label}
       </button>
     {/each}
   </div>
-  <p class="hint preview-row">
-    Unicode絵文字（リアクション等）の見た目です。プレビュー:
+  <p class="mb-4 mt-0 flex flex-wrap items-center gap-1 text-[0.76rem] text-muted-foreground">
+    Unicode絵文字(リアクション等)の見た目です。プレビュー:
     {#each ["😺", "👍", "🎉"] as c}
       {#if emojiPreviewUrl(emojiStyle)}
-        <img class="emoji-preview" src={unicodeEmojiUrl(c, emojiStyle) ?? undefined} alt={c} />
+        <img class="h-[1.3em] w-[1.3em] object-contain" src={unicodeEmojiUrl(c, emojiStyle) ?? undefined} alt={c} />
       {:else}
         {c}
       {/if}
@@ -502,23 +542,25 @@
   </p>
 </div>
 
-<label class="checkbox-row"
+<label class="mb-2 flex items-center gap-2 text-[0.85rem]"
   ><input type="checkbox" bind:checked={mfmAnimationEnabled} /> MFMアニメーション($[shake]等)を有効にする</label
 >
-<p class="hint">
+<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">
   他人の投稿に含まれる装飾($[shake]/$[spin]/$[rainbow]等)のアニメーション表示です。
   環境によってはこの描画コストが高く、CPU使用率が上がることがあります
-  （Linux/Wayland環境で特に発生しやすい既知の問題です）。気になる場合はOFFにしてください
-  （静的な装飾は残ります）。
+  (Linux/Wayland環境で特に発生しやすい既知の問題です)。気になる場合はOFFにしてください
+  (静的な装飾は残ります)。
 </p>
 
-<div class="field">
-  <span>フォント</span>
-  <div class="seg">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">フォント</span>
+  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each fontPresets as p (p.value)}
       <button
-        class="seg-btn"
-        class:active={fontFamily === p.value}
+        type="button"
+        class={fontFamily === p.value
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
         onclick={() => (fontFamily = p.value)}
       >
         {p.label}
@@ -527,38 +569,40 @@
   </div>
   <input
     type="text"
-    class="font-input"
-    placeholder='CSS の font-family 値（例: "Noto Sans JP", sans-serif）'
+    class="mt-1.5 w-full rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground"
+    placeholder='CSS の font-family 値(例: "Noto Sans JP", sans-serif)'
     bind:value={fontFamily}
   />
 </div>
-<p class="hint" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
+<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
   プレビュー: あいうえお ABCDEFG 123
 </p>
 
-<div class="field">
-  <span>背景画像</span>
-  <div class="bg-row">
+<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <span class="text-muted-foreground">背景画像</span>
+  <div class="flex items-center gap-2.5">
     {#if backgroundImage}
-      <img class="bg-thumb" src={backgroundImage} alt="背景プレビュー" />
+      <img class="h-9 w-14 rounded-md border border-border object-cover" src={backgroundImage} alt="背景プレビュー" />
     {/if}
-    <button class="mini-btn" disabled={pickingImage} onclick={pickImage}>
+    <button type="button" class="rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary disabled:cursor-default disabled:opacity-50" disabled={pickingImage} onclick={pickImage}>
       {pickingImage ? "読み込み中…" : backgroundImage ? "画像を変更" : "画像を選択"}
     </button>
     {#if backgroundImage}
-      <button class="mini-btn" onclick={clearImage}>解除</button>
+      <button type="button" class="rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={clearImage}>解除</button>
     {/if}
   </div>
 </div>
 
 {#if backgroundImage}
-  <div class="field">
-    <span>背景画像の配置方法</span>
-    <div class="seg">
+  <div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+    <span class="text-muted-foreground">背景画像の配置方法</span>
+    <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
       {#each BACKGROUND_FIT_MODE_OPTIONS as m (m.value)}
         <button
-          class="seg-btn"
-          class:active={backgroundFitMode === m.value}
+          type="button"
+          class={backgroundFitMode === m.value
+            ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
+            : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
           onclick={() => (backgroundFitMode = m.value)}
         >
           {m.label}
@@ -567,13 +611,15 @@
     </div>
   </div>
   {#if backgroundFitMode !== "fill"}
-    <div class="field">
-      <span>基準点</span>
-      <div class="pos-grid">
+    <div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+      <span class="text-muted-foreground">基準点</span>
+      <div class="grid w-fit grid-cols-[repeat(3,28px)] grid-rows-[repeat(3,28px)] gap-1">
         {#each BACKGROUND_POSITION_GRID as p (p)}
           <button
-            class="pos-btn"
-            class:active={backgroundPosition === p}
+            type="button"
+            class={backgroundPosition === p
+              ? "h-[28px] w-[28px] rounded border border-primary bg-primary p-0"
+              : "h-[28px] w-[28px] rounded border border-border bg-muted p-0 hover:border-primary"}
             title={positionLabels[p]}
             aria-label={positionLabels[p]}
             onclick={() => (backgroundPosition = p)}
@@ -582,324 +628,23 @@
       </div>
     </div>
   {/if}
-  <label class="field">
-    <span>背景の暗さ（{backgroundDim}%）</span>
-    <input type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
+  <label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+    <span class="text-muted-foreground">背景の暗さ({backgroundDim}%)</span>
+    <input class="w-full max-w-[320px] accent-primary" type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
   </label>
-  <label class="field">
-    <span>背景のぼかし（{backgroundBlur}px）</span>
-    <input type="range" min="0" max="40" step="2" bind:value={backgroundBlur} />
+  <label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+    <span class="text-muted-foreground">背景のぼかし({backgroundBlur}px)</span>
+    <input class="w-full max-w-[320px] accent-primary" type="range" min="0" max="40" step="2" bind:value={backgroundBlur} />
   </label>
-  <label class="field">
-    <span>カラムの不透明度（{columnOpacity}%）</span>
-    <input type="range" min="60" max="100" step="5" bind:value={columnOpacity} />
+  <label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+    <span class="text-muted-foreground">カラムの不透明度({columnOpacity}%)</span>
+    <input class="w-full max-w-[320px] accent-primary" type="range" min="60" max="100" step="5" bind:value={columnOpacity} />
   </label>
-  <p class="hint">数値が低いほど背景画像が透けて見えます。</p>
+  <p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">数値が低いほど背景画像が透けて見えます。</p>
 {/if}
 
-<div class="actions">
-  {#if saved}<span class="ok">保存しました</span>{/if}
-  <button class="save" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
+<div class="flex items-center justify-end gap-3">
+  {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
+  <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white disabled:opacity-50" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
 </div>
-{#if err}<p class="err">{err}</p>{/if}
-
-<style>
-  .title {
-    margin: 0 0 14px;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
-    font-size: 0.82rem;
-  }
-  .checkbox-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
-    margin-bottom: 8px;
-  }
-  .field > span {
-    color: var(--text-dim);
-  }
-  .seg {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-    width: fit-content;
-  }
-  .seg-btn {
-    padding: 6px 14px;
-    border: none;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.82rem;
-    border-right: 1px solid var(--border);
-  }
-  .seg-btn:last-child {
-    border-right: none;
-  }
-  .seg-btn.active {
-    background: var(--accent);
-    color: #fff;
-  }
-  .pos-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 28px);
-    grid-template-rows: repeat(3, 28px);
-    gap: 4px;
-    width: fit-content;
-  }
-  .pos-btn {
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-2);
-    cursor: pointer;
-    padding: 0;
-  }
-  .pos-btn:hover {
-    border-color: var(--accent);
-  }
-  .pos-btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  input[type="number"] {
-    padding: 7px 9px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    width: 140px;
-  }
-  .font-input {
-    padding: 7px 9px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    width: 100%;
-    margin-top: 6px;
-  }
-  .hint {
-    font-size: 0.76rem;
-    color: var(--text-dim);
-    margin: 0 0 16px;
-  }
-  .emoji-style-thumb {
-    height: 1.2em;
-    width: 1.2em;
-    object-fit: contain;
-    vertical-align: -0.25em;
-    margin-right: 4px;
-  }
-  .preview-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: wrap;
-  }
-  .emoji-preview {
-    height: 1.3em;
-    width: 1.3em;
-    object-fit: contain;
-  }
-  .bg-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .bg-thumb {
-    width: 56px;
-    height: 36px;
-    object-fit: cover;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-  }
-  .mini-btn {
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.8rem;
-  }
-  .mini-btn:hover {
-    border-color: var(--accent);
-  }
-  .mini-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .theme-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-    gap: 10px;
-  }
-  .theme-card-wrap {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .theme-card {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.78rem;
-    overflow: hidden;
-    text-align: left;
-  }
-  .theme-card:hover {
-    border-color: var(--accent);
-  }
-  .theme-card.active {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
-  }
-  .swatch-strip {
-    display: flex;
-    width: 100%;
-    height: 30px;
-    flex: none;
-  }
-  .sw {
-    flex: 1;
-    height: 100%;
-  }
-  .theme-card-name {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-    padding: 7px 9px;
-  }
-  .theme-card-name :global(.theme-card-check) {
-    flex: none;
-    color: var(--accent);
-  }
-  .theme-card-actions {
-    display: flex;
-    gap: 4px;
-  }
-  .icon-btn {
-    flex: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 5px 0;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .icon-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .add-theme {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 8px;
-  }
-  .theme-editor {
-    margin-top: 10px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .theme-name-input {
-    padding: 7px 9px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-1);
-    color: var(--text);
-    font-family: inherit;
-  }
-  .color-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .color-label {
-    width: 80px;
-    flex: none;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-  .swatch {
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
-    border: 1px solid var(--border);
-    flex: none;
-  }
-  .hex-input {
-    width: 100px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-1);
-    color: var(--text);
-    font-family: ui-monospace, monospace;
-    font-size: 0.82rem;
-  }
-  .editor-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
-  }
-  input[type="range"] {
-    accent-color: var(--accent);
-    width: 100%;
-    max-width: 320px;
-  }
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 12px;
-  }
-  .ok {
-    font-size: 0.8rem;
-    color: var(--success);
-  }
-  .save {
-    padding: 7px 18px;
-    border: none;
-    border-radius: 6px;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .save:disabled {
-    opacity: 0.5;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 8px 0 0;
-  }
-</style>
+{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
