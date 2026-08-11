@@ -41,7 +41,7 @@
 </script>
 
 <Modal title="設定" {onclose} width="640px">
-  <div class="-m-4 flex max-h-[84vh] flex-col overflow-hidden">
+  <div class="-mx-4 -mb-4 flex max-h-[calc(84vh-3rem)] flex-col overflow-hidden rounded-b-[13px]">
     <div class="flex min-h-0 flex-1 border-t border-border">
       <nav class="flex w-40 flex-none flex-col gap-0.5 overflow-y-auto border-r border-border bg-muted px-2 py-2.5">
         {#each nav as item (item.id)}
