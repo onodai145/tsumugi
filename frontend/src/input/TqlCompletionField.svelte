@@ -133,6 +133,9 @@
     el?.setSelectionRange(result.cursor, result.cursor);
     el?.focus();
     cursorPos = result.cursor;
+    // value を直接書き換えるだけではネイティブ input イベントが発火せず、
+    // 親コンポーネントの再検証(onTqlInput等)が呼ばれないままになる。確定時も明示的に呼ぶ。
+    oninput?.();
   }
 
   function onKeydown(e: KeyboardEvent) {
