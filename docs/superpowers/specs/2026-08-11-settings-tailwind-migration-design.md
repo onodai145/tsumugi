@@ -13,7 +13,7 @@ Issue本文の想定区分のうち最後に残った「設定画面」に着手
 
 ## 対象
 
-`frontend/src/ui/settings/`配下の8ファイル(合計2097行):
+`frontend/src/ui/Settings.svelte`(設定モーダルのシェル本体、156行)と、`frontend/src/ui/settings/`配下の8ファイル(合計2097行):
 
 - `AboutSection.svelte`(103行)
 - `AccountsSection.svelte`(199行)
@@ -24,11 +24,27 @@ Issue本文の想定区分のうち最後に残った「設定画面」に着手
 - `NotifySection.svelte`(175行)
 - `ReactionSection.svelte`(220行)
 
-**対象外**: `frontend/src/ui/Settings.svelte`(設定モーダルのシェル本体)。幅640px・サイドナビ+ペインの2列レイアウト(それぞれ独立スクロール)・高さ上限84vhという、共通`Modal.svelte`(幅480px固定・単一コンテンツ領域)とは構造がかなり異なるため、`Modal.svelte`の拡張要否を含めて別バッチで検討する。今回は8ファイルとも`Settings.svelte`から`<... Section />`として呼ばれる形は変えず、各セクション内部のマークアップ/スタイルのみを移行する。
-
 いずれのファイルにも既存テストファイルは無いため、`data-testid`移行は不要。
 
 ## 設計
+
+### 0. `Settings.svelte`(モーダルシェル本体)
+
+幅640px・サイドナビ(160px)+ペインの2列レイアウト(それぞれ独立スクロール)・高さ上限84vhという、共通`Modal.svelte`(幅480px固定・単一コンテンツ領域・パディング固定)とは構造がかなり異なる。以下の方針で`Modal.svelte`を最小限拡張し、既存4呼び出し元(`AddColumnModal`/`ProfileModal`/`FollowListModal`/`ComposeBar`)には一切影響を与えない形で統合する:
+
+- `Modal.svelte`に任意の`width` prop(既定`"480px"`)を追加する。モーダル本体のクラスは`` `w-[min(${width},92vw)] rounded-[14px] border border-border bg-background p-4` ``のようにテンプレート文字列へ埋め込む。これは条件によって複数のクラス文字列を切り替えるものではなく、単一の値をテンプレートに埋め込むだけなので、条件付きクラスの禁止パターン(同じCSSプロパティを争う複数クラスの個別トグル)には該当しない。既存呼び出し元は`width`未指定のため従来通り480pxのまま
+- `Settings.svelte`は`<Modal title="設定" {onclose} width="640px">`とし、中身(サイドナビ+ペイン)は`children`として渡す。`Modal.svelte`の`p-4`パディングは、Settings側のchildren直下で`-m-4`により相殺し、2列レイアウトを自前で組む:
+  ```svelte
+  <div class="-m-4 flex max-h-[84vh] flex-col overflow-hidden">
+    <div class="flex min-h-0 flex-1 border-t border-border">
+      <nav class="w-40 flex-none overflow-y-auto border-r border-border bg-muted p-2">...</nav>
+      <section class="min-w-0 flex-1 overflow-y-auto p-5">...</section>
+    </div>
+  </div>
+  ```
+  `border-t`は、元CSSで`.head`(タイトル行)と`.body`(サイドナビ+ペイン)の間にあった`border-bottom`と視覚的に同じ区切り線を、`Modal.svelte`のヘッダー自体には手を入れずに再現するもの
+- `.nav-item.active`(`background`/`color`衝突)は既存バッチの規約通り三項演算子で解消する
+- `color-mix()`パターンなし。`<style>`ブロックは完全削除
 
 ### 共通パターン
 
