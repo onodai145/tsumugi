@@ -64,10 +64,10 @@
   });
 </script>
 
-<span class="mfm-sparkle" bind:this={host}>
+<span class="relative inline-block" bind:this={host}>
   {@render children()}
   {#if !reduced}
-    <span class="layer" aria-hidden="true">
+    <span class="pointer-events-none absolute inset-0 overflow-visible" data-testid="sparkle-layer" aria-hidden="true">
       {#each particles as p (p.id)}
         <svg
           class="particle"
@@ -82,16 +82,6 @@
 </span>
 
 <style>
-  .mfm-sparkle {
-    position: relative;
-    display: inline-block;
-  }
-  .layer {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    overflow: visible;
-  }
   .particle {
     position: absolute;
     width: 64px;
