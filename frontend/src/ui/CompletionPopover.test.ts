@@ -94,7 +94,7 @@ describe("CompletionPopover", () => {
     const { baseElement } = render(CompletionPopover, {
       props: { items: [textItem], selectedIndex: 0, left: 42, top: 99, onpick: () => {} },
     });
-    const el = baseElement.querySelector(".completion-popover") as HTMLElement;
+    const el = baseElement.querySelector('[data-testid="completion-popover"]') as HTMLElement;
     expect(el.style.left).toBe("42px");
     expect(el.style.top).toBe("99px");
   });

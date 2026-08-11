@@ -36,12 +36,12 @@ describe("Sparkle", () => {
   it("does not render the particle layer when reduced motion is preferred", () => {
     mockMatchMedia(true);
     const { container } = render(Sparkle, { props: { children: textSnippet("hi") } });
-    expect(container.querySelector(".layer")).toBeNull();
+    expect(container.querySelector('[data-testid="sparkle-layer"]')).toBeNull();
   });
 
   it("renders the particle layer when reduced motion is not preferred", () => {
     mockMatchMedia(false);
     const { container } = render(Sparkle, { props: { children: textSnippet("hi") } });
-    expect(container.querySelector(".layer")).not.toBeNull();
+    expect(container.querySelector('[data-testid="sparkle-layer"]')).not.toBeNull();
   });
 });

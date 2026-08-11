@@ -150,7 +150,8 @@ describe("Mfm", () => {
 
   it("wraps $[sparkle ...] content in the Sparkle component", () => {
     const { container } = render(Mfm, { props: { text: "$[sparkle hi]" } });
-    const sparkle = container.querySelector(".mfm-sparkle");
+    const layer = container.querySelector('[data-testid="sparkle-layer"]');
+    const sparkle = layer?.parentElement;
     expect(sparkle?.textContent?.trim()).toBe("hi");
   });
 

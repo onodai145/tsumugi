@@ -23,12 +23,21 @@
   });
 </script>
 
-<div class="completion-popover" use:portal style={`left:${left}px;top:${top}px`} role="listbox">
+<!-- Modal.svelte/ConfirmDialog.svelte(z-[1000])より前面に出す必要がある。
+     AddColumnModal(唯一のTqlCompletionField呼び出し元)が共通Modalを使うようになったため。 -->
+<div
+  class="fixed z-[1010] flex max-h-[260px] min-w-[160px] max-w-[min(320px,90vw)] flex-col overflow-y-auto rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+  data-testid="completion-popover"
+  use:portal
+  style={`left:${left}px;top:${top}px`}
+  role="listbox"
+>
   {#each items as item, i (item.key)}
     <button
       type="button"
-      class="completion-item"
-      class:selected={i === selectedIndex}
+      class={i === selectedIndex
+        ? "flex w-full items-center gap-1.5 rounded-md bg-muted px-2 py-[5px] text-left font-[inherit] text-[0.82rem] text-primary"
+        : "flex w-full items-center gap-1.5 rounded-md px-2 py-[5px] text-left font-[inherit] text-[0.82rem] text-foreground"}
       role="option"
       aria-selected={i === selectedIndex}
       bind:this={itemEls[i]}
@@ -41,69 +50,11 @@
       }}
     >
       {#if item.thumbnail?.type === "custom" || item.thumbnail?.type === "avatar"}
-        <img class="completion-thumb" src={item.thumbnail.url} alt={item.label} />
+        <img class="h-[18px] w-[18px] flex-none object-contain" src={item.thumbnail.url} alt={item.label} />
       {:else if item.thumbnail?.type === "unicode"}
-        <span class="completion-thumb completion-thumb-unicode">{item.thumbnail.char}</span>
+        <span class="inline-flex h-[18px] w-[18px] flex-none items-center justify-center text-base">{item.thumbnail.char}</span>
       {/if}
-      <span class="completion-label">{item.label}</span>
+      <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{item.label}</span>
     </button>
   {/each}
 </div>
-
-<style>
-  .completion-popover {
-    position: fixed;
-    /* Modal.svelte/ConfirmDialog.svelte(z-[1000])より前面に出す必要がある。
-       AddColumnModal(唯一のTqlCompletionField呼び出し元)が共通Modalを使うようになったため。 */
-    z-index: 1010;
-    display: flex;
-    flex-direction: column;
-    max-height: 260px;
-    overflow-y: auto;
-    min-width: 160px;
-    max-width: min(320px, 90vw);
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    padding: 4px;
-  }
-  .completion-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    padding: 5px 8px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-    font-size: 0.82rem;
-  }
-  .completion-item.selected {
-    background: var(--surface-2);
-    color: var(--accent);
-  }
-  .completion-thumb {
-    flex: none;
-    width: 18px;
-    height: 18px;
-    object-fit: contain;
-  }
-  .completion-thumb-unicode {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-  }
-  .completion-label {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-</style>
