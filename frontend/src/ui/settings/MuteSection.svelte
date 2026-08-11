@@ -34,84 +34,24 @@
   }
 </script>
 
-<h3 class="title">NG（ミュート）</h3>
-<p class="hint">1行につき1件。以降に受信するノートに適用され、表示中の該当ノートも消えます。</p>
+<h3 class="mb-2 mt-0 text-base font-semibold">NG(ミュート)</h3>
+<p class="mb-3.5 mt-0 text-[0.78rem] text-muted-foreground">1行につき1件。以降に受信するノートに適用され、表示中の該当ノートも消えます。</p>
 
-<label class="field">
-  <span>NGワード（本文/CWに含むと非表示・部分一致）</span>
-  <textarea rows="3" placeholder={"ネタバレ\nspoiler"} bind:value={words}></textarea>
+<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <span class="text-muted-foreground">NGワード(本文/CWに含むと非表示・部分一致)</span>
+  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="3" placeholder={"ネタバレ\nspoiler"} bind:value={words}></textarea>
 </label>
-<label class="field">
-  <span>NGユーザ（@user@host。@は省略可）</span>
-  <textarea rows="2" placeholder={"@spammer@example.com"} bind:value={users}></textarea>
+<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <span class="text-muted-foreground">NGユーザ(@user@host。@は省略可)</span>
+  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder={"@spammer@example.com"} bind:value={users}></textarea>
 </label>
-<label class="field">
-  <span>NGインスタンス（host）</span>
-  <textarea rows="2" placeholder={"spam.example"} bind:value={instances}></textarea>
+<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <span class="text-muted-foreground">NGインスタンス(host)</span>
+  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder={"spam.example"} bind:value={instances}></textarea>
 </label>
 
-<div class="actions">
-  {#if saved}<span class="ok">保存しました</span>{/if}
-  <button class="save" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
+<div class="mt-1 flex items-center justify-end gap-3">
+  {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
+  <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white disabled:opacity-50" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
 </div>
-{#if err}<p class="err">{err}</p>{/if}
-
-<style>
-  .title {
-    margin: 0 0 8px;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-  .hint {
-    font-size: 0.78rem;
-    color: var(--text-dim);
-    margin: 0 0 14px;
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 10px;
-    font-size: 0.82rem;
-  }
-  .field span {
-    color: var(--text-dim);
-  }
-  textarea {
-    padding: 7px 9px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    resize: vertical;
-  }
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 12px;
-    margin-top: 4px;
-  }
-  .ok {
-    font-size: 0.8rem;
-    color: var(--success);
-  }
-  .save {
-    padding: 7px 18px;
-    border: none;
-    border-radius: 6px;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .save:disabled {
-    opacity: 0.5;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 8px 0 0;
-  }
-</style>
+{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
