@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
   import type { Account } from "../../bindings/tauri.gen";
+  import { Button } from "$lib/components/ui/button";
 
   let {
     onAddAccount,
@@ -54,17 +55,17 @@
         {#if confirmId === a.id}
           <div class="flex flex-none items-center gap-1.5 text-[0.78rem] text-muted-foreground">
             <span>削除？</span>
-            <button type="button" class="rounded-md bg-destructive px-2.5 py-[5px] text-[0.78rem] text-white disabled:opacity-50" disabled={busyId === a.id} onclick={() => remove(a.id)}>
+            <Button type="button" variant="destructive" size="xs" disabled={busyId === a.id} onclick={() => remove(a.id)}>
               {busyId === a.id ? "…" : "はい"}
-            </button>
-            <button type="button" class="rounded-md border border-border bg-background px-2.5 py-[5px] text-[0.78rem] text-foreground" onclick={() => (confirmId = null)}>いいえ</button>
+            </Button>
+            <Button type="button" variant="outline" size="xs" onclick={() => (confirmId = null)}>いいえ</Button>
           </div>
         {:else}
           {#if a.id !== app.defaultAccountId()}
-            <button type="button" class="rounded-md border border-border bg-background px-2.5 py-[5px] text-[0.78rem] text-foreground" onclick={() => makeDefault(a.id)}>既定に設定</button>
+            <Button type="button" variant="outline" size="xs" onclick={() => makeDefault(a.id)}>既定に設定</Button>
           {/if}
-          <button type="button" class="rounded-md border border-border bg-background px-2.5 py-[5px] text-[0.78rem] text-foreground" onclick={() => onReauth(a)}>再認証</button>
-          <button type="button" class="rounded-md border border-border bg-background px-2.5 py-[5px] text-[0.78rem] text-foreground" onclick={() => (confirmId = a.id)}>削除</button>
+          <Button type="button" variant="outline" size="xs" onclick={() => onReauth(a)}>再認証</Button>
+          <Button type="button" variant="outline" size="xs" onclick={() => (confirmId = a.id)}>削除</Button>
         {/if}
       </li>
     {/each}
@@ -76,7 +77,7 @@
 </p>
 
 <div class="flex justify-start">
-  <button type="button" class="rounded-md border border-primary bg-transparent px-4 py-[7px] font-semibold text-primary" onclick={onAddAccount}>＋ アカウントを追加</button>
+  <Button type="button" variant="outline" class="border-primary text-primary hover:text-primary" onclick={onAddAccount}>＋ アカウントを追加</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
 

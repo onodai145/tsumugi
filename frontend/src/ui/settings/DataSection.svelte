@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let noteCacheLimit = $state(app.ui.noteCacheLimit ?? 10000);
   let noteCacheMaxAgeDays = $state(app.ui.noteCacheMaxAgeDays ?? 0);
@@ -65,6 +66,6 @@
 
 <div class="flex items-center justify-end gap-3">
   {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
-  <button type="button" class="rounded-lg bg-primary px-4.5 py-[7px] font-semibold text-white disabled:cursor-default disabled:opacity-50" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
+  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}

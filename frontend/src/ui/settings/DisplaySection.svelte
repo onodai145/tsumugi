@@ -7,6 +7,7 @@
   import type { CustomTheme, ThemeColors, CustomSyntaxTheme } from "../../bindings/tauri.gen";
   import { BUNDLED_SHIKI_THEMES } from "../../lib/shikiThemeList";
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let theme = $state(app.ui.theme);
   let codeHighlightTheme = $state(app.ui.codeHighlightTheme ?? "auto");
@@ -378,7 +379,7 @@
       </div>
     {/each}
   </div>
-  <button type="button" class="mt-2 inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={startCreateTheme}><Plus size={13} /> 新規作成</button>
+  <Button type="button" variant="outline" size="xs" class="mt-2" onclick={startCreateTheme}><Plus size={13} /> 新規作成</Button>
 
   {#if editingTheme}
     <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
@@ -392,8 +393,8 @@
       {/each}
       {#if editErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{editErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
-        <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={cancelEditTheme}><X size={13} /> キャンセル</button>
-        <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white" onclick={saveCustomTheme}>このテーマを保存</button>
+        <Button type="button" variant="outline" size="xs" onclick={cancelEditTheme}><X size={13} /> キャンセル</Button>
+        <Button type="button" onclick={saveCustomTheme}>このテーマを保存</Button>
       </div>
     </div>
   {/if}
@@ -467,7 +468,7 @@
       </div>
     {/each}
   </div>
-  <button type="button" class="mt-2 inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</button>
+  <Button type="button" variant="outline" size="xs" class="mt-2" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</Button>
 
   {#if editingSyntaxTheme}
     <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
@@ -481,8 +482,8 @@
       {/each}
       {#if syntaxEditErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{syntaxEditErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
-        <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</button>
-        <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white" onclick={saveCustomSyntaxTheme}>このテーマを保存</button>
+        <Button type="button" variant="outline" size="xs" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</Button>
+        <Button type="button" onclick={saveCustomSyntaxTheme}>このテーマを保存</Button>
       </div>
     </div>
   {/if}
@@ -584,11 +585,11 @@
     {#if backgroundImage}
       <img class="h-9 w-14 rounded-md border border-border object-cover" src={backgroundImage} alt="背景プレビュー" />
     {/if}
-    <button type="button" class="rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary disabled:cursor-default disabled:opacity-50" disabled={pickingImage} onclick={pickImage}>
+    <Button type="button" variant="outline" size="xs" disabled={pickingImage} onclick={pickImage}>
       {pickingImage ? "読み込み中…" : backgroundImage ? "画像を変更" : "画像を選択"}
-    </button>
+    </Button>
     {#if backgroundImage}
-      <button type="button" class="rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={clearImage}>解除</button>
+      <Button type="button" variant="outline" size="xs" onclick={clearImage}>解除</Button>
     {/if}
   </div>
 </div>
@@ -645,6 +646,6 @@
 
 <div class="flex items-center justify-end gap-3">
   {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
-  <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white disabled:opacity-50" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
+  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}

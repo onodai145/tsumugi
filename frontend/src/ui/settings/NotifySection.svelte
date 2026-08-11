@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import { app, NOTIFY_SOUND_PRESETS, playNotifySound } from "../../lib/store.svelte";
   import Dropdown from "../Dropdown.svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let desktop = $state(app.notify.desktop);
   let sound = $state(app.notify.sound);
@@ -72,15 +73,15 @@
     <Dropdown bind:value={soundMode} options={soundModeOptions} />
     {#if soundMode === "custom"}
       <div class="mb-2 flex items-center gap-2 text-[0.88rem]">
-        <button type="button" class="rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary disabled:cursor-default disabled:opacity-50" disabled={pickingSound} onclick={pickSound}>
+        <Button type="button" variant="outline" size="xs" disabled={pickingSound} onclick={pickSound}>
           {pickingSound ? "読み込み中…" : soundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-        </button>
+        </Button>
         {#if soundChoice.startsWith("data:")}
-          <button type="button" class="rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={() => playNotifySound(soundChoice)}>試聴</button>
+          <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundChoice)}>試聴</Button>
         {/if}
       </div>
     {:else}
-      <button type="button" class="rounded-md border border-border bg-muted px-3 py-1.5 text-[0.8rem] text-foreground hover:border-primary" onclick={() => playNotifySound(soundMode)}>試聴</button>
+      <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundMode)}>試聴</Button>
     {/if}
   </div>
 {/if}
@@ -94,6 +95,6 @@
 
 <div class="flex items-center justify-end gap-3">
   {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
-  <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white disabled:opacity-50" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
+  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}

@@ -8,6 +8,7 @@
     isModifierOnly,
     type KeyAction,
   } from "../../lib/keymap";
+  import { Button } from "$lib/components/ui/button";
 
   let capturing = $state<KeyAction | null>(null);
   let err = $state<string | null>(null);
@@ -92,9 +93,9 @@
 
 <div class="mb-2 flex items-center justify-between">
   <h3 class="m-0 text-base font-semibold">キー操作</h3>
-  <button type="button" class="rounded-md border border-border bg-background px-2.5 py-1 text-[0.76rem] text-foreground disabled:cursor-default disabled:opacity-40" disabled={busy || Object.keys(overrides).length === 0} onclick={resetAll}>
+  <Button type="button" variant="outline" size="xs" disabled={busy || Object.keys(overrides).length === 0} onclick={resetAll}>
     すべて既定に戻す
-  </button>
+  </Button>
 </div>
 <p class="my-1.5 mb-2.5 text-[0.76rem] text-muted-foreground">
   「変更」を押して割り当てたいキーを押してください(Esc でキャンセル)。タイムライン上でフォーカス中カラムの選択ノートを操作します。

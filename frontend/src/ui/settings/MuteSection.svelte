@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
+  import { Button } from "$lib/components/ui/button";
 
   // 1行1エントリのテキストで編集
   let words = $state(app.mute.ngWords.join("\n"));
@@ -52,6 +53,6 @@
 
 <div class="mt-1 flex items-center justify-end gap-3">
   {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
-  <button type="button" class="rounded-md bg-primary px-[18px] py-[7px] font-semibold text-white disabled:opacity-50" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
+  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
