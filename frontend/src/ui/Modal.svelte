@@ -3,8 +3,12 @@
   import { X } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
 
-  let { title, onclose, children }: { title: string; onclose: () => void; children: Snippet } =
-    $props();
+  let {
+    title,
+    onclose,
+    children,
+    width = "480px",
+  }: { title: string; onclose: () => void; children: Snippet; width?: string } = $props();
 
   // 深くネストされたコンポーネントから呼ばれても
   // content-visibility/containの包含ブロックを脱出できるよう portal で body 直下に置く。
@@ -29,7 +33,7 @@
 >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="w-[min(480px,92vw)] rounded-[14px] border border-border bg-background p-4"
+    class={`w-[min(${width},92vw)] rounded-[14px] border border-border bg-background p-4`}
     bind:this={modalEl}
     onclick={(e) => e.stopPropagation()}
     role="dialog"

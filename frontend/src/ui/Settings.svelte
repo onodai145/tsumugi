@@ -8,7 +8,7 @@
   import AccountsSection from "./settings/AccountsSection.svelte";
   import KeysSection from "./settings/KeysSection.svelte";
   import AboutSection from "./settings/AboutSection.svelte";
-  import { X } from "@lucide/svelte";
+  import Modal from "./Modal.svelte";
 
   type Section = "accounts" | "display" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
 
@@ -40,23 +40,23 @@
   let active = $state<Section>(initial);
 </script>
 
-<div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
-    <header class="head">
-      <span>設定</span>
-      <button class="x" onclick={onclose}><X size={16} /></button>
-    </header>
-
-    <div class="body">
-      <nav class="side">
+<Modal title="設定" {onclose} width="640px">
+  <div class="-m-4 flex max-h-[84vh] flex-col overflow-hidden">
+    <div class="flex min-h-0 flex-1 border-t border-border">
+      <nav class="flex w-40 flex-none flex-col gap-0.5 overflow-y-auto border-r border-border bg-muted px-2 py-2.5">
         {#each nav as item (item.id)}
-          <button class="nav-item" class:active={active === item.id} onclick={() => (active = item.id)}>
+          <button
+            type="button"
+            class={active === item.id
+              ? "rounded-md bg-primary px-2.5 py-2 text-left text-[0.85rem] text-primary-foreground"
+              : "rounded-md px-2.5 py-2 text-left text-[0.85rem] text-foreground hover:bg-background"}
+            onclick={() => (active = item.id)}
+          >
             {item.label}
           </button>
         {/each}
       </nav>
-      <section class="pane">
+      <section class="min-w-0 flex-1 overflow-y-auto px-5 py-[18px]">
         {#if active === "accounts"}
           <AccountsSection {onAddAccount} {onReauth} />
         {:else if active === "display"}
@@ -77,79 +77,4 @@
       </section>
     </div>
   </div>
-</div>
-
-<style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    display: grid;
-    place-items: start center;
-    padding-top: 8vh;
-    z-index: 50;
-  }
-  .modal {
-    width: min(640px, 94vw);
-    max-height: 84vh;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  .head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-weight: 600;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .x {
-    display: inline-flex;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .body {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-  }
-  .side {
-    flex: none;
-    width: 160px;
-    border-right: 1px solid var(--border);
-    padding: 10px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    background: var(--surface-2);
-  }
-  .nav-item {
-    text-align: left;
-    padding: 8px 10px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.85rem;
-  }
-  .nav-item:hover {
-    background: var(--surface-1);
-  }
-  .nav-item.active {
-    background: var(--accent);
-    color: #fff;
-  }
-  .pane {
-    flex: 1;
-    min-width: 0;
-    padding: 18px 20px;
-    overflow-y: auto;
-  }
-</style>
+</Modal>
