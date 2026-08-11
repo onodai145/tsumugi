@@ -38,94 +38,33 @@
   }
 </script>
 
-<label class="field">
-  <span>ノートキャッシュの保持件数上限（件, 0〜100000。0で無制限）</span>
-  <input type="number" min="0" max="100000" step="500" bind:value={noteCacheLimit} />
+<label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+  <span class="text-muted-foreground">ノートキャッシュの保持件数上限(件, 0〜100000。0で無制限)</span>
+  <input class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground" type="number" min="0" max="100000" step="500" bind:value={noteCacheLimit} />
 </label>
-<label class="field">
-  <span>ノートキャッシュの保持日数上限（日, 0〜3650。0で無制限）</span>
-  <input type="number" min="0" max="3650" step="1" bind:value={noteCacheMaxAgeDays} />
+<label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+  <span class="text-muted-foreground">ノートキャッシュの保持日数上限(日, 0〜3650。0で無制限)</span>
+  <input class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground" type="number" min="0" max="3650" step="1" bind:value={noteCacheMaxAgeDays} />
 </label>
-<label class="field">
-  <span>ノートキャッシュのサイズ上限（MB, 0〜10000。0で無制限）</span>
-  <input type="number" min="0" max="10000" step="50" bind:value={noteCacheMaxSizeMb} />
+<label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+  <span class="text-muted-foreground">ノートキャッシュのサイズ上限(MB, 0〜10000。0で無制限)</span>
+  <input class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground" type="number" min="0" max="10000" step="50" bind:value={noteCacheMaxSizeMb} />
 </label>
-<p class="hint">
+<p class="mb-4 mt-0 text-[0.75rem] text-muted-foreground">
   ローカルDBに保持するノートの上限です。件数・投稿からの経過日数・DBファイルサイズのいずれかを
   超えた分は古い順に自動で削除されます。すべて0にすると無制限に溜め続けます
-  （ディスク容量を圧迫する可能性があります）。
+  (ディスク容量を圧迫する可能性があります)。
 </p>
 
-<label class="row"><input type="checkbox" bind:checked={enableFileLogging} /> 動作ログをファイルに残す（デバッグ用）</label>
-<p class="hint">
+<label class="mb-2 flex items-center gap-2 text-[0.88rem]"><input type="checkbox" bind:checked={enableFileLogging} /> 動作ログをファイルに残す(デバッグ用)</label>
+<p class="mb-4 mt-0 text-[0.75rem] text-muted-foreground">
   WebSocket再接続やpingタイムアウトなどの内部ログを、アプリのログディレクトリにファイルとして
   永続化します。通知が来るタイミングがおかしい等の不具合調査用で、既定はOFFです。
   切り替えは次回起動から反映されます。
 </p>
 
-<div class="actions">
-  {#if saved}<span class="ok">保存しました</span>{/if}
-  <button class="save" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
+<div class="flex items-center justify-end gap-3">
+  {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
+  <button type="button" class="rounded-lg bg-primary px-4.5 py-[7px] font-semibold text-white disabled:cursor-default disabled:opacity-50" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</button>
 </div>
-{#if err}<p class="err">{err}</p>{/if}
-
-<style>
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.88rem;
-    margin-bottom: 8px;
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 10px;
-    font-size: 0.85rem;
-  }
-  .field > span {
-    color: var(--text-dim);
-  }
-  input {
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-  }
-  .hint {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    margin: 0 0 16px;
-  }
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 12px;
-  }
-  .ok {
-    font-size: 0.8rem;
-    color: var(--success);
-  }
-  .save {
-    padding: 7px 18px;
-    border: none;
-    border-radius: 8px;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .save:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 8px 0 0;
-  }
-</style>
+{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
