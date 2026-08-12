@@ -71,8 +71,12 @@
       {busy ? "認可ページを開いています…" : "認可ページを開けませんでした。"}
     </p>
     {#if !busy}
-      <Button type="button" variant="ghost" size="sm" class="text-muted-foreground" onclick={start}
-        >もう一度試す</Button
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class="text-muted-foreground hover:text-muted-foreground"
+        onclick={start}>もう一度試す</Button
       >
     {/if}
   {:else if !sessionId}
@@ -86,7 +90,7 @@
         bind:value={host}
         onkeydown={(e) => e.key === "Enter" && host.trim() && start()}
       />
-      <Button type="button" variant="default" size="sm" disabled={busy || !host.trim()} onclick={start}>
+      <Button type="button" variant="default" size="default" disabled={busy || !host.trim()} onclick={start}>
         {busy ? "…" : "認可ページを開く"}
       </Button>
     </div>
@@ -96,14 +100,14 @@
         ? "スコープが更新されたトークンを取得します。ブラウザで認可を完了したら、下のボタンを押してください。"
         : "ブラウザで認可を完了したら、下のボタンを押してください。"}
     </p>
-    <Button type="button" variant="default" size="sm" class="mt-1.5" disabled={busy} onclick={complete}>
+    <Button type="button" variant="default" size="default" class="mt-1.5" disabled={busy} onclick={complete}>
       {busy ? "確認中…" : "認可を完了した"}
     </Button>
     <Button
       type="button"
       variant="ghost"
       size="sm"
-      class="ml-2 text-muted-foreground"
+      class="ml-2 text-muted-foreground hover:text-muted-foreground"
       onclick={() => (reauthAccount ? start() : (sessionId = null))}
     >
       やり直す

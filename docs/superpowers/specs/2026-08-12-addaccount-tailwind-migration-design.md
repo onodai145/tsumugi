@@ -29,9 +29,9 @@ Issue #174(既存コンポーネントのTailwindクラスへの移行)の一環
 
 ### アクションボタン
 
-「認可ページを開く」「認可を完了した」→ `Button variant="default" size="sm"`(元は`background: var(--accent); color: white`で`Button`のdefaultバリアントと一致)。
+「認可ページを開く」「認可を完了した」→ `Button variant="default" size="default"`(元は`background: var(--accent); color: white`で`Button`のdefaultバリアントと一致)。`size`は`default`(`h-9`=36px)を選ぶ — 「認可ページを開く」は隣のホスト名入力欄(`px-2.5 py-2`+ボーダーで実測36〜38px相当)と高さを揃える必要があり、`sm`(`h-8`=32px)では入力欄より低くなってしまうため。
 
-「もう一度試す」「やり直す」(元`.link`)→ `Button variant="ghost" size="sm"`。元は`color: var(--text-dim)`だったため、Buttonの`class`propで`text-muted-foreground`を追加して色を維持する。
+「もう一度試す」「やり直す」(元`.link`)→ `Button variant="ghost" size="sm"`。元は`color: var(--text-dim)`で、hoverでの色変化は無かった。Buttonの`class`propに`text-muted-foreground hover:text-muted-foreground`を追加する — `text-muted-foreground`だけでは`ghost`バリアントの`hover:text-foreground`がtailwind-mergeで打ち消されずhover時にコントラストが変わってしまうため、hover状態も明示的に上書きする。
 
 ## テスト方針
 
