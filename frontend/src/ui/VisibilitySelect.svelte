@@ -2,6 +2,7 @@
   import type { VisibilityInput } from "../bindings/tauri.gen";
   import type { Component } from "svelte";
   import { Globe, House, Lock, Mail } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button";
 
   let {
     value = $bindable(),
@@ -51,32 +52,41 @@
   }
 </script>
 
-<button
-  class="trigger"
-  bind:this={trigger}
+<Button
+  type="button"
+  variant="outline"
+  size="xs"
   onclick={toggle}
   title={`公開範囲: ${current.label}`}
-  type="button"
+  bind:ref={trigger}
   disabled={disabled}
->
-  <span class="ico"><current.icon size={14} /></span>
-  <span class="label">{current.label}</span>
-  <span class="caret">▾</span>
-</button>
+><span class="inline-flex flex-none"><current.icon size={14} /></span><span class="whitespace-nowrap">{current.label}</span><span class="flex-none text-[0.7rem] text-muted-foreground">▾</span></Button>
 
 {#if open && pos}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="overlay" use:portal onclick={() => (open = false)} role="presentation">
+  <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (open = false)} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="menu" style={`left:${pos.left}px;top:${pos.top}px`} onclick={(e) => e.stopPropagation()} role="listbox" tabindex="-1">
+    <div
+      class="fixed min-w-[200px] rounded-[10px] border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+      style={`left:${pos.left}px;top:${pos.top}px`}
+      onclick={(e) => e.stopPropagation()}
+      role="listbox"
+      tabindex="-1"
+    >
       {#each OPTIONS as o (o.v)}
-        <button class="item" class:active={o.v === value} onclick={() => choose(o.v)} type="button">
-          <span class="ico"><o.icon size={16} /></span>
-          <span class="meta">
-            <span class="name">{o.label}</span>
-            <span class="desc">{o.desc}</span>
+        <button
+          type="button"
+          class={o.v === value
+            ? "active flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-[inherit] text-foreground hover:bg-muted"
+            : "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-[inherit] text-foreground hover:bg-muted"}
+          onclick={() => choose(o.v)}
+        >
+          <span class="inline-flex flex-none text-muted-foreground"><o.icon size={16} /></span>
+          <span class="flex min-w-0 flex-col">
+            <span class="text-[0.85rem] font-semibold">{o.label}</span>
+            <span class="text-[0.72rem] text-muted-foreground">{o.desc}</span>
           </span>
         </button>
       {/each}
@@ -85,91 +95,7 @@
 {/if}
 
 <style>
-  .trigger {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.82rem;
-    flex: none;
-  }
-  .trigger:hover {
-    border-color: var(--accent);
-  }
-  .trigger:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  .trigger:disabled:hover {
-    border-color: var(--border);
-  }
-  .ico {
-    display: inline-flex;
-    flex: none;
-  }
-  .label {
-    white-space: nowrap;
-  }
-  .caret {
-    color: var(--text-dim);
-    font-size: 0.7rem;
-    flex: none;
-  }
-
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-  }
-  .menu {
-    position: fixed;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    padding: 4px;
-    min-width: 200px;
-  }
-  .item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 8px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-  }
-  .item:hover {
-    background: var(--surface-2);
-  }
-  .item.active {
+  .active {
     background: color-mix(in srgb, var(--accent) 16%, transparent);
-  }
-  .item .ico {
-    color: var(--text-dim);
-  }
-  .meta {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .name {
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
-  .desc {
-    font-size: 0.72rem;
-    color: var(--text-dim);
   }
 </style>
