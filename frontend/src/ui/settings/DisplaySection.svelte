@@ -379,7 +379,7 @@
       </div>
     {/each}
   </div>
-  <Button type="button" variant="outline" size="xs" class="mt-2" onclick={startCreateTheme}><Plus size={13} /> 新規作成</Button>
+  <Button type="button" variant="outline" size="sm" class="mt-2" onclick={startCreateTheme}><Plus size={13} /> 新規作成</Button>
 
   {#if editingTheme}
     <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
@@ -468,7 +468,7 @@
       </div>
     {/each}
   </div>
-  <Button type="button" variant="outline" size="xs" class="mt-2" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</Button>
+  <Button type="button" variant="outline" size="sm" class="mt-2" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</Button>
 
   {#if editingSyntaxTheme}
     <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
@@ -585,11 +585,11 @@
     {#if backgroundImage}
       <img class="h-9 w-14 rounded-md border border-border object-cover" src={backgroundImage} alt="背景プレビュー" />
     {/if}
-    <Button type="button" variant="outline" size="xs" disabled={pickingImage} onclick={pickImage}>
+    <Button type="button" variant="outline" size="sm" disabled={pickingImage} onclick={pickImage}>
       {pickingImage ? "読み込み中…" : backgroundImage ? "画像を変更" : "画像を選択"}
     </Button>
     {#if backgroundImage}
-      <Button type="button" variant="outline" size="xs" onclick={clearImage}>解除</Button>
+      <Button type="button" variant="outline" size="sm" onclick={clearImage}>解除</Button>
     {/if}
   </div>
 </div>
