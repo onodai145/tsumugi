@@ -45,7 +45,7 @@
   }
 </script>
 
-<Button type="button" variant="outline" size="xs" class="w-full justify-between" onclick={toggle} bind:ref={trigger}>
+<Button type="button" variant="outline" size="sm" class="w-full justify-between" onclick={toggle} bind:ref={trigger}>
   <span class={current ? "overflow-hidden text-ellipsis whitespace-nowrap" : "overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground"}>{current?.label ?? placeholder}</span>
   <span class="flex-none text-[0.7rem] text-muted-foreground">▾</span>
 </Button>

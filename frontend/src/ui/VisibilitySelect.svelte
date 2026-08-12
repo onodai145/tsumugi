@@ -55,7 +55,7 @@
 <Button
   type="button"
   variant="outline"
-  size="xs"
+  size="sm"
   onclick={toggle}
   title={`公開範囲: ${current.label}`}
   bind:ref={trigger}

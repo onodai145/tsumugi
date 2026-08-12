@@ -672,7 +672,7 @@
         <Button
           type="button"
           variant="outline"
-          size="xs"
+          size="sm"
           disabled={pollChoices.length >= MAX_POLL_CHOICES}
           onclick={() => (pollChoices = [...pollChoices, ""])}
         >
@@ -686,7 +686,7 @@
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="sm"
             class={pollExpiryMode === m.value ? "border-primary text-primary" : ""}
             onclick={() => (pollExpiryMode = m.value)}
           >
@@ -716,15 +716,15 @@
       <Button
         type="button"
         variant="outline"
-        size="icon-xs"
+        size="icon-sm"
         title="画像を添付"
         bind:ref={attachTrigger}
         onclick={toggleAttachMenu}
         disabled={busy}
       ><ImagePlus size={16} class="size-4" /></Button>
-      <Button type="button" variant="outline" size="xs" class={useCw ? "border-primary text-primary" : ""} onclick={() => (useCw = !useCw)}>CW</Button>
-      <Button type="button" variant="outline" size="xs" class={usePoll ? "border-primary text-primary" : ""} onclick={() => (usePoll = !usePoll)}>投票</Button>
-      <Button type="button" variant="outline" size="xs" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
+      <Button type="button" variant="outline" size="sm" class={useCw ? "border-primary text-primary" : ""} onclick={() => (useCw = !useCw)}>CW</Button>
+      <Button type="button" variant="outline" size="sm" class={usePoll ? "border-primary text-primary" : ""} onclick={() => (usePoll = !usePoll)}>投票</Button>
+      <Button type="button" variant="outline" size="sm" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
       {#if useChannel}
         {#if channelsLoading}
           <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">読み込み中…</span>
