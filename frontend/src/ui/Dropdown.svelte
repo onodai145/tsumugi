@@ -1,5 +1,7 @@
 <script lang="ts" generics="T extends string">
   // 汎用の値+ラベル ドロップダウン（テーマ適用・portal で overflow 脱出）。
+  import { Button } from "$lib/components/ui/button";
+
   let {
     value = $bindable(),
     options,
@@ -43,26 +45,32 @@
   }
 </script>
 
-<button class="trigger" bind:this={trigger} onclick={toggle} type="button">
-  <span class="label" class:placeholder={!current}>{current?.label ?? placeholder}</span>
-  <span class="caret">▾</span>
-</button>
+<Button type="button" variant="outline" size="xs" class="w-full justify-between" onclick={toggle} bind:ref={trigger}>
+  <span class={current ? "overflow-hidden text-ellipsis whitespace-nowrap" : "overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground"}>{current?.label ?? placeholder}</span>
+  <span class="flex-none text-[0.7rem] text-muted-foreground">▾</span>
+</Button>
 
 {#if open && pos}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="overlay" use:portal onclick={() => (open = false)} role="presentation">
+  <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (open = false)} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="menu"
+      class="fixed max-h-[280px] overflow-y-auto rounded-[10px] border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
       style={`left:${pos.left}px;top:${pos.top}px;min-width:${pos.width}px`}
       onclick={(e) => e.stopPropagation()}
       role="listbox"
       tabindex="-1"
     >
       {#each options as o (o.value)}
-        <button class="item" class:active={o.value === value} onclick={() => choose(o.value)} type="button">
+        <button
+          type="button"
+          class={o.value === value
+            ? "active block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.85rem] text-foreground hover:bg-muted"
+            : "block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.85rem] text-foreground hover:bg-muted"}
+          onclick={() => choose(o.value)}
+        >
           {o.label}
         </button>
       {/each}
@@ -71,74 +79,7 @@
 {/if}
 
 <style>
-  .trigger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.85rem;
-    text-align: left;
-  }
-  .trigger:hover {
-    border-color: var(--accent);
-  }
-  .label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .label.placeholder {
-    color: var(--text-dim);
-  }
-  .caret {
-    color: var(--text-dim);
-    font-size: 0.7rem;
-    flex: none;
-  }
-
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-  }
-  .menu {
-    position: fixed;
-    max-height: 280px;
-    overflow-y: auto;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    padding: 4px;
-  }
-  .item {
-    display: block;
-    width: 100%;
-    padding: 7px 9px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-    font-size: 0.85rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .item:hover {
-    background: var(--surface-2);
-  }
-  .item.active {
+  .active {
     background: color-mix(in srgb, var(--accent) 16%, transparent);
   }
 </style>

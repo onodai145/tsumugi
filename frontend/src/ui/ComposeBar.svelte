@@ -731,7 +731,7 @@
         {:else if channelsError}
           <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">読み込みに失敗しました</span>
         {:else if channelOptions.length > 0}
-          <div class="channel-select w-[140px]">
+          <div class="w-[140px]">
             <Dropdown bind:value={channelId} options={channelOptions} />
           </div>
         {:else}
@@ -816,11 +816,3 @@
 {#if showDrivePicker && accountId}
   <DrivePicker {accountId} onSelect={onDriveFilesSelected} onclose={() => (showDrivePicker = false)} />
 {/if}
-
-<style>
-  .channel-select :global(.trigger) {
-    padding: 5px 8px;
-    font-size: 0.82rem;
-    gap: 5px;
-  }
-</style>
