@@ -96,12 +96,15 @@
   }
 
   let attachments = $state<AttachmentItem[]>([]);
-  let attachTrigger = $state<HTMLElement | undefined>(undefined);
+  // Button の ref prop は $bindable(null) のためフォールバック値と型を合わせて null 初期化する
+  // (undefined 初期化のままだと Svelte が "Cannot do bind:ref={undefined} when ref has
+  // a fallback value" で例外を投げ、ComposeBar 全体がマウントに失敗する)。
+  let attachTrigger = $state<HTMLElement | null>(null);
   let showAttachMenu = $state(false);
   let attachMenuPos = $state<{ left: number; top: number } | null>(null);
   let showDrivePicker = $state(false);
   let showEmojiPicker = $state(false);
-  let emojiPickerTrigger = $state<HTMLElement | undefined>(undefined);
+  let emojiPickerTrigger = $state<HTMLElement | null>(null);
   let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
 
   // ボタンをテキストエリア右上に重ねて配置しているため、素直に左揃えで開くと
