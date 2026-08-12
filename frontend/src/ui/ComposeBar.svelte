@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
+  import { Button } from "$lib/components/ui/button";
   import AccountSelect from "./AccountSelect.svelte";
   import VisibilitySelect from "./VisibilitySelect.svelte";
   import Dropdown from "./Dropdown.svelte";
@@ -95,12 +96,15 @@
   }
 
   let attachments = $state<AttachmentItem[]>([]);
-  let attachTrigger = $state<HTMLElement | undefined>(undefined);
+  // Button の ref prop は $bindable(null) のためフォールバック値と型を合わせて null 初期化する
+  // (undefined 初期化のままだと Svelte が "Cannot do bind:ref={undefined} when ref has
+  // a fallback value" で例外を投げ、ComposeBar 全体がマウントに失敗する)。
+  let attachTrigger = $state<HTMLElement | null>(null);
   let showAttachMenu = $state(false);
   let attachMenuPos = $state<{ left: number; top: number } | null>(null);
   let showDrivePicker = $state(false);
   let showEmojiPicker = $state(false);
-  let emojiPickerTrigger = $state<HTMLElement | undefined>(undefined);
+  let emojiPickerTrigger = $state<HTMLElement | null>(null);
   let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
 
   // ボタンをテキストエリア右上に重ねて配置しているため、素直に左揃えで開くと
@@ -539,7 +543,7 @@
   }}
 />
 
-<div class="composewrap">
+<div class="flex flex-1 min-w-0 items-start gap-1.5">
   <AccountSelect
     bind:value={
       () => accountId,
@@ -552,25 +556,27 @@
     large={!expanded}
   />
 
-  <div class="composebox">
+  <div class="flex flex-1 min-w-0 flex-col gap-1">
   {#if replyTo || quoteOf}
-    <div class="context">
-      <span class="context-text">
+    <div class="flex items-center gap-1.5 rounded-md border border-border bg-muted px-1.5 py-[3px] text-[0.78rem] text-muted-foreground">
+      <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         {replyTo ? "返信: " : "引用: "}@{(replyTo ?? quoteOf)!.user.username} — {(replyTo ?? quoteOf)!.text ?? ""}
       </span>
-      <button class="context-x" title="キャンセル" onclick={cancelContext}><X size={12} /></button>
+      <Button type="button" variant="ghost" size="icon-xs" class="flex-none text-muted-foreground" title="キャンセル" onclick={cancelContext}><X size={12} /></Button>
     </div>
   {/if}
 
   {#if useCw}
-    <input class="cw-input" placeholder="内容警告 (CW)" bind:value={cw} />
+    <input class="w-full box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-[0.84rem] text-foreground" placeholder="内容警告 (CW)" bind:value={cw} />
   {/if}
 
-  <div class="text-wrap">
+  <div class="relative">
     <textarea
-      class="text"
-      class:compact
-      class:expanded
+      class={expanded
+        ? "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-[0.86rem] leading-[1.4] text-foreground min-h-24 [transition:min-height_0.12s_ease]"
+        : compact
+          ? "w-full box-border resize-none rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-[0.86rem] leading-[1.4] text-foreground min-h-[34px] [transition:min-height_0.12s_ease]"
+          : "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-[0.86rem] leading-[1.4] text-foreground min-h-20 [transition:min-height_0.12s_ease]"}
       rows={expanded ? 4 : 1}
       placeholder={placeholder}
       bind:value={text}
@@ -591,15 +597,19 @@
       }}
       onpaste={handlePaste}
     ></textarea>
-    <button
-      class="emoji-trigger"
-      class:active={showEmojiPicker}
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      class={showEmojiPicker
+        ? "absolute top-1.5 right-1.5 bg-background text-primary opacity-100 hover:bg-accent hover:text-foreground dark:hover:bg-accent disabled:cursor-default disabled:opacity-40"
+        : "absolute top-1.5 right-1.5 bg-background text-muted-foreground opacity-85 hover:bg-accent hover:text-foreground dark:hover:bg-accent hover:opacity-100 disabled:cursor-default disabled:opacity-40"}
       title="絵文字を挿入"
-      bind:this={emojiPickerTrigger}
+      bind:ref={emojiPickerTrigger}
       onmousedown={(e) => e.preventDefault()}
       onclick={toggleEmojiPicker}
       disabled={busy || !accountId}
-    ><SmilePlus size={16} /></button>
+    ><SmilePlus size={16} class="size-4" /></Button>
   </div>
 
   {#if popoverOpen && popoverPos}
@@ -615,77 +625,84 @@
   {/if}
 
   {#if attachments.length > 0}
-    <div class="thumbs">
+    <div class="flex flex-wrap gap-1">
       {#each attachments as a (a.id)}
-        <div class="thumb-wrap">
+        <div class="relative h-7 w-7">
           {#if a.kind === "drive"}
             {#if a.file.mimeType.startsWith("image/")}
-              <img class="thumb" src={a.file.thumbnailUrl ?? a.file.url} alt="" />
+              <img class="h-7 w-7 rounded object-cover" src={a.file.thumbnailUrl ?? a.file.url} alt="" />
             {:else}
-              <span class="thumb badge">{a.file.mimeType.split("/")[0]}</span>
+              <span class="grid h-7 w-7 place-items-center rounded bg-accent text-[0.6rem] text-muted-foreground">{a.file.mimeType.split("/")[0]}</span>
             {/if}
           {:else if a.previewUrl}
-            <img class="thumb" src={a.previewUrl} alt="" />
+            <img class="h-7 w-7 rounded object-cover" src={a.previewUrl} alt="" />
           {:else}
-            <span class="thumb badge">{extLower(a.name).toUpperCase() || "FILE"}</span>
+            <span class="grid h-7 w-7 place-items-center rounded bg-accent text-[0.6rem] text-muted-foreground">{extLower(a.name).toUpperCase() || "FILE"}</span>
           {/if}
           {#if uploadingAttachmentId === a.id}
-            <span class="thumb-status" title="アップロード中">…</span>
+            <span class="absolute -bottom-1 -left-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-black/60 text-[0.6rem] text-white" title="アップロード中">…</span>
           {:else if failedAttachmentId === a.id}
-            <span class="thumb-status error">!</span>
+            <span class="absolute -bottom-1 -left-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-destructive text-[0.6rem] text-white">!</span>
           {/if}
-          <button class="thumb-x" title="削除" onclick={() => removeAttached(a.id)}><X size={10} /></button>
+          <Button type="button" variant="ghost" size="icon-xs" class="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-black/60 text-white hover:bg-black/60" title="削除" onclick={() => removeAttached(a.id)}><X size={10} /></Button>
         </div>
       {/each}
     </div>
   {/if}
 
   {#if usePoll}
-    <div class="poll">
+    <div class="flex flex-col gap-[5px]">
       {#each pollChoices as _, i}
-        <div class="poll-choice-row">
-          <input class="poll-choice" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
-          <button
-            class="poll-choice-x"
+        <div class="flex items-center gap-1">
+          <input class="flex-1 box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-[0.84rem] text-foreground" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            class="flex-none text-muted-foreground disabled:opacity-35"
             title="この選択肢を削除"
             disabled={pollChoices.length <= 2}
             onclick={() => (pollChoices = pollChoices.filter((_, j) => j !== i))}
           >
             <X size={12} />
-          </button>
+          </Button>
         </div>
       {/each}
-      <div class="poll-actions">
-        <button
-          class="mini"
+      <div class="flex flex-wrap items-center gap-3 text-[0.8rem] text-muted-foreground">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
           disabled={pollChoices.length >= MAX_POLL_CHOICES}
           onclick={() => (pollChoices = [...pollChoices, ""])}
         >
           ＋選択肢
-        </button>
+        </Button>
         <label><input type="checkbox" bind:checked={pollMultiple} /> 複数選択</label>
       </div>
-      <div class="poll-expiry">
-        <span class="expiry-label">期限:</span>
+      <div class="flex flex-wrap items-center gap-1.5 text-[0.8rem] text-muted-foreground">
+        <span class="flex-none">期限:</span>
         {#each pollExpiryModes as m (m.value)}
-          <button
-            class="mini"
-            class:active={pollExpiryMode === m.value}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class={pollExpiryMode === m.value ? "border-primary text-primary" : ""}
             onclick={() => (pollExpiryMode = m.value)}
           >
             {m.label}
-          </button>
+          </Button>
         {/each}
         {#if pollExpiryMode === "at"}
-          <input type="datetime-local" bind:value={pollExpiresAt} class="poll-expires" />
+          <input type="datetime-local" bind:value={pollExpiresAt} class="rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-[0.78rem] text-foreground" />
         {:else if pollExpiryMode === "after"}
           <input
             type="number"
             min="1"
-            class="poll-after-amount"
+            class="w-[60px] rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-[0.78rem] text-foreground"
             bind:value={pollAfterAmount}
           />
-          <div class="poll-after-unit">
+          <div class="w-[90px]">
             <Dropdown bind:value={pollAfterUnit} options={pollAfterUnits} />
           </div>
         {/if}
@@ -693,33 +710,35 @@
     </div>
   {/if}
 
-  <div class="toolbar">
-    <div class="tools left">
+  <div class="flex items-center justify-between gap-2">
+    <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
       <VisibilitySelect bind:value={visibility} disabled={useChannel} />
-      <button
-        class="icon"
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
         title="画像を添付"
-        bind:this={attachTrigger}
+        bind:ref={attachTrigger}
         onclick={toggleAttachMenu}
         disabled={busy}
-      ><ImagePlus size={16} /></button>
-      <button class="mini" class:active={useCw} onclick={() => (useCw = !useCw)}>CW</button>
-      <button class="mini" class:active={usePoll} onclick={() => (usePoll = !usePoll)}>投票</button>
-      <button class="mini" class:active={useChannel} onclick={() => (useChannel = !useChannel)}>チャンネル</button>
+      ><ImagePlus size={16} class="size-4" /></Button>
+      <Button type="button" variant="outline" size="sm" class={useCw ? "border-primary text-primary" : ""} onclick={() => (useCw = !useCw)}>CW</Button>
+      <Button type="button" variant="outline" size="sm" class={usePoll ? "border-primary text-primary" : ""} onclick={() => (usePoll = !usePoll)}>投票</Button>
+      <Button type="button" variant="outline" size="sm" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
       {#if useChannel}
         {#if channelsLoading}
-          <span class="lo">読み込み中…</span>
+          <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">読み込み中…</span>
         {:else if channelsError}
-          <span class="lo">読み込みに失敗しました</span>
+          <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">読み込みに失敗しました</span>
         {:else if channelOptions.length > 0}
-          <div class="channel-select">
+          <div class="w-[140px]">
             <Dropdown bind:value={channelId} options={channelOptions} />
           </div>
         {:else}
-          <span class="lo">フォロー中のチャンネルがありません</span>
+          <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">フォロー中のチャンネルがありません</span>
         {/if}
       {/if}
-      <label class="lo">
+      <label class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">
         <input
           type="checkbox"
           checked={useChannel || localOnly}
@@ -728,8 +747,8 @@
         /> 連合なし
       </label>
     </div>
-    <div class="tools right">
-      <button class="post" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</button>
+    <div class="flex flex-none flex-wrap items-center gap-1.5">
+      <Button type="button" size="sm" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</Button>
     </div>
   </div>
   </div>
@@ -738,9 +757,9 @@
 {#if err}
   <Modal title="エラー" onclose={() => (err = null)}>
     {#snippet children()}
-      <p class="err-body">{err}</p>
-      <div class="err-actions">
-        <button class="err-ok" onclick={() => (err = null)}>わかった</button>
+      <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-[0.9rem] text-foreground">{err}</p>
+      <div class="flex justify-end">
+        <Button onclick={() => (err = null)}>わかった</Button>
       </div>
     {/snippet}
   </Modal>
@@ -749,25 +768,25 @@
 {#if showAttachMenu && attachMenuPos}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="attach-overlay" use:portal onclick={() => (showAttachMenu = false)} role="presentation">
+  <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (showAttachMenu = false)} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="attach-menu"
+      class="fixed min-w-[160px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
       style={`left:${attachMenuPos.left}px;top:${attachMenuPos.top}px`}
       onclick={(e) => e.stopPropagation()}
       role="menu"
       tabindex="-1"
     >
       <button
-        class="attach-item"
+        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.82rem] text-foreground hover:bg-muted disabled:cursor-default disabled:opacity-50"
         type="button"
         disabled={!accountId}
         title={accountId ? undefined : "アカウントを選択してください"}
         onclick={chooseLocalUpload}
       >ローカルから選択</button>
       <button
-        class="attach-item"
+        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.82rem] text-foreground hover:bg-muted disabled:cursor-default disabled:opacity-50"
         type="button"
         disabled={!accountId}
         title={accountId ? undefined : "アカウントを選択してください"}
@@ -780,11 +799,11 @@
 {#if showEmojiPicker && emojiPickerPos && accountId}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="attach-overlay" use:portal onclick={() => (showEmojiPicker = false)} role="presentation">
+  <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (showEmojiPicker = false)} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="emoji-picker-pop"
+      class="fixed"
       style={`left:${emojiPickerPos.left}px;top:${emojiPickerPos.top}px`}
       onclick={(e) => e.stopPropagation()}
       role="presentation"
@@ -797,379 +816,3 @@
 {#if showDrivePicker && accountId}
   <DrivePicker {accountId} onSelect={onDriveFilesSelected} onclose={() => (showDrivePicker = false)} />
 {/if}
-
-<style>
-  .composewrap {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    flex: 1;
-    min-width: 0;
-  }
-  .composebox {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1;
-    min-width: 0;
-  }
-  .context {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.78rem;
-    color: var(--text-dim);
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 6px;
-  }
-  .context-text {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .context-x {
-    display: inline-flex;
-    flex: none;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .text-wrap {
-    position: relative;
-  }
-  .text {
-    width: 100%;
-    resize: vertical;
-    padding: 6px 34px 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.86rem;
-    line-height: 1.4;
-    min-height: 80px;
-    box-sizing: border-box;
-    transition: min-height 0.12s ease;
-  }
-  .emoji-trigger {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border: none;
-    border-radius: 6px;
-    background: var(--surface-1);
-    color: var(--text-dim);
-    cursor: pointer;
-    opacity: 0.85;
-  }
-  .emoji-trigger:hover {
-    opacity: 1;
-    color: var(--text);
-    background: var(--surface-3);
-  }
-  .emoji-trigger.active {
-    color: var(--accent);
-    opacity: 1;
-  }
-  .emoji-trigger:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  /* フォーカスが無く未入力の時はコンパクトに(フォーカス/入力があれば通常サイズへ戻す) */
-  .text.compact {
-    min-height: 34px;
-    resize: none;
-  }
-  /* モバイル投稿モーダルなど: 常に4行分の高さを確保する */
-  .text.expanded {
-    min-height: 96px;
-  }
-  .cw-input,
-  .poll-choice {
-    width: 100%;
-    padding: 6px 9px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.84rem;
-    box-sizing: border-box;
-  }
-  .poll {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  .channel-select {
-    width: 140px;
-  }
-  .channel-select :global(.trigger) {
-    padding: 5px 8px;
-    font-size: 0.82rem;
-    gap: 5px;
-  }
-  .poll-choice-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .poll-choice-row .poll-choice {
-    flex: 1;
-  }
-  .poll-choice-x {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 4px;
-  }
-  .poll-choice-x:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-  .poll-actions {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-  .poll-actions .mini:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .poll-expiry {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-  .expiry-label {
-    flex: none;
-  }
-  .poll-expires {
-    padding: 3px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.78rem;
-  }
-  .poll-after-amount {
-    width: 60px;
-    padding: 3px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.78rem;
-  }
-  .poll-after-unit {
-    width: 90px;
-  }
-  .thumbs {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
-  }
-  .thumb-wrap {
-    position: relative;
-    width: 28px;
-    height: 28px;
-  }
-  .thumb {
-    width: 28px;
-    height: 28px;
-    border-radius: 4px;
-    object-fit: cover;
-  }
-  .thumb.badge {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    background: var(--surface-3);
-    color: var(--text-dim);
-    font-size: 0.6rem;
-    border-radius: 4px;
-  }
-  .thumb-x {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    border: none;
-    background: rgba(0, 0, 0, 0.6);
-    color: #fff;
-    border-radius: 50%;
-    width: 14px;
-    height: 14px;
-    cursor: pointer;
-  }
-  .thumb-status {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    position: absolute;
-    bottom: -4px;
-    left: -4px;
-    border: none;
-    background: rgba(0, 0, 0, 0.6);
-    color: #fff;
-    border-radius: 50%;
-    width: 14px;
-    height: 14px;
-    font-size: 0.6rem;
-  }
-  .thumb-status.error {
-    background: var(--danger);
-  }
-  .toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .tools {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .tools.left {
-    flex: 1;
-    min-width: 0;
-  }
-  .tools.right {
-    flex: none;
-  }
-  .icon {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-    color: var(--text);
-    border-radius: 4px;
-    padding: 4px 7px;
-    cursor: pointer;
-    flex: none;
-  }
-  .icon:disabled {
-    opacity: 0.5;
-  }
-  .mini {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-1);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.78rem;
-    flex: none;
-  }
-  .mini.active {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .lo {
-    font-size: 0.78rem;
-    color: var(--text-dim);
-    flex: none;
-    white-space: nowrap;
-  }
-  .post {
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-    border-radius: 6px;
-    padding: 7px 20px;
-    cursor: pointer;
-    flex: none;
-  }
-  .post:disabled {
-    opacity: 0.5;
-  }
-  .err-body {
-    color: var(--text);
-    font-size: 0.9rem;
-    margin: 0 0 14px;
-    word-break: break-word;
-    white-space: pre-wrap;
-  }
-  .err-actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-  .err-ok {
-    padding: 8px 20px;
-    border: none;
-    border-radius: 8px;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .attach-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-  }
-  .attach-menu {
-    position: fixed;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    padding: 4px;
-    min-width: 160px;
-  }
-  .emoji-picker-pop {
-    position: fixed;
-  }
-  .attach-item {
-    display: block;
-    width: 100%;
-    padding: 7px 10px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-    font-size: 0.82rem;
-  }
-  .attach-item:hover {
-    background: var(--surface-2);
-  }
-  .attach-item:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-</style>
