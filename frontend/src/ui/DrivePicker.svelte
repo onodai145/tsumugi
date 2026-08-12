@@ -2,6 +2,7 @@
   import { commands, unwrap } from "../lib/ipc";
   import { X, Check } from "@lucide/svelte";
   import type { DriveFile, SourceItem } from "../bindings/tauri.gen";
+  import { Button } from "$lib/components/ui/button";
 
   let {
     accountId,
@@ -99,234 +100,108 @@
   void refresh();
 </script>
 
-<div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
+<div
+  class="fixed inset-0 z-[60] grid items-start justify-items-center bg-black/45 pt-[8vh]"
+  onclick={onclose}
+  onkeydown={(e) => e.key === "Escape" && onclose()}
+  role="presentation"
+>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
-    <header class="head">
+  <div
+    class="flex max-h-[78vh] w-[min(520px,92vw)] flex-col rounded-[14px] border border-border bg-background p-4"
+    onclick={(e) => e.stopPropagation()}
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+  >
+    <header class="mb-2.5 flex flex-none items-center justify-between font-semibold">
       <span>ドライブから選択</span>
-      <button class="x" onclick={onclose}><X size={16} /></button>
+      <Button type="button" variant="ghost" size="icon-xs" onclick={onclose}><X size={16} /></Button>
     </header>
 
-    <nav class="breadcrumb">
-      <button class="crumb" class:active={path.length === 0} onclick={() => goToBreadcrumb(-1)}>ドライブ</button>
+    <nav class="mb-2.5 flex flex-none flex-wrap items-center gap-1 text-[0.8rem]">
+      <button
+        type="button"
+        class={path.length === 0
+          ? "px-1 py-0.5 font-[inherit] font-semibold text-foreground"
+          : "px-1 py-0.5 font-[inherit] text-muted-foreground"}
+        onclick={() => goToBreadcrumb(-1)}>ドライブ</button
+      >
       {#each path as p, i (p.id)}
-        <span class="sep">/</span>
-        <button class="crumb" class:active={i === path.length - 1} onclick={() => goToBreadcrumb(i)}>
+        <span class="text-muted-foreground">/</span>
+        <button
+          type="button"
+          class={i === path.length - 1
+            ? "px-1 py-0.5 font-[inherit] font-semibold text-foreground"
+            : "px-1 py-0.5 font-[inherit] text-muted-foreground"}
+          onclick={() => goToBreadcrumb(i)}
+        >
           {p.name || "(無題)"}
         </button>
       {/each}
     </nav>
 
     {#if loading}
-      <p class="hint">読み込み中…</p>
+      <p class="text-[0.8rem] text-muted-foreground">読み込み中…</p>
     {:else}
       {#if folders.length === 0 && files.length === 0}
-        <p class="hint">ファイルがありません</p>
+        <p class="text-[0.8rem] text-muted-foreground">ファイルがありません</p>
       {/if}
-      <div class="grid">
+      <div class="grid min-h-0 flex-1 auto-rows-[84px] grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2 overflow-y-auto">
         {#each folders as f (f.id)}
-          <button class="cell folder" onclick={() => enterFolder(f)}>📁 {f.name || "(無題)"}</button>
+          <button
+            type="button"
+            class="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-1.5 text-[0.72rem] break-all text-foreground"
+            onclick={() => enterFolder(f)}
+          >
+            📁 {f.name || "(無題)"}
+          </button>
         {/each}
         {#each files as f (f.id)}
-          <button class="cell file" class:selected={selected.has(f.id)} onclick={() => onFileClick(f)}>
+          <button
+            type="button"
+            class={selected.has(f.id)
+              ? "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-[0.75rem] text-foreground outline-2 outline-offset-[-2px] outline-primary"
+              : "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-[0.75rem] text-foreground"}
+            onclick={() => onFileClick(f)}
+          >
             {#if f.isSensitive && !revealed[f.id]}
-              <span class="sensitive-cover">閲覧注意（クリックで表示）</span>
+              <span class="p-1 text-muted-foreground">閲覧注意（クリックで表示）</span>
             {:else if f.mimeType.startsWith("image/")}
-              <img src={f.thumbnailUrl ?? f.url} alt={f.name} loading="lazy" />
+              <img src={f.thumbnailUrl ?? f.url} alt={f.name} loading="lazy" class="h-full w-full object-cover" />
             {:else}
-              <span class="badge">{f.mimeType.split("/")[0] || "file"}</span>
+              <span class="text-muted-foreground">{f.mimeType.split("/")[0] || "file"}</span>
             {/if}
             {#if selected.has(f.id)}
-              <span class="check"><Check size={14} /></span>
+              <span
+                class="absolute top-1 right-1 flex size-[18px] items-center justify-center rounded-full bg-primary text-white"
+                ><Check size={14} /></span
+              >
             {/if}
           </button>
         {/each}
       </div>
       {#if !noMoreFiles && files.length > 0}
-        <button class="mini more" disabled={loadingMore} onclick={loadMore}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          class="mt-2 self-center"
+          disabled={loadingMore}
+          onclick={loadMore}
+        >
           {loadingMore ? "読み込み中…" : "もっと見る"}
-        </button>
+        </Button>
       {/if}
     {/if}
 
-    {#if err}<p class="err">{err}</p>{/if}
+    {#if err}<p class="mt-2 flex-none text-[0.82rem] break-words text-destructive">{err}</p>{/if}
 
-    <div class="actions">
-      <span class="count">選択中 {selected.size}件</span>
-      <button class="submit" disabled={selected.size === 0} onclick={confirm}>添付</button>
+    <div class="mt-3 flex flex-none items-center justify-between">
+      <span class="text-[0.8rem] text-muted-foreground">選択中 {selected.size}件</span>
+      <Button type="button" variant="default" size="sm" disabled={selected.size === 0} onclick={confirm}
+        >添付</Button
+      >
     </div>
   </div>
 </div>
-
-<style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    display: grid;
-    place-items: start center;
-    padding-top: 8vh;
-    z-index: 60;
-  }
-  .modal {
-    width: min(520px, 92vw);
-    max-height: 78vh;
-    display: flex;
-    flex-direction: column;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 16px;
-  }
-  .head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-weight: 600;
-    margin-bottom: 10px;
-    flex: none;
-  }
-  .x {
-    display: inline-flex;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-wrap: wrap;
-    font-size: 0.8rem;
-    margin-bottom: 10px;
-    flex: none;
-  }
-  .crumb {
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 2px 4px;
-    font: inherit;
-  }
-  .crumb.active {
-    color: var(--text);
-    font-weight: 600;
-  }
-  .sep {
-    color: var(--text-dim);
-  }
-  .hint {
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-    /* .cell の高さを aspect-ratio ではなく grid-auto-rows で直接固定する
-       (aspect-ratio 頼りだと画像が縦に伸びて列ごとに崩れる実機報告があったため)。 */
-    grid-auto-rows: 84px;
-    gap: 8px;
-    overflow-y: auto;
-    flex: 1;
-    min-height: 0;
-  }
-  .cell {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    overflow: hidden;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.75rem;
-  }
-  .cell.folder {
-    font-size: 0.72rem;
-    padding: 6px;
-    word-break: break-all;
-  }
-  .cell.file img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .cell.file.selected {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
-  .sensitive-cover {
-    padding: 4px;
-    color: var(--text-dim);
-  }
-  .badge {
-    color: var(--text-dim);
-  }
-  .check {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: #fff;
-  }
-  .mini.more {
-    margin-top: 8px;
-    align-self: center;
-    padding: 5px 14px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.8rem;
-    flex: none;
-  }
-  .mini.more:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 12px;
-    flex: none;
-  }
-  .count {
-    font-size: 0.8rem;
-    color: var(--text-dim);
-  }
-  .submit {
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-    border-radius: 8px;
-    padding: 7px 20px;
-    cursor: pointer;
-  }
-  .submit:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-  .err {
-    color: var(--danger);
-    font-size: 0.82rem;
-    margin: 8px 0 0;
-    word-break: break-word;
-    flex: none;
-  }
-</style>
