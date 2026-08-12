@@ -599,14 +599,14 @@
       variant="ghost"
       size="icon-xs"
       class={showEmojiPicker
-        ? "absolute top-1.5 right-1.5 bg-background text-primary opacity-100 hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-40"
-        : "absolute top-1.5 right-1.5 bg-background text-muted-foreground opacity-85 hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-40"}
+        ? "absolute top-1.5 right-1.5 bg-background text-primary opacity-100 hover:bg-accent hover:text-foreground dark:hover:bg-accent disabled:cursor-default disabled:opacity-40"
+        : "absolute top-1.5 right-1.5 bg-background text-muted-foreground opacity-85 hover:bg-accent hover:text-foreground dark:hover:bg-accent hover:opacity-100 disabled:cursor-default disabled:opacity-40"}
       title="絵文字を挿入"
       bind:ref={emojiPickerTrigger}
       onmousedown={(e) => e.preventDefault()}
       onclick={toggleEmojiPicker}
       disabled={busy || !accountId}
-    ><SmilePlus size={16} /></Button>
+    ><SmilePlus size={16} class="size-4" /></Button>
   </div>
 
   {#if popoverOpen && popoverPos}
@@ -718,7 +718,7 @@
         bind:ref={attachTrigger}
         onclick={toggleAttachMenu}
         disabled={busy}
-      ><ImagePlus size={16} /></Button>
+      ><ImagePlus size={16} class="size-4" /></Button>
       <Button type="button" variant="outline" size="xs" class={useCw ? "border-primary text-primary" : ""} onclick={() => (useCw = !useCw)}>CW</Button>
       <Button type="button" variant="outline" size="xs" class={usePoll ? "border-primary text-primary" : ""} onclick={() => (usePoll = !usePoll)}>投票</Button>
       <Button type="button" variant="outline" size="xs" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
