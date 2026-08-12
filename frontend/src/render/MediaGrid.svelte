@@ -67,29 +67,57 @@
 </script>
 
 {#if files.length > 0}
-  <div class="media-grid" class:single={files.length === 1} bind:this={gridEl}>
+  <div
+    class={files.length === 1
+      ? "mt-2 grid grid-cols-1 gap-1 overflow-hidden rounded-[5px]"
+      : "mt-2 grid grid-cols-2 gap-1 overflow-hidden rounded-[5px]"}
+    bind:this={gridEl}
+  >
     {#each files as f (f.id)}
-      <div class="media-cell">
+      <div class="media-cell relative flex aspect-[16/10] items-center justify-center">
         {#if f.isSensitive && !revealed[f.id]}
-          <button class="sensitive-cover" onclick={() => (revealed = { ...revealed, [f.id]: true })}>
+          <button
+            class="sensitive-cover h-full w-full border-0 text-[0.85rem] text-muted-foreground"
+            onclick={() => (revealed = { ...revealed, [f.id]: true })}
+          >
             閲覧注意（クリックで表示）
           </button>
         {:else if isImage(f)}
-          <img src={f.thumbnailUrl ?? f.url} data-original={f.url} alt={fileName(f)} loading="lazy" />
+          <img
+            src={f.thumbnailUrl ?? f.url}
+            data-original={f.url}
+            alt={fileName(f)}
+            loading="lazy"
+            class="h-full w-full cursor-zoom-in object-cover"
+          />
         {:else if isVideo(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={f.url} controls preload="metadata"></video>
-          <button class="video-save" onclick={() => saveToDisk(f.url, fileName(f))} aria-label="保存">
+          <video src={f.url} controls preload="metadata" class="h-full w-full cursor-zoom-in object-cover"
+          ></video>
+          <button
+            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-[0.85rem] leading-none text-white"
+            onclick={() => saveToDisk(f.url, fileName(f))}
+            aria-label="保存"
+          >
             💾
           </button>
         {:else if isAudio(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <audio src={f.url} controls preload="metadata"></audio>
-          <button class="video-save" onclick={() => saveToDisk(f.url, fileName(f))} aria-label="保存">
+          <audio src={f.url} controls preload="metadata" class="w-[calc(100%-16px)]"></audio>
+          <button
+            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-[0.85rem] leading-none text-white"
+            onclick={() => saveToDisk(f.url, fileName(f))}
+            aria-label="保存"
+          >
             💾
           </button>
         {:else}
-          <button class="file-link" onclick={() => openUrl(f.url)}>📄 {fileName(f)}</button>
+          <button
+            class="max-w-full overflow-hidden text-ellipsis whitespace-nowrap border-0 bg-none p-2 font-[inherit] text-[0.85rem] text-primary"
+            onclick={() => openUrl(f.url)}
+          >
+            📄 {fileName(f)}
+          </button>
         {/if}
       </div>
     {/each}
@@ -97,74 +125,15 @@
 {/if}
 
 <style>
-  .media-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px;
-    margin-top: 8px;
-    border-radius:  5px;
-    overflow: hidden;
-  }
-  .media-grid.single {
-    grid-template-columns: 1fr;
-  }
   .media-cell {
-    position: relative;
-    aspect-ratio: 16 / 10;
     /* 幅広カラムでは aspect-ratio のままだと高さも際限なく伸びてしまう
        (Issue #8) ため、高さの上限を設ける。object-fit: cover で見た目は保たれる。
        設定→表示 で調整可能（--media-thumbnail-height, 既定200px）。 */
     max-height: var(--media-thumbnail-height, 200px);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .media-cell img,
-  .media-cell video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    cursor: zoom-in;
-  }
-  .media-cell audio {
-    width: calc(100% - 16px);
   }
   .sensitive-cover {
-    width: 100%;
-    height: 100%;
-    border: none;
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
-    color: var(--text-dim);
-    cursor: pointer;
-    font-size: 0.85rem;
-  }
-  .file-link {
-    font-size: 0.85rem;
-    padding: 8px;
-    color: var(--accent);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-    border: none;
-    background: none;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .video-save {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    border: none;
-    background: rgba(0, 0, 0, 0.5);
-    color: #fff;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    font-size: 0.85rem;
-    line-height: 1;
-    cursor: pointer;
   }
   :global(.viewer-download::before) {
     content: "⬇";
