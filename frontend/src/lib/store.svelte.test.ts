@@ -220,14 +220,14 @@ describe("app.getUserProfile / followUser / unfollowUser", () => {
   });
 
   // ProfileModal/FollowListModal は自前のエラー表示を持つため、これらのメソッドは失敗時に
-  // グローバルバナー(app.error)を出さずBackstageログ(app.logs)にのみ記録する必要がある
-  // (投稿欄の下に重複してエラーが出る、というユーザー報告への修正の回帰テスト)。
-  it("getUserProfileが失敗してもapp.errorは変化せずBackstageに記録される", async () => {
-    app.error = null;
+  // グローバルエラーモーダル(app.errorModal)を出さずBackstageログ(app.logs)にのみ記録する
+  // 必要がある(投稿欄の下に重複してエラーが出る、というユーザー報告への修正の回帰テスト)。
+  it("getUserProfileが失敗してもapp.errorModalは変化せずBackstageに記録される", async () => {
+    app.errorModal = null;
     const logsBefore = app.logs.length;
     invokeMock.mockRejectedValueOnce(new Error("boom"));
     await expect(app.getUserProfile(ACCOUNT_ID, "u1")).rejects.toThrow("boom");
-    expect(app.error).toBeNull();
+    expect(app.errorModal).toBeNull();
     expect(app.logs.length).toBe(logsBefore + 1);
     // #log は新しいログを先頭に追加するため、最新エントリはlogs[0]。
     expect(app.logs[0].level).toBe("error");

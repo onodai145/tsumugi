@@ -117,7 +117,7 @@ class AppStore {
   groups = $state<GroupView[]>([]);
   paneRoot = $state<PaneNode>({ type: "split", id: "boot", direction: "row", children: [] });
   booting = $state(true);
-  error = $state<string | null>(null);
+  errorModal = $state<string | null>(null);
   compose = $state<ComposeState | null>(null);
   // スマホでは投稿欄を常時表示せず、モーダルとして開く(Issue #34/#35)。
   // openCompose() から一元的に開閉するので、返信/引用/新規投稿のどの経路でも自動で開く。
@@ -246,12 +246,12 @@ class AppStore {
           this.#insertTab(opened);
           this.#captureInitial(opened.column.id, opened.notes);
         } catch (e) {
-          this.#fail(e);
+          this.#logFailure(e);
         }
       }
       this.#log("success", "起動完了");
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     } finally {
       this.booting = false;
     }
@@ -370,11 +370,14 @@ class AppStore {
   #logDebug(text: string) {
     if (this.ui.enableFileLogging) void commands.logFrontendEvent("debug", text);
   }
-  /// エラーをバナー表示＋Backstage へ記録する共通処理。
+  /// エラーをモーダル表示＋Backstage へ記録する共通処理。ユーザーの直接操作(Renote・
+  /// リアクション・お気に入り・投票・クリップ追加・タブ名変更・カラム通知設定変更)の
+  /// 失敗にのみ使う。それ以外は #logFailure を使う(Issue #183: 投稿欄下のグローバル
+  /// バナーは廃止し、ユーザー注意が必要な場合のみモーダルで通知する)。
   /// ForbiddenError なら「再認証」アクションをログ行に付与する。
-  #fail(e: unknown) {
+  #failModal(e: unknown) {
     const msg = String(e);
-    this.error = msg;
+    this.errorModal = msg;
     this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
   }
   /// Backstage へは記録するが、バナー表示はしない。呼び出し元が自前のエラーUIを持つ場合に使う
@@ -387,8 +390,9 @@ class AppStore {
     this.logs = [];
   }
   /// store の非同期フロー外(単発の子コンポーネント操作等)から失敗を報告する共通口。
+  /// 背景処理からの呼び出しのためモーダルは出さず、Backstageログにのみ記録する。
   reportError(e: unknown) {
-    this.#fail(e);
+    this.#logFailure(e);
   }
 
   #allTabs(): TabView[] {
@@ -417,7 +421,7 @@ class AppStore {
     try {
       await unwrap(commands.renameColumn(tabId, value));
     } catch (e) {
-      this.#fail(e);
+      this.#failModal(e);
     }
   }
 
@@ -437,7 +441,7 @@ class AppStore {
     try {
       await unwrap(commands.setColumnNotify(tabId, notifyDesktop, notifySound, notifySoundChoice));
     } catch (e) {
-      this.#fail(e);
+      this.#failModal(e);
     }
   }
 
@@ -620,7 +624,7 @@ class AppStore {
       // 移動元グループが空になっていればペイン分割ツリーも畳まれているため取り直す(Issue #31)。
       this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     }
   }
 
@@ -646,7 +650,7 @@ class AppStore {
     try {
       await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     }
   }
 
@@ -658,7 +662,7 @@ class AppStore {
     try {
       await unwrap(commands.setGroupWidth(groupId, width));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     }
   }
 
@@ -668,7 +672,7 @@ class AppStore {
     try {
       await unwrap(commands.setGroupAuto(groupId, auto));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     }
   }
 
@@ -682,7 +686,7 @@ class AppStore {
       this.paneRoot = paneRoot;
       return newGroup.id;
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       return null;
     }
   }
@@ -699,7 +703,7 @@ class AppStore {
       this.groups = this.groups.filter((x) => x.id !== groupId);
       this.paneRoot = paneRoot;
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     }
   }
 
@@ -763,7 +767,7 @@ class AppStore {
       await unwrap(commands.setPaneAuto(nodeId, auto));
       this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     }
   }
 
@@ -772,7 +776,7 @@ class AppStore {
       await unwrap(commands.resizePane(nodeId, size));
       this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     }
   }
 
@@ -1017,7 +1021,7 @@ class AppStore {
       this.#log("success", `カラムを追加: ${name || kindLabel(kind)}`);
       return tab;
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1064,7 +1068,7 @@ class AppStore {
     try {
       return await unwrapAcc(accountId, commands.listUserLists(accountId));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1073,7 +1077,7 @@ class AppStore {
     try {
       return await unwrapAcc(accountId, commands.listAntennas(accountId));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1082,7 +1086,7 @@ class AppStore {
     try {
       return await unwrapAcc(accountId, commands.listChannels(accountId));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1092,7 +1096,7 @@ class AppStore {
     try {
       return await unwrapAcc(accountId, commands.resolveUserAcct(accountId, acct));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1457,7 +1461,7 @@ class AppStore {
         this.#captureInitial(tab.id, fresh);
       }
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
     } finally {
       tab.loadingMore = false;
     }
@@ -1498,7 +1502,7 @@ class AppStore {
       await unwrapAcc(accountId, commands.postNote(accountId, draft));
       this.#log("success", "投稿しました");
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1508,7 +1512,7 @@ class AppStore {
       await unwrapAcc(accountId, commands.renote(accountId, noteId, visibility));
       this.#log("success", "Renote しました");
     } catch (e) {
-      this.#fail(e);
+      this.#failModal(e);
     }
   }
 
@@ -1518,7 +1522,7 @@ class AppStore {
       for (const t of this.#allTabs()) t.notes = t.notes.filter((n) => n.id !== noteId);
       this.#log("info", "ノートを削除しました");
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1577,7 +1581,7 @@ class AppStore {
       }
     } catch (e) {
       backups.forEach(restoreReaction);
-      this.#fail(e);
+      this.#failModal(e);
     }
   }
 
@@ -1605,7 +1609,7 @@ class AppStore {
         return;
       }
       backups.forEach(({ n, was }) => (n.isFavoritedByMe = was));
-      this.#fail(e);
+      this.#failModal(e);
     }
   }
 
@@ -1613,7 +1617,7 @@ class AppStore {
     try {
       return await unwrapAcc(accountId, commands.listClips(accountId));
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1624,7 +1628,7 @@ class AppStore {
       this.#log("success", `クリップを作成しました: ${clip.name}`);
       return clip;
     } catch (e) {
-      this.#fail(e);
+      this.#logFailure(e);
       throw e;
     }
   }
@@ -1634,7 +1638,7 @@ class AppStore {
       await unwrapAcc(accountId, commands.addNoteToClip(accountId, clipId, noteId));
       this.#log("success", "クリップに追加しました");
     } catch (e) {
-      this.#fail(e);
+      this.#failModal(e);
     }
   }
 
@@ -1649,7 +1653,7 @@ class AppStore {
       this.#log("success", "投票しました");
     } catch (e) {
       backups.forEach(restorePoll);
-      this.#fail(e);
+      this.#failModal(e);
     }
   }
 
