@@ -748,7 +748,7 @@
       </label>
     </div>
     <div class="flex flex-none flex-wrap items-center gap-1.5">
-      <Button type="button" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</Button>
+      <Button type="button" size="sm" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</Button>
     </div>
   </div>
   </div>
