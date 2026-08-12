@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
   import { X } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button";
 
   // カラム(視覚カラム)自体の設定。タブ設定とは別に、グリップのダブルクリックで開く。
   let { groupId, onclose }: { groupId: string; onclose: () => void } = $props();
@@ -48,30 +49,54 @@
   }
 </script>
 
-<div class="overlay" onclick={onclose} onkeydown={(e) => e.key === "Escape" && onclose()} role="presentation">
+<div
+  class="fixed inset-0 z-50 grid items-start justify-items-center bg-black/45 pt-[8vh]"
+  onclick={onclose}
+  onkeydown={(e) => e.key === "Escape" && onclose()}
+  role="presentation"
+>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
-    <header class="head">
+  <div
+    class="w-[min(360px,92vw)] rounded-[14px] border border-border bg-background p-4"
+    onclick={(e) => e.stopPropagation()}
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+  >
+    <header class="mb-3 flex items-center justify-between font-semibold">
       <span>カラム設定</span>
-      <button class="x" onclick={onclose}><X size={16} /></button>
+      <Button type="button" variant="ghost" size="icon-xs" onclick={onclose}><X size={16} /></Button>
     </header>
 
     {#if group}
       {#if rowSlot?.isLeaf}
-        <div class="field">
-          <span>幅</span>
-          <label class="check-row">
-            <input type="radio" name="width-mode" checked={!group.auto} onchange={() => setAuto(false)} /> 固定（ドラッグで調整）
+        <div class="flex flex-col gap-1 text-[0.85rem]">
+          <span class="text-muted-foreground">幅</span>
+          <label class="flex items-center gap-1.5 text-[0.85rem]">
+            <input
+              type="radio"
+              name="width-mode"
+              class="accent-primary"
+              checked={!group.auto}
+              onchange={() => setAuto(false)}
+            /> 固定（ドラッグで調整）
           </label>
-          <label class="check-row">
-            <input type="radio" name="width-mode" checked={group.auto} onchange={() => setAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
+          <label class="flex items-center gap-1.5 text-[0.85rem]">
+            <input
+              type="radio"
+              name="width-mode"
+              class="accent-primary"
+              checked={group.auto}
+              onchange={() => setAuto(true)}
+            /> 自動調整（ウィンドウ幅に合わせて均等割付）
           </label>
         </div>
 
         {#if !group.auto}
-          <label class="field num-field">
-            <span>幅（px、220〜720）</span>
+          <label class="mt-2.5 flex flex-col gap-1 text-[0.85rem]">
+            <span class="text-muted-foreground">幅（px、220〜720）</span>
             <input
+              class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
               type="number"
               min="220"
               max="720"
@@ -81,20 +106,33 @@
           </label>
         {/if}
       {:else if rowSlot}
-        <div class="field">
-          <span>分割ブロック全体の幅</span>
-          <label class="check-row">
-            <input type="radio" name="block-width-mode" checked={!rowSlot.auto} onchange={() => setBlockAuto(false)} /> 固定
+        <div class="flex flex-col gap-1 text-[0.85rem]">
+          <span class="text-muted-foreground">分割ブロック全体の幅</span>
+          <label class="flex items-center gap-1.5 text-[0.85rem]">
+            <input
+              type="radio"
+              name="block-width-mode"
+              class="accent-primary"
+              checked={!rowSlot.auto}
+              onchange={() => setBlockAuto(false)}
+            /> 固定
           </label>
-          <label class="check-row">
-            <input type="radio" name="block-width-mode" checked={rowSlot.auto} onchange={() => setBlockAuto(true)} /> 自動調整（ウィンドウ幅に合わせて均等割付）
+          <label class="flex items-center gap-1.5 text-[0.85rem]">
+            <input
+              type="radio"
+              name="block-width-mode"
+              class="accent-primary"
+              checked={rowSlot.auto}
+              onchange={() => setBlockAuto(true)}
+            /> 自動調整（ウィンドウ幅に合わせて均等割付）
           </label>
         </div>
 
         {#if !rowSlot.auto}
-          <label class="field num-field">
-            <span>幅（px、220〜720）</span>
+          <label class="mt-2.5 flex flex-col gap-1 text-[0.85rem]">
+            <span class="text-muted-foreground">幅（px、220〜720）</span>
             <input
+              class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
               type="number"
               min="220"
               max="720"
@@ -106,20 +144,33 @@
       {/if}
 
       {#if paneCtx}
-        <div class="field">
-          <span>高さ</span>
-          <label class="check-row">
-            <input type="radio" name="height-mode" checked={!paneCtx.auto} onchange={() => setHeightAuto(false)} /> 固定
+        <div class="flex flex-col gap-1 text-[0.85rem]">
+          <span class="text-muted-foreground">高さ</span>
+          <label class="flex items-center gap-1.5 text-[0.85rem]">
+            <input
+              type="radio"
+              name="height-mode"
+              class="accent-primary"
+              checked={!paneCtx.auto}
+              onchange={() => setHeightAuto(false)}
+            /> 固定
           </label>
-          <label class="check-row">
-            <input type="radio" name="height-mode" checked={paneCtx.auto} onchange={() => setHeightAuto(true)} /> 自動調整（残りを均等割り）
+          <label class="flex items-center gap-1.5 text-[0.85rem]">
+            <input
+              type="radio"
+              name="height-mode"
+              class="accent-primary"
+              checked={paneCtx.auto}
+              onchange={() => setHeightAuto(true)}
+            /> 自動調整（残りを均等割り）
           </label>
         </div>
 
         {#if !paneCtx.auto}
-          <label class="field num-field">
-            <span>高さ（%、5〜95）</span>
+          <label class="mt-2.5 flex flex-col gap-1 text-[0.85rem]">
+            <span class="text-muted-foreground">高さ（%、5〜95）</span>
             <input
+              class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
               type="number"
               min="5"
               max="95"
@@ -132,63 +183,3 @@
     {/if}
   </div>
 </div>
-
-<style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    display: grid;
-    place-items: start center;
-    padding-top: 8vh;
-    z-index: 50;
-  }
-  .modal {
-    width: min(360px, 92vw);
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 16px;
-  }
-  .head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-weight: 600;
-    margin-bottom: 12px;
-  }
-  .x {
-    display: inline-flex;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 0.85rem;
-  }
-  .field > span:first-child {
-    color: var(--text-dim);
-  }
-  .check-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.85rem;
-  }
-  .num-field {
-    margin-top: 10px;
-  }
-  .num-field input {
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: inherit;
-    width: 100px;
-  }
-</style>
