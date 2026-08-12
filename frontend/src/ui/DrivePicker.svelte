@@ -161,7 +161,7 @@
           <button
             type="button"
             class={selected.has(f.id)
-              ? "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-[0.75rem] text-foreground outline-2 outline-offset-[-2px] outline-primary"
+              ? "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-[0.75rem] text-foreground outline outline-2 outline-offset-[-2px] outline-primary"
               : "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-[0.75rem] text-foreground"}
             onclick={() => onFileClick(f)}
           >
