@@ -73,15 +73,15 @@
     <Dropdown bind:value={soundMode} options={soundModeOptions} />
     {#if soundMode === "custom"}
       <div class="mb-2 flex items-center gap-2 text-[0.88rem]">
-        <Button type="button" variant="outline" size="xs" disabled={pickingSound} onclick={pickSound}>
+        <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
           {pickingSound ? "読み込み中…" : soundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
         </Button>
         {#if soundChoice.startsWith("data:")}
-          <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundChoice)}>試聴</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundChoice)}>試聴</Button>
         {/if}
       </div>
     {:else}
-      <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundMode)}>試聴</Button>
+      <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
     {/if}
   </div>
 {/if}

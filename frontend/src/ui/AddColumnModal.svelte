@@ -505,15 +505,15 @@
         <Dropdown bind:value={soundMode} options={soundModeOptions} />
         {#if soundMode === "custom"}
           <div class="flex items-center gap-2.5">
-            <Button type="button" variant="outline" size="xs" disabled={pickingSound} onclick={pickSound}>
+            <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
               {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
             </Button>
             {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
+              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
             {/if}
           </div>
         {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundMode)}>試聴</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
         {/if}
       </div>
     {/if}
@@ -556,15 +556,15 @@
         <Dropdown bind:value={soundMode} options={soundModeOptions} />
         {#if soundMode === "custom"}
           <div class="flex items-center gap-2.5">
-            <Button type="button" variant="outline" size="xs" disabled={pickingSound} onclick={pickSound}>
+            <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
               {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
             </Button>
             {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
+              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
             {/if}
           </div>
         {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="xs" onclick={() => playNotifySound(soundMode)}>試聴</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
         {/if}
       </div>
     {/if}
