@@ -25,9 +25,13 @@ Issue #174(既存コンポーネントのTailwindクラスへの移行)の一環
 
 `Button`プリミティブに変換する(`variant="outline" size="sm"`)。ツールバー標準サイズの既存規約(VisibilitySelect/Dropdown等)に合わせる。アイコン(`SettingsIcon`)は明示`size`指定をそのまま残す(Buttonのbaseクラスにより16px相当に統一されるが、視覚差は軽微なため許容)。
 
+**意図的な見た目の変化:** 元の`.bar-btn`は`padding: 5px 10px`・固定高さなしで実測26〜28px相当だったが、`size="sm"`は`h-8`(32px)固定になる。ヘッダーが`items-start`のため、`ComposeBar`のツールバー(前回のPRで`sm`/32pxに統一済み)との高さの整合性はむしろ向上する想定。「見た目は移行前と完全に同一」ではない点をPR本文に明記する。
+
 ### `.global-err`
 
 `color-mix(in srgb, var(--danger) 15%, var(--surface-1))`は、Buttonのdestructiveバリアント(`bg-destructive/10 hover:bg-destructive/20`)と同じ考え方で`bg-destructive/15 text-destructive`に置き換える。この置き換えにより本ファイルの`<style>`ブロックは不要になる見込み。
+
+**意図的な見た目の変化:** 元は不透明な`--surface-1`上に15%の`--danger`を混ぜた不透明色。`bg-destructive/15`は背景の透過15%アルファであり、かつ`--destructive`と`--danger`は理論上別トークン(近似だが同一ではない)。視覚的にはほぼ同じだが厳密には同一ではない点をPR本文に明記する。
 
 ### `.compose-fab`
 
