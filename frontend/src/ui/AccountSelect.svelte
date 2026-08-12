@@ -72,13 +72,13 @@
         src={selected.avatarUrl}
         alt=""
         class={large
-          ? "size-10 flex-none rounded-[9px] object-cover"
+          ? "size-9 flex-none rounded-lg object-cover"
           : "size-[22px] flex-none rounded-[5px] object-cover"}
       />
     {:else}
       <span
         class={large
-          ? "grid size-10 flex-none place-items-center rounded-[9px] bg-accent text-[1.2rem] font-bold text-muted-foreground"
+          ? "grid size-9 flex-none place-items-center rounded-lg bg-accent text-[1rem] font-bold text-muted-foreground"
           : "grid size-[22px] flex-none place-items-center rounded-[5px] bg-accent text-[0.7rem] font-bold text-muted-foreground"}
         >{(selected.displayName || selected.username).charAt(0)}</span
       >

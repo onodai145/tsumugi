@@ -21,10 +21,10 @@ Issue #174(既存コンポーネントのTailwindクラスへの移行)の一環
 既存の`<button class="trigger" class:full={showLabel} class:large>`を`Button`プリミティブ(`frontend/src/lib/components/ui/button/button.svelte`)に変換する。
 
 - `variant="outline"`
-- `size={large ? "lg" : "sm"}`(largeはButtonの最大トークン`lg`=40pxに寄せる。元の44pxアバターは40px相当`size-10`に縮小する)
+- `size={large ? "lg" : "sm"}`(largeはButtonの最大トークン`lg`=40pxに寄せる。ただしButtonは`border`(1px)を持つためコンテンツ領域は38px相当になる。元の44pxアバターはコンテンツ領域に収まる36px相当`size-9`に縮小する)
 - `showLabel`時は`class="w-full justify-start"`を追加(Buttonの`class`propは`cn()`でマージされるため、`variant`のデフォルトクラスと衝突せず安全に上書きされる)
 - `bind:ref={trigger}`(`trigger`は既に`$state<HTMLElement | null>(null)`で正しく初期化済み — ComposeBarで踏んだ`bind:ref={undefined}`バグの対象外)
-- disabled時のhoverボーダー打ち消しは`enabled:hover:border-primary`(Tailwindの`enabled:`バリアント)で再現する
+- disabled時のhover打ち消しは個別に再現しない。Buttonの`disabled:pointer-events-none`によりdisabled中はそもそもhoverイベントが発火しないため(VisibilitySelect/Dropdownの移行時と同じ扱い)
 
 キャレット(`▾`)は`{#if !large}`のまま維持(largeモードでは非表示)。`showLabel`時のみ`ml-auto`を追加してキャレットを右端に押し出す。
 
