@@ -394,7 +394,7 @@
       {#if editErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{editErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
         <Button type="button" variant="outline" size="xs" onclick={cancelEditTheme}><X size={13} /> キャンセル</Button>
-        <Button type="button" onclick={saveCustomTheme}>このテーマを保存</Button>
+        <Button type="button" size="sm" onclick={saveCustomTheme}>このテーマを保存</Button>
       </div>
     </div>
   {/if}
@@ -483,7 +483,7 @@
       {#if syntaxEditErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{syntaxEditErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
         <Button type="button" variant="outline" size="xs" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</Button>
-        <Button type="button" onclick={saveCustomSyntaxTheme}>このテーマを保存</Button>
+        <Button type="button" size="sm" onclick={saveCustomSyntaxTheme}>このテーマを保存</Button>
       </div>
     </div>
   {/if}
