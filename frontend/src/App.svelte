@@ -11,6 +11,7 @@
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
   import ProfileModal from "./ui/ProfileModal.svelte";
+  import Modal from "./ui/Modal.svelte";
   import { currentProfileTarget, currentProfileAccountId, closeProfile } from "./lib/profileModal.svelte";
   import { buildKeymap, eventToChord } from "./lib/keymap";
   import { Settings as SettingsIcon, Pencil } from "@lucide/svelte";
@@ -93,7 +94,7 @@
       return;
     }
     // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
-    if (showAdd || showAddColumn || showSettings || app.showComposeModal) return;
+    if (showAdd || showAddColumn || showSettings || app.showComposeModal || app.errorModal) return;
     const action = keymap.get(eventToChord(e));
     if (!action) return;
     e.preventDefault();
@@ -124,17 +125,6 @@
       </Button>
     {/if}
   </header>
-
-  {#if app.error}
-    <div
-      class="flex-none overflow-hidden text-ellipsis whitespace-nowrap bg-destructive/15 px-2.5 py-1 text-[0.78rem] text-destructive"
-      title={app.error}
-      onclick={() => (app.error = null)}
-      role="presentation"
-    >
-      {app.error}
-    </div>
-  {/if}
 
   <main class="min-h-0 min-w-0 flex-1">
     {#if app.booting}
@@ -231,5 +221,15 @@
       accountId={currentProfileAccountId() ?? app.defaultAccountId()}
       onclose={closeProfile}
     />
+  {/if}
+  {#if app.errorModal}
+    <Modal title="エラー" onclose={() => (app.errorModal = null)}>
+      {#snippet children()}
+        <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-[0.9rem] text-foreground">{app.errorModal}</p>
+        <div class="flex justify-end">
+          <Button onclick={() => (app.errorModal = null)}>わかった</Button>
+        </div>
+      {/snippet}
+    </Modal>
   {/if}
 </div>

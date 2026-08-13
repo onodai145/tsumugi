@@ -220,14 +220,14 @@ describe("app.getUserProfile / followUser / unfollowUser", () => {
   });
 
   // ProfileModal/FollowListModal は自前のエラー表示を持つため、これらのメソッドは失敗時に
-  // グローバルバナー(app.error)を出さずBackstageログ(app.logs)にのみ記録する必要がある
-  // (投稿欄の下に重複してエラーが出る、というユーザー報告への修正の回帰テスト)。
-  it("getUserProfileが失敗してもapp.errorは変化せずBackstageに記録される", async () => {
-    app.error = null;
+  // グローバルエラーモーダル(app.errorModal)を出さずBackstageログ(app.logs)にのみ記録する
+  // 必要がある(投稿欄の下に重複してエラーが出る、というユーザー報告への修正の回帰テスト)。
+  it("getUserProfileが失敗してもapp.errorModalは変化せずBackstageに記録される", async () => {
+    app.errorModal = null;
     const logsBefore = app.logs.length;
     invokeMock.mockRejectedValueOnce(new Error("boom"));
     await expect(app.getUserProfile(ACCOUNT_ID, "u1")).rejects.toThrow("boom");
-    expect(app.error).toBeNull();
+    expect(app.errorModal).toBeNull();
     expect(app.logs.length).toBe(logsBefore + 1);
     // #log は新しいログを先頭に追加するため、最新エントリはlogs[0]。
     expect(app.logs[0].level).toBe("error");
@@ -336,5 +336,90 @@ describe("#applyTheme (Issue #170: data-theme属性から.darkクラスへ移行
     expect(listenerCount()).toBe(1);
     await app.setUiPrefs({ ...app.ui, theme: "light" });
     expect(listenerCount()).toBe(0);
+  });
+});
+
+function makeNormalTab(overrides: Partial<TabView> = {}): TabView {
+  return {
+    id: "tab1",
+    accountId: ACCOUNT_ID,
+    kind: { type: "home" },
+    title: "ホーム",
+    customTitle: null,
+    filter: { kind: "keywords", value: [] },
+    notifyDesktop: false,
+    notifySound: false,
+    notifySoundChoice: "",
+    notes: [],
+    notifications: [],
+    state: "connected",
+    loadingMore: false,
+    selectedNoteId: null,
+    ...overrides,
+  };
+}
+
+describe("ユーザー直接操作の失敗はerrorModalに記録される(Issue #183)", () => {
+  beforeEach(() => {
+    app.errorModal = null;
+  });
+
+  it("renoteが失敗するとerrorModalがセットされる", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("renote failed"));
+    await app.renote(ACCOUNT_ID, "note1");
+    expect(app.errorModal).toContain("renote failed");
+  });
+
+  it("toggleReactionが失敗するとerrorModalがセットされる", async () => {
+    const note = makeNote({ id: "note-react", myReaction: null });
+    app.groups = [makeGroup([makeNormalTab({ notes: [note] })])];
+    invokeMock.mockRejectedValueOnce(new Error("react failed"));
+    await app.toggleReaction(ACCOUNT_ID, "note-react", "👍");
+    expect(app.errorModal).toContain("react failed");
+  });
+
+  it("toggleFavoriteが失敗するとerrorModalがセットされる", async () => {
+    const note = makeNote({ id: "note-fav", isFavoritedByMe: false });
+    app.groups = [makeGroup([makeNormalTab({ notes: [note] })])];
+    invokeMock.mockRejectedValueOnce(new Error("favorite failed"));
+    await app.toggleFavorite(ACCOUNT_ID, "note-fav");
+    expect(app.errorModal).toContain("favorite failed");
+  });
+
+  it("votePollが失敗するとerrorModalがセットされる", async () => {
+    const note = makeNote({
+      id: "note-poll",
+      poll: { choices: [{ text: "a", votes: 0, isVoted: false }], multiple: false, expiresAt: null },
+    });
+    app.groups = [makeGroup([makeNormalTab({ notes: [note] })])];
+    invokeMock.mockRejectedValueOnce(new Error("vote failed"));
+    await app.votePoll(ACCOUNT_ID, "note-poll", 0);
+    expect(app.errorModal).toContain("vote failed");
+  });
+
+  it("addNoteToClipが失敗するとerrorModalがセットされる", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("clip failed"));
+    await app.addNoteToClip(ACCOUNT_ID, "clip1", "note1");
+    expect(app.errorModal).toContain("clip failed");
+  });
+
+  it("renameTabが失敗するとerrorModalがセットされる", async () => {
+    app.groups = [makeGroup([makeNormalTab()])];
+    invokeMock.mockRejectedValueOnce(new Error("rename failed"));
+    await app.renameTab("tab1", "新しい名前");
+    expect(app.errorModal).toContain("rename failed");
+  });
+
+  it("setColumnNotifyが失敗するとerrorModalがセットされる", async () => {
+    app.groups = [makeGroup([makeNormalTab()])];
+    invokeMock.mockRejectedValueOnce(new Error("notify failed"));
+    await app.setColumnNotify("tab1", true, true, "default");
+    expect(app.errorModal).toContain("notify failed");
+  });
+
+  it("persistGroupWidthが失敗してもerrorModalは変化しない(レイアウト操作は対象外)", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("width failed"));
+    await app.persistGroupWidth("g1", 300);
+    expect(app.errorModal).toBeNull();
   });
 });
