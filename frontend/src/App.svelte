@@ -94,7 +94,7 @@
       return;
     }
     // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
-    if (showAdd || showAddColumn || showSettings || app.showComposeModal) return;
+    if (showAdd || showAddColumn || showSettings || app.showComposeModal || app.errorModal) return;
     const action = keymap.get(eventToChord(e));
     if (!action) return;
     e.preventDefault();
