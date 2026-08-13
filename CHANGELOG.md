@@ -2,6 +2,243 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-08-13
+
+### 🚀 Features
+
+- 通知カラムの再接続ギャップ埋め用ウォーターマークを追加
+- 通知受信のたびに再接続ギャップ埋め用ウォーターマークを更新
+- 通知の再接続ギャップ埋めイベントColumnNotificationGapFillを追加
+- ノート系カラムのStream再接続時ギャップ埋めを追加
+- 通知カラムのStream再接続時ギャップ埋めを追加
+- 通知カラムの再接続ギャップ埋め結果をフロントへ反映
+- UiPrefsに絵文字使用履歴フィールドを追加
+- 絵文字使用履歴リスト更新の純粋関数を追加
+- Storeに絵文字使用履歴の記録メソッドを追加
+- ノートへのリアクションで絵文字使用履歴を記録
+- 絵文字ピッカーに最近使った絵文字セクションを追加
+- NoteCardにshowActions propを追加してquotedからアクション表示を分離
+- 通知カードのノートに返信/Renote/リアクションボタンを表示
+- 時間帯別プレースホルダーのロジックを追加
+- 投稿欄プレースホルダーを時間帯に応じて表示
+- リアクションキーを投稿欄挿入テキストに変換するヘルパーを追加
+- 投稿欄に絵文字ピッカーを追加
+- TQL補完エンジンを追加
+- Tql_completeコマンドを追加しTSバインディングを再生成
+- TQL補完のフロント側ロジックを追加
+- App.tqlCompleteラッパーを追加
+- TqlCompletionFieldコンポーネントを追加
+- AddColumnModalのTQL入力欄に補完を組み込む
+- NoteDraftにchannel_idを追加してチャンネル投稿を可能にする
+- コンポーズバーにチャンネル選択UIを追加
+- Userドメイン型にbio/banner_urlを追加
+- RawUserのdescription/bannerUrlをUser.bio/banner_urlへ正規化
+- Users/show, following/create, following/deleteのAPIラッパーを追加
+- Users/followers, users/followingのAPIラッパーを追加
+- Get_user_profileコマンドを追加
+- Follow_user/unfollow_user/get_user_notesコマンドを追加
+- Get_user_followers/get_user_followingコマンドを追加
+- ユーザープロフィール系コマンドをspecta_builderに登録
+- プロフィールモーダルのグローバル開閉状態を追加
+- AppStoreにプロフィール取得・フォロー操作メソッドを追加
+- ProfileModalコンポーネントを追加
+- FollowListModalコンポーネントを追加
+- ProfileModalにFollowListModalを配線
+- ノートのアバター/名前/mentionクリックでプロフィールモーダルを開けるようにする
+- フォロー一覧・ノート一覧を既存カラムと同じスクロール自動取得に変更
+- 通知欄のアバター/表示名クリックでもプロフィールモーダルを開けるようにする
+- Shadcn-svelteのButtonプリミティブを追加
+- AccountSelect.svelteをTailwindクラスに移行
+- App.svelteをTailwindクラスに移行
+- MediaGrid.svelteをTailwindクラスに移行
+- DrivePicker.svelteをTailwindクラスに移行
+- AddAccount.svelteをTailwindクラスに移行
+- ColumnSettings.svelteをTailwindクラスに移行
+- 投稿欄下のエラーバナーを廃止しエラーモーダルに置き換え
+
+### 🐛 Bug Fixes
+
+- アバター・カスタム絵文字をhome instanceのメディアプロキシ経由で取得する
+- 引用Renoteの本文にemojiAccountIdを伝播する
+- 自インスタンスのカスタム絵文字リアクションキーの表記を正規化する
+- ノートキャッシュの旧形式emojisペイロードをスキップして読み込み継続する
+- 再接続ギャップ埋めの多重実行を防止
+- 通知の再接続ギャップ埋めと実配信の競合による通知欠落を修正
+- 通知の初期REST取得結果でギャップ埋めウォーターマークを初期化
+- リアクション解除時に絵文字使用履歴を記録しないよう修正
+- 通知カードのRenote/返信バナーが重複表示されるのを抑制
+- 引用RN内でネストされた引用元ノートのリアクションを非表示に
+- 通知専用ノートへのリアクション/お気に入り/投票がサイレントに失敗する不具合を修正
+- 絵文字挿入位置とEscapeキーの挙動を修正
+- 絵文字ボタンをテキストエリア右上に配置しEscape・収縮の不具合を修正
+- 絵文字ボタン押下時にテキストエリアのフォーカスを維持
+- 絵文字ピッカーがウィンドウ外にはみ出さないよう位置をクランプ
+- TQL補完ポップアップで未選択時のEnterは確定しないよう修正
+- 最終レビュー指摘を修正(list/antenna/channel補完・ドット区切りフィールド補完・不要CSS)
+- TQL補完欄が未フォーカスでもポップアップが出てしまう不具合を修正
+- TQL補完欄はフォーカス直後ではなく入力を始めてから候補を出すよう修正
+- TQL補完欄を全消しした際に補完が居座らないよう空欄判定に一本化
+- チャンネル選択の未フォロー表示・未選択投稿・アカウント切替時の不整合を修正
+- チャンネル選択UIの表示調整(公開範囲のグレーアウト・連合なし固定表示・チャンネルドロップダウンの位置とサイズ)
+- プロフィール実装計画をレビュー指摘に基づき修正
+- 実装計画のinvokeMockモックが二重ラップになっていた誤りを修正
+- Task13にProfileModalへのFollowListModal配線手順を追加
+- FollowListModalがprops変化時に再ロードしない不具合を修正
+- フォロー一覧のページングカーソル・ノート追加取得のエラー処理・プロフィール絵文字表示を修正
+- フォロー一覧の表示名の文字色・カスタム絵文字表示・アバター角丸を修正
+- リモートユーザーの負のカウント値でのデシリアライズ失敗と、プロフィール系操作のエラー二重表示を修正
+- プロフィール系操作のエラーをバナー表示なしでBackstageに記録するよう変更
+- エラー中の無限スクロールで再試行が連続発火するのを防ぐ
+- @mentionクリックでのユーザー解決失敗時にバナーとモーダル内エラーが二重表示されるのを修正
+- Shadcn-svelte CLIが上書きした既存テーマ変数とpremature CSSを復元
+- 最終レビュー指摘を反映(Preflight除外/auto時dark:バリアント対応/tsconfig警告解消)
+- 最終レビュー指摘を反映(タブ閉じるボタン/接続状態ドットのクラス衝突を解消)
+- Preflight除外環境下でbuttonの素の見た目を最小限リセット
+- FollowListModal.svelteのスペーシングを元CSSに合わせて修正
+- スクロールテストのセレクタをスタイル用クラスからdata-testidに分離
+- Preflight除外環境でのUAデフォルトmargin復活を修正(FollowListModal/ProfileModal)
+- MFMアニメーションを設定でOFFにできるようにする(Issue #175)
+- ConfirmDialogのメッセージ上マージンを明示してUAデフォルト復活を防ぐ
+- TQL補完ポップアップがModalの下に隠れる問題を修正
+- ノートフッターのボタン高さをアイコン基準に揃える
+- ノートフッターの各ボタンに固定高さを与えて確実に揃える
+- リアクション/その他ボタンのラッパーdivも固定高さのflexにする
+- TQL補完確定後に再検証が走らない不具合を修正
+- Modal.svelteのwidth未生成バグとSettings.svelteのレイアウト微調整を修正
+- カスタムテーマ編集フォームの保存ボタンをsmサイズにしてキャンセルとの高さ差を縮める
+- キャンセルボタンもsmサイズにして保存ボタンとの高さ差を解消
+- 試聴/音声選択/新規作成/画像選択ボタンもsmサイズに統一
+- 絵文字ボタンのサイズ/hover挙動とComposeBarアイコンサイズの微調整
+- Bind:refの初期値をundefinedからnullに修正しComposeBarのマウント失敗を解消
+- 投稿ボタンをsmサイズにしてツールバーの高さ差を縮める
+- ツールバー系ボタンをsm/icon-smサイズに統一し窮屈さと投稿ボタンとの差を解消
+- AccountSelectのlargeアバターサイズをButtonのコンテンツ領域に収める
+- DrivePickerの選択枠にoutlineユーティリティを明示追加
+- AddAccountのボタン高さとホバー色をadvisor指摘に沿って修正
+- エラーモーダル表示中はグローバルキーバインドを無効化
+
+### 💼 Other
+
+- Tailwind CSS v4をViteに統合
+- Shadcn-svelteを初期化
+
+### 🚜 Refactor
+
+- Acct/displayNameヘルパーをlib/userDisplay.tsへ共通化
+- テーマ切替をdata-theme属性から.dark/.lightクラスに変更
+- エラー通知をバナーからモーダル/ログ振り分けに変更
+
+### 📚 Documentation
+
+- CLAUDE.mdにリリース手順を追記
+- Android buildSrc設定失敗時のJDKバージョン既知問題を追記
+- Stream再接続時ギャップ埋め設計spec追加(Issue #147)
+- Stream再接続時ギャップ埋め実装計画追加(Issue #147)
+- 絵文字ピッカー使用履歴(Issue #108)の設計を追加
+- 絵文字ピッカー使用履歴(Issue #108)の実装計画を追加
+- Issue #50 通知ノートアクション有効化の設計spec追加
+- Issue #50 通知ノートアクション有効化の実装計画追加
+- Issue #16 ユーザーガイド追加の設計書追加
+- Issue #16 実装計画追加
+- 設計書をdocs/design/へ再編成
+- Issue #16 ユーザーガイドを追加
+- 最終レビュー指摘の修正(リンク切れ・古いパス参照)
+- 投稿バーの位置に関する記述を修正(画面上部)
+- READMEにバッジ・特徴・OS別ダウンロードリンクを追加
+- READMEの構成を利用者向け/開発者向けに整理、リリース手順をdocs/design/へ分離
+- ユーザーガイドにダウンロードセクションへの導線を追加
+- ダウンロードセクションのテーブルをOS横並びに整理
+- 冒頭の紹介文をシンプルにし、Krileへの言及を特徴セクションへ移動
+- READMEにネタバッジを追加
+- 投稿欄プレースホルダー時間帯変更の設計書を追加
+- プレースホルダー文言を各区分7パターンに拡充
+- 投稿欄プレースホルダー時間帯変更の実装計画を追加
+- 投稿欄絵文字ピッカー追加の設計を追加
+- 投稿欄絵文字ピッカー追加の実装計画を追加
+- TQL入力補完の実装計画を追加
+- TQL入力補完の実装計画(タスク分解)を追加
+- Issue #95 チャンネル投稿機能の設計を追加
+- Issue #95 チャンネル投稿機能の実装計画を追加
+- ユーザープロフィールページの設計spec追加 (Issue #91)
+- ユーザープロフィールページの実装計画を追加
+- Tailwind + shadcn-svelte導入の設計を追加(Issue #170)
+- テーマ変数移行方針を修正、Rust構造体は不変に(Issue #170)
+- Tailwind + shadcn-svelte基盤導入の実装計画を追加(Issue #170)
+- レイアウト系コンポーネントのTailwind移行設計を追加(Issue #174)
+- レイアウト系コンポーネントのTailwind移行実装計画を追加(Issue #174)
+- モーダル基盤コンポーネントのTailwind移行設計を追加(Issue #174)
+- Dialogプリミティブ化を見送る理由を明記(Issue #174)
+- モーダル基盤コンポーネントのTailwind移行実装計画を追加(Issue #174)
+- Destructiveバリアントの実際の配色に合わせてspec記述を修正(Issue #174)
+- ProfileModal/FollowListModalのTailwind移行設計を追加(Issue #174)
+- ProfileModal/FollowListModalのTailwind移行実装計画を追加(Issue #174)
+- DMABUF無効化時のフォールバック経路の説明を訂正
+- AddColumnModal Tailwind移行のspec追加(Issue #174 第4バッチ)
+- AddColumnModal Tailwind移行の実装計画を追加(Issue #174 第4バッチ)
+- NoteCard周辺Tailwind移行のspec追加(Issue #174 第5バッチ)
+- NoteCard周辺Tailwind移行の実装計画を追加(Issue #174 第5バッチ)
+- 入力系ウィジェットTailwind移行のspec追加(Issue #174 第6バッチ)
+- 入力系ウィジェットTailwind移行の実装計画を追加(Issue #174 第6バッチ)
+- 設定画面Tailwind移行のspec追加(Issue #174 第7バッチ)
+- Settings.svelteシェル本体もspec対象に追加
+- 設定画面Tailwind移行の実装計画を追加(Issue #174 第7バッチ)
+- ComposeBar.svelte Tailwind移行のspec追加(Issue #174 継続バッチ)
+- ComposeBar.svelte Tailwind移行の実装計画を追加(Issue #174 継続バッチ)
+- AccountSelect Tailwind移行のdesign specを追加
+- App.svelte Tailwind移行のdesign specを追加
+- App.svelte migration specに意図的な見た目差分を明記
+- MediaGrid Tailwind移行のdesign specを追加
+- DrivePicker Tailwind移行のdesign specを追加
+- AddAccount Tailwind移行のdesign specを追加
+- ColumnSettings Tailwind移行のdesign specを追加
+- エラーバナー→モーダル移行のdesign specを追加
+- エラーバナー→モーダル移行の実装計画を追加
+
+### 🎨 Styling
+
+- ProfileModal/FollowListModalを既存UIのデザイン言語に合わせて調整
+- フォロー一覧を円形アバター+行区切り線で見やすく調整
+- Shadcn標準トークンを既存CSS変数にブリッジする@themeを追加
+- Pane.svelteをTailwindクラスに移行
+- Backstage.svelteをTailwindクラス+Buttonプリミティブに移行
+- Column.svelteをTailwindクラス+Buttonプリミティブに移行
+- Modal.svelteをTailwindクラス+Buttonプリミティブに移行
+- ConfirmDialog.svelteをTailwindクラス+Buttonプリミティブに移行
+- FollowListModal.svelteをTailwindクラス+Buttonプリミティブに移行
+- ProfileModal.svelteをTailwindクラス+Buttonプリミティブに移行
+- AddColumnModal.svelteを共通Modal+Tailwindクラスに移行
+- NoteCard.svelteをTailwindクラスに移行
+- NotificationCard.svelteをTailwindクラスに移行
+- ReactionPicker.svelteをTailwindクラスに移行
+- NoteMenu.svelteをTailwindクラスに移行
+- ReactionUsersPopover.svelteをTailwindクラスに移行、z-indexをModal.svelteより前面に引き上げ
+- TqlCompletionField.svelteをTailwindクラスに移行
+- CompletionPopover.svelteをTailwindクラスに移行
+- Sparkle.svelteをTailwindクラスに移行
+- Modal.svelteにwidth propを追加しSettings.svelteをTailwind移行
+- AboutSection.svelteをTailwindクラスに移行
+- AccountsSection.svelteをTailwindクラスに移行
+- DataSection.svelteをTailwindクラスに移行
+- KeysSection.svelteをTailwindクラスに移行
+- MuteSection.svelteをTailwindクラスに移行
+- NotifySection.svelteをTailwindクラスに移行
+- ReactionSection.svelteをTailwindクラスに移行
+- DisplaySection.svelteをTailwindクラスに移行
+- 設定画面のボタンをButtonプリミティブに統一
+- ComposeBar.svelteをTailwindクラス+Buttonプリミティブに移行
+- VisibilitySelect.svelteをTailwind移行しButtonプリミティブに統一
+- Dropdown.svelteをTailwind移行しButtonプリミティブに統一
+
+### 🧪 Testing
+
+- ComposePlaceholder.test.tsの型エラーを修正
+- NoteCardのプロフィール導線テストをimg/name/acctにも拡充
+- エラーモーダル対象/非対象操作の回帰テストを追加
+
+### ⚙️ Miscellaneous Tasks
+
+- SDD作業用ディレクトリをgitignoreに追加
+- Worktreeスクラッチディレクトリをgitignoreに追加
 ## [0.8.0] - 2026-08-01
 
 ### 🚀 Features
