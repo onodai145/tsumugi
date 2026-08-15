@@ -97,30 +97,31 @@
     すべて既定に戻す
   </Button>
 </div>
-<p class="my-1.5 mb-2.5 text-[0.76rem] text-muted-foreground">
+<p class="my-1.5 mb-2.5 text-xs text-muted-foreground">
   「変更」を押して割り当てたいキーを押してください(Esc でキャンセル)。タイムライン上でフォーカス中カラムの選択ノートを操作します。
 </p>
 
-<table class="my-1.5 w-full border-collapse text-[0.84rem]">
+<table class="my-1.5 w-full border-collapse text-sm">
   <tbody>
     {#each ACTIONS as a (a.action)}
       <tr>
         <td class="w-[34%] whitespace-nowrap border-b border-border px-1.5 py-[5px] align-middle">
           {#if capturing === a.action}
-            <span class="text-[0.8rem] text-primary">キー入力待ち…</span>
+            <span class="text-sm text-primary">キー入力待ち…</span>
           {:else}
-            <kbd class="inline-block rounded-md border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{prettyChord(effectiveChord(a.action, overrides))}</kbd>
+            <kbd class="inline-block rounded-md border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-sm">{prettyChord(effectiveChord(a.action, overrides))}</kbd>
+            <!-- text-[0.68rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。極小バッジのため例外的に即値を維持。 -->
             {#if isCustom(a.action)}<span class="ml-1.5 text-[0.68rem] text-primary">変更済</span>{/if}
           {/if}
         </td>
         <td class="border-b border-border px-1.5 py-[5px] align-middle text-foreground">{a.label}</td>
         <td class="w-[22%] whitespace-nowrap border-b border-border px-1.5 py-[5px] text-right align-middle">
           {#if capturing === a.action}
-            <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-[0.76rem] text-foreground" onclick={cancel}>キャンセル</button>
+            <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-xs text-foreground" onclick={cancel}>キャンセル</button>
           {:else}
-            <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-[0.76rem] text-foreground disabled:cursor-default disabled:opacity-40" disabled={busy} onclick={() => startCapture(a.action)}>変更</button>
+            <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-xs text-foreground disabled:cursor-default disabled:opacity-40" disabled={busy} onclick={() => startCapture(a.action)}>変更</button>
             {#if isCustom(a.action)}
-              <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-[0.76rem] text-foreground disabled:cursor-default disabled:opacity-40" disabled={busy} onclick={() => resetOne(a.action)}>既定</button>
+              <button type="button" class="ml-1 rounded-md border border-border bg-background px-2.5 py-[3px] text-xs text-foreground disabled:cursor-default disabled:opacity-40" disabled={busy} onclick={() => resetOne(a.action)}>既定</button>
             {/if}
           {/if}
         </td>
@@ -129,15 +130,15 @@
   </tbody>
 </table>
 
-{#if err}<p class="my-1.5 text-[0.82rem] text-destructive">{err}</p>{/if}
+{#if err}<p class="my-1.5 text-sm text-destructive">{err}</p>{/if}
 
 <div class="mt-3.5">
-  <div class="mb-0.5 text-[0.74rem] text-muted-foreground">固定(変更不可)</div>
-  <table class="my-1.5 w-full border-collapse text-[0.84rem]">
+  <div class="mb-0.5 text-xs text-muted-foreground">固定(変更不可)</div>
+  <table class="my-1.5 w-full border-collapse text-sm">
     <tbody>
       {#each fixed as f (f.combo)}
         <tr>
-          <td class="w-[34%] whitespace-nowrap border-b border-border px-1.5 py-[5px] align-middle"><kbd class="inline-block rounded-md border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{f.combo}</kbd></td>
+          <td class="w-[34%] whitespace-nowrap border-b border-border px-1.5 py-[5px] align-middle"><kbd class="inline-block rounded-md border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-sm">{f.combo}</kbd></td>
           <td class="border-b border-border px-1.5 py-[5px] align-middle text-foreground">{f.desc}</td>
           <td class="w-[22%] whitespace-nowrap border-b border-border px-1.5 py-[5px] text-right align-middle"></td>
         </tr>

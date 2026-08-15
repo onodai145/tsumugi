@@ -51,8 +51,8 @@
           <button
             type="button"
             class={active === item.id
-              ? "rounded-md bg-primary px-2.5 py-2 text-left text-[0.85rem] text-primary-foreground"
-              : "rounded-md px-2.5 py-2 text-left text-[0.85rem] text-foreground hover:bg-background"}
+              ? "rounded-md bg-primary px-2.5 py-2 text-left text-sm text-primary-foreground"
+              : "rounded-md px-2.5 py-2 text-left text-sm text-foreground hover:bg-background"}
             onclick={() => (active = item.id)}
           >
             {item.label}

@@ -107,24 +107,24 @@
             <div class="avatar-ph h-10 w-10 flex-none rounded-lg"></div>
           {/if}
           <span class="flex min-w-0 flex-col gap-0.5">
-            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.88rem] font-semibold"
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold"
               ><Mfm
                 text={displayName(entry.user)}
                 emojis={proxiedEmojiMap(entry.user.emojis, instanceHost)}
                 simple
               /></span
             >
-            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.78rem] text-muted-foreground"
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-sm text-muted-foreground"
               >{acct(entry.user)}</span
             >
           </span>
         </button>
       </li>
     {/each}
-    {#if busy}<li class="px-4 py-2.5 text-center text-[0.8rem] text-muted-foreground">読み込み中…</li>{/if}
+    {#if busy}<li class="px-4 py-2.5 text-center text-sm text-muted-foreground">読み込み中…</li>{/if}
   </ul>
   {#if err}
-    <p class="mt-0 mb-2 text-[0.82rem] text-destructive">{err}</p>
+    <p class="mt-0 mb-2 text-sm text-destructive">{err}</p>
     <Button variant="outline" size="sm" class="mt-2" onclick={loadMore} disabled={busy}>再試行</Button>
   {/if}
 </Modal>

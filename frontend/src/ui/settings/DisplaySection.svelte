@@ -292,31 +292,31 @@
 
 <h3 class="mb-3.5 mt-0 text-base font-semibold">表示</h3>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">UIモード</span>
   <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each uiModes as m (m.id)}
       <button
         type="button"
         class={uiMode === m.id
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
         onclick={() => (uiMode = m.id)}
       >{m.label}</button>
     {/each}
   </div>
-  <p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
 </div>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">テーマ</span>
   <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each themes as t (t.id)}
       <button
         type="button"
         class={theme === t.id
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
         onclick={() => (theme = t.id)}
       >{t.label}</button>
     {/each}
@@ -331,7 +331,7 @@
   </span>
 {/snippet}
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">プリセットテーマ</span>
   <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     {#each PRESETS as p (p.id)}
@@ -339,8 +339,8 @@
       <button
         type="button"
         class={isActive
-          ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
-          : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+          ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-sm text-foreground shadow-[0_0_0_1px_var(--accent)]"
+          : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-sm text-foreground hover:border-primary"}
         onclick={() => (theme = `preset:${p.id}`)}
       >
         {@render swatchStrip(p.colors)}
@@ -353,7 +353,7 @@
   </div>
 </div>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">カスタムテーマ</span>
   <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     {#each customThemes as t (t.id)}
@@ -362,8 +362,8 @@
         <button
           type="button"
           class={isActive
-            ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
-            : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+            ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-sm text-foreground shadow-[0_0_0_1px_var(--accent)]"
+            : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-sm text-foreground hover:border-primary"}
           onclick={() => (theme = `custom:${t.id}`)}
         >
           {@render swatchStrip(t.colors)}
@@ -386,12 +386,12 @@
       <input type="text" class="rounded-md border border-border bg-background px-2.5 py-[7px] font-[inherit] text-foreground" placeholder="テーマ名" bind:value={editingTheme.name} />
       {#each THEME_VAR_KEYS as v (v.key)}
         <div class="flex items-center gap-2">
-          <span class="w-20 flex-none text-[0.8rem] text-muted-foreground">{colorLabels[v.key]}</span>
+          <span class="w-20 flex-none text-sm text-muted-foreground">{colorLabels[v.key]}</span>
           <span class="h-[22px] w-[22px] flex-none rounded-md border border-border" style={`background:${editingTheme.colors[v.key]}`}></span>
-          <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-[0.82rem] text-foreground" bind:value={editingTheme.colors[v.key]} />
+          <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-sm text-foreground" bind:value={editingTheme.colors[v.key]} />
         </div>
       {/each}
-      {#if editErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{editErr}</p>{/if}
+      {#if editErr}<p class="mt-2 mb-0 text-sm text-destructive">{editErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onclick={cancelEditTheme}><X size={13} /> キャンセル</Button>
         <Button type="button" size="sm" onclick={saveCustomTheme}>このテーマを保存</Button>
@@ -400,14 +400,14 @@
   {/if}
 </div>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">コードハイライトテーマ</span>
   <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     <button
       type="button"
       class={codeHighlightTheme === "auto"
-        ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
-        : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+        ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-sm text-foreground shadow-[0_0_0_1px_var(--accent)]"
+        : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-sm text-foreground hover:border-primary"}
       onclick={() => (codeHighlightTheme = "auto")}
     >
       <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
@@ -420,8 +420,8 @@
       <button
         type="button"
         class={isActive
-          ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
-          : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+          ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-sm text-foreground shadow-[0_0_0_1px_var(--accent)]"
+          : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-sm text-foreground hover:border-primary"}
         onclick={() => (codeHighlightTheme = `shiki:${t.id}`)}
       >
         <span class="flex h-[30px] w-full flex-none">
@@ -438,7 +438,7 @@
   </div>
 </div>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">カスタムシンタックステーマ</span>
   <div class="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-2.5">
     {#each customSyntaxThemes as t (t.id)}
@@ -447,8 +447,8 @@
         <button
           type="button"
           class={isActive
-            ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-[0.78rem] text-foreground shadow-[0_0_0_1px_var(--accent)]"
-            : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-[0.78rem] text-foreground hover:border-primary"}
+            ? "flex w-full flex-col overflow-hidden rounded-lg border border-primary bg-muted p-0 text-left text-sm text-foreground shadow-[0_0_0_1px_var(--accent)]"
+            : "flex w-full flex-col overflow-hidden rounded-lg border border-border bg-muted p-0 text-left text-sm text-foreground hover:border-primary"}
           onclick={() => (codeHighlightTheme = `custom:${t.id}`)}
         >
           <span class="flex h-[30px] w-full flex-none">
@@ -475,12 +475,12 @@
       <input type="text" class="rounded-md border border-border bg-background px-2.5 py-[7px] font-[inherit] text-foreground" placeholder="テーマ名" bind:value={editingSyntaxTheme.name} />
       {#each SYNTAX_VAR_KEYS as v (v.key)}
         <div class="flex items-center gap-2">
-          <span class="w-20 flex-none text-[0.8rem] text-muted-foreground">{syntaxColorLabels[v.key]}</span>
+          <span class="w-20 flex-none text-sm text-muted-foreground">{syntaxColorLabels[v.key]}</span>
           <span class="h-[22px] w-[22px] flex-none rounded-md border border-border" style={`background:${editingSyntaxTheme[v.key]}`}></span>
-          <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-[0.82rem] text-foreground" bind:value={editingSyntaxTheme[v.key]} />
+          <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-sm text-foreground" bind:value={editingSyntaxTheme[v.key]} />
         </div>
       {/each}
-      {#if syntaxEditErr}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{syntaxEditErr}</p>{/if}
+      {#if syntaxEditErr}<p class="mt-2 mb-0 text-sm text-destructive">{syntaxEditErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</Button>
         <Button type="button" size="sm" onclick={saveCustomSyntaxTheme}>このテーマを保存</Button>
@@ -489,39 +489,39 @@
   {/if}
 </div>
 
-<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+<label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">新規カラムの既定幅(px, 220〜720)</span>
   <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="220" max="720" step="10" bind:value={width} />
 </label>
-<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
+<p class="mb-4 mt-0 text-xs text-muted-foreground">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
 
-<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+<label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">起動時のギャップ埋め(件, 0〜1000。0で無効)</span>
   <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
 </label>
-<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">
+<p class="mb-4 mt-0 text-xs text-muted-foreground">
   アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
   0にすると従来どおりキャッシュのみ表示します。
 </p>
 
-<label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+<label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">メディアサムネイルの高さ上限(px, 80〜600)</span>
   <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="80" max="600" step="20" bind:value={mediaThumbnailHeight} />
 </label>
-<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">
+<p class="mb-4 mt-0 text-xs text-muted-foreground">
   ノートに添付された画像/動画のサムネイル最大高さです。小さくするとノートを詰めて表示でき、
   大きくすると画像を大きく見られます。
 </p>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">絵文字のスタイル</span>
   <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each emojiStyles as s (s.id)}
       <button
         type="button"
         class={emojiStyle === s.id
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
         onclick={() => (emojiStyle = s.id)}
       >
         {#if emojiPreviewUrl(s.id)}
@@ -531,7 +531,7 @@
       </button>
     {/each}
   </div>
-  <p class="mb-4 mt-0 flex flex-wrap items-center gap-1 text-[0.76rem] text-muted-foreground">
+  <p class="mb-4 mt-0 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
     Unicode絵文字(リアクション等)の見た目です。プレビュー:
     {#each ["😺", "👍", "🎉"] as c}
       {#if emojiPreviewUrl(emojiStyle)}
@@ -543,25 +543,25 @@
   </p>
 </div>
 
-<label class="mb-2 flex items-center gap-2 text-[0.85rem]"
+<label class="mb-2 flex items-center gap-2 text-sm"
   ><input type="checkbox" bind:checked={mfmAnimationEnabled} /> MFMアニメーション($[shake]等)を有効にする</label
 >
-<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">
+<p class="mb-4 mt-0 text-xs text-muted-foreground">
   他人の投稿に含まれる装飾($[shake]/$[spin]/$[rainbow]等)のアニメーション表示です。
   環境によってはこの描画コストが高く、CPU使用率が上がることがあります
   (Linux/Wayland環境で特に発生しやすい既知の問題です)。気になる場合はOFFにしてください
   (静的な装飾は残ります)。
 </p>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">フォント</span>
   <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each fontPresets as p (p.value)}
       <button
         type="button"
         class={fontFamily === p.value
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
         onclick={() => (fontFamily = p.value)}
       >
         {p.label}
@@ -575,11 +575,11 @@
     bind:value={fontFamily}
   />
 </div>
-<p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
+<p class="mb-4 mt-0 text-xs text-muted-foreground" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
   プレビュー: あいうえお ABCDEFG 123
 </p>
 
-<div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">背景画像</span>
   <div class="flex items-center gap-2.5">
     {#if backgroundImage}
@@ -595,15 +595,15 @@
 </div>
 
 {#if backgroundImage}
-  <div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+  <div class="mb-3 flex flex-col gap-1.5 text-sm">
     <span class="text-muted-foreground">背景画像の配置方法</span>
     <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
       {#each BACKGROUND_FIT_MODE_OPTIONS as m (m.value)}
         <button
           type="button"
           class={backgroundFitMode === m.value
-            ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground last:border-r-0"
-            : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground last:border-r-0"}
+            ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+            : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
           onclick={() => (backgroundFitMode = m.value)}
         >
           {m.label}
@@ -612,7 +612,7 @@
     </div>
   </div>
   {#if backgroundFitMode !== "fill"}
-    <div class="mb-3 flex flex-col gap-1.5 text-[0.82rem]">
+    <div class="mb-3 flex flex-col gap-1.5 text-sm">
       <span class="text-muted-foreground">基準点</span>
       <div class="grid w-fit grid-cols-[repeat(3,28px)] grid-rows-[repeat(3,28px)] gap-1">
         {#each BACKGROUND_POSITION_GRID as p (p)}
@@ -629,23 +629,23 @@
       </div>
     </div>
   {/if}
-  <label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <label class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">背景の暗さ({backgroundDim}%)</span>
     <input class="w-full max-w-[320px] accent-primary" type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
   </label>
-  <label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <label class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">背景のぼかし({backgroundBlur}px)</span>
     <input class="w-full max-w-[320px] accent-primary" type="range" min="0" max="40" step="2" bind:value={backgroundBlur} />
   </label>
-  <label class="mb-2.5 flex flex-col gap-1 text-[0.82rem]">
+  <label class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">カラムの不透明度({columnOpacity}%)</span>
     <input class="w-full max-w-[320px] accent-primary" type="range" min="60" max="100" step="5" bind:value={columnOpacity} />
   </label>
-  <p class="mb-4 mt-0 text-[0.76rem] text-muted-foreground">数値が低いほど背景画像が透けて見えます。</p>
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">数値が低いほど背景画像が透けて見えます。</p>
 {/if}
 
 <div class="flex items-center justify-end gap-3">
-  {#if saved}<span class="text-[0.8rem] text-[var(--success)]">保存しました</span>{/if}
+  {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}
   <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
 </div>
-{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
+{#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}

@@ -558,7 +558,7 @@
 
   <div class="flex flex-1 min-w-0 flex-col gap-1">
   {#if replyTo || quoteOf}
-    <div class="flex items-center gap-1.5 rounded-md border border-border bg-muted px-1.5 py-[3px] text-[0.78rem] text-muted-foreground">
+    <div class="flex items-center gap-1.5 rounded-md border border-border bg-muted px-1.5 py-[3px] text-sm text-muted-foreground">
       <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         {replyTo ? "返信: " : "引用: "}@{(replyTo ?? quoteOf)!.user.username} — {(replyTo ?? quoteOf)!.text ?? ""}
       </span>
@@ -567,16 +567,16 @@
   {/if}
 
   {#if useCw}
-    <input class="w-full box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-[0.84rem] text-foreground" placeholder="内容警告 (CW)" bind:value={cw} />
+    <input class="w-full box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-sm text-foreground" placeholder="内容警告 (CW)" bind:value={cw} />
   {/if}
 
   <div class="relative">
     <textarea
       class={expanded
-        ? "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-[0.86rem] leading-[1.4] text-foreground min-h-24 [transition:min-height_0.12s_ease]"
+        ? "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-24 [transition:min-height_0.12s_ease]"
         : compact
-          ? "w-full box-border resize-none rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-[0.86rem] leading-[1.4] text-foreground min-h-[34px] [transition:min-height_0.12s_ease]"
-          : "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-[0.86rem] leading-[1.4] text-foreground min-h-20 [transition:min-height_0.12s_ease]"}
+          ? "w-full box-border resize-none rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-[34px] [transition:min-height_0.12s_ease]"
+          : "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-20 [transition:min-height_0.12s_ease]"}
       rows={expanded ? 4 : 1}
       placeholder={placeholder}
       bind:value={text}
@@ -627,6 +627,8 @@
   {#if attachments.length > 0}
     <div class="flex flex-wrap gap-1">
       {#each attachments as a (a.id)}
+        <!-- text-[0.6rem]（このブロック内4箇所）はスタイルガイド(docs/design/style-guide.md §5)の対象外。
+             28px/14px四方の固定サイズバッジのため例外的に即値を維持。 -->
         <div class="relative h-7 w-7">
           {#if a.kind === "drive"}
             {#if a.file.mimeType.startsWith("image/")}
@@ -654,7 +656,7 @@
     <div class="flex flex-col gap-[5px]">
       {#each pollChoices as _, i}
         <div class="flex items-center gap-1">
-          <input class="flex-1 box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-[0.84rem] text-foreground" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
+          <input class="flex-1 box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-sm text-foreground" placeholder={`選択肢 ${i + 1}`} bind:value={pollChoices[i]} />
           <Button
             type="button"
             variant="ghost"
@@ -668,7 +670,7 @@
           </Button>
         </div>
       {/each}
-      <div class="flex flex-wrap items-center gap-3 text-[0.8rem] text-muted-foreground">
+      <div class="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
         <Button
           type="button"
           variant="outline"
@@ -680,7 +682,7 @@
         </Button>
         <label><input type="checkbox" bind:checked={pollMultiple} /> 複数選択</label>
       </div>
-      <div class="flex flex-wrap items-center gap-1.5 text-[0.8rem] text-muted-foreground">
+      <div class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
         <span class="flex-none">期限:</span>
         {#each pollExpiryModes as m (m.value)}
           <Button
@@ -694,12 +696,12 @@
           </Button>
         {/each}
         {#if pollExpiryMode === "at"}
-          <input type="datetime-local" bind:value={pollExpiresAt} class="rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-[0.78rem] text-foreground" />
+          <input type="datetime-local" bind:value={pollExpiresAt} class="rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground" />
         {:else if pollExpiryMode === "after"}
           <input
             type="number"
             min="1"
-            class="w-[60px] rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-[0.78rem] text-foreground"
+            class="w-[60px] rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground"
             bind:value={pollAfterAmount}
           />
           <div class="w-[90px]">
@@ -727,18 +729,18 @@
       <Button type="button" variant="outline" size="sm" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
       {#if useChannel}
         {#if channelsLoading}
-          <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">読み込み中…</span>
+          <span class="flex-none whitespace-nowrap text-sm text-muted-foreground">読み込み中…</span>
         {:else if channelsError}
-          <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">読み込みに失敗しました</span>
+          <span class="flex-none whitespace-nowrap text-sm text-muted-foreground">読み込みに失敗しました</span>
         {:else if channelOptions.length > 0}
           <div class="w-[140px]">
             <Dropdown bind:value={channelId} options={channelOptions} />
           </div>
         {:else}
-          <span class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">フォロー中のチャンネルがありません</span>
+          <span class="flex-none whitespace-nowrap text-sm text-muted-foreground">フォロー中のチャンネルがありません</span>
         {/if}
       {/if}
-      <label class="flex-none whitespace-nowrap text-[0.78rem] text-muted-foreground">
+      <label class="flex-none whitespace-nowrap text-sm text-muted-foreground">
         <input
           type="checkbox"
           checked={useChannel || localOnly}
@@ -757,7 +759,7 @@
 {#if err}
   <Modal title="エラー" onclose={() => (err = null)}>
     {#snippet children()}
-      <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-[0.9rem] text-foreground">{err}</p>
+      <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{err}</p>
       <div class="flex justify-end">
         <Button onclick={() => (err = null)}>わかった</Button>
       </div>
@@ -779,14 +781,14 @@
       tabindex="-1"
     >
       <button
-        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.82rem] text-foreground hover:bg-muted disabled:cursor-default disabled:opacity-50"
+        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted disabled:cursor-default disabled:opacity-50"
         type="button"
         disabled={!accountId}
         title={accountId ? undefined : "アカウントを選択してください"}
         onclick={chooseLocalUpload}
       >ローカルから選択</button>
       <button
-        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.82rem] text-foreground hover:bg-muted disabled:cursor-default disabled:opacity-50"
+        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted disabled:cursor-default disabled:opacity-50"
         type="button"
         disabled={!accountId}
         title={accountId ? undefined : "アカウントを選択してください"}

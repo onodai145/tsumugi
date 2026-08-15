@@ -116,7 +116,7 @@
         }}
       >
         <button
-          class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-[0.76rem] text-foreground"
+          class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
           onclick={() => app.setActiveTab(group.id, t.id)}
           ondblclick={() => onEditTab(t)}
           title={`${tabName(t)}（ダブルクリックで編集）`}
@@ -148,7 +148,7 @@
           <NotificationCard notification={n} accountId={activeTab.accountId} />
         {/each}
         {#if activeTab.notifications.length === 0 && !activeTab.loadingMore}
-          <div class="p-3.5 text-center text-[0.82rem] text-muted-foreground">まだ通知がありません</div>
+          <div class="p-3.5 text-center text-sm text-muted-foreground">まだ通知がありません</div>
         {/if}
       {:else}
         {#each activeTab.notes as note (note.id)}
@@ -160,10 +160,10 @@
           />
         {/each}
         {#if activeTab.notes.length === 0 && !activeTab.loadingMore}
-          <div class="p-3.5 text-center text-[0.82rem] text-muted-foreground">まだノートがありません</div>
+          <div class="p-3.5 text-center text-sm text-muted-foreground">まだノートがありません</div>
         {/if}
       {/if}
-      {#if activeTab.loadingMore}<div class="p-3.5 text-center text-[0.82rem] text-muted-foreground">読み込み中…</div>{/if}
+      {#if activeTab.loadingMore}<div class="p-3.5 text-center text-sm text-muted-foreground">読み込み中…</div>{/if}
     </div>
   {/if}
 

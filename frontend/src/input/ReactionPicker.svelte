@@ -86,26 +86,26 @@
     {#if queryLower}
       <div class="flex flex-wrap gap-0.5">
         {#each customMatches as e (e.name)}
-          <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
+          <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
             <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.url} alt={`:${e.name}:`} loading="lazy" />
           </button>
         {/each}
         {#each unicodeMatches as e (e.char)}
-          <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
+          <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
             <UnicodeEmoji char={e.char} />
           </button>
         {/each}
         {#if unicodeMatches.length === 0 && customMatches.length === 0}
-          <span class="p-2 text-[0.8rem] text-muted-foreground">絵文字がありません</span>
+          <span class="p-2 text-sm text-muted-foreground">絵文字がありません</span>
         {/if}
       </div>
     {:else}
       {#if showPinned && recentEntries.length > 0}
         <section class="mb-1">
-          <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">最近使った</h4>
+          <h4 class="mb-1 mt-1.5 text-xs font-semibold text-muted-foreground">最近使った</h4>
           <div class="flex flex-wrap gap-0.5">
             {#each recentEntries as e (e.key)}
-              <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
+              <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
                 {#if e.custom}
                   <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.custom.url} alt={e.key} loading="lazy" />
                 {:else}
@@ -119,10 +119,10 @@
 
       {#if showPinned}
         <section class="mb-1">
-          <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">ピン留め</h4>
+          <h4 class="mb-1 mt-1.5 text-xs font-semibold text-muted-foreground">ピン留め</h4>
           <div class="flex flex-wrap gap-0.5">
             {#each pinnedEntries as e (e.key)}
-              <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
+              <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
                 {#if e.custom}
                   <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.custom.url} alt={e.key} loading="lazy" />
                 {:else}
@@ -131,20 +131,20 @@
               </button>
             {/each}
             {#if pinnedEntries.length === 0}
-              <span class="p-2 text-[0.8rem] text-muted-foreground">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
+              <span class="p-2 text-sm text-muted-foreground">ピン留めした絵文字がありません（設定→リアクションで追加できます）</span>
             {/if}
           </div>
         </section>
       {/if}
 
       <section class="mb-1">
-        <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">カスタム絵文字</h4>
+        <h4 class="mb-1 mt-1.5 text-xs font-semibold text-muted-foreground">カスタム絵文字</h4>
         {#each customByCategory as group (group.category ?? "")}
           <details open={customByCategory.length <= 1}>
-            <summary class="cursor-pointer px-0.5 py-1 text-[0.72rem] text-muted-foreground">{group.category ?? "その他"}（{group.emojis.length}）</summary>
+            <summary class="cursor-pointer px-0.5 py-1 text-xs text-muted-foreground">{group.category ?? "その他"}（{group.emojis.length}）</summary>
             <div class="flex flex-wrap gap-0.5">
               {#each group.emojis as e (e.name)}
-                <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
+                <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(customEmojiKey(e.name))}>
                   <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.url} alt={`:${e.name}:`} loading="lazy" />
                 </button>
               {/each}
@@ -152,18 +152,18 @@
           </details>
         {/each}
         {#if customByCategory.length === 0}
-          <span class="p-2 text-[0.8rem] text-muted-foreground">カスタム絵文字がありません</span>
+          <span class="p-2 text-sm text-muted-foreground">カスタム絵文字がありません</span>
         {/if}
       </section>
 
       <section class="mb-1">
-        <h4 class="mb-1 mt-1.5 text-[0.72rem] font-semibold text-muted-foreground">絵文字</h4>
+        <h4 class="mb-1 mt-1.5 text-xs font-semibold text-muted-foreground">絵文字</h4>
         {#each UNICODE_EMOJI_CATEGORIES as c (c.index)}
           <details>
-            <summary class="cursor-pointer px-0.5 py-1 text-[0.72rem] text-muted-foreground">{c.label}</summary>
+            <summary class="cursor-pointer px-0.5 py-1 text-xs text-muted-foreground">{c.label}</summary>
             <div class="flex flex-wrap gap-0.5">
               {#each UNICODE_EMOJIS.filter((e) => e.category === c.index) as e (e.char)}
-                <button type="button" class="rounded-md p-1 text-[1.1rem] leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
+                <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={`:${e.name}:`} onclick={() => onpick(e.char)}>
                   <UnicodeEmoji char={e.char} />
                 </button>
               {/each}

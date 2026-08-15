@@ -76,9 +76,11 @@
           : "size-[22px] flex-none rounded-md object-cover"}
       />
     {:else}
+      <!-- text-[0.7rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。
+           22px四方の小アバター・チェブロンなど収まりの厳しい箇所のため例外的に即値を維持。 -->
       <span
         class={large
-          ? "grid size-9 flex-none place-items-center rounded-lg bg-accent text-[1rem] font-bold text-muted-foreground"
+          ? "grid size-9 flex-none place-items-center rounded-lg bg-accent text-base font-bold text-muted-foreground"
           : "grid size-[22px] flex-none place-items-center rounded-md bg-accent text-[0.7rem] font-bold text-muted-foreground"}
         >{(selected.displayName || selected.username).charAt(0)}</span
       >
@@ -126,11 +128,11 @@
             >
           {/if}
           <span class="flex min-w-0 flex-col">
-            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.85rem] font-semibold"
+            <span class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold"
               >{a.displayName || a.username}</span
             >
             <span
-              class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.74rem] text-muted-foreground"
+              class="overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground"
               >@{a.username}@{a.host}</span
             >
           </span>

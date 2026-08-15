@@ -77,7 +77,7 @@
       <div class="media-cell relative flex aspect-[16/10] items-center justify-center">
         {#if f.isSensitive && !revealed[f.id]}
           <button
-            class="sensitive-cover h-full w-full border-0 text-[0.85rem] text-muted-foreground"
+            class="sensitive-cover h-full w-full border-0 text-sm text-muted-foreground"
             onclick={() => (revealed = { ...revealed, [f.id]: true })}
           >
             閲覧注意（クリックで表示）
@@ -95,7 +95,7 @@
           <video src={f.url} controls preload="metadata" class="h-full w-full cursor-zoom-in object-cover"
           ></video>
           <button
-            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-[0.85rem] leading-none text-white"
+            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
             onclick={() => saveToDisk(f.url, fileName(f))}
             aria-label="保存"
           >
@@ -105,7 +105,7 @@
           <!-- svelte-ignore a11y_media_has_caption -->
           <audio src={f.url} controls preload="metadata" class="w-[calc(100%-16px)]"></audio>
           <button
-            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-[0.85rem] leading-none text-white"
+            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
             onclick={() => saveToDisk(f.url, fileName(f))}
             aria-label="保存"
           >
@@ -113,7 +113,7 @@
           </button>
         {:else}
           <button
-            class="max-w-full overflow-hidden text-ellipsis whitespace-nowrap border-0 bg-none p-2 font-[inherit] text-[0.85rem] text-primary"
+            class="max-w-full overflow-hidden text-ellipsis whitespace-nowrap border-0 bg-none p-2 font-[inherit] text-sm text-primary"
             onclick={() => openUrl(f.url)}
           >
             📄 {fileName(f)}

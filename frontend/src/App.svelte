@@ -225,7 +225,7 @@
   {#if app.errorModal}
     <Modal title="エラー" onclose={() => (app.errorModal = null)}>
       {#snippet children()}
-        <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-[0.9rem] text-foreground">{app.errorModal}</p>
+        <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{app.errorModal}</p>
         <div class="flex justify-end">
           <Button onclick={() => (app.errorModal = null)}>わかった</Button>
         </div>

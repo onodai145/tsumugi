@@ -119,7 +119,7 @@
       <Button type="button" variant="ghost" size="icon-xs" onclick={onclose}><X size={16} /></Button>
     </header>
 
-    <nav class="mb-2.5 flex flex-none flex-wrap items-center gap-1 text-[0.8rem]">
+    <nav class="mb-2.5 flex flex-none flex-wrap items-center gap-1 text-sm">
       <button
         type="button"
         class={path.length === 0
@@ -142,16 +142,16 @@
     </nav>
 
     {#if loading}
-      <p class="text-[0.8rem] text-muted-foreground">読み込み中…</p>
+      <p class="text-sm text-muted-foreground">読み込み中…</p>
     {:else}
       {#if folders.length === 0 && files.length === 0}
-        <p class="text-[0.8rem] text-muted-foreground">ファイルがありません</p>
+        <p class="text-sm text-muted-foreground">ファイルがありません</p>
       {/if}
       <div class="grid min-h-0 flex-1 auto-rows-[84px] grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2 overflow-y-auto">
         {#each folders as f (f.id)}
           <button
             type="button"
-            class="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-1.5 text-[0.72rem] break-all text-foreground"
+            class="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-1.5 text-xs break-all text-foreground"
             onclick={() => enterFolder(f)}
           >
             📁 {f.name || "(無題)"}
@@ -161,8 +161,8 @@
           <button
             type="button"
             class={selected.has(f.id)
-              ? "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-[0.75rem] text-foreground outline outline-2 outline-offset-[-2px] outline-primary"
-              : "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-[0.75rem] text-foreground"}
+              ? "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-xs text-foreground outline outline-2 outline-offset-[-2px] outline-primary"
+              : "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-xs text-foreground"}
             onclick={() => onFileClick(f)}
           >
             {#if f.isSensitive && !revealed[f.id]}
@@ -195,10 +195,10 @@
       {/if}
     {/if}
 
-    {#if err}<p class="mt-2 flex-none text-[0.82rem] break-words text-destructive">{err}</p>{/if}
+    {#if err}<p class="mt-2 flex-none text-sm break-words text-destructive">{err}</p>{/if}
 
     <div class="mt-3 flex flex-none items-center justify-between">
-      <span class="text-[0.8rem] text-muted-foreground">選択中 {selected.size}件</span>
+      <span class="text-sm text-muted-foreground">選択中 {selected.size}件</span>
       <Button type="button" variant="default" size="sm" disabled={selected.size === 0} onclick={confirm}
         >添付</Button
       >

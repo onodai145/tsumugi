@@ -57,7 +57,7 @@
 
 <div class="mx-auto my-12 max-w-[420px] rounded-xl border border-border bg-background p-6">
   <div class="mb-2 flex items-center justify-between">
-    <h2 class="m-0 text-[1.1rem]">
+    <h2 class="m-0 text-lg">
       {reauthAccount
         ? `再認証: @${reauthAccount.username}@${reauthAccount.host}`
         : "アカウントを追加"}
@@ -67,7 +67,7 @@
     {/if}
   </div>
   {#if reauthAccount && !sessionId}
-    <p class="mb-3.5 text-[0.86rem] text-muted-foreground">
+    <p class="mb-3.5 text-sm text-muted-foreground">
       {busy ? "認可ページを開いています…" : "認可ページを開けませんでした。"}
     </p>
     {#if !busy}
@@ -80,7 +80,7 @@
       >
     {/if}
   {:else if !sessionId}
-    <p class="mb-3.5 text-[0.86rem] text-muted-foreground">
+    <p class="mb-3.5 text-sm text-muted-foreground">
       Misskeyインスタンスのホスト名を入力してください（例: misskey.example）
     </p>
     <div class="flex gap-2">
@@ -95,7 +95,7 @@
       </Button>
     </div>
   {:else}
-    <p class="mb-3.5 text-[0.86rem] text-muted-foreground">
+    <p class="mb-3.5 text-sm text-muted-foreground">
       {reauthAccount
         ? "スコープが更新されたトークンを取得します。ブラウザで認可を完了したら、下のボタンを押してください。"
         : "ブラウザで認可を完了したら、下のボタンを押してください。"}
@@ -113,5 +113,5 @@
       やり直す
     </Button>
   {/if}
-  {#if err}<p class="mt-3 text-[0.85rem] break-words text-destructive">{err}</p>{/if}
+  {#if err}<p class="mt-3 text-sm break-words text-destructive">{err}</p>{/if}
 </div>

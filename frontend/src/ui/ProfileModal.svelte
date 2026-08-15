@@ -137,9 +137,9 @@
 
 <Modal title="プロフィール" {onclose}>
   {#if profileState.status === "loading"}
-    <p class="text-[0.85rem] text-muted-foreground">読み込み中…</p>
+    <p class="text-sm text-muted-foreground">読み込み中…</p>
   {:else if profileState.status === "error"}
-    <p class="my-2 text-[0.82rem] text-destructive">{profileState.message}</p>
+    <p class="my-2 text-sm text-destructive">{profileState.message}</p>
     <Button variant="outline" size="sm" onclick={load}>再試行</Button>
   {:else}
     {@const profile = profileState.profile}
@@ -153,11 +153,11 @@
         <div class="avatar-ph h-14 w-14 flex-none rounded-lg border-2 border-background"></div>
       {/if}
       <div class="flex min-w-0 flex-1 flex-col gap-px">
-        <span class="text-[0.95rem] font-semibold"
+        <span class="text-sm font-semibold"
           ><Mfm text={displayName(profile.user)} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} simple
           /></span
         >
-        <span class="text-[0.78rem] text-muted-foreground">{acct(profile.user)}</span>
+        <span class="text-sm text-muted-foreground">{acct(profile.user)}</span>
       </div>
       {#if !profile.isSelf}
         <Button
@@ -171,9 +171,9 @@
         </Button>
       {/if}
     </div>
-    {#if followErr}<p class="my-2 text-[0.82rem] text-destructive">{followErr}</p>{/if}
+    {#if followErr}<p class="my-2 text-sm text-destructive">{followErr}</p>{/if}
     {#if profile.user.bio}
-      <p class="mt-2.5 mb-0 whitespace-pre-wrap break-words text-[0.88rem] leading-normal"
+      <p class="mt-2.5 mb-0 whitespace-pre-wrap break-words text-sm leading-normal"
         ><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p
       >
     {/if}
@@ -186,7 +186,7 @@
       <Button variant="ghost" size="xs" aria-label="followers-count" onclick={() => (followListKind = "followers")}>
         <strong class="font-semibold text-foreground">{profile.user.followersCount}</strong> フォロワー
       </Button>
-      <span class="px-1.5 py-[3px] text-[0.78rem] text-muted-foreground"
+      <span class="px-1.5 py-[3px] text-sm text-muted-foreground"
         ><strong class="font-semibold text-foreground">{profile.user.notesCount}</strong> ノート</span
       >
     </div>
@@ -199,9 +199,9 @@
       {#each notes as note (note.id)}
         <NoteCard {note} {accountId} />
       {/each}
-      {#if notesBusy}<p class="m-0 text-center text-[0.85rem] text-muted-foreground">読み込み中…</p>{/if}
+      {#if notesBusy}<p class="m-0 text-center text-sm text-muted-foreground">読み込み中…</p>{/if}
       {#if notesErr}
-        <p class="my-2 text-[0.82rem] text-destructive">{notesErr}</p>
+        <p class="my-2 text-sm text-destructive">{notesErr}</p>
         <Button variant="outline" size="sm" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</Button>
       {/if}
     </div>

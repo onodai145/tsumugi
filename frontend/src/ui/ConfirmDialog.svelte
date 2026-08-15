@@ -42,7 +42,7 @@
     tabindex="-1"
   >
     <header class="mb-2.5 font-semibold">{title}</header>
-    <p class="mb-4 mt-0 whitespace-pre-wrap text-[0.85rem] text-foreground">{message}</p>
+    <p class="mb-4 mt-0 whitespace-pre-wrap text-sm text-foreground">{message}</p>
     <div class="flex justify-end gap-2">
       <Button variant="secondary" size="sm" onclick={onCancel}>{cancelLabel}</Button>
       <Button variant={danger ? "destructive" : "default"} size="sm" onclick={onConfirm}>{confirmLabel}</Button>
