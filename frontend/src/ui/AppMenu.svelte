@@ -33,9 +33,13 @@
 </script>
 
 <!-- Backstage.svelte(ログバー)と隣接して並ぶため、そのバーの外枠(border-t/bg-card)と
-     見た目を揃える。Backstage.svelte自体はログ専用の責務を保つため変更しない。 -->
-<div class="flex flex-none items-center border-t border-border bg-card py-[3px] pr-1 pl-[max(8px,env(safe-area-inset-left))]">
-  <Button type="button" variant="ghost" size="icon-sm" onclick={toggle} bind:ref={trigger} title="メニュー">
+     高さ(min-h-6 + pt-[3px] pb-[max(3px,env(safe-area-inset-bottom))])を正確に揃える
+     （揃っていないと横並びflex行のalign-items:stretchでBackstage側に余白ができる）。
+     Backstage.svelte自体はログ専用の責務を保つため変更しない。 -->
+<div
+  class="flex min-h-6 flex-none items-center border-t border-border bg-card pt-[3px] pr-1 pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))]"
+>
+  <Button type="button" variant="ghost" size="icon-xs" onclick={toggle} bind:ref={trigger} title="メニュー">
     <Menu size={16} />
   </Button>
 </div>
