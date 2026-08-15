@@ -41,7 +41,7 @@
 <div
   class="flex min-h-6 flex-none items-center self-end border-t border-border bg-card pt-[3px] pr-1 pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))]"
 >
-  <Button type="button" variant="ghost" size="icon-xs" onclick={toggle} bind:ref={trigger} title="メニュー">
+  <Button type="button" variant="outline" size="icon-xs" onclick={toggle} bind:ref={trigger} title="メニュー">
     <Menu size={16} />
   </Button>
 </div>
