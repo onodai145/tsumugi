@@ -97,8 +97,10 @@
   <!-- 本家準拠: リンクラベル内は nyaize しない（disableNyaize） -->
   <a class="mfm-link" href={p.url} target="_blank" rel="noreferrer noopener">{#each children as c}<Self node={c} {emojis} />{/each}<ExternalLink class="mfm-link-icon" size={12} /></a>
 {:else if node.type === "mention"}
+  <!-- role="button"だがButtonプリミティブ非経由のため、キーボードフォーカス時の視認性を
+       Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
   <span
-    class="mfm-mention"
+    class="mfm-mention rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
     onclick={() => openProfile({ username: p.username, host: p.host ?? null })}
     role="button"
     tabindex="0"

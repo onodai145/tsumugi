@@ -86,7 +86,10 @@
       />
     {/if}
     <span class="min-w-0 flex-1">
+      <!-- role="button"だがButtonプリミティブ非経由のため、キーボードフォーカス時の視認性を
+           Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
       {#if actor}<b
+          class="rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           data-testid="notification-actor"
           onclick={() => n.user && openProfile({ userId: n.user.id }, accountId)}
           role="button"

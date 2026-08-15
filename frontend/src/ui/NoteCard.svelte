@@ -280,8 +280,10 @@
         style="cursor: pointer"
       />
     {:else}
+      <!-- role="button"だがButtonプリミティブ非経由のため、キーボードフォーカス時の視認性を
+           Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
       <div
-        class="avatar h-[34px] w-[34px] flex-none rounded-md"
+        class="avatar h-[34px] w-[34px] flex-none rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         data-testid="note-avatar"
         onclick={() => openProfile({ userId: inner.user.id }, accountId)}
         role="button"
@@ -292,7 +294,7 @@
     <div class="min-w-0 flex-1">
       <header class="flex flex-wrap items-baseline gap-[5px]">
         <span
-          class="text-sm font-semibold"
+          class="rounded-sm text-sm font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           data-testid="note-name"
           onclick={() => openProfile({ userId: inner.user.id }, accountId)}
           role="button"
@@ -305,7 +307,7 @@
           simple
         /></span>
         <span
-          class="text-xs text-muted-foreground"
+          class="rounded-sm text-xs text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           data-testid="note-acct"
           onclick={() => openProfile({ userId: inner.user.id }, accountId)}
           role="button"
