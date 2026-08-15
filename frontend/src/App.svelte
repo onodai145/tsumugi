@@ -26,7 +26,7 @@
   let showAdd = $state(false);
   let showAddColumn = $state(false);
   let editTab = $state<TabView | null>(null);
-  type SettingsSection = "accounts" | "display" | "notify" | "mute" | "keys";
+  type SettingsSection = "accounts" | "layout" | "notify" | "mute" | "keys";
   let showSettings = $state(false);
   let settingsInitial = $state<SettingsSection>("notify");
   let addTabGroupId = $state<string | null>(null);

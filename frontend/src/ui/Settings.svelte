@@ -2,7 +2,7 @@
   import type { Account } from "../bindings/tauri.gen";
   import NotifySection from "./settings/NotifySection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
-  import DisplaySection from "./settings/DisplaySection.svelte";
+  import LayoutSection from "./settings/LayoutSection.svelte";
   import ThemeSection from "./settings/ThemeSection.svelte";
   import BackgroundSection from "./settings/BackgroundSection.svelte";
   import ReactionSection from "./settings/ReactionSection.svelte";
@@ -12,7 +12,7 @@
   import AboutSection from "./settings/AboutSection.svelte";
   import Modal from "./Modal.svelte";
 
-  type Section = "accounts" | "display" | "theme" | "background" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
+  type Section = "accounts" | "layout" | "theme" | "background" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
 
   let {
     onclose,
@@ -28,7 +28,7 @@
 
   const nav: { id: Section; label: string }[] = [
     { id: "accounts", label: "アカウント" },
-    { id: "display", label: "表示" },
+    { id: "layout", label: "レイアウト" },
     { id: "theme", label: "テーマ" },
     { id: "background", label: "背景" },
     { id: "reaction", label: "リアクション" },
@@ -66,8 +66,8 @@
       <section class="min-w-0 flex-1 overflow-y-auto px-5 py-[18px]">
         {#if active === "accounts"}
           <AccountsSection {onAddAccount} {onReauth} />
-        {:else if active === "display"}
-          <DisplaySection />
+        {:else if active === "layout"}
+          <LayoutSection />
         {:else if active === "theme"}
           <ThemeSection />
         {:else if active === "background"}

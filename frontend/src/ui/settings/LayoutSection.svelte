@@ -1,12 +1,8 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
-  import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import { Button } from "$lib/components/ui/button";
 
   let width = $state(app.ui.defaultColumnWidth);
-  let fontFamily = $state(app.ui.fontFamily ?? "");
-  let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
-  let mfmAnimationEnabled = $state(app.ui.mfmAnimationEnabled ?? true);
   let uiMode = $state(app.ui.uiMode ?? "auto");
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
@@ -19,23 +15,6 @@
     { id: "auto", label: "OSに合わせる" },
     { id: "desktop", label: "PC版" },
     { id: "mobile", label: "モバイル版" },
-  ];
-
-  const emojiStyles: { id: EmojiStyle; label: string }[] = [
-    { id: "twemoji", label: "Twemoji" },
-    { id: "fluentEmoji", label: "Fluent Emoji" },
-    { id: "native", label: "OS標準" },
-  ];
-  function emojiPreviewUrl(style: EmojiStyle): string | null {
-    return unicodeEmojiUrl("😺", style);
-  }
-
-  const fontPresets: { label: string; value: string }[] = [
-    { label: "既定", value: "" },
-    { label: "游ゴシック", value: '"Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif' },
-    { label: "メイリオ", value: "Meiryo, sans-serif" },
-    { label: "等幅", value: 'ui-monospace, "Cascadia Code", "SF Mono", monospace' },
-    { label: "明朝", value: '"Yu Mincho", "Hiragino Mincho ProN", serif' },
   ];
 
   async function save() {
@@ -54,10 +33,7 @@
       await app.setUiPrefs({
         ...app.ui,
         defaultColumnWidth: w,
-        fontFamily,
         uiMode,
-        emojiStyle,
-        mfmAnimationEnabled,
         gapFillLimit: gapLimit,
         mediaThumbnailHeight: thumbHeight,
       });
@@ -70,7 +46,7 @@
   }
 </script>
 
-<h3 class="mb-3.5 mt-0 text-base font-semibold">表示</h3>
+<h3 class="mb-3.5 mt-0 text-base font-semibold">レイアウト</h3>
 
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">UIモード</span>
@@ -94,6 +70,7 @@
 </label>
 <p class="mb-4 mt-0 text-xs text-muted-foreground">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
 
+<!-- 起動時のギャップ埋めは本来「データ」寄りの設定(#212で移動を検討中)だが、今回のスコープでは現状維持。 -->
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">起動時のギャップ埋め(件, 0〜1000。0で無効)</span>
   <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
@@ -110,72 +87,6 @@
 <p class="mb-4 mt-0 text-xs text-muted-foreground">
   ノートに添付された画像/動画のサムネイル最大高さです。小さくするとノートを詰めて表示でき、
   大きくすると画像を大きく見られます。
-</p>
-
-<div class="mb-3 flex flex-col gap-1.5 text-sm">
-  <span class="text-muted-foreground">絵文字のスタイル</span>
-  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
-    {#each emojiStyles as s (s.id)}
-      <button
-        type="button"
-        class={emojiStyle === s.id
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
-        onclick={() => (emojiStyle = s.id)}
-      >
-        {#if emojiPreviewUrl(s.id)}
-          <img class="mr-1 h-[1.2em] w-[1.2em] object-contain align-[-0.25em]" src={emojiPreviewUrl(s.id)} alt="" />
-        {/if}
-        {s.label}
-      </button>
-    {/each}
-  </div>
-  <p class="mb-4 mt-0 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-    Unicode絵文字(リアクション等)の見た目です。プレビュー:
-    {#each ["😺", "👍", "🎉"] as c}
-      {#if emojiPreviewUrl(emojiStyle)}
-        <img class="h-[1.3em] w-[1.3em] object-contain" src={unicodeEmojiUrl(c, emojiStyle) ?? undefined} alt={c} />
-      {:else}
-        {c}
-      {/if}
-    {/each}
-  </p>
-</div>
-
-<label class="mb-2 flex items-center gap-2 text-sm"
-  ><input type="checkbox" bind:checked={mfmAnimationEnabled} /> MFMアニメーション($[shake]等)を有効にする</label
->
-<p class="mb-4 mt-0 text-xs text-muted-foreground">
-  他人の投稿に含まれる装飾($[shake]/$[spin]/$[rainbow]等)のアニメーション表示です。
-  環境によってはこの描画コストが高く、CPU使用率が上がることがあります
-  (Linux/Wayland環境で特に発生しやすい既知の問題です)。気になる場合はOFFにしてください
-  (静的な装飾は残ります)。
-</p>
-
-<div class="mb-3 flex flex-col gap-1.5 text-sm">
-  <span class="text-muted-foreground">フォント</span>
-  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
-    {#each fontPresets as p (p.value)}
-      <button
-        type="button"
-        class={fontFamily === p.value
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
-        onclick={() => (fontFamily = p.value)}
-      >
-        {p.label}
-      </button>
-    {/each}
-  </div>
-  <input
-    type="text"
-    class="mt-1.5 w-full rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground"
-    placeholder='CSS の font-family 値(例: "Noto Sans JP", sans-serif)'
-    bind:value={fontFamily}
-  />
-</div>
-<p class="mb-4 mt-0 text-xs text-muted-foreground" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
-  プレビュー: あいうえお ABCDEFG 123
 </p>
 
 <div class="flex items-center justify-end gap-3">
