@@ -15,6 +15,7 @@
   import { app } from "../lib/store.svelte";
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
+  import { handleNyaizeCopy } from "../lib/nyaizeCopy";
   import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail, MoreHorizontal } from "@lucide/svelte";
   import { openProfile } from "../lib/profileModal.svelte";
 
@@ -326,7 +327,7 @@
 
       {#if inner.cw}
         <div class="mt-0.5">
-          <span class="text-sm [-webkit-user-select:text] select-text"><Mfm text={inner.cw} emojis={emojiMap} nyaize={inner.user.isCat} /></span>
+          <span class="text-sm [-webkit-user-select:text] select-text" oncopy={handleNyaizeCopy}><Mfm text={inner.cw} emojis={emojiMap} nyaize={inner.user.isCat} /></span>
           <button type="button" class="cw-toggle ml-2 rounded-md border border-border px-2 py-px text-sm text-foreground" onclick={() => (cwOpen = !cwOpen)}>
             {cwOpen ? "隠す" : `続きを見る${inner.text ? "" : ""}`}
           </button>
@@ -335,7 +336,7 @@
 
       {#if !inner.cw || cwOpen}
         {#if inner.text}
-          <div class="mt-px whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text"><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
+          <div class="mt-px whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text" oncopy={handleNyaizeCopy}><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
         {/if}
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
