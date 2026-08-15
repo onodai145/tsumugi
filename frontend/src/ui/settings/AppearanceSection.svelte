@@ -213,7 +213,7 @@
   }
 </script>
 
-<h3 class="mb-3.5 mt-0 text-base font-semibold">テーマ</h3>
+<h3 class="mb-3.5 mt-0 text-base font-semibold">外観</h3>
 
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">テーマ</span>
