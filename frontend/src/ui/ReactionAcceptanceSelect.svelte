@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ReactionAcceptanceInput } from "../bindings/tauri.gen";
   import { Button } from "$lib/components/ui/button";
+  import { SmilePlus } from "@lucide/svelte";
 
   let {
     value = $bindable(),
@@ -56,7 +57,7 @@
   onclick={toggle}
   title={`リアクション受け入れ: ${current.label}`}
   bind:ref={trigger}
-><span class="whitespace-nowrap">{current.label}</span><span class="flex-none text-[0.7rem] text-muted-foreground">▾</span></Button>
+><span class="inline-flex flex-none"><SmilePlus size={16} /></span><span class="whitespace-nowrap">{current.label}</span><span class="flex-none text-[0.7rem] text-muted-foreground">▾</span></Button>
 
 {#if open && pos}
   <!-- svelte-ignore a11y_click_events_have_key_events -->

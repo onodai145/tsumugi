@@ -189,3 +189,7 @@ git add frontend/src/ui/ReactionAcceptanceSelect.svelte docs/superpowers/specs/2
 git commit -m "fix: リアクション受け入れ選択肢の文言をMisskey本家に揃える"
 git push
 ```
+
+- [x] **Step 5: ボタンに文脈を示すアイコンを付ける**
+
+「全て」等のラベル単体では何の設定か分かりづらいという指摘を受け、`VisibilitySelect.svelte` と同様にトリガーボタンへアイコンを先頭に追加し、一目でリアクション関連の設定と分かるようにする。アイコンは `NoteCard.svelte`(リアクション数表示)・`ComposeBar.svelte`(絵文字挿入ボタン)で既に使われている `@lucide/svelte` の `SmilePlus` を採用し、アプリ内の「リアクション」を表すアイコンと統一する。
