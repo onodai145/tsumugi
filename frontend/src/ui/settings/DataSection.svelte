@@ -43,6 +43,8 @@
   }
 </script>
 
+<h3 class="mb-3.5 mt-0 text-base font-semibold">データ</h3>
+
 <h4 class="mb-2 mt-0 text-sm font-semibold text-muted-foreground">ノートキャッシュ</h4>
 
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
