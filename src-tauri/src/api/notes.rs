@@ -39,6 +39,13 @@ pub struct NoteDraft {
     pub channel_id: Option<String>,
     #[serde(default)]
     pub local_only: bool,
+    /// `All`（既定）はフィールドごと省略し、Misskey 側のデフォルト（`null`＝全員）に委ねる。
+    #[serde(skip_serializing_if = "reaction_acceptance_is_default")]
+    pub reaction_acceptance: Option<ReactionAcceptanceInput>,
+}
+
+fn reaction_acceptance_is_default(v: &Option<ReactionAcceptanceInput>) -> bool {
+    matches!(v, None | Some(ReactionAcceptanceInput::All))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Default, PartialEq)]
@@ -50,6 +57,18 @@ pub enum VisibilityInput {
     Followers,
     /// direct（Misskey では specified）
     Specified,
+}
+
+/// `notes/create` の `reactionAcceptance`。`All` は送信時 `null` 相当（フィールド省略）として扱う。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReactionAcceptanceInput {
+    #[default]
+    All,
+    LikeOnly,
+    LikeOnlyForRemote,
+    NonSensitiveOnly,
+    NonSensitiveOnlyForLocalLikeOnlyForRemote,
 }
 
 impl From<VisibilityInput> for Visibility {
@@ -233,6 +252,29 @@ mod tests {
         assert_eq!(v["text"], "nice");
         assert_eq!(v["renoteId"], "n1");
         assert_eq!(v["visibility"], "public");
+    }
+
+    #[test]
+    fn reaction_acceptance_omitted_by_default() {
+        let d = NoteDraft {
+            text: Some("hi".into()),
+            visibility: VisibilityInput::Public,
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&d).unwrap();
+        assert!(v.get("reactionAcceptance").is_none());
+    }
+
+    #[test]
+    fn reaction_acceptance_serializes_non_default_choice() {
+        let d = NoteDraft {
+            text: Some("hi".into()),
+            visibility: VisibilityInput::Public,
+            reaction_acceptance: Some(ReactionAcceptanceInput::LikeOnly),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&d).unwrap();
+        assert_eq!(v["reactionAcceptance"], "likeOnly");
     }
 
     #[test]

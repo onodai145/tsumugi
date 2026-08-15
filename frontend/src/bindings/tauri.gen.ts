@@ -537,6 +537,8 @@ export type NoteDraft_Deserialize = {
 	renoteId: string | null,
 	channelId: string | null,
 	localOnly?: boolean,
+	/**  `All`（既定）はフィールドごと省略し、Misskey 側のデフォルト（`null`＝全員）に委ねる。 */
+	reactionAcceptance: ReactionAcceptanceInput | null,
 };
 
 /**  `notes/create` 等の入力。フロントの NoteDraft をそのまま受ける想定。 */
@@ -550,6 +552,8 @@ export type NoteDraft_Serialize = {
 	renoteId?: string | null,
 	channelId?: string | null,
 	localOnly: boolean,
+	/**  `All`（既定）はフィールドごと省略し、Misskey 側のデフォルト（`null`＝全員）に委ねる。 */
+	reactionAcceptance?: ReactionAcceptanceInput | null,
 };
 
 export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };
@@ -626,6 +630,9 @@ export type PollInput_Serialize = {
 	multiple: boolean,
 	expiresAt?: number | null,
 };
+
+/**  `notes/create` の `reactionAcceptance`。`All` は送信時 `null` 相当（フィールド省略）として扱う。 */
+export type ReactionAcceptanceInput = "all" | "likeOnly" | "likeOnlyForRemote" | "nonSensitiveOnly" | "nonSensitiveOnlyForLocalLikeOnlyForRemote";
 
 /**  リアクション付与ユーザー一覧のエントリ（`notes/reactions` のレスポンス正規化後）。 */
 export type ReactionUser = {

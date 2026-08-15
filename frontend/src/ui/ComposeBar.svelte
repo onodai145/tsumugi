@@ -3,6 +3,7 @@
   import { Button } from "$lib/components/ui/button";
   import AccountSelect from "./AccountSelect.svelte";
   import VisibilitySelect from "./VisibilitySelect.svelte";
+  import ReactionAcceptanceSelect from "./ReactionAcceptanceSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
   import DrivePicker from "./DrivePicker.svelte";
   import Modal from "./Modal.svelte";
@@ -21,6 +22,7 @@
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
+    ReactionAcceptanceInput,
     DriveFile,
     Note,
     SourceItem,
@@ -58,6 +60,7 @@
       : channels.map((c) => ({ value: c.id, label: c.name || c.id })),
   );
   let localOnly = $state(false);
+  let reactionAcceptance = $state<ReactionAcceptanceInput>("all");
   const MAX_POLL_CHOICES = 10;
   let usePoll = $state(false);
   let pollChoices = $state<string[]>(["", ""]);
@@ -460,6 +463,7 @@
         renoteId: quoteOf?.id ?? null,
         channelId: useChannel && channelId ? channelId : null,
         localOnly: useChannel || localOnly,
+        reactionAcceptance,
       };
       await app.postNote(accountId, draft);
       text = "";
@@ -473,6 +477,7 @@
       pollAfterAmount = 1;
       pollAfterUnit = "hour";
       localOnly = false;
+      reactionAcceptance = "all";
       useChannel = false;
       channelId = "";
       attachments = [];
@@ -727,6 +732,7 @@
       <Button type="button" variant="outline" size="sm" class={useCw ? "border-primary text-primary" : ""} onclick={() => (useCw = !useCw)}>CW</Button>
       <Button type="button" variant="outline" size="sm" class={usePoll ? "border-primary text-primary" : ""} onclick={() => (usePoll = !usePoll)}>投票</Button>
       <Button type="button" variant="outline" size="sm" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
+      <ReactionAcceptanceSelect bind:value={reactionAcceptance} />
       {#if useChannel}
         {#if channelsLoading}
           <span class="flex-none whitespace-nowrap text-sm text-muted-foreground">読み込み中…</span>
