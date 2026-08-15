@@ -69,8 +69,8 @@
 {#if files.length > 0}
   <div
     class={files.length === 1
-      ? "mt-2 grid grid-cols-1 gap-1 overflow-hidden rounded-[5px]"
-      : "mt-2 grid grid-cols-2 gap-1 overflow-hidden rounded-[5px]"}
+      ? "mt-2 grid grid-cols-1 gap-1 overflow-hidden rounded-md"
+      : "mt-2 grid grid-cols-2 gap-1 overflow-hidden rounded-md"}
     bind:this={gridEl}
   >
     {#each files as f (f.id)}

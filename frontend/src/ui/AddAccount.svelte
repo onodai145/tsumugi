@@ -55,7 +55,7 @@
   }
 </script>
 
-<div class="mx-auto my-12 max-w-[420px] rounded-[14px] border border-border bg-background p-6">
+<div class="mx-auto my-12 max-w-[420px] rounded-xl border border-border bg-background p-6">
   <div class="mb-2 flex items-center justify-between">
     <h2 class="m-0 text-[1.1rem]">
       {reauthAccount

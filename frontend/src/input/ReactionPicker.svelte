@@ -80,7 +80,7 @@
   }
 </script>
 
-<div class="w-[300px] rounded-[10px] border border-border bg-background p-2 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
+<div class="w-[300px] rounded-lg border border-border bg-background p-2 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
   <input class="mb-1.5 box-border w-full rounded-md border border-border bg-muted px-2 py-1.5 text-foreground" placeholder="絵文字を検索…" bind:value={query} />
   <div class="max-h-[320px] overflow-y-auto overflow-x-hidden">
     {#if queryLower}

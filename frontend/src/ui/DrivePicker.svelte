@@ -108,7 +108,7 @@
 >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="flex max-h-[78vh] w-[min(520px,92vw)] flex-col rounded-[14px] border border-border bg-background p-4"
+    class="flex max-h-[78vh] w-[min(520px,92vw)] flex-col rounded-xl border border-border bg-background p-4"
     onclick={(e) => e.stopPropagation()}
     role="dialog"
     aria-modal="true"

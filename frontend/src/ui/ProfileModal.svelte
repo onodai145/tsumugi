@@ -148,9 +148,9 @@
     {/if}
     <div class={profile.user.bannerUrl ? "flex items-end gap-2.5 -mt-[22px] pl-1" : "mt-2 flex items-end gap-2.5"}>
       {#if profile.user.avatarUrl}
-        <img class="h-14 w-14 flex-none rounded-[10px] border-2 border-background object-cover" src={profile.user.avatarUrl} alt="" />
+        <img class="h-14 w-14 flex-none rounded-lg border-2 border-background object-cover" src={profile.user.avatarUrl} alt="" />
       {:else}
-        <div class="avatar-ph h-14 w-14 flex-none rounded-[10px] border-2 border-background"></div>
+        <div class="avatar-ph h-14 w-14 flex-none rounded-lg border-2 border-background"></div>
       {/if}
       <div class="flex min-w-0 flex-1 flex-col gap-px">
         <span class="text-[0.95rem] font-semibold"

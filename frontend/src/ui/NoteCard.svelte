@@ -271,7 +271,7 @@
   <div class="flex gap-[7px]">
     {#if inner.user.avatarUrl}
       <img
-        class="h-[34px] w-[34px] flex-none rounded-[5px] object-cover"
+        class="h-[34px] w-[34px] flex-none rounded-md object-cover"
         data-testid="note-avatar"
         src={inner.user.avatarUrl}
         alt=""
@@ -281,7 +281,7 @@
       />
     {:else}
       <div
-        class="avatar h-[34px] w-[34px] flex-none rounded-[5px]"
+        class="avatar h-[34px] w-[34px] flex-none rounded-md"
         data-testid="note-avatar"
         onclick={() => openProfile({ userId: inner.user.id }, accountId)}
         role="button"
@@ -318,7 +318,7 @@
         </span>
         {#if inner.visibility !== "public"}
           {@const VisIcon = VIS_ICON[inner.visibility]}
-          <span class="inline-flex items-center rounded-[3px] border border-border p-0.5 text-[0.76rem] text-muted-foreground" title={VIS_LABEL[inner.visibility]}><VisIcon size={12} /></span>
+          <span class="inline-flex items-center rounded-sm border border-border p-0.5 text-[0.76rem] text-muted-foreground" title={VIS_LABEL[inner.visibility]}><VisIcon size={12} /></span>
         {/if}
       </header>
 
@@ -385,8 +385,8 @@
               <button
                 type="button"
                 class={inner.myReaction === key
-                  ? "reaction mine inline-flex items-center gap-[3px] rounded-[3px] border border-primary px-[7px] py-px text-[0.85rem] text-foreground disabled:cursor-default disabled:opacity-60"
-                  : "reaction inline-flex items-center gap-[3px] rounded-[3px] border border-border px-[7px] py-px text-[0.85rem] text-foreground disabled:cursor-default disabled:opacity-60"}
+                  ? "reaction mine inline-flex items-center gap-[3px] rounded-sm border border-primary px-[7px] py-px text-[0.85rem] text-foreground disabled:cursor-default disabled:opacity-60"
+                  : "reaction inline-flex items-center gap-[3px] rounded-sm border border-border px-[7px] py-px text-[0.85rem] text-foreground disabled:cursor-default disabled:opacity-60"}
                 disabled={!accountId || isRemoteCustomEmoji(key)}
                 aria-label={isRemoteCustomEmoji(key) ? "このインスタンスに無い絵文字のためリアクションできません" : undefined}
                 onclick={() => react(key)}

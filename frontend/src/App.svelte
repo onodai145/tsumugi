@@ -180,7 +180,7 @@
     >
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div
-        class="box-border max-h-[80vh] w-full overflow-y-auto rounded-[14px] border border-border bg-background p-3"
+        class="box-border max-h-[80vh] w-full overflow-y-auto rounded-xl border border-border bg-background p-3"
         onclick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
