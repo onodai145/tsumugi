@@ -45,7 +45,7 @@
 
 <div class="flex flex-col flex-none border-t border-border bg-card">
   {#if open}
-    <div class="h-[min(38vh,320px)] overflow-y-auto border-b border-border bg-background font-mono text-[0.76rem]">
+    <div class="h-[min(38vh,320px)] overflow-y-auto border-b border-border bg-background font-mono text-xs">
       {#if app.logs.length === 0}
         <div class="p-3.5 text-center text-muted-foreground">ログはまだありません</div>
       {:else}
@@ -75,10 +75,11 @@
   {/if}
 
   <div
-    class="flex min-h-6 items-center gap-2 pt-[3px] pr-[max(8px,env(safe-area-inset-right))] pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))] text-[0.76rem]"
+    class="flex min-h-6 items-center gap-2 pt-[3px] pr-[max(8px,env(safe-area-inset-right))] pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))] text-xs"
   >
     <Button variant="outline" size="xs" onclick={() => (open = !open)} title="操作ログ (Backstage)">
       {#if open}<ChevronDown size={13} />{:else}<ChevronUp size={13} />{/if} ログ
+      <!-- text-[0.68rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。極小バッジのため例外的に即値を維持。 -->
       {#if errorCount > 0}<span class="rounded-lg bg-destructive px-[5px] text-[0.68rem] leading-[1.4] text-white">{errorCount}</span>{/if}
     </Button>
     <div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden whitespace-nowrap" data-level={latest?.level ?? "info"}>

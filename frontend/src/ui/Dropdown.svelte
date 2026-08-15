@@ -47,6 +47,7 @@
 
 <Button type="button" variant="outline" size="sm" class="w-full justify-between" onclick={toggle} bind:ref={trigger}>
   <span class={current ? "overflow-hidden text-ellipsis whitespace-nowrap" : "overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground"}>{current?.label ?? placeholder}</span>
+  <!-- text-[0.7rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。小さめのシェブロンのため例外的に即値を維持。 -->
   <span class="flex-none text-[0.7rem] text-muted-foreground">▾</span>
 </Button>
 
@@ -67,8 +68,8 @@
         <button
           type="button"
           class={o.value === value
-            ? "active block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.85rem] text-foreground hover:bg-muted"
-            : "block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-[0.85rem] text-foreground hover:bg-muted"}
+            ? "active block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"
+            : "block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"}
           onclick={() => choose(o.value)}
         >
           {o.label}

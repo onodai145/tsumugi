@@ -60,7 +60,7 @@
   title={`公開範囲: ${current.label}`}
   bind:ref={trigger}
   disabled={disabled}
-><span class="inline-flex flex-none"><current.icon size={14} /></span><span class="whitespace-nowrap">{current.label}</span><span class="flex-none text-[0.7rem] text-muted-foreground">▾</span></Button>
+><!-- text-[0.7rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。小さめのシェブロンのため例外的に即値を維持。 --><span class="inline-flex flex-none"><current.icon size={14} /></span><span class="whitespace-nowrap">{current.label}</span><span class="flex-none text-[0.7rem] text-muted-foreground">▾</span></Button>
 
 {#if open && pos}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -85,8 +85,8 @@
         >
           <span class="inline-flex flex-none text-muted-foreground"><o.icon size={16} /></span>
           <span class="flex min-w-0 flex-col">
-            <span class="text-[0.85rem] font-semibold">{o.label}</span>
-            <span class="text-[0.72rem] text-muted-foreground">{o.desc}</span>
+            <span class="text-sm font-semibold">{o.label}</span>
+            <span class="text-xs text-muted-foreground">{o.desc}</span>
           </span>
         </button>
       {/each}

@@ -36,8 +36,8 @@
     <button
       type="button"
       class={i === selectedIndex
-        ? "flex w-full items-center gap-1.5 rounded-md bg-muted px-2 py-[5px] text-left font-[inherit] text-[0.82rem] text-primary"
-        : "flex w-full items-center gap-1.5 rounded-md px-2 py-[5px] text-left font-[inherit] text-[0.82rem] text-foreground"}
+        ? "flex w-full items-center gap-1.5 rounded-md bg-muted px-2 py-[5px] text-left font-[inherit] text-sm text-primary"
+        : "flex w-full items-center gap-1.5 rounded-md px-2 py-[5px] text-left font-[inherit] text-sm text-foreground"}
       role="option"
       aria-selected={i === selectedIndex}
       bind:this={itemEls[i]}

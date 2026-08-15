@@ -176,8 +176,8 @@
 {#if mode === "query"}
   <textarea
     class={invalid
-      ? 'rounded-lg border border-destructive bg-muted px-2.5 py-2 font-[ui-monospace,"Cascadia_Code","SF_Mono",monospace] text-[0.82rem] text-foreground resize-y'
-      : 'rounded-lg border border-border bg-muted px-2.5 py-2 font-[ui-monospace,"Cascadia_Code","SF_Mono",monospace] text-[0.82rem] text-foreground resize-y'}
+      ? 'rounded-lg border border-destructive bg-muted px-2.5 py-2 font-[ui-monospace,"Cascadia_Code","SF_Mono",monospace] text-sm text-foreground resize-y'
+      : 'rounded-lg border border-border bg-muted px-2.5 py-2 font-[ui-monospace,"Cascadia_Code","SF_Mono",monospace] text-sm text-foreground resize-y'}
     {rows}
     {placeholder}
     bind:value

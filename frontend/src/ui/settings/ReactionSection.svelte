@@ -88,7 +88,7 @@
 </script>
 
 <h3 class="mb-1.5 mt-0 text-base font-semibold">リアクション</h3>
-<p class="mb-3.5 mt-0 text-[0.8rem] text-muted-foreground">絵文字ピッカーの「ピン留め」タブに表示する絵文字を編集できます(本家Misskeyのピン留め絵文字に相当)。ドラッグで並べ替えられます。</p>
+<p class="mb-3.5 mt-0 text-sm text-muted-foreground">絵文字ピッカーの「ピン留め」タブに表示する絵文字を編集できます(本家Misskeyのピン留め絵文字に相当)。ドラッグで並べ替えられます。</p>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="list flex flex-wrap items-center gap-2" onpointermove={onPointerMove} onpointerup={onPointerEnd} onpointercancel={onPointerEnd}>
@@ -104,7 +104,7 @@
       <span class="-my-1 flex touch-none cursor-grab items-center justify-center p-2 text-muted-foreground" onpointerdown={(e) => onPointerDown(i, e)} title="ドラッグで並べ替え">
         <GripVertical size={12} />
       </span>
-      <span class="flex text-[1.2rem] leading-none">
+      <span class="flex text-lg leading-none">
         {#if isCustomEmojiKey(key)}
           {#if custom}
             <img class="h-[1.3em] w-[1.3em] object-contain" src={custom.url} alt={key} />
@@ -123,7 +123,7 @@
   </button>
 </div>
 {#if pinned.length === 0}
-  <p class="mb-3.5 mt-0 text-[0.8rem] text-muted-foreground">ピン留めがありません。「＋」から追加できます。</p>
+  <p class="mb-3.5 mt-0 text-sm text-muted-foreground">ピン留めがありません。「＋」から追加できます。</p>
 {/if}
 
 {#if picking}
@@ -131,4 +131,4 @@
     <ReactionPicker {accountId} showPinned={false} onpick={add} />
   </div>
 {/if}
-{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
+{#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}

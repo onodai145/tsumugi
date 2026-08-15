@@ -38,7 +38,7 @@
 <h3 class="mb-3.5 mt-0 text-base font-semibold">アカウント</h3>
 
 {#if app.accounts.length === 0}
-  <p class="mb-3.5 mt-0 text-[0.76rem] text-muted-foreground">ログイン中のアカウントはありません。</p>
+  <p class="mb-3.5 mt-0 text-xs text-muted-foreground">ログイン中のアカウントはありません。</p>
 {:else}
   <ul class="m-0 mb-3 flex list-none flex-col gap-1.5 p-0">
     {#each app.accounts as a (a.id)}
@@ -49,11 +49,12 @@
           <div class="grid h-[34px] w-[34px] flex-none place-items-center rounded-lg bg-accent font-bold text-muted-foreground">{(a.displayName || a.username).charAt(0)}</div>
         {/if}
         <div class="min-w-0 flex-1">
-          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.86rem] font-semibold">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge ml-1.5 rounded px-1.5 py-px text-[0.68rem] font-semibold text-primary">既定</span>{/if}</div>
-          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[0.76rem] text-muted-foreground">@{a.username}@{a.host}</div>
+          <!-- text-[0.68rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。極小バッジのため例外的に即値を維持。 -->
+          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge ml-1.5 rounded px-1.5 py-px text-[0.68rem] font-semibold text-primary">既定</span>{/if}</div>
+          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">@{a.username}@{a.host}</div>
         </div>
         {#if confirmId === a.id}
-          <div class="flex flex-none items-center gap-1.5 text-[0.78rem] text-muted-foreground">
+          <div class="flex flex-none items-center gap-1.5 text-sm text-muted-foreground">
             <span>削除？</span>
             <Button type="button" variant="destructive" size="xs" disabled={busyId === a.id} onclick={() => remove(a.id)}>
               {busyId === a.id ? "…" : "はい"}
@@ -72,14 +73,14 @@
   </ul>
 {/if}
 
-<p class="mb-3.5 mt-0 text-[0.76rem] text-muted-foreground">
+<p class="mb-3.5 mt-0 text-xs text-muted-foreground">
   アカウントを削除すると、そのアカウントのカラム(タブ)も表示されなくなり、保存済みトークンは keyring から破棄されます。
 </p>
 
 <div class="flex justify-start">
   <Button type="button" variant="outline" class="border-primary text-primary hover:text-primary" onclick={onAddAccount}>＋ アカウントを追加</Button>
 </div>
-{#if err}<p class="mt-2 mb-0 text-[0.82rem] text-destructive">{err}</p>{/if}
+{#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
 
 <style>
   .default-badge {

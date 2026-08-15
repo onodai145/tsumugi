@@ -363,32 +363,32 @@
 </script>
 
 <Modal title={isEdit ? "タブを編集" : groupId ? "タブを追加" : "カラムを追加"} {onclose}>
-  <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+  <div class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">入力方法</span>
     <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
       <button
         type="button"
         class={uiMode === "guided"
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground"}
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground"}
         onclick={() => (uiMode = "guided")}
       >簡単</button>
       <button
         type="button"
         class={uiMode === "expert"
-          ? "bg-primary px-3.5 py-1.5 text-[0.82rem] text-primary-foreground"
-          : "bg-muted px-3.5 py-1.5 text-[0.82rem] text-foreground"}
+          ? "bg-primary px-3.5 py-1.5 text-sm text-primary-foreground"
+          : "bg-muted px-3.5 py-1.5 text-sm text-foreground"}
         onclick={switchToExpert}
       >エキスパート(TQL)</button>
     </div>
   </div>
 
-  <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+  <div class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">アカウント{isEdit ? "（変更不可）" : ""}</span>
     <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel disabled={isEdit} />
   </div>
 
-  <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+  <label class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">名前（空欄で自動）</span>
     <input
       class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
@@ -398,7 +398,7 @@
   </label>
 
   {#if uiMode === "expert"}
-    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <label class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">from ... where ...（複数ソースはカンマ区切り。例: from home, list("id") where has_files）</span>
       <TqlCompletionField
         mode="query"
@@ -412,8 +412,8 @@
         {channels}
       />
     </label>
-    {#if tqlErr}<p class="mb-0 mt-2 text-[0.82rem] text-destructive break-words">TQLエラー: {tqlErr}</p>{/if}
-    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">
+    {#if tqlErr}<p class="mb-0 mt-2 text-sm text-destructive break-words">TQLエラー: {tqlErr}</p>{/if}
+    <p class="mb-2 mt-0 text-xs text-muted-foreground">
       ソース: <code class="rounded bg-accent px-1">home</code> / <code class="rounded bg-accent px-1">local</code> / <code class="rounded bg-accent px-1">hybrid</code> / <code class="rounded bg-accent px-1">global</code> /
       <code class="rounded bg-accent px-1">list("id")</code> / <code class="rounded bg-accent px-1">antenna("id")</code> / <code class="rounded bg-accent px-1">channel("id")</code> /
       <code class="rounded bg-accent px-1">user("@acct")</code> / <code class="rounded bg-accent px-1">tag("name")</code> / <code class="rounded bg-accent px-1">search("q")</code> /
@@ -422,46 +422,46 @@
   {/if}
 
   {#if uiMode === "guided"}
-  <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+  <div class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">ソース</span>
     <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} />
   </div>
 
   {#if sourceType === "list"}
-    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <div class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">リスト</span>
       {#if lists.length > 0}
         <Dropdown bind:value={listId} options={lists.map((l) => ({ value: l.id, label: l.name || l.id }))} />
       {:else}
-        <span class="text-[0.75rem] text-muted-foreground">リストがありません（Misskey 側で作成してください）</span>
+        <span class="text-xs text-muted-foreground">リストがありません（Misskey 側で作成してください）</span>
       {/if}
     </div>
   {/if}
 
   {#if sourceType === "antenna"}
-    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <div class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">アンテナ</span>
       {#if antennas.length > 0}
         <Dropdown bind:value={antennaId} options={antennas.map((a) => ({ value: a.id, label: a.name || a.id }))} />
       {:else}
-        <span class="text-[0.75rem] text-muted-foreground">アンテナがありません（Misskey 側で作成してください）</span>
+        <span class="text-xs text-muted-foreground">アンテナがありません（Misskey 側で作成してください）</span>
       {/if}
     </div>
   {/if}
 
   {#if sourceType === "channel"}
-    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <div class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">チャンネル（フォロー中）</span>
       {#if channels.length > 0}
         <Dropdown bind:value={channelId} options={channels.map((c) => ({ value: c.id, label: c.name || c.id }))} />
       {:else}
-        <span class="text-[0.75rem] text-muted-foreground">フォロー中のチャンネルがありません</span>
+        <span class="text-xs text-muted-foreground">フォロー中のチャンネルがありません</span>
       {/if}
     </div>
   {/if}
 
   {#if sourceType === "user"}
-    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <label class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">ユーザ（@user@host。ローカルは @host 省略可）</span>
       <input
         class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
@@ -472,7 +472,7 @@
   {/if}
 
   {#if sourceType === "tag"}
-    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <label class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">ハッシュタグ（# は省略可）</span>
       <input
         class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
@@ -483,7 +483,7 @@
   {/if}
 
   {#if sourceType === "search"}
-    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <label class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">検索語</span>
       <input
         class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
@@ -494,13 +494,13 @@
   {/if}
 
   {#if sourceType !== "search" && sourceType !== "user" && sourceType !== "tag"}
-    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <div class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">このタブの通知</span>
-      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
-      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
+      <label class="flex items-center gap-1.5 text-sm"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
+      <label class="flex items-center gap-1.5 text-sm"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
     </div>
     {#if notifySound}
-      <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <div class="mb-2.5 flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">通知音の種類</span>
         <Dropdown bind:value={soundMode} options={soundModeOptions} />
         {#if soundMode === "custom"}
@@ -517,16 +517,16 @@
         {/if}
       </div>
     {/if}
-    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">
+    <p class="mb-2 mt-0 text-xs text-muted-foreground">
       {sourceType === "notifications" ? "通知カラムへの新着" : "このタブに新着ノート"}が届いたら発火します。
       設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。
     </p>
   {:else}
-    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">このソースはライブ更新（ストリーミング）に対応していないため通知は鳴りません。</p>
+    <p class="mb-2 mt-0 text-xs text-muted-foreground">このソースはライブ更新（ストリーミング）に対応していないため通知は鳴りません。</p>
   {/if}
 
   {#if sourceType !== "notifications"}
-    <label class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <label class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">フィルタ（TQL・空欄で全件）</span>
       <TqlCompletionField
         mode="predicate"
@@ -536,22 +536,22 @@
         oninput={onFilterInput}
       />
     </label>
-    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">
+    <p class="mb-2 mt-0 text-xs text-muted-foreground">
       例: <code class="rounded bg-accent px-1">has_files</code> / <code class="rounded bg-accent px-1">!bot && local</code> /
       <code class="rounded bg-accent px-1">reactions &gt;= 10</code> / <code class="rounded bg-accent px-1">text -&gt; "rust"</code>
     </p>
-    {#if filterErr}<p class="mb-0 mt-2 text-[0.82rem] text-destructive break-words">TQLエラー: {filterErr}</p>{/if}
+    {#if filterErr}<p class="mb-0 mt-2 text-sm text-destructive break-words">TQLエラー: {filterErr}</p>{/if}
   {/if}
   {/if}
 
   {#if uiMode === "expert"}
-    <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+    <div class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">このタブの通知</span>
-      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
-      <label class="flex items-center gap-1.5 text-[0.85rem]"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
+      <label class="flex items-center gap-1.5 text-sm"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
+      <label class="flex items-center gap-1.5 text-sm"><input type="checkbox" bind:checked={notifySound} /> 通知音</label>
     </div>
     {#if notifySound}
-      <div class="mb-2.5 flex flex-col gap-1 text-[0.85rem]">
+      <div class="mb-2.5 flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">通知音の種類</span>
         <Dropdown bind:value={soundMode} options={soundModeOptions} />
         {#if soundMode === "custom"}
@@ -568,7 +568,7 @@
         {/if}
       </div>
     {/if}
-    <p class="mb-2 mt-0 text-[0.75rem] text-muted-foreground">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
+    <p class="mb-2 mt-0 text-xs text-muted-foreground">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
   {/if}
 
   <div class="mt-1.5 flex justify-end">
@@ -576,5 +576,5 @@
       {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
     </Button>
   </div>
-  {#if submitErr}<p class="mb-0 mt-2 text-[0.82rem] text-destructive break-words">{submitErr}</p>{/if}
+  {#if submitErr}<p class="mb-0 mt-2 text-sm text-destructive break-words">{submitErr}</p>{/if}
 </Modal>

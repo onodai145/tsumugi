@@ -70,7 +70,7 @@
 </script>
 
 <article class="border-b border-border px-3 py-2 [content-visibility:auto] [contain-intrinsic-size:auto_80px]">
-  <div class="flex items-center gap-2 text-[0.86rem]">
+  <div class="flex items-center gap-2 text-sm">
     <span class="inline-flex flex-none text-muted-foreground"><IconComp size={15} /></span>
     {#if n.user?.avatarUrl}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -104,7 +104,7 @@
         </span>
       {/if}
     </span>
-    <span class="text-[0.78rem] text-muted-foreground">{relativeTime(n.createdAt)}</span>
+    <span class="text-sm text-muted-foreground">{relativeTime(n.createdAt)}</span>
   </div>
   {#if n.note}
     <div class="ml-[30px]" data-testid="notification-note-preview">
