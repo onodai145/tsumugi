@@ -35,9 +35,11 @@
 <!-- Backstage.svelte(ログバー)と隣接して並ぶため、そのバーの外枠(border-t/bg-card)と
      高さ(min-h-6 + pt-[3px] pb-[max(3px,env(safe-area-inset-bottom))])を正確に揃える
      （揃っていないと横並びflex行のalign-items:stretchでBackstage側に余白ができる）。
+     self-endで行の下端に固定：Backstageはログ展開時に上へ可変長のログ一覧が伸び、
+     下部バー自身は常に下端にあるため、AppMenu側も下端に揃えないと展開のたびにボタン位置がずれる。
      Backstage.svelte自体はログ専用の責務を保つため変更しない。 -->
 <div
-  class="flex min-h-6 flex-none items-center border-t border-border bg-card pt-[3px] pr-1 pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))]"
+  class="flex min-h-6 flex-none items-center self-end border-t border-border bg-card pt-[3px] pr-1 pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))]"
 >
   <Button type="button" variant="ghost" size="icon-xs" onclick={toggle} bind:ref={trigger} title="メニュー">
     <Menu size={16} />
