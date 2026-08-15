@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Goal:** 投稿バーから Misskey の `notes/create` `reactionAcceptance`（全員/いいねのみ/いいねのみ(リモート)/非センシティブのみ/非センシティブ(ローカル)+いいねのみ(リモート)）を選べるようにする(Issue #169)。
+**Goal:** 投稿バーから Misskey の `notes/create` `reactionAcceptance`（全て/いいねのみ/全て(リモートはいいねのみ)/非センシティブのみ/非センシティブのみ(リモートはいいねのみ)）を選べるようにする(Issue #169)。ラベル文言は Misskey 本家 `locales/ja-JP.yml` に揃える。
 
 **Architecture:** `src-tauri/src/api/notes.rs` の `NoteDraft` に `reaction_acceptance: Option<ReactionAcceptanceInput>` を追加し、既定(`All`)は `skip_serializing_if` でフィールドごと省略して Misskey 側のデフォルト(`null`＝全員)に委ねる。フロントは `VisibilitySelect.svelte` と同じ構造の新規 `ReactionAcceptanceSelect.svelte` を追加し、`ComposeBar.svelte` の CW/投票/チャンネル ボタン列に配置する。表示側(`NoteCard` 等)への反映は行わない(投稿時のみの設定)。
 
@@ -114,7 +114,7 @@ Expected: `frontend/src/bindings/tauri.gen.ts` に `ReactionAcceptanceInput` 型
 
 - [x] **Step 1: `ReactionAcceptanceSelect.svelte` を作成**
 
-`VisibilitySelect.svelte` と同じ portal メニュー構造で、5択(すべて/いいねのみ/いいねのみ(リモート)/非センシティブ絵文字のみ/非センシティブ(ローカル)+いいねのみ(リモート))のラベル・説明文を持つコンポーネントを作成する。
+`VisibilitySelect.svelte` と同じ portal メニュー構造で、Misskey 本家 `locales/ja-JP.yml` に揃えた5択(全て/いいねのみ/全て(リモートはいいねのみ)/非センシティブのみ/非センシティブのみ(リモートはいいねのみ))のラベルを持つコンポーネントを作成する。
 
 - [x] **Step 2: `ComposeBar.svelte` に state を追加**
 
@@ -178,4 +178,14 @@ git add -A
 git commit -m "feat: 投稿バーにリアクション受け入れ設定を追加"
 git push -u origin feat/issue-169-reaction-acceptance
 gh pr create --title "feat: 投稿バーにリアクション受け入れ設定を追加" --body "Fixes #169 ..."
+```
+
+- [x] **Step 4: ラベル文言を Misskey 本家に揃える**
+
+`ReactionAcceptanceSelect.svelte` の `OPTIONS` ラベルを独自の日本語訳から Misskey 本家 `locales/ja-JP.yml` の文言(`全て`/`いいねのみ`/`全て (リモートはいいねのみ)`/`非センシティブのみ`/`非センシティブのみ (リモートはいいねのみ)`)へ差し替え。本家に説明文(desc)は無いため、メニュー項目も `Dropdown.svelte` と同じ単一行表示に簡略化。
+
+```bash
+git add frontend/src/ui/ReactionAcceptanceSelect.svelte docs/superpowers/specs/2026-08-15-reaction-acceptance-design.md docs/superpowers/plans/2026-08-15-reaction-acceptance.md
+git commit -m "fix: リアクション受け入れ選択肢の文言をMisskey本家に揃える"
+git push
 ```

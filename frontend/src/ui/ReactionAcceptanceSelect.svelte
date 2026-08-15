@@ -6,16 +6,13 @@
     value = $bindable(),
   }: { value: ReactionAcceptanceInput } = $props();
 
-  const OPTIONS: { v: ReactionAcceptanceInput; label: string; desc: string }[] = [
-    { v: "all", label: "すべて", desc: "誰でもリアクションできます" },
-    { v: "likeOnly", label: "いいねのみ", desc: "いいね♡のみ受け付けます" },
-    { v: "likeOnlyForRemote", label: "いいねのみ（リモート）", desc: "リモートユーザーはいいねのみ" },
-    { v: "nonSensitiveOnly", label: "非センシティブ絵文字のみ", desc: "センシティブな絵文字リアクションを拒否します" },
-    {
-      v: "nonSensitiveOnlyForLocalLikeOnlyForRemote",
-      label: "非センシティブ（ローカル）／いいねのみ（リモート）",
-      desc: "ローカルは非センシティブ絵文字のみ、リモートはいいねのみ",
-    },
+  // ラベルは Misskey 本家 (ja-JP.yml) の文言に揃える。
+  const OPTIONS: { v: ReactionAcceptanceInput; label: string }[] = [
+    { v: "all", label: "全て" },
+    { v: "likeOnly", label: "いいねのみ" },
+    { v: "likeOnlyForRemote", label: "全て (リモートはいいねのみ)" },
+    { v: "nonSensitiveOnly", label: "非センシティブのみ" },
+    { v: "nonSensitiveOnlyForLocalLikeOnlyForRemote", label: "非センシティブのみ (リモートはいいねのみ)" },
   ];
 
   const current = $derived(OPTIONS.find((o) => o.v === value) ?? OPTIONS[0]);
@@ -78,14 +75,11 @@
         <button
           type="button"
           class={o.v === value
-            ? "active flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-[inherit] text-foreground hover:bg-muted"
-            : "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-[inherit] text-foreground hover:bg-muted"}
+            ? "active block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"
+            : "block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"}
           onclick={() => choose(o.v)}
         >
-          <span class="flex min-w-0 flex-col">
-            <span class="text-sm font-semibold">{o.label}</span>
-            <span class="text-xs text-muted-foreground">{o.desc}</span>
-          </span>
+          {o.label}
         </button>
       {/each}
     </div>

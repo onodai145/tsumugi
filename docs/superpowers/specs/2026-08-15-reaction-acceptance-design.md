@@ -23,13 +23,14 @@ Misskey の `notes/create` は `reactionAcceptance` フィールドを受け付�
 
 ### フロントエンド
 
-- 新規 `ReactionAcceptanceSelect.svelte`（`VisibilitySelect.svelte` と同じ構造: portal メニュー + `bind:value`）。
+- 新規 `ReactionAcceptanceSelect.svelte`（`VisibilitySelect.svelte` と同じ portal メニュー構造 + `bind:value`。
+  項目ラベルは Misskey 本家 `locales/ja-JP.yml` の文言に揃える）。
   ラベル:
-  - すべて（既定）
+  - 全て（既定）
   - いいねのみ
-  - いいねのみ（リモート）
-  - 非センシティブ絵文字のみ
-  - 非センシティブ（ローカル）/ いいねのみ（リモート）
+  - 全て (リモートはいいねのみ)
+  - 非センシティブのみ
+  - 非センシティブのみ (リモートはいいねのみ)
 - `ComposeBar.svelte`:
   - `reactionAcceptance` state を追加（既定 `"all"`）。
   - CW/投票/チャンネル ボタンの並びに配置。
