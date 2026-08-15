@@ -88,7 +88,7 @@
       ondragend={() => app.endDragGroup()}
       ondblclick={() => onEditGroup(group.id)}
       title="ドラッグでカラムを並べ替え（ダブルクリックでカラム設定）"
-    ><GripVertical size={14} /></span>
+    ><GripVertical size={16} /></span>
 
     {#each group.tabs as t (t.id)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->

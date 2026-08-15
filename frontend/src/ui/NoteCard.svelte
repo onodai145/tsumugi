@@ -255,7 +255,7 @@
 >
   {#if isPureRenote && !hideActionBanner}
     <div class="mb-0.5 inline-flex items-center gap-1 text-xs text-[var(--success)]">
-      <Repeat2 size={13} /> <Mfm
+      <Repeat2 size={12} /> <Mfm
         text={displayName(note.user)}
         emojis={proxiedEmojiMap(note.user.emojis, instanceHost)}
         simple
@@ -264,7 +264,7 @@
   {/if}
   {#if inner.replyId && !hideActionBanner}
     <div class="mb-0.5 inline-flex items-center gap-1 text-xs text-[var(--info)]">
-      <Reply size={13} /> 返信
+      <Reply size={12} /> 返信
     </div>
   {/if}
 
@@ -407,7 +407,7 @@
       {#if effectiveShowActions && accountId}
         <footer class="actions mt-2 flex items-center gap-[14px] text-sm text-muted-foreground">
           <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-1 text-sm leading-none text-muted-foreground" aria-label="返信" onclick={() => app.openCompose(accountId!, { replyTo: inner })}>
-            <Reply size={15} /> {inner.replyCount || ""}
+            <Reply size={16} /> {inner.replyCount || ""}
           </button>
           {#if canRenote}
             <button
@@ -420,13 +420,13 @@
               onmouseenter={(e) => enterHover({ kind: "renote" }, e.currentTarget as HTMLElement)}
               onmouseleave={leaveHover}
             >
-              <Repeat2 size={15} />
+              <Repeat2 size={16} />
               {#if inner.renoteCount > 0}
                 <span>{inner.renoteCount}</span>
               {/if}
             </button>
             <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-1 text-sm leading-none text-muted-foreground" aria-label="引用" onclick={() => app.openCompose(accountId!, { quoteOf: inner })}>
-              <Quote size={15} />
+              <Quote size={16} />
             </button>
           {/if}
           <div class="relative inline-flex h-6 items-center">
@@ -439,7 +439,7 @@
               aria-label="リアクション"
               onclick={togglePicker}
             >
-              <SmilePlus size={15} /> {inner.reactionCount || ""}
+              <SmilePlus size={16} /> {inner.reactionCount || ""}
             </button>
             {#if showPicker && pickerPos}
               <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -471,7 +471,7 @@
                 noteMenuOpen = !noteMenuOpen;
               }}
             >
-              <MoreHorizontal size={15} />
+              <MoreHorizontal size={16} />
             </button>
             {#if noteMenuOpen && noteMenuPos}
               <!-- svelte-ignore a11y_click_events_have_key_events -->

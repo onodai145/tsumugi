@@ -646,7 +646,7 @@
           {:else if failedAttachmentId === a.id}
             <span class="absolute -bottom-1 -left-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-destructive text-[0.6rem] text-white">!</span>
           {/if}
-          <Button type="button" variant="ghost" size="icon-xs" class="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-black/60 text-white hover:bg-black/60" title="削除" onclick={() => removeAttached(a.id)}><X size={10} /></Button>
+          <Button type="button" variant="ghost" size="icon-xs" class="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-black/60 text-white hover:bg-black/60" title="削除" onclick={() => removeAttached(a.id)}><X size={12} /></Button>
         </div>
       {/each}
     </div>

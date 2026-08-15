@@ -121,7 +121,7 @@
     {#if app.accounts.length > 0}
       <Button type="button" variant="outline" size="sm" onclick={openAddColumn}>＋カラム</Button>
       <Button type="button" variant="outline" size="sm" onclick={() => openSettings("accounts")} title="設定">
-        <SettingsIcon size={14} /> 設定
+        <SettingsIcon size={16} /> 設定
       </Button>
     {/if}
   </header>

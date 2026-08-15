@@ -346,7 +346,7 @@
         {@render swatchStrip(p.colors)}
         <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
           {p.name}
-          {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
+          {#if isActive}<Check size={12} class="flex-none text-primary" />{/if}
         </span>
       </button>
     {/each}
@@ -369,17 +369,17 @@
           {@render swatchStrip(t.colors)}
           <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
             {t.name}
-            {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
+            {#if isActive}<Check size={12} class="flex-none text-primary" />{/if}
           </span>
         </button>
         <div class="flex gap-1">
-          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="編集" onclick={() => startEditTheme(t)}><Pencil size={13} /></button>
-          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="削除" onclick={() => removeCustomTheme(t.id)}><Trash2 size={13} /></button>
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="編集" onclick={() => startEditTheme(t)}><Pencil size={12} /></button>
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="削除" onclick={() => removeCustomTheme(t.id)}><Trash2 size={12} /></button>
         </div>
       </div>
     {/each}
   </div>
-  <Button type="button" variant="outline" size="sm" class="mt-2" onclick={startCreateTheme}><Plus size={13} /> 新規作成</Button>
+  <Button type="button" variant="outline" size="sm" class="mt-2" onclick={startCreateTheme}><Plus size={12} /> 新規作成</Button>
 
   {#if editingTheme}
     <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
@@ -393,7 +393,7 @@
       {/each}
       {#if editErr}<p class="mt-2 mb-0 text-sm text-destructive">{editErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onclick={cancelEditTheme}><X size={13} /> キャンセル</Button>
+        <Button type="button" variant="outline" size="sm" onclick={cancelEditTheme}><X size={12} /> キャンセル</Button>
         <Button type="button" size="sm" onclick={saveCustomTheme}>このテーマを保存</Button>
       </div>
     </div>
@@ -412,7 +412,7 @@
     >
       <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
         自動(OSに合わせる)
-        {#if codeHighlightTheme === "auto"}<Check size={13} class="flex-none text-primary" />{/if}
+        {#if codeHighlightTheme === "auto"}<Check size={12} class="flex-none text-primary" />{/if}
       </span>
     </button>
     {#each BUNDLED_SHIKI_THEMES as t (t.id)}
@@ -431,7 +431,7 @@
         </span>
         <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
           {t.label}
-          {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
+          {#if isActive}<Check size={12} class="flex-none text-primary" />{/if}
         </span>
       </button>
     {/each}
@@ -458,17 +458,17 @@
           </span>
           <span class="flex items-center justify-between gap-1 px-2.5 py-[7px]">
             {t.name}
-            {#if isActive}<Check size={13} class="flex-none text-primary" />{/if}
+            {#if isActive}<Check size={12} class="flex-none text-primary" />{/if}
           </span>
         </button>
         <div class="flex gap-1">
-          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="編集" onclick={() => startEditSyntaxTheme(t)}><Pencil size={13} /></button>
-          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="削除" onclick={() => removeCustomSyntaxTheme(t.id)}><Trash2 size={13} /></button>
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="編集" onclick={() => startEditSyntaxTheme(t)}><Pencil size={12} /></button>
+          <button type="button" class="flex flex-1 items-center justify-center rounded-md border border-border bg-muted py-[5px] text-muted-foreground hover:border-primary hover:text-primary" title="削除" onclick={() => removeCustomSyntaxTheme(t.id)}><Trash2 size={12} /></button>
         </div>
       </div>
     {/each}
   </div>
-  <Button type="button" variant="outline" size="sm" class="mt-2" onclick={startCreateSyntaxTheme}><Plus size={13} /> 新規作成</Button>
+  <Button type="button" variant="outline" size="sm" class="mt-2" onclick={startCreateSyntaxTheme}><Plus size={12} /> 新規作成</Button>
 
   {#if editingSyntaxTheme}
     <div class="mt-2.5 flex flex-col gap-2 rounded-lg border border-border bg-muted p-3">
@@ -482,7 +482,7 @@
       {/each}
       {#if syntaxEditErr}<p class="mt-2 mb-0 text-sm text-destructive">{syntaxEditErr}</p>{/if}
       <div class="mt-1 flex justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onclick={cancelEditSyntaxTheme}><X size={13} /> キャンセル</Button>
+        <Button type="button" variant="outline" size="sm" onclick={cancelEditSyntaxTheme}><X size={12} /> キャンセル</Button>
         <Button type="button" size="sm" onclick={saveCustomSyntaxTheme}>このテーマを保存</Button>
       </div>
     </div>
