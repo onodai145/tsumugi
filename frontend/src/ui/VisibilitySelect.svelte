@@ -69,7 +69,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="fixed min-w-[200px] rounded-[10px] border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+      class="fixed min-w-[200px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
       style={`left:${pos.left}px;top:${pos.top}px`}
       onclick={(e) => e.stopPropagation()}
       role="listbox"

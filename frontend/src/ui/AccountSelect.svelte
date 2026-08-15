@@ -73,13 +73,13 @@
         alt=""
         class={large
           ? "size-9 flex-none rounded-lg object-cover"
-          : "size-[22px] flex-none rounded-[5px] object-cover"}
+          : "size-[22px] flex-none rounded-md object-cover"}
       />
     {:else}
       <span
         class={large
           ? "grid size-9 flex-none place-items-center rounded-lg bg-accent text-[1rem] font-bold text-muted-foreground"
-          : "grid size-[22px] flex-none place-items-center rounded-[5px] bg-accent text-[0.7rem] font-bold text-muted-foreground"}
+          : "grid size-[22px] flex-none place-items-center rounded-md bg-accent text-[0.7rem] font-bold text-muted-foreground"}
         >{(selected.displayName || selected.username).charAt(0)}</span
       >
     {/if}
@@ -103,7 +103,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="fixed max-h-[280px] overflow-y-auto rounded-[10px] border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+      class="fixed max-h-[280px] overflow-y-auto rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
       style={`left:${pos.left}px;top:${pos.top}px;min-width:${pos.width}px`}
       onclick={(e) => e.stopPropagation()}
       role="listbox"
@@ -118,10 +118,10 @@
           onclick={() => choose(a.id)}
         >
           {#if a.avatarUrl}
-            <img src={a.avatarUrl} alt="" class="size-7 flex-none rounded-[5px] object-cover" />
+            <img src={a.avatarUrl} alt="" class="size-7 flex-none rounded-md object-cover" />
           {:else}
             <span
-              class="grid size-7 flex-none place-items-center rounded-[5px] bg-accent text-[0.7rem] font-bold text-muted-foreground"
+              class="grid size-7 flex-none place-items-center rounded-md bg-accent text-[0.7rem] font-bold text-muted-foreground"
               >{(a.displayName || a.username).charAt(0)}</span
             >
           {/if}

@@ -387,7 +387,7 @@
       {#each THEME_VAR_KEYS as v (v.key)}
         <div class="flex items-center gap-2">
           <span class="w-20 flex-none text-[0.8rem] text-muted-foreground">{colorLabels[v.key]}</span>
-          <span class="h-[22px] w-[22px] flex-none rounded-[5px] border border-border" style={`background:${editingTheme.colors[v.key]}`}></span>
+          <span class="h-[22px] w-[22px] flex-none rounded-md border border-border" style={`background:${editingTheme.colors[v.key]}`}></span>
           <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-[0.82rem] text-foreground" bind:value={editingTheme.colors[v.key]} />
         </div>
       {/each}
@@ -476,7 +476,7 @@
       {#each SYNTAX_VAR_KEYS as v (v.key)}
         <div class="flex items-center gap-2">
           <span class="w-20 flex-none text-[0.8rem] text-muted-foreground">{syntaxColorLabels[v.key]}</span>
-          <span class="h-[22px] w-[22px] flex-none rounded-[5px] border border-border" style={`background:${editingSyntaxTheme[v.key]}`}></span>
+          <span class="h-[22px] w-[22px] flex-none rounded-md border border-border" style={`background:${editingSyntaxTheme[v.key]}`}></span>
           <input type="text" class="w-[100px] rounded-md border border-border bg-background px-2 py-[5px] font-[ui-monospace,monospace] text-[0.82rem] text-foreground" bind:value={editingSyntaxTheme[v.key]} />
         </div>
       {/each}

@@ -33,7 +33,7 @@
 >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="w-[min(var(--modal-w),92vw)] rounded-[14px] border border-border bg-background p-4"
+    class="w-[min(var(--modal-w),92vw)] rounded-xl border border-border bg-background p-4"
     style={`--modal-w:${width}`}
     bind:this={modalEl}
     onclick={(e) => e.stopPropagation()}

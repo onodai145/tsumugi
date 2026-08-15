@@ -109,7 +109,7 @@
           {#if capturing === a.action}
             <span class="text-[0.8rem] text-primary">キー入力待ち…</span>
           {:else}
-            <kbd class="inline-block rounded-[5px] border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{prettyChord(effectiveChord(a.action, overrides))}</kbd>
+            <kbd class="inline-block rounded-md border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{prettyChord(effectiveChord(a.action, overrides))}</kbd>
             {#if isCustom(a.action)}<span class="ml-1.5 text-[0.68rem] text-primary">変更済</span>{/if}
           {/if}
         </td>
@@ -137,7 +137,7 @@
     <tbody>
       {#each fixed as f (f.combo)}
         <tr>
-          <td class="w-[34%] whitespace-nowrap border-b border-border px-1.5 py-[5px] align-middle"><kbd class="inline-block rounded-[5px] border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{f.combo}</kbd></td>
+          <td class="w-[34%] whitespace-nowrap border-b border-border px-1.5 py-[5px] align-middle"><kbd class="inline-block rounded-md border border-b-2 border-border bg-muted px-[7px] py-0.5 font-[ui-monospace,monospace] text-[0.78rem]">{f.combo}</kbd></td>
           <td class="border-b border-border px-1.5 py-[5px] align-middle text-foreground">{f.desc}</td>
           <td class="w-[22%] whitespace-nowrap border-b border-border px-1.5 py-[5px] text-right align-middle"></td>
         </tr>

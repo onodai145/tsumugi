@@ -57,7 +57,7 @@
 >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="w-[min(360px,92vw)] rounded-[14px] border border-border bg-background p-4"
+    class="w-[min(360px,92vw)] rounded-xl border border-border bg-background p-4"
     onclick={(e) => e.stopPropagation()}
     role="dialog"
     aria-modal="true"
