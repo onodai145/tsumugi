@@ -4,7 +4,6 @@
 
   let width = $state(app.ui.defaultColumnWidth);
   let uiMode = $state(app.ui.uiMode ?? "auto");
-  let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -24,17 +23,14 @@
     try {
       const w = Math.min(720, Math.max(220, Math.round(width) || 300));
       width = w;
-      const gapLimit = Math.min(1000, Math.max(0, Math.round(gapFillLimit) || 0));
-      gapFillLimit = gapLimit;
       const thumbHeight = Math.min(600, Math.max(80, Math.round(mediaThumbnailHeight) || 200));
       mediaThumbnailHeight = thumbHeight;
-      // このセクションが編集しないフィールド(テーマ・背景等)を保存で消さないよう、
+      // このセクションが編集しないフィールド(外観・背景等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
         ...app.ui,
         defaultColumnWidth: w,
         uiMode,
-        gapFillLimit: gapLimit,
         mediaThumbnailHeight: thumbHeight,
       });
       saved = true;
@@ -69,16 +65,6 @@
   <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="220" max="720" step="10" bind:value={width} />
 </label>
 <p class="mb-4 mt-0 text-xs text-muted-foreground">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
-
-<!-- 起動時のギャップ埋めは本来「データ」寄りの設定(#212で移動を検討中)だが、今回のスコープでは現状維持。 -->
-<label class="mb-2.5 flex flex-col gap-1 text-sm">
-  <span class="text-muted-foreground">起動時のギャップ埋め(件, 0〜1000。0で無効)</span>
-  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
-</label>
-<p class="mb-4 mt-0 text-xs text-muted-foreground">
-  アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
-  0にすると従来どおりキャッシュのみ表示します。
-</p>
 
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">メディアサムネイルの高さ上限(px, 80〜600)</span>

@@ -5,6 +5,7 @@
   let noteCacheLimit = $state(app.ui.noteCacheLimit ?? 10000);
   let noteCacheMaxAgeDays = $state(app.ui.noteCacheMaxAgeDays ?? 0);
   let noteCacheMaxSizeMb = $state(app.ui.noteCacheMaxSizeMb ?? 0);
+  let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
   let enableFileLogging = $state(app.ui.enableFileLogging ?? false);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -21,13 +22,16 @@
       noteCacheMaxAgeDays = cacheMaxAge;
       const cacheMaxSize = Math.min(10000, Math.max(0, Math.round(noteCacheMaxSizeMb) || 0));
       noteCacheMaxSizeMb = cacheMaxSize;
-      // このセクションが編集しないフィールド(テーマ等)を保存で消さないよう、
+      const gapLimit = Math.min(1000, Math.max(0, Math.round(gapFillLimit) || 0));
+      gapFillLimit = gapLimit;
+      // このセクションが編集しないフィールド(外観等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
         ...app.ui,
         noteCacheLimit: cacheLimit,
         noteCacheMaxAgeDays: cacheMaxAge,
         noteCacheMaxSizeMb: cacheMaxSize,
+        gapFillLimit: gapLimit,
         enableFileLogging,
       });
       saved = true;
@@ -38,6 +42,8 @@
     }
   }
 </script>
+
+<h4 class="mb-2 mt-0 text-sm font-semibold text-muted-foreground">ノートキャッシュ</h4>
 
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">ノートキャッシュの保持件数上限(件, 0〜100000。0で無制限)</span>
@@ -56,6 +62,17 @@
   超えた分は古い順に自動で削除されます。すべて0にすると無制限に溜め続けます
   (ディスク容量を圧迫する可能性があります)。
 </p>
+
+<label class="mb-2.5 flex flex-col gap-1 text-sm">
+  <span class="text-muted-foreground">起動時のギャップ埋め(件, 0〜1000。0で無効)</span>
+  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
+</label>
+<p class="mb-4 mt-0 text-xs text-muted-foreground">
+  アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
+  0にすると従来どおりキャッシュのみ表示します。
+</p>
+
+<h4 class="mb-2 mt-0 text-sm font-semibold text-muted-foreground">デバッグ</h4>
 
 <label class="mb-2 flex items-center gap-2 text-sm"><input type="checkbox" bind:checked={enableFileLogging} /> 動作ログをファイルに残す(デバッグ用)</label>
 <p class="mb-4 mt-0 text-xs text-muted-foreground">
