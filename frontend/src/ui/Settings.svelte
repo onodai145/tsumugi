@@ -2,7 +2,9 @@
   import type { Account } from "../bindings/tauri.gen";
   import NotifySection from "./settings/NotifySection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
-  import DisplaySection from "./settings/DisplaySection.svelte";
+  import LayoutSection from "./settings/LayoutSection.svelte";
+  import AppearanceSection from "./settings/AppearanceSection.svelte";
+  import BackgroundSection from "./settings/BackgroundSection.svelte";
   import ReactionSection from "./settings/ReactionSection.svelte";
   import DataSection from "./settings/DataSection.svelte";
   import AccountsSection from "./settings/AccountsSection.svelte";
@@ -10,7 +12,7 @@
   import AboutSection from "./settings/AboutSection.svelte";
   import Modal from "./Modal.svelte";
 
-  type Section = "accounts" | "display" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
+  type Section = "accounts" | "layout" | "appearance" | "background" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
 
   let {
     onclose,
@@ -26,7 +28,9 @@
 
   const nav: { id: Section; label: string }[] = [
     { id: "accounts", label: "アカウント" },
-    { id: "display", label: "表示" },
+    { id: "layout", label: "レイアウト" },
+    { id: "appearance", label: "外観" },
+    { id: "background", label: "背景" },
     { id: "reaction", label: "リアクション" },
     { id: "data", label: "データ" },
     { id: "notify", label: "通知" },
@@ -62,8 +66,12 @@
       <section class="min-w-0 flex-1 overflow-y-auto px-5 py-[18px]">
         {#if active === "accounts"}
           <AccountsSection {onAddAccount} {onReauth} />
-        {:else if active === "display"}
-          <DisplaySection />
+        {:else if active === "layout"}
+          <LayoutSection />
+        {:else if active === "appearance"}
+          <AppearanceSection />
+        {:else if active === "background"}
+          <BackgroundSection />
         {:else if active === "reaction"}
           <ReactionSection />
         {:else if active === "data"}

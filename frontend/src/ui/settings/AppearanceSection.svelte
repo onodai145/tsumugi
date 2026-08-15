@@ -1,9 +1,7 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
-  import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import { PRESETS, THEME_VAR_KEYS, SYNTAX_VAR_KEYS } from "../../lib/theme";
-  import { BACKGROUND_FIT_MODE_OPTIONS, type BackgroundFitMode } from "../../lib/backgroundFitMode";
-  import { BACKGROUND_POSITION_GRID, type BackgroundPosition } from "../../lib/backgroundPosition";
+  import { unicodeEmojiUrl, type EmojiStyle } from "../../lib/emoji";
   import type { CustomTheme, ThemeColors, CustomSyntaxTheme } from "../../bindings/tauri.gen";
   import { BUNDLED_SHIKI_THEMES } from "../../lib/shikiThemeList";
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
@@ -11,40 +9,12 @@
 
   let theme = $state(app.ui.theme);
   let codeHighlightTheme = $state(app.ui.codeHighlightTheme ?? "auto");
-  let width = $state(app.ui.defaultColumnWidth);
   let fontFamily = $state(app.ui.fontFamily ?? "");
-  let backgroundImage = $state(app.ui.backgroundImage ?? "");
-  let backgroundDim = $state(app.ui.backgroundDim ?? 0);
-  let backgroundBlur = $state(app.ui.backgroundBlur ?? 0);
-  let columnOpacity = $state(app.ui.columnOpacity ?? 100);
-  let backgroundFitMode = $state<BackgroundFitMode>(
-    (app.ui.backgroundFitMode as BackgroundFitMode) ?? "cover",
-  );
-  let backgroundPosition = $state<BackgroundPosition>(
-    (app.ui.backgroundPosition as BackgroundPosition) ?? "center",
-  );
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let mfmAnimationEnabled = $state(app.ui.mfmAnimationEnabled ?? true);
-  let uiMode = $state(app.ui.uiMode ?? "auto");
-  let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
-  let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
-  let pickingImage = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
-
-  // 背景画像の基準点（9点グリッド、Issue #76）。position→アクセシブルラベル。
-  const positionLabels: Record<BackgroundPosition, string> = {
-    "top-left": "左上",
-    top: "上",
-    "top-right": "右上",
-    left: "左",
-    center: "中央",
-    right: "右",
-    "bottom-left": "左下",
-    bottom: "下",
-    "bottom-right": "右下",
-  };
 
   const themes: { id: string; label: string }[] = [
     { id: "auto", label: "OSに合わせる" },
@@ -52,11 +22,21 @@
     { id: "dark", label: "ダーク" },
   ];
 
-  // 投稿欄の見せ方(常時表示のPC版 or FAB+モーダルのモバイル版)を切り替える(Issue #51)。
-  const uiModes: { id: string; label: string }[] = [
-    { id: "auto", label: "OSに合わせる" },
-    { id: "desktop", label: "PC版" },
-    { id: "mobile", label: "モバイル版" },
+  const emojiStyles: { id: EmojiStyle; label: string }[] = [
+    { id: "twemoji", label: "Twemoji" },
+    { id: "fluentEmoji", label: "Fluent Emoji" },
+    { id: "native", label: "OS標準" },
+  ];
+  function emojiPreviewUrl(style: EmojiStyle): string | null {
+    return unicodeEmojiUrl("😺", style);
+  }
+
+  const fontPresets: { label: string; value: string }[] = [
+    { label: "既定", value: "" },
+    { label: "游ゴシック", value: '"Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif' },
+    { label: "メイリオ", value: "Meiryo, sans-serif" },
+    { label: "等幅", value: 'ui-monospace, "Cascadia Code", "SF Mono", monospace' },
+    { label: "明朝", value: '"Yu Mincho", "Hiragino Mincho ProN", serif' },
   ];
 
   // ---- カスタムテーマ(プリセット + ユーザー作成) ----
@@ -216,71 +196,14 @@
     if (clearing) codeHighlightTheme = "auto";
   }
 
-  const emojiStyles: { id: EmojiStyle; label: string }[] = [
-    { id: "twemoji", label: "Twemoji" },
-    { id: "fluentEmoji", label: "Fluent Emoji" },
-    { id: "native", label: "OS標準" },
-  ];
-  function emojiPreviewUrl(style: EmojiStyle): string | null {
-    return unicodeEmojiUrl("😺", style);
-  }
-
-  const fontPresets: { label: string; value: string }[] = [
-    { label: "既定", value: "" },
-    { label: "游ゴシック", value: '"Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif' },
-    { label: "メイリオ", value: "Meiryo, sans-serif" },
-    { label: "等幅", value: 'ui-monospace, "Cascadia Code", "SF Mono", monospace' },
-    { label: "明朝", value: '"Yu Mincho", "Hiragino Mincho ProN", serif' },
-  ];
-
-  async function pickImage() {
-    err = null;
-    pickingImage = true;
-    try {
-      const url = await app.pickBackgroundImage();
-      if (url) backgroundImage = url;
-    } catch (e) {
-      err = String(e);
-    } finally {
-      pickingImage = false;
-    }
-  }
-
-  function clearImage() {
-    backgroundImage = "";
-  }
-
   async function save() {
     err = null;
     saved = false;
     busy = true;
     try {
-      const w = Math.min(720, Math.max(220, Math.round(width) || 300));
-      width = w;
-      const gapLimit = Math.min(1000, Math.max(0, Math.round(gapFillLimit) || 0));
-      gapFillLimit = gapLimit;
-      const thumbHeight = Math.min(600, Math.max(80, Math.round(mediaThumbnailHeight) || 200));
-      mediaThumbnailHeight = thumbHeight;
-      // このセクションが編集しないフィールド(既定アカウント等)を保存で消さないよう、
+      // このセクションが編集しないフィールド(レイアウト・背景等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
-      await app.setUiPrefs({
-        ...app.ui,
-        theme,
-        codeHighlightTheme,
-        defaultColumnWidth: w,
-        fontFamily,
-        backgroundImage,
-        backgroundDim,
-        backgroundBlur,
-        columnOpacity,
-        backgroundFitMode,
-        backgroundPosition,
-        uiMode,
-        emojiStyle,
-        mfmAnimationEnabled,
-        gapFillLimit: gapLimit,
-        mediaThumbnailHeight: thumbHeight,
-      });
+      await app.setUiPrefs({ ...app.ui, theme, codeHighlightTheme, fontFamily, emojiStyle, mfmAnimationEnabled });
       saved = true;
     } catch (e) {
       err = String(e);
@@ -290,23 +213,7 @@
   }
 </script>
 
-<h3 class="mb-3.5 mt-0 text-base font-semibold">表示</h3>
-
-<div class="mb-3 flex flex-col gap-1.5 text-sm">
-  <span class="text-muted-foreground">UIモード</span>
-  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
-    {#each uiModes as m (m.id)}
-      <button
-        type="button"
-        class={uiMode === m.id
-          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
-          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
-        onclick={() => (uiMode = m.id)}
-      >{m.label}</button>
-    {/each}
-  </div>
-  <p class="mb-4 mt-0 text-xs text-muted-foreground">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
-</div>
+<h3 class="mb-3.5 mt-0 text-base font-semibold">外観</h3>
 
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">テーマ</span>
@@ -489,30 +396,6 @@
   {/if}
 </div>
 
-<label class="mb-2.5 flex flex-col gap-1 text-sm">
-  <span class="text-muted-foreground">新規カラムの既定幅(px, 220〜720)</span>
-  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="220" max="720" step="10" bind:value={width} />
-</label>
-<p class="mb-4 mt-0 text-xs text-muted-foreground">既定幅は次に追加するカラムから適用されます。既存カラムはカラム端のドラッグで個別調整できます。</p>
-
-<label class="mb-2.5 flex flex-col gap-1 text-sm">
-  <span class="text-muted-foreground">起動時のギャップ埋め(件, 0〜1000。0で無効)</span>
-  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="0" max="1000" step="50" bind:value={gapFillLimit} />
-</label>
-<p class="mb-4 mt-0 text-xs text-muted-foreground">
-  アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
-  0にすると従来どおりキャッシュのみ表示します。
-</p>
-
-<label class="mb-2.5 flex flex-col gap-1 text-sm">
-  <span class="text-muted-foreground">メディアサムネイルの高さ上限(px, 80〜600)</span>
-  <input class="w-[140px] rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" type="number" min="80" max="600" step="20" bind:value={mediaThumbnailHeight} />
-</label>
-<p class="mb-4 mt-0 text-xs text-muted-foreground">
-  ノートに添付された画像/動画のサムネイル最大高さです。小さくするとノートを詰めて表示でき、
-  大きくすると画像を大きく見られます。
-</p>
-
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">絵文字のスタイル</span>
   <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
@@ -578,71 +461,6 @@
 <p class="mb-4 mt-0 text-xs text-muted-foreground" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
   プレビュー: あいうえお ABCDEFG 123
 </p>
-
-<div class="mb-3 flex flex-col gap-1.5 text-sm">
-  <span class="text-muted-foreground">背景画像</span>
-  <div class="flex items-center gap-2.5">
-    {#if backgroundImage}
-      <img class="h-9 w-14 rounded-md border border-border object-cover" src={backgroundImage} alt="背景プレビュー" />
-    {/if}
-    <Button type="button" variant="outline" size="sm" disabled={pickingImage} onclick={pickImage}>
-      {pickingImage ? "読み込み中…" : backgroundImage ? "画像を変更" : "画像を選択"}
-    </Button>
-    {#if backgroundImage}
-      <Button type="button" variant="outline" size="sm" onclick={clearImage}>解除</Button>
-    {/if}
-  </div>
-</div>
-
-{#if backgroundImage}
-  <div class="mb-3 flex flex-col gap-1.5 text-sm">
-    <span class="text-muted-foreground">背景画像の配置方法</span>
-    <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
-      {#each BACKGROUND_FIT_MODE_OPTIONS as m (m.value)}
-        <button
-          type="button"
-          class={backgroundFitMode === m.value
-            ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
-            : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
-          onclick={() => (backgroundFitMode = m.value)}
-        >
-          {m.label}
-        </button>
-      {/each}
-    </div>
-  </div>
-  {#if backgroundFitMode !== "fill"}
-    <div class="mb-3 flex flex-col gap-1.5 text-sm">
-      <span class="text-muted-foreground">基準点</span>
-      <div class="grid w-fit grid-cols-[repeat(3,28px)] grid-rows-[repeat(3,28px)] gap-1">
-        {#each BACKGROUND_POSITION_GRID as p (p)}
-          <button
-            type="button"
-            class={backgroundPosition === p
-              ? "h-[28px] w-[28px] rounded border border-primary bg-primary p-0"
-              : "h-[28px] w-[28px] rounded border border-border bg-muted p-0 hover:border-primary"}
-            title={positionLabels[p]}
-            aria-label={positionLabels[p]}
-            onclick={() => (backgroundPosition = p)}
-          ></button>
-        {/each}
-      </div>
-    </div>
-  {/if}
-  <label class="mb-2.5 flex flex-col gap-1 text-sm">
-    <span class="text-muted-foreground">背景の暗さ({backgroundDim}%)</span>
-    <input class="w-full max-w-[320px] accent-primary" type="range" min="0" max="100" step="5" bind:value={backgroundDim} />
-  </label>
-  <label class="mb-2.5 flex flex-col gap-1 text-sm">
-    <span class="text-muted-foreground">背景のぼかし({backgroundBlur}px)</span>
-    <input class="w-full max-w-[320px] accent-primary" type="range" min="0" max="40" step="2" bind:value={backgroundBlur} />
-  </label>
-  <label class="mb-2.5 flex flex-col gap-1 text-sm">
-    <span class="text-muted-foreground">カラムの不透明度({columnOpacity}%)</span>
-    <input class="w-full max-w-[320px] accent-primary" type="range" min="60" max="100" step="5" bind:value={columnOpacity} />
-  </label>
-  <p class="mb-4 mt-0 text-xs text-muted-foreground">数値が低いほど背景画像が透けて見えます。</p>
-{/if}
 
 <div class="flex items-center justify-end gap-3">
   {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}
