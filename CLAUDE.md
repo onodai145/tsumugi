@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 tsumugi: a Misskey multi-column desktop client (Krile-like UX) built on Tauri v2. Rust core (`src-tauri/`) owns all Model-layer logic; the Svelte frontend (`frontend/`) is View/ViewModel only. Design docs live in `docs/design/` — `docs/design/misskey-multicolumn-client-design.md` is the authoritative design doc; if any other doc conflicts with it, the design doc wins. User-facing documentation lives in `docs/guide/user-guide.md`.
 
+Frontend visual conventions (border-radius/font-size/icon-size/focus-visible scales) are codified in `docs/design/style-guide.md` — check it before adding new UI, don't invent one-off values (e.g. `rounded-[Npx]`).
+
 ## Commands
 
 ```sh
