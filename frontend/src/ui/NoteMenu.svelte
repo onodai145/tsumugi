@@ -63,7 +63,7 @@
 
 <div class="w-[200px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
   <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={toggleFavorite}>
-    <Star size={14} />
+    <Star size={16} />
     {note.isFavoritedByMe ? "お気に入り解除" : "お気に入り登録"}
   </button>
 
@@ -71,9 +71,9 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="relative" role="presentation" bind:this={clipRowEl} onmouseenter={openClipSubmenu}>
     <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={openClipSubmenu}>
-      <Paperclip size={14} />
+      <Paperclip size={16} />
       クリップに追加
-      <ChevronRight size={14} class="ml-auto" />
+      <ChevronRight size={16} class="ml-auto" />
     </button>
 
     {#if clipSubmenuOpen}

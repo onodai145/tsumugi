@@ -71,7 +71,7 @@
 
 <article class="border-b border-border px-3 py-2 [content-visibility:auto] [contain-intrinsic-size:auto_80px]">
   <div class="flex items-center gap-2 text-sm">
-    <span class="inline-flex flex-none text-muted-foreground"><IconComp size={15} /></span>
+    <span class="inline-flex flex-none text-muted-foreground"><IconComp size={16} /></span>
     {#if n.user?.avatarUrl}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

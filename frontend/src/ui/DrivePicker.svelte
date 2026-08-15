@@ -175,7 +175,7 @@
             {#if selected.has(f.id)}
               <span
                 class="absolute top-1 right-1 flex size-[18px] items-center justify-center rounded-full bg-primary text-white"
-                ><Check size={14} /></span
+                ><Check size={16} /></span
               >
             {/if}
           </button>

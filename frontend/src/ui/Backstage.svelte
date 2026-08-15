@@ -78,7 +78,7 @@
     class="flex min-h-6 items-center gap-2 pt-[3px] pr-[max(8px,env(safe-area-inset-right))] pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))] text-xs"
   >
     <Button variant="outline" size="xs" onclick={() => (open = !open)} title="操作ログ (Backstage)">
-      {#if open}<ChevronDown size={13} />{:else}<ChevronUp size={13} />{/if} ログ
+      {#if open}<ChevronDown size={12} />{:else}<ChevronUp size={12} />{/if} ログ
       <!-- text-[0.68rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。極小バッジのため例外的に即値を維持。 -->
       {#if errorCount > 0}<span class="rounded-lg bg-destructive px-[5px] text-[0.68rem] leading-[1.4] text-white">{errorCount}</span>{/if}
     </Button>
