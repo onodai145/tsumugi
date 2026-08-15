@@ -75,3 +75,64 @@ export function mapNyaizedRangeToOriginal(
   const origEndExclusive = map[end - 1] + 1;
   return original.slice(origStart, Math.max(origStart, origEndExclusive));
 }
+
+function collectRangePieces(container: HTMLElement, range: Range): string[] {
+  const pieces: string[] = [];
+  const walker = document.createTreeWalker(
+    container,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+    {
+      acceptNode(node) {
+        if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName !== "BR") {
+          return NodeFilter.FILTER_SKIP;
+        }
+        return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
+    },
+  );
+
+  let node = walker.nextNode();
+  while (node) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      pieces.push("\n");
+    } else {
+      const textNode = node as Text;
+      const full = textNode.textContent ?? "";
+      const start = textNode === range.startContainer ? range.startOffset : 0;
+      const end = textNode === range.endContainer ? range.endOffset : full.length;
+
+      const originalAncestor = (textNode.parentElement)?.closest<HTMLElement>("[data-original-text]");
+      if (originalAncestor && originalAncestor.contains(textNode)) {
+        const original = originalAncestor.dataset.originalText ?? "";
+        const map = buildNyaizeCharMap(original, full);
+        pieces.push(mapNyaizedRangeToOriginal(map, original, start, end));
+      } else {
+        pieces.push(full.slice(start, end));
+      }
+    }
+    node = walker.nextNode();
+  }
+  return pieces;
+}
+
+/**
+ * copyイベントを横取りし、nyaize済みテキストの選択範囲を元の（nyaize前の）文字列に
+ * 差し替えてクリップボードに書き込む。選択がコンテナ外にまたがる場合は何もしない
+ * （ブラウザデフォルトのコピー動作にフォールバックする）。
+ */
+export function handleNyaizeCopy(event: ClipboardEvent): void {
+  const container = event.currentTarget as HTMLElement | null;
+  if (!container) return;
+
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+
+  const range = selection.getRangeAt(0);
+  if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+    return;
+  }
+
+  const pieces = collectRangePieces(container, range);
+  event.clipboardData?.setData("text/plain", pieces.join(""));
+  event.preventDefault();
+}

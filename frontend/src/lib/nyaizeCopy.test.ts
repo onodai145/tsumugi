@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildNyaizeCharMap, mapNyaizedRangeToOriginal } from "./nyaizeCopy";
+import { fireEvent } from "@testing-library/svelte";
+import { buildNyaizeCharMap, handleNyaizeCopy, mapNyaizedRangeToOriginal } from "./nyaizeCopy";
 import { nyaize } from "./nyaize";
 
 describe("buildNyaizeCharMap / mapNyaizedRangeToOriginal", () => {
@@ -42,5 +43,82 @@ describe("buildNyaizeCharMap / mapNyaizedRangeToOriginal", () => {
   it("handles empty strings", () => {
     const map = buildNyaizeCharMap("", "");
     expect(mapNyaizedRangeToOriginal(map, "", 0, 0)).toBe("");
+  });
+});
+
+describe("handleNyaizeCopy", () => {
+  function setDataAttrSpan(text: string, original: string): HTMLSpanElement {
+    const span = document.createElement("span");
+    span.dataset.originalText = original;
+    span.textContent = text;
+    return span;
+  }
+
+  function fireCopyAndCapture(container: HTMLElement, selectStart: Node, selectEnd: Node): string {
+    const range = document.createRange();
+    range.setStart(selectStart, 0);
+    range.setEnd(selectEnd, (selectEnd.textContent ?? "").length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    let captured = "";
+    const clipboardData = {
+      setData: (_type: string, value: string) => {
+        captured = value;
+      },
+    };
+    const event = new Event("copy", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, "clipboardData", { value: clipboardData });
+    Object.defineProperty(event, "currentTarget", { value: container });
+    fireEvent(container, event);
+    return captured;
+  }
+
+  it("replaces the copied text with the original (pre-nyaize) text", () => {
+    const container = document.createElement("div");
+    const span = setDataAttrSpan("こんにゃ感じ", "こんな感じ");
+    container.appendChild(span);
+    document.body.appendChild(container);
+
+    container.addEventListener("copy", handleNyaizeCopy);
+    const textNode = span.firstChild!;
+    const captured = fireCopyAndCapture(container, textNode, textNode);
+
+    expect(captured).toBe("こんな感じ");
+    document.body.removeChild(container);
+  });
+
+  it("passes through text that has no data-original-text ancestor (nyaize対象外)", () => {
+    const container = document.createElement("div");
+    const span = document.createElement("span");
+    span.textContent = "plain text";
+    container.appendChild(span);
+    document.body.appendChild(container);
+
+    container.addEventListener("copy", handleNyaizeCopy);
+    const textNode = span.firstChild!;
+    const captured = fireCopyAndCapture(container, textNode, textNode);
+
+    expect(captured).toBe("plain text");
+    document.body.removeChild(container);
+  });
+
+  it("converts <br> elements crossed by the selection into newlines", () => {
+    const container = document.createElement("div");
+    const span1 = setDataAttrSpan("こんにゃ", "こんな");
+    container.appendChild(span1);
+    container.appendChild(document.createElement("br"));
+    const span2 = setDataAttrSpan("感じ", "感じ");
+    container.appendChild(span2);
+    document.body.appendChild(container);
+
+    container.addEventListener("copy", handleNyaizeCopy);
+    const start = span1.firstChild!;
+    const end = span2.firstChild!;
+    const captured = fireCopyAndCapture(container, start, end);
+
+    expect(captured).toBe("こんな\n感じ");
+    document.body.removeChild(container);
   });
 });
