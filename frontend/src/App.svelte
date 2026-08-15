@@ -10,11 +10,12 @@
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Settings from "./ui/Settings.svelte";
   import Backstage from "./ui/Backstage.svelte";
+  import AppMenu from "./ui/AppMenu.svelte";
   import ProfileModal from "./ui/ProfileModal.svelte";
   import Modal from "./ui/Modal.svelte";
   import { currentProfileTarget, currentProfileAccountId, closeProfile } from "./lib/profileModal.svelte";
   import { buildKeymap, eventToChord } from "./lib/keymap";
-  import { Settings as SettingsIcon, Pencil } from "@lucide/svelte";
+  import { Pencil } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
@@ -109,22 +110,19 @@
 </script>
 
 <div class="flex h-screen flex-col overflow-hidden">
-  <!-- 上部: 投稿バー(スマホでは非表示) + カラム/アカウント追加 -->
-  <header
-    class="flex flex-none items-start gap-2.5 border-b border-border bg-muted p-[max(6px,env(safe-area-inset-top))_max(10px,env(safe-area-inset-right))_6px_max(10px,env(safe-area-inset-left))]"
-  >
-    {#if app.accounts.length > 0 && !useMobileUi}
-      <ComposeBar />
-    {:else}
-      <div class="flex-1"></div>
-    {/if}
-    {#if app.accounts.length > 0}
-      <Button type="button" variant="outline" size="sm" onclick={openAddColumn}>＋カラム</Button>
-      <Button type="button" variant="outline" size="sm" onclick={() => openSettings("accounts")} title="設定">
-        <SettingsIcon size={16} /> 設定
-      </Button>
-    {/if}
-  </header>
+  <!-- 上部: 投稿バー(スマホでは非表示)。「＋カラム」「設定」は下部バー左端のAppMenuへ移設(Issue #96)。
+       スマホUIでは投稿欄自体を表示しないため、headerはPC版でのみ表示する。 -->
+  {#if !useMobileUi}
+    <header
+      class="flex flex-none items-start gap-2.5 border-b border-border bg-muted p-[max(6px,env(safe-area-inset-top))_max(10px,env(safe-area-inset-right))_6px_max(10px,env(safe-area-inset-left))]"
+    >
+      {#if app.accounts.length > 0}
+        <ComposeBar />
+      {:else}
+        <div class="flex-1"></div>
+      {/if}
+    </header>
+  {/if}
 
   <main class="min-h-0 min-w-0 flex-1">
     {#if app.booting}
@@ -153,12 +151,19 @@
   </main>
 
   {#if app.accounts.length > 0 && !app.booting}
-    <Backstage
-      onReauth={(accountId) => {
-        const acc = app.accounts.find((a) => a.id === accountId);
-        if (acc) startReauth(acc);
-      }}
-    />
+    <!-- AppMenu(＋カラム/設定)はBackstageバー左端に並べるが、Backstage.svelte自体はログ専用の
+         責務を保つため変更しない。Backstageは幅いっぱいに描画されるよう flex-1 の枠で包む。 -->
+    <div class="flex flex-none">
+      <AppMenu onAddColumn={openAddColumn} onOpenSettings={() => openSettings("accounts")} />
+      <div class="min-w-0 flex-1">
+        <Backstage
+          onReauth={(accountId) => {
+            const acc = app.accounts.find((a) => a.id === accountId);
+            if (acc) startReauth(acc);
+          }}
+        />
+      </div>
+    </div>
   {/if}
 
   {#if useMobileUi && app.accounts.length > 0 && !app.booting}
