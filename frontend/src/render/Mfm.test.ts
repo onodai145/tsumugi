@@ -193,4 +193,33 @@ describe("Mfm", () => {
     const { container } = render(Mfm, { props: { text: "" } });
     expect(container.textContent).toBe("");
   });
+
+  it("wraps nyaized text in a span with data-original-text", () => {
+    const { container } = render(Mfm, { props: { text: "こんな", nyaize: true } });
+    const span = container.querySelector<HTMLElement>("span[data-original-text]");
+    expect(span?.dataset.originalText).toBe("こんな");
+    expect(span?.textContent).toBe("こんにゃ");
+  });
+
+  it("does not add data-original-text when nyaize is false", () => {
+    const { container } = render(Mfm, { props: { text: "こんな", nyaize: false } });
+    expect(container.querySelector("span[data-original-text]")).toBeNull();
+  });
+
+  it("does not add data-original-text inside a link label (disableNyaize)", () => {
+    const { container } = render(Mfm, {
+      props: { text: "[こんな](https://example.com)", nyaize: true },
+    });
+    expect(container.querySelector("span[data-original-text]")).toBeNull();
+  });
+
+  it("wraps each line of multi-line nyaized text in its own span, keeping <br> outside", () => {
+    const { container } = render(Mfm, { props: { text: "こんな\nばなな", nyaize: true } });
+    const spans = container.querySelectorAll("span[data-original-text]");
+    expect(spans.length).toBe(2);
+    expect((spans[0] as HTMLElement).dataset.originalText).toBe("こんな");
+    expect((spans[1] as HTMLElement).dataset.originalText).toBe("ばなな");
+    expect(container.querySelectorAll("br").length).toBe(1);
+    expect(container.querySelector("span[data-original-text] br")).toBeNull();
+  });
 });

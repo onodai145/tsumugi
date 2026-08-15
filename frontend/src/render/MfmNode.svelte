@@ -45,9 +45,11 @@
   const ruby = $derived(
     node.type === "fn" && p.name === "ruby" ? rubyParts(children) : null,
   );
+  const rubyBaseOriginal = $derived(ruby?.baseText);
   const rubyBaseText = $derived(
     ruby?.baseText !== undefined ? (shouldNyaize ? nyaize(ruby.baseText) : ruby.baseText) : undefined,
   );
+  const rubyRtOriginal = $derived(ruby?.rt ?? "");
   const rubyRt = $derived(ruby ? (shouldNyaize ? nyaize(ruby.rt) : ruby.rt) : "");
 
   // $[unixtime <epoch秒>]。子テキストの数値をローカル日時で表示する。
@@ -60,8 +62,14 @@
 </script>
 
 {#if node.type === "text"}
-  {@const text = shouldNyaize ? nyaize(String(p.text ?? "")) : String(p.text ?? "")}
-  {#each text.split("\n") as line, i}{#if i > 0}<br />{/if}{line}{/each}
+  {@const original = String(p.text ?? "")}
+  {@const text = shouldNyaize ? nyaize(original) : original}
+  {#if shouldNyaize}
+    {@const originalLines = original.split("\n")}
+    {#each text.split("\n") as line, i}{#if i > 0}<br />{/if}<span data-original-text={originalLines[i]}>{line}</span>{/each}
+  {:else}
+    {#each text.split("\n") as line, i}{#if i > 0}<br />{/if}{line}{/each}
+  {/if}
 {:else if node.type === "bold"}
   <b>{#each children as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}</b>
 {:else if node.type === "italic"}
@@ -77,7 +85,7 @@
   <blockquote class="mfm-quote">{#each children as c}<Self node={c} {emojis} />{/each}</blockquote>
 {:else if node.type === "fn"}
   {#if ruby}
-    <ruby>{#if rubyBaseText !== undefined}{rubyBaseText}{:else}{#each ruby.base as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}{/if}<rt>{rubyRt}</rt></ruby>
+    <ruby>{#if rubyBaseText !== undefined}{#if shouldNyaize}<span data-original-text={rubyBaseOriginal}>{rubyBaseText}</span>{:else}{rubyBaseText}{/if}{:else}{#each ruby.base as c}<Self node={c} {emojis} nyaize={shouldNyaize} />{/each}{/if}<rt>{#if shouldNyaize}<span data-original-text={rubyRtOriginal}>{rubyRt}</span>{:else}{rubyRt}{/if}</rt></ruby>
   {:else if p.name === "unixtime" && unixLabel}
     <span class="mfm-unixtime" title={unixLabel}>🕛 {unixLabel}</span>
   {:else if p.name === "sparkle"}
