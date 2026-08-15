@@ -3,6 +3,8 @@
   import NotifySection from "./settings/NotifySection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
   import DisplaySection from "./settings/DisplaySection.svelte";
+  import ThemeSection from "./settings/ThemeSection.svelte";
+  import BackgroundSection from "./settings/BackgroundSection.svelte";
   import ReactionSection from "./settings/ReactionSection.svelte";
   import DataSection from "./settings/DataSection.svelte";
   import AccountsSection from "./settings/AccountsSection.svelte";
@@ -10,7 +12,7 @@
   import AboutSection from "./settings/AboutSection.svelte";
   import Modal from "./Modal.svelte";
 
-  type Section = "accounts" | "display" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
+  type Section = "accounts" | "display" | "theme" | "background" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
 
   let {
     onclose,
@@ -27,6 +29,8 @@
   const nav: { id: Section; label: string }[] = [
     { id: "accounts", label: "アカウント" },
     { id: "display", label: "表示" },
+    { id: "theme", label: "テーマ" },
+    { id: "background", label: "背景" },
     { id: "reaction", label: "リアクション" },
     { id: "data", label: "データ" },
     { id: "notify", label: "通知" },
@@ -64,6 +68,10 @@
           <AccountsSection {onAddAccount} {onReauth} />
         {:else if active === "display"}
           <DisplaySection />
+        {:else if active === "theme"}
+          <ThemeSection />
+        {:else if active === "background"}
+          <BackgroundSection />
         {:else if active === "reaction"}
           <ReactionSection />
         {:else if active === "data"}
