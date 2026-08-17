@@ -13,5 +13,6 @@ export XDG_DATA_HOME="$TMP_HOME/data"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 
 export BROWSER="$REPO_ROOT/e2e/helpers/browser-open.sh"
+export E2E_MIAUTH_CDP_PORT="${E2E_MIAUTH_CDP_PORT:-9333}"
 
 exec dbus-run-session -- "$BINARY" "$@"
