@@ -1,0 +1,4 @@
+node_modules/
+certs/
+wdio-logs/
+misskey-data/
