@@ -2,9 +2,10 @@
 // tsumugi本体がMiAuth URLをシステムブラウザで開こうとすると、opener差し替え
 // (browser-open.sh)がこのブリッジのCDPセッションに新規タブとしてURLを渡す。
 // approveNext()はその新規タブを検知し、「許可」ボタンをクリックする。
-import { chromium, type Browser, type BrowserContext } from "playwright";
-import { readFileSync } from "node:fs";
+import { chromium, type BrowserContext } from "playwright";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 // このファイル自体はESM (package.json "type": "module") で実行されるため、
@@ -26,41 +27,67 @@ interface SeededAccount {
   password: string;
 }
 
+// SigninFlowResponse (packages/backend/src/server/api/SigninApiService.ts /
+// misskey-js `entities.SigninFlowResponse`) when signin completes in a
+// single step (no 2FA/captcha configured on this instance).
+interface SigninFlowFinished {
+  finished: true;
+  id: string;
+  i: string; // access token
+}
+
 /**
  * MiAuthの同意画面を自動承認するためのブリッジを起動する。
- * 1. CDPデバッグポート付きでChromiumを起動する。
- * 2. /api/signin でテストユーザーのセッションCookieを取得し、ブラウザに注入する。
+ * 1. 単一の永続コンテキスト付きでChromiumを起動する（CDP `/json/new` で
+ *    開かれるタブも、このブリッジが観測するタブも同じコンテキストに
+ *    属させるため — 詳細は下記コメント参照）。
+ * 2. /api/signin-flow でテストユーザーのアクセストークンを取得し、/api/i
+ *    でそのユーザーの詳細情報を取得したうえで、フロントエンドが起動時に
+ *    参照する localStorage の "account" キーへ addInitScript() で注入する。
+ *    これにより、MiAuth同意画面がロードされた時点でフロントエンドは
+ *    「既にサインイン済み」として扱う。
  * 3. approveNext() が呼ばれたら、新規タブでMiAuth URLが開かれるのを待ち、
  *    「許可」ボタンをクリックする。
  *
- * KNOWN BROKEN (Misskey 2026.7.0, verified 2026-08-17 — see task-6-report.md):
- * - `/api/signin` no longer exists; the current endpoint is
- *   `/api/signin-flow`, and even that returns `{finished, id, i: token}`
- *   with NO `Set-Cookie` header at all. This Misskey version's web frontend
- *   does not use a server session cookie for login — `packages/frontend/src/
- *   accounts.ts` stores the access token client-side (pizzax store, backed
- *   by IndexedDB, with a legacy localStorage migration path). The
- *   cookie-injection step below (`signinRes.headers.get("set-cookie")`)
- *   will always throw. A correct implementation would call
- *   `/api/signin-flow`, take the returned `i` token, and use
- *   `context.addInitScript()` (or `page.addInitScript()`, since a
- *   CDP-opened tab lands in the browser's default context — see next
- *   paragraph) to seed the frontend's account store before the MiAuth
- *   consent page's own script runs, instead of `addCookies()`.
- * - Separately (independent of the above): a tab opened via CDP's
- *   `/json/new` lands in the browser's default context, not the
- *   `browser.newContext()` created here — `context.waitForEvent("page")`
- *   in `approveNext()` never fires for it. Confirmed empirically. Fix is to
- *   use `chromium.launchPersistentContext()` instead of `launch()` +
- *   `newContext()`, so there is only one context and CDP-opened tabs are
- *   visible to it.
+ * --- なぜCookieではなくlocalStorageなのか (Misskey 2026.7.0で検証済み) ---
+ * このMisskeyバージョンに `/api/signin` は存在しない
+ * (`Route POST:/api/signin not found`)。実際のエンドポイントは
+ * `/api/signin-flow` で、これも `Set-Cookie` を一切返さない
+ * (`packages/backend/src/server/api/SigninService.ts` の `signin()` は
+ * `{finished, id, i}` を返すのみで `reply.setCookie` を呼んでいない)。
+ * このバージョンのWebフロントエンドはサーバーセッションCookieを
+ * 使っておらず、ログイン状態はクライアント側の
+ * `window.localStorage.getItem('account')` (JSON文字列、
+ * `MeDetailed & {token: string}` 形状) を起動時に同期的に読んで
+ * `$i` を初期化することで判定している
+ * (`packages/frontend/src/i.ts`: `const accountData =
+ * miLocalStorage.getItem('account'); export const $i = accountData ? ... :
+ * null;`)。MiAuth同意画面 (`packages/frontend/src/components/
+ * MkAuthConfirm.vue`) の `init()` も `$i` が非nullなら
+ * `users.value.set($i.id, $i)` としてアカウント選択候補に加える。
+ * したがって `addCookies()` ではなく、ページ読み込み前に
+ * `localStorage['account']` へ正しい形状のJSONを書き込む
+ * `addInitScript()` が正しい注入手段となる。
+ *
+ * --- なぜ`launch()`+`newContext()`ではなく`launchPersistentContext()`か ---
+ * CDPの `PUT /json/new` で開いたタブは、ブラウザの「デフォルトの
+ * コンテキスト」に属する。`chromium.launch()` + `browser.newContext()` で
+ * 別途作成したコンテキストの `waitForEvent("page")` は、デフォルト
+ * コンテキストに属するそのタブを検知できない (実機で確認済み:
+ * `browserContext.waitForEvent: Timeout 5000ms exceeded`)。
+ * `launchPersistentContext()` はコンテキストが1つしか存在しないため、
+ * CDPで開いたタブも `addInitScript()` によるlocalStorage注入も
+ * 同じコンテキストに属し、両方が機能する。
  */
 export async function startMiauthBridge(): Promise<MiauthBridge> {
   const seeded: SeededAccount = JSON.parse(
     readFileSync(join(__dirname, "..", "certs", "seeded-account.json"), "utf-8"),
   );
 
-  const browser: Browser = await chromium.launch({
+  const userDataDir = mkdtempSync(join(tmpdir(), "tsumugi-e2e-miauth-bridge-"));
+
+  const context: BrowserContext = await chromium.launchPersistentContext(userDataDir, {
+    ignoreHTTPSErrors: true,
     args: [
       `--remote-debugging-port=${CDP_PORT}`,
       // このブリッジ専用のChromiumインスタンスに限定した措置。
@@ -69,32 +96,45 @@ export async function startMiauthBridge(): Promise<MiauthBridge> {
       "--host-resolver-rules=MAP misskey.local 127.0.0.1",
     ],
   });
-  const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
 
-  const signinRes = await fetch(`${MISSKEY_URL}/api/signin`, {
+  const signinRes = await fetch(`${MISSKEY_URL}/api/signin-flow`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: seeded.username, password: seeded.password }),
   });
   if (!signinRes.ok) {
-    throw new Error(`miauthBridge: /api/signin failed with ${signinRes.status}`);
+    throw new Error(`miauthBridge: /api/signin-flow failed with ${signinRes.status}`);
   }
-  const setCookie = signinRes.headers.get("set-cookie");
-  if (!setCookie) {
-    throw new Error("miauthBridge: /api/signin did not return a session cookie");
+  const signinBody = (await signinRes.json()) as { finished?: boolean; i?: string };
+  if (!signinBody.finished || !signinBody.i) {
+    throw new Error(
+      `miauthBridge: /api/signin-flow did not complete in one step (got ${JSON.stringify(signinBody)}); ` +
+        "2FA/captcha may be enabled on this instance, which this bridge does not handle",
+    );
   }
-  const [nameValue] = setCookie.split(";");
-  const [cookieName, cookieValue] = nameValue.split("=");
-  const url = new URL(MISSKEY_URL);
-  await context.addCookies([
-    {
-      name: cookieName,
-      value: cookieValue,
-      domain: url.hostname,
-      path: "/",
-      secure: true,
+  const token = (signinBody as SigninFlowFinished).i;
+
+  const meRes = await fetch(`${MISSKEY_URL}/api/i`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token }),
+  });
+  if (!meRes.ok) {
+    throw new Error(`miauthBridge: /api/i failed with ${meRes.status}`);
+  }
+  const me = await meRes.json();
+
+  // packages/frontend/src/i.ts reads this synchronously at module-load time
+  // (before any app code runs), so it must land in localStorage before the
+  // page's own scripts execute — addInitScript() runs on every subsequent
+  // document in this context, exactly what's needed here.
+  const accountJson = JSON.stringify({ ...me, token });
+  await context.addInitScript(
+    (value: string) => {
+      window.localStorage.setItem("account", value);
     },
-  ]);
+    accountJson,
+  );
 
   return {
     cdpPort: CDP_PORT,
@@ -105,7 +145,6 @@ export async function startMiauthBridge(): Promise<MiauthBridge> {
     },
     async teardown() {
       await context.close();
-      await browser.close();
     },
   };
 }
