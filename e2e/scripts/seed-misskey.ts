@@ -2,7 +2,11 @@
 // 既に作成済み(2回目以降の実行)は admin/accounts/create が
 // ACCESS_DENIED を返すため、その場合は成功とみなしスキップする。
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const BASE_URL = process.env.E2E_MISSKEY_URL ?? "https://misskey.local:8443";
 const USERNAME = "e2etestadmin";
