@@ -9,7 +9,7 @@ export const config: Options.Testrunner = {
     {
       browserName: "tauri",
       "tauri:options": {
-        application: "../src-tauri/target/debug/tsumugi",
+        application: "./scripts/run-app.sh",
       },
     } as WebdriverIO.Capabilities,
   ],
