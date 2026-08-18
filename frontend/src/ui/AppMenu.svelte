@@ -41,7 +41,7 @@
 <div
   class="flex min-h-6 flex-none items-center self-end border-t border-border bg-card pt-[3px] pr-1 pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))]"
 >
-  <Button type="button" variant="outline" size="icon-xs" onclick={toggle} bind:ref={trigger} title="メニュー">
+  <Button type="button" variant="outline" size="icon-xs" onclick={toggle} bind:ref={trigger} title="メニュー" data-testid="app-menu-trigger">
     <Menu size={16} />
   </Button>
 </div>
@@ -63,6 +63,7 @@
         type="button"
         role="menuitem"
         class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+        data-testid="app-menu-add-column"
         onclick={() => pick(onAddColumn)}
       >
         <Plus size={16} /> カラム追加

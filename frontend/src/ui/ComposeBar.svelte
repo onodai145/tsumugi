@@ -584,6 +584,7 @@
           : "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-20 [transition:min-height_0.12s_ease]"}
       rows={expanded ? 4 : 1}
       placeholder={placeholder}
+      data-testid="compose-textarea"
       bind:value={text}
       bind:this={textarea}
       onkeydown={onKey}
@@ -756,7 +757,7 @@
       </label>
     </div>
     <div class="flex flex-none flex-wrap items-center gap-1.5">
-      <Button type="button" size="sm" disabled={busy} onclick={submit}>{busy ? "…" : "投稿"}</Button>
+      <Button type="button" size="sm" disabled={busy} onclick={submit} data-testid="compose-submit">{busy ? "…" : "投稿"}</Button>
     </div>
   </div>
   </div>

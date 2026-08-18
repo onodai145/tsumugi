@@ -122,7 +122,7 @@
           <h4 class="mb-1 mt-1.5 text-xs font-semibold text-muted-foreground">ピン留め</h4>
           <div class="flex flex-wrap gap-0.5">
             {#each pinnedEntries as e (e.key)}
-              <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={e.key} onclick={() => onpick(reactionKeyOf(e))}>
+              <button type="button" class="rounded-md p-1 text-lg leading-none hover:bg-accent" title={e.key} data-testid={`emoji-pick-${e.key}`} onclick={() => onpick(reactionKeyOf(e))}>
                 {#if e.custom}
                   <img class="block h-[1.4em] w-[1.4em] object-contain" src={e.custom.url} alt={e.key} loading="lazy" />
                 {:else}
