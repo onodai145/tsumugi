@@ -4,9 +4,33 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import dns from "node:dns";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// e2eサンドボックスの/etc/hostsにはmisskey.localのエントリが無いため、Node標準の
+// fetch()(undiciベース、デフォルトでnode:dnsのdns.lookup()を経由する)はこのままでは
+// misskey.localを解決できない(実機確認済み: TypeError: fetch failed)。
+// helpers/miauthBridge.tsと同じ発想で、このプロセス内だけmisskey.localを127.0.0.1へ
+// 固定解決する。
+const originalLookup = dns.lookup;
+// @ts-expect-error - overload signatures make a single reassignment awkward; behavior is verified in miauthBridge.ts
+dns.lookup = (hostname: string, options: unknown, callback?: unknown) => {
+  const cb = (typeof options === "function" ? options : callback) as (
+    err: NodeJS.ErrnoException | null,
+    address: string | dns.LookupAddress[],
+    family?: number,
+  ) => void;
+  if (hostname === "misskey.local") {
+    if (typeof options === "object" && options !== null && (options as { all?: boolean }).all) {
+      return cb(null, [{ address: "127.0.0.1", family: 4 }]);
+    }
+    return cb(null, "127.0.0.1", 4);
+  }
+  // @ts-expect-error - passthrough to the original overloaded signature
+  return originalLookup(hostname, options, callback);
+};
 
 const BASE_URL = process.env.E2E_MISSKEY_URL ?? "https://misskey.local:8443";
 const USERNAME = "e2etestadmin";

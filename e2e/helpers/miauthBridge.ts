@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import dns from "node:dns";
 
 // このファイル自体はESM (package.json "type": "module") で実行されるため、
 // CommonJSの__dirnameは使えない。import.meta.urlから同等のものを導出する。
@@ -15,6 +16,32 @@ const __dirname = dirname(__filename);
 
 const CDP_PORT = 9333;
 const MISSKEY_URL = process.env.E2E_MISSKEY_URL ?? "https://misskey.local:8443";
+
+// e2eサンドボックスの/etc/hostsにはmisskey.localのエントリが無い(実機検証済み、
+// sudoにパスワードが必要でCI/エージェントからは書き換えられない)。このファイル内で
+// launchPersistentContext()に渡すChromiumは`--host-resolver-rules`で自前解決できるが、
+// このファイル自身がNodeの標準fetch()で直接叩く/api/signin-flowや/api/iは
+// misskey.localを解決できず`TypeError: fetch failed`になる(実機確認済み)。
+// undiciベースのNode fetch()はデフォルトでnode:dnsのdns.lookup()を経由して名前解決する
+// ため、ここをプロセス内でパッチしてmisskey.localだけ127.0.0.1へ固定する
+// (Chromiumの--host-resolver-rulesと同じ発想を、Node側のfetch()にも適用するもの)。
+const originalLookup = dns.lookup;
+// @ts-expect-error - overload signatures make a single reassignment awkward; behavior is verified above
+dns.lookup = (hostname: string, options: unknown, callback?: unknown) => {
+  const cb = (typeof options === "function" ? options : callback) as (
+    err: NodeJS.ErrnoException | null,
+    address: string | dns.LookupAddress[],
+    family?: number,
+  ) => void;
+  if (hostname === "misskey.local") {
+    if (typeof options === "object" && options !== null && (options as { all?: boolean }).all) {
+      return cb(null, [{ address: "127.0.0.1", family: 4 }]);
+    }
+    return cb(null, "127.0.0.1", 4);
+  }
+  // @ts-expect-error - passthrough to the original overloaded signature
+  return originalLookup(hostname, options, callback);
+};
 
 export interface MiauthBridge {
   cdpPort: number;
