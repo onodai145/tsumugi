@@ -86,6 +86,21 @@ export TSUMUGI_E2E_TMP_HOSTS="$TMP_HOSTS"
 export TSUMUGI_E2E_TMP_NSSWITCH="$TMP_NSSWITCH"
 export TSUMUGI_E2E_BINARY="$BINARY"
 
+# tsumugiのreqwestは rustls-tls-native-roots (rustls-native-certs) でOSの
+# 信頼ストアを読む設定になっているが、e2e用の自己署名テストCA
+# (e2e/certs/ca.pem)はそこには入っていない。install-ca.sh経由でOSの信頼
+# ストアに登録する方法(update-ca-certificates等)はディストリ依存かつ
+# sudoが要る。rustls-native-certsはSSL_CERT_FILEが設定されていれば
+# OSの通常の探索を一切せずそのファイルだけを読む(実装確認済み:
+# rustls-native-certs 0.8.4 の load_native_certs() は CertPaths::from_env()
+# を先にチェックし、SSL_CERT_FILE/SSL_CERT_DIRが設定されていればそちらを
+# 優先する)ため、実システムの信頼ストア(/etc/ssl/certs/ca-certificates.crt)
+# の内容にこのテストCAを追記したファイルを作り、SSL_CERT_FILEで指すだけで
+# sudo無しに完結する。
+TMP_CERT_BUNDLE="$TMP_HOME/ca-bundle.pem"
+cat /etc/ssl/certs/ca-certificates.crt "$REPO_ROOT/e2e/certs/ca.pem" > "$TMP_CERT_BUNDLE"
+export SSL_CERT_FILE="$TMP_CERT_BUNDLE"
+
 exec unshare --user --map-root-user --mount -- bash -c '
   mount --bind "$TSUMUGI_E2E_TMP_HOSTS" /etc/hosts
   mount --bind "$TSUMUGI_E2E_TMP_NSSWITCH" /etc/nsswitch.conf
