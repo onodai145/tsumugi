@@ -1,0 +1,89 @@
+diff --git a/dist/cjs/index.js b/dist/cjs/index.js
+index 6b7af77b7d4e8b59ff12771e6cf35bbc92fcea31..6951bb366ed4226bf1f13e30c0b10babb8d94775 100644
+--- a/dist/cjs/index.js
++++ b/dist/cjs/index.js
+@@ -2833,9 +2833,18 @@ const pluginAvailabilityCache = new WeakMap();
+ function isPluginAvailabilityCached(browser) {
+     return pluginAvailabilityCache.get(browser) === true;
+ }
++// tsumugi patch: see dist/esm/index.js for the full rationale — caches the
++// negative result too, so the 100-attempt/50ms poll runs at most once per
++// browser session instead of before every qualifying command.
++function isPluginAvailabilityCachedNegative(browser) {
++    return pluginAvailabilityCache.get(browser) === false;
++}
+ function setPluginAvailabilityCached(browser) {
+     pluginAvailabilityCache.set(browser, true);
+ }
++function setPluginAvailabilityCachedNegative(browser) {
++    pluginAvailabilityCache.set(browser, false);
++}
+ function clearPluginAvailabilityCache(browser) {
+     pluginAvailabilityCache.delete(browser);
+ }
+@@ -3270,6 +3279,9 @@ async function execute(browser, script, ...args) {
+         throw lastError;
+     }
+     // Non-embedded path: use IPC via browser.execute (official/crabnebula providers)
++    if (isPluginAvailabilityCachedNegative(browser)) {
++        throw new Error('Tauri plugin not available. Make sure @wdio/tauri-plugin is installed and registered in your Tauri app.');
++    }
+     if (!isPluginAvailabilityCached(browser)) {
+         const maxAttempts = 100;
+         const retryInterval = 50;
+@@ -3287,6 +3299,7 @@ async function execute(browser, script, ...args) {
+             await new Promise((resolve) => setTimeout(resolve, retryInterval));
+         }
+         if (!pluginAvailable) {
++            setPluginAvailabilityCachedNegative(browser);
+             throw new Error('Tauri plugin not available. Make sure @wdio/tauri-plugin is installed and registered in your Tauri app.');
+         }
+         setPluginAvailabilityCached(browser);
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index 160a6f513fd6897758a08e00f7b1d4c79d821234..eb6af020ad6a887298b10d20eab8ad857c2c88b1 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -2829,9 +2829,25 @@ const pluginAvailabilityCache = new WeakMap();
+ function isPluginAvailabilityCached(browser) {
+     return pluginAvailabilityCache.get(browser) === true;
+ }
++// tsumugi patch: upstream only ever cached the *positive* result, so a Tauri
++// app that never registers @wdio/tauri-plugin (like tsumugi, which uses
++// driverProvider: "external" specifically to avoid needing it) re-runs the
++// full 100-attempt/50ms poll (5-12+s, worse under load) on every single
++// qualifying command (getTitle/findElement/findElements/$/$$/elementClick)
++// for the entire test run. That tax regularly blew past @wdio/utils'
++// internal 20s per-command watchdog and produced a bare, undiagnosable
++// "Error: Timeout" (see e2e/.superpowers/sdd/2026-08-17-e2e-automation/
++// task-7-report.md for the empirical trace). Caching the negative result
++// too makes the poll run at most once per browser session.
++function isPluginAvailabilityCachedNegative(browser) {
++    return pluginAvailabilityCache.get(browser) === false;
++}
+ function setPluginAvailabilityCached(browser) {
+     pluginAvailabilityCache.set(browser, true);
+ }
++function setPluginAvailabilityCachedNegative(browser) {
++    pluginAvailabilityCache.set(browser, false);
++}
+ function clearPluginAvailabilityCache(browser) {
+     pluginAvailabilityCache.delete(browser);
+ }
+@@ -3266,6 +3282,9 @@ async function execute(browser, script, ...args) {
+         throw lastError;
+     }
+     // Non-embedded path: use IPC via browser.execute (official/crabnebula providers)
++    if (isPluginAvailabilityCachedNegative(browser)) {
++        throw new Error('Tauri plugin not available. Make sure @wdio/tauri-plugin is installed and registered in your Tauri app.');
++    }
+     if (!isPluginAvailabilityCached(browser)) {
+         const maxAttempts = 100;
+         const retryInterval = 50;
+@@ -3283,6 +3302,7 @@ async function execute(browser, script, ...args) {
+             await new Promise((resolve) => setTimeout(resolve, retryInterval));
+         }
+         if (!pluginAvailable) {
++            setPluginAvailabilityCachedNegative(browser);
+             throw new Error('Tauri plugin not available. Make sure @wdio/tauri-plugin is installed and registered in your Tauri app.');
+         }
+         setPluginAvailabilityCached(browser);
