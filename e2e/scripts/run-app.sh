@@ -60,31 +60,42 @@ EOF
 # tsumugi本体(Rust側のreqwest経由のHTTPS/WebSocket通信)もmisskey.localを
 # 解決する必要があるが、このe2eサンドボックスの/etc/hostsにはエントリが無く、
 # sudoにパスワードが必要で書き換えられない(実機確認済み)。BROWSERやNode側の
-# fetch()と違い、Rustのreqwest/tokioは自前でDNSをフックする手段を持たない
-# (getaddrinfo系。プロセスごとの上書きが効かない)ため、ここだけは
-# unshare(1)の非特権ユーザー名前空間+マウント名前空間を使い、実システムの
-# /etc/hostsに一切触れずに、tsumugiプロセスからだけ見える/etc/hostsを
-# bind mountで差し替える(root権限は名前空間内だけの偽装で完結し、
-# 実機のsudo/rootは一切不要。実機検証済み: `unshare --user --map-root-user
-# --mount -- ...`でmount --bindが成功する)。
+# fetch()と違い、Rustのreqwest/tokioは自前でDNSをフックする手段を持たない。
 #
-# /etc/hostsのbind mountだけでは不十分だった(実機検証済み): このホストの
-# /etc/nsswitch.confは `hosts: mymachines mdns_minimal [NOTFOUND=return]
-# resolve [!UNAVAIL=return] files myhostname dns` で、systemd-resolved経由の
-# "resolve"モジュールが"files"(/etc/hosts)より先に来る。systemd-resolvedは
-# 名前空間の外で動く別プロセスなので実物の/etc/hostsしか見えず、
-# misskey.localについて確定的にNXDOMAINを返し、`[!UNAVAIL=return]`により
-# そこで解決が打ち切られて"files"には一切到達しない。そのため
-# /etc/nsswitch.confも同様にbind mountし、hostsの参照順を`files`優先に
-# 上書きする(この2ファイルのbind mountだけで完結し、Rustコード変更は不要)。
-TMP_HOSTS="$TMP_HOME/hosts"
-cat /etc/hosts > "$TMP_HOSTS"
-echo "127.0.0.1 misskey.local" >> "$TMP_HOSTS"
-TMP_NSSWITCH="$TMP_HOME/nsswitch.conf"
-sed 's/^hosts:.*/hosts: files mdns_minimal [NOTFOUND=return] resolve [!UNAVAIL=return] myhostname dns/' /etc/nsswitch.conf > "$TMP_NSSWITCH"
-export TSUMUGI_E2E_TMP_HOSTS="$TMP_HOSTS"
-export TSUMUGI_E2E_TMP_NSSWITCH="$TMP_NSSWITCH"
-export TSUMUGI_E2E_BINARY="$BINARY"
+# --- 経緯: /etc/hosts bind mount方式は最終的に採用しなかった ---
+# 当初は非特権ユーザー名前空間(unshare(1)/bwrap(1))を使い、tsumugiプロセス
+# からだけ見える/etc/hosts・/etc/nsswitch.confをbind mountで差し替える方式を
+# 実装したが、実機検証の結果、この方式にはsession/secrets.rs(OS Secret
+# Service経由のkeyring-coreストア)との深刻な非互換が判明した:
+#   - `unshare --user --map-root-user`の中でgnome-keyring-daemonを起動すると
+#     `failed dropping capabilities - -11, aborting`で即abortする(実際に
+#     失敗するsyscallは`setgroups(0, NULL) = -1 EPERM`。CVE-2014-8989対策で
+#     新規ユーザー名前空間は既定でsetgroupsが"deny"であり、`unshare
+#     --map-root-user`はこれを"allow"にする経路を持たない)。
+#   - 回避策としてbwrap(1)(Flatpak等が使う非特権サンドボックス専用ツール、
+#     setgroups許可のタイミングを正しく処理する)に切り替え、gnome-keyring-
+#     daemon自体は起動できるようになったが、今度は名前空間内でuid 0として
+#     動くtsumugi本体のzbusクライアントが、名前空間の外(実uid 1000)で
+#     動くD-Busセッションバスへの接続時に`D-Bus handshake failed: EXTERNAL
+#     rejected by the server`で拒否されることが分かった。手書きのzbus単体
+#     再現コードで検証した結果、libdbus系クライアント(secret-tool,
+#     dbus-send)は同じ名前空間トポロジで問題なく認証できる一方、zbusは
+#     常に拒否される(gnome-keyring-daemon自身の接続が先に成功した後でも
+#     zbusだけ拒否され続けることまで確認済み)。zbus 5.16.0のEXTERNAL認証
+#     実装(sasl_auth_id() = geteuid()の10進文字列)はDBus仕様通りに見え、
+#     正確な原因(zbus固有のソケット接続シーケンスとカーネルのSO_PEERCRED
+#     評価タイミングの相互作用と推測される)は特定できなかった。
+# この非互換はuid remap(名前空間内でuid 0になる)そのものに起因するため、
+# 名前空間を使わない方式へ切り替えた: LD_PRELOADで`getaddrinfo()`を
+# フックし、"misskey.local"だけを127.0.0.1に固定解決するごく小さな共有
+# ライブラリ(helpers/misskey-dns-hook.c)を使う。これによりuid remapが
+# 一切不要になり、gnome-keyring-daemonは実uid 1000のまま素の
+# dbus-run-session配下で起動でき(最初に検証した、最もシンプルで問題の
+# 無かった構成)、mount --bind自体も不要になった。
+DNS_HOOK_SRC="$REPO_ROOT/e2e/helpers/misskey-dns-hook.c"
+DNS_HOOK_SO="$TMP_HOME/misskey-dns-hook.so"
+gcc -shared -fPIC -O2 -o "$DNS_HOOK_SO" "$DNS_HOOK_SRC" -ldl
+export LD_PRELOAD="$DNS_HOOK_SO"
 
 # tsumugiのreqwestは rustls-tls-native-roots (rustls-native-certs) でOSの
 # 信頼ストアを読む設定になっているが、e2e用の自己署名テストCA
@@ -101,8 +112,27 @@ TMP_CERT_BUNDLE="$TMP_HOME/ca-bundle.pem"
 cat /etc/ssl/certs/ca-certificates.crt "$REPO_ROOT/e2e/certs/ca.pem" > "$TMP_CERT_BUNDLE"
 export SSL_CERT_FILE="$TMP_CERT_BUNDLE"
 
-exec unshare --user --map-root-user --mount -- bash -c '
-  mount --bind "$TSUMUGI_E2E_TMP_HOSTS" /etc/hosts
-  mount --bind "$TSUMUGI_E2E_TMP_NSSWITCH" /etc/nsswitch.conf
-  exec dbus-run-session -- "$TSUMUGI_E2E_BINARY" "$@"
-' bash "$@"
+# session/secrets.rs はOS Secret Service(D-Bus org.freedesktop.secrets)経由の
+# keyring-coreストアを常時使う(本番コード分岐なし、設計として意図通り。
+# docs/superpowers/specs/2026-08-17-e2e-automation-design.md 2節参照)。
+# dbus-run-sessionが立てる一時セッションバスにはSecret Serviceの実装が
+# 何も乗っていないため、org.freedesktop.secretsの所有者が存在せず、
+# MiAuth完了後のトークン保存が
+# `secret: Platform failure: zbus error: ... Process org.freedesktop.secrets
+# exited with status 1` で失敗する(実機確認済み)。design specが元々
+# 指定していた `gnome-keyring-daemon --unlock --daemonize` の起動が
+# run-app.sh実装時に抜け落ちていたのが原因。
+#
+# --unlock は標準入力からログインキーリングのパスワードを読む。XDG_DATA_HOME
+# は毎回mktempの新規空ディレクトリなので既存キーリングは無く、空文字列を
+# 渡すだけで新規キーリングが作成されその場でアンロックされる(実機確認済み:
+# `echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets`
+# 後、secret-tool store/lookupが成功する)。使い捨てのテスト専用キーリング
+# なので空パスワードで問題ない。dbus-run-session配下・実uid 1000のままの
+# 素のプロセスとして起動する(上記のLD_PRELOAD切り替えにより、名前空間や
+# uid remapが一切不要になったため、この起動もシンプルなまま保てる)。
+exec dbus-run-session -- bash -c '
+  eval "$(echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets)"
+  export GNOME_KEYRING_CONTROL
+  exec "$0" "$@"
+' "$BINARY" "$@"
