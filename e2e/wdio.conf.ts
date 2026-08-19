@@ -14,6 +14,7 @@ export const config: Options.Testrunner = {
     } as WebdriverIO.Capabilities,
   ],
   logLevel: "info",
+  outputDir: "./wdio-logs",
   framework: "mocha",
   reporters: ["spec"],
   mochaOpts: {
