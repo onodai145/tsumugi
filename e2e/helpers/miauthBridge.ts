@@ -2,12 +2,13 @@
 // tsumugi本体がMiAuth URLをシステムブラウザで開こうとすると、opener差し替え
 // (browser-open.sh)がこのブリッジのCDPセッションに新規タブとしてURLを渡す。
 // approveNext()はその新規タブを検知し、「許可」ボタンをクリックする。
-import { chromium, type BrowserContext } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import dns from "node:dns";
+import { debugLog } from "./debugLog";
 
 // このファイル自体はESM (package.json "type": "module") で実行されるため、
 // CommonJSの__dirnameは使えない。import.meta.urlから同等のものを導出する。
@@ -124,6 +125,27 @@ export async function startMiauthBridge(): Promise<MiauthBridge> {
     ],
   });
 
+  // ページの`console`/`pageerror`を漏れなく拾うため、`context.on("page", ...)`で
+  // 新規タブが生成された瞬間にリスナーを付ける。個々のページを取得してから
+  // (`waitForEvent("page")`の戻り値等)付けると、ロード中に出た最初のconsole
+  // 出力やエラーを取りこぼす(実機で未検証だが、Playwrightのイベント順序上
+  // 確実に安全な側に倒す措置)。
+  context.on("page", (page: Page) => {
+    debugLog("miauthBridge:page", `new page created: ${page.url()}`);
+    page.on("console", (msg) => {
+      debugLog("miauthBridge:console", `[${page.url()}] ${msg.type()}: ${msg.text()}`);
+    });
+    page.on("pageerror", (err) => {
+      debugLog("miauthBridge:pageerror", `[${page.url()}] ${err.stack ?? err.message}`);
+    });
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) {
+        debugLog("miauthBridge:navigation", `page navigated to ${frame.url()}`);
+      }
+    });
+  });
+
+  debugLog("miauthBridge:setup", `signin-flow: POST ${MISSKEY_URL}/api/signin-flow (user=${seeded.username})`);
   const signinRes = await fetch(`${MISSKEY_URL}/api/signin-flow`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -140,6 +162,7 @@ export async function startMiauthBridge(): Promise<MiauthBridge> {
     );
   }
   const token = (signinBody as SigninFlowFinished).i;
+  debugLog("miauthBridge:setup", "signin-flow: finished=true, token acquired");
 
   const meRes = await fetch(`${MISSKEY_URL}/api/i`, {
     method: "POST",
@@ -150,6 +173,7 @@ export async function startMiauthBridge(): Promise<MiauthBridge> {
     throw new Error(`miauthBridge: /api/i failed with ${meRes.status}`);
   }
   const me = await meRes.json();
+  debugLog("miauthBridge:setup", `/api/i: id=${(me as { id?: string }).id ?? "?"} username=${(me as { username?: string }).username ?? "?"}`);
 
   // packages/frontend/src/i.ts reads this synchronously at module-load time
   // (before any app code runs), so it must land in localStorage before the
@@ -162,13 +186,31 @@ export async function startMiauthBridge(): Promise<MiauthBridge> {
     },
     accountJson,
   );
+  debugLog("miauthBridge:setup", "addInitScript registered (localStorage account injection); bridge ready");
 
   return {
     cdpPort: CDP_PORT,
     async approveNext() {
+      debugLog("miauthBridge:approveNext", "waiting for new page (timeout=30000ms)");
       const page = await context.waitForEvent("page", { timeout: 30000 });
+      debugLog("miauthBridge:approveNext", `page acquired: ${page.url()}`);
       await page.waitForLoadState("domcontentloaded");
-      await page.getByRole("button", { name: "許可" }).click();
+      debugLog("miauthBridge:approveNext", `domcontentloaded: url=${page.url()} title=${await page.title().catch(() => "?")}`);
+      try {
+        // タイムアウト値は変更しない(元々明示指定無し=Playwrightのデフォルト
+        // アクションタイムアウト)。診断のためtry/catchで包むのみ。
+        await page.getByRole("button", { name: "許可" }).click();
+        debugLog("miauthBridge:approveNext", "clicked 許可 button");
+      } catch (err) {
+        debugLog(
+          "miauthBridge:approveNext",
+          `FAILED to click 許可 button: ${String(err)}; bodyText=${await page
+            .innerText("body")
+            .then((t) => t.slice(0, 2000))
+            .catch((e) => `<failed to read body: ${String(e)}>`)}`,
+        );
+        throw err;
+      }
     },
     async teardown() {
       await context.close();
