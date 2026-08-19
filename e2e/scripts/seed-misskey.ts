@@ -61,7 +61,14 @@ async function main() {
 
   const errBody = (await res.json()) as { error?: { code?: string } };
   if (errBody.error?.code === "ACCESS_DENIED") {
-    console.log("seed-misskey: instance already set up, skipping (idempotent)");
+    // ACCESS_DENIEDレスポンスにはtokenが含まれない。miauthBridge.tsが読むのは
+    // username/passwordのみ(token非使用、実装確認済み: helpers/miauthBridge.tsは
+    // signIn()でusername/passwordから毎回自前でトークンを取得しに行く)なので、
+    // token無しでも問題ない。ここで書かないと、e2e/certs/を消した(または新規
+    // checkoutの)まま同じMisskeyインスタンス/DBを使い回すローカル反復開発時に、
+    // miauthBridge.tsの起動時readFileSync()がENOENTでクラッシュする。
+    writeFileSync(OUT_FILE, JSON.stringify({ username: USERNAME, password: PASSWORD }, null, 2));
+    console.log(`seed-misskey: instance already set up, skipping (idempotent); wrote ${OUT_FILE}`);
     return;
   }
 

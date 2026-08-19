@@ -177,7 +177,16 @@ describe("account → post → reaction", () => {
   });
 
   it("reacts to its own note", async () => {
-    const reactionButton = await $('button[aria-label="リアクション"]');
+    // ローカルで同じスタック(古い投稿が残っているMisskey DB)に対して繰り返し
+    // 実行した場合、タイムライン全体からの`$()`(先勝ち)だとテスト2で投稿した
+    // ノート以外の(過去実行由来の)ノートに誤ってヒットしうる。CIは毎回新規DBの
+    // ため問題は顕在化しないが、テスト2同様に`noteText`でスコープする。
+    const noteArticle = await $(
+      `//article[.//*[@data-testid="note-text" and contains(text(), "${noteText}")]]`,
+    );
+    await noteArticle.waitForDisplayed({ timeout: 15000 });
+
+    const reactionButton = await noteArticle.$('button[aria-label="リアクション"]');
     await reactionButton.waitForDisplayed({ timeout: 15000 });
     await reactionButton.click();
 
@@ -185,7 +194,7 @@ describe("account → post → reaction", () => {
     await thumbsUp.waitForDisplayed({ timeout: 15000 });
     await thumbsUp.click();
 
-    const reactionCount = await $('[data-testid="note-reaction-count-👍"]');
+    const reactionCount = await noteArticle.$('[data-testid="note-reaction-count-👍"]');
     await reactionCount.waitForDisplayed({ timeout: 15000 });
     await expect(reactionCount).toHaveText("1");
   });

@@ -173,10 +173,20 @@ export SSL_CERT_FILE="$TMP_CERT_BUNDLE"
 set -m
 Xvfb :88 -screen 0 1280x1024x24 -nolisten tcp &
 XVFB_PID=$!
+XVFB_READY=0
 for _ in $(seq 1 30); do
-  DISPLAY=:88 xdpyinfo >/dev/null 2>&1 && break
+  if DISPLAY=:88 xdpyinfo >/dev/null 2>&1; then
+    XVFB_READY=1
+    break
+  fi
   sleep 0.2
 done
+if [ "$XVFB_READY" -ne 1 ]; then
+  echo "run-app.sh: Xvfb :88 did not become ready within 6s." >&2
+  echo "run-app.sh: this Xvfb invocation may have failed to start (check for a stale /tmp/.X88-lock from a prior killed run)." >&2
+  kill -TERM "$XVFB_PID" 2>/dev/null || true
+  exit 1
+fi
 export DISPLAY=:88
 
 dbus-run-session -- bash -c '
