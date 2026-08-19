@@ -131,8 +131,70 @@ export SSL_CERT_FILE="$TMP_CERT_BUNDLE"
 # なので空パスワードで問題ない。dbus-run-session配下・実uid 1000のままの
 # 素のプロセスとして起動する(上記のLD_PRELOAD切り替えにより、名前空間や
 # uid remapが一切不要になったため、この起動もシンプルなまま保てる)。
-exec dbus-run-session -- bash -c '
+
+# `xvfb-run -a pnpm e2e`(design spec/brief記載の既定の実行コマンド。変更
+# しない)が使うXvfbの既定画面サイズは`xvfb-run`本体にハードコードされた
+# `-screen 0 640x480x24`で、これはtauri.conf.jsonのウィンドウサイズ
+# (800x600)より小さい(実機確認済み: `head -33 /usr/bin/xvfb-run`)。
+# ウィンドウマネージャの無いXvfb上ではアプリのウィンドウはこの640x480の
+# フレームバッファに収まる範囲でしか描画されず、モーダル等で画面下部に
+# あるボタンは物理的にビューポート外へ出てしまい、WebdriverIOの
+# `waitForClickable()`/`click()`が(スクロールしても)要素を掴めなくなる
+# (実機確認済み: `document.elementFromPoint()`で該当ボタンの中心座標が
+# ビューポート外のためnullになることを確認)。`xvfb-run`のスクリーン
+# サイズは`-s`/`--server-args`でしか変更できず環境変数越しの上書きは
+# 効かないため(実機確認済み)、外側の`xvfb-run -a pnpm e2e`はそのままに、
+# ここ(tsumugiプロセスを実際に起動する直前)でtauri-driverから見えない
+# 内側専用の、より大きなXvfbを起動する。サーバー番号は外側の既定値
+# (:99)と衝突しないよう明示的に別番号を指定する。
+#
+# 当初はこれを`xvfb-run -a -n 88 -s "..." dbus-run-session -- ...`という
+# ネストしたxvfb-run呼び出しで実装したが、実機検証の結果プロセスリーク
+# することが判明した: /usr/bin/xvfb-runのソース(末尾)を読むと、ラップ
+# したコマンドを`exec`ではなく素の`"$@"`(フォアグラウンド子プロセス)
+# として起動し、その終了を待ってからXvfbをkillする設計になっている。
+# ところがrun-app.sh自身は`exec xvfb-run ...`としていたため、
+# run-app.shのPIDはxvfb-run自身になる。tauri-driverがセッション終了時に
+# このPIDへシグナルを送っても、xvfb-runはtrapによるシグナル転送を
+# 一切行っておらず、フォアグラウンド待機中の子プロセスツリー
+# (dbus-run-session・gnome-keyring-daemon・tsumugi本体・ネストした
+# Xvfb自身)を道連れにできず、initに再親化された孤児プロセスとして
+# 残留することを実機で確認した。
+#
+# そのため、Xvfbは自前でバックグラウンド起動し、`trap`でSIGTERM/SIGINT/
+# 終了時にプロセスグループ全体(`kill -TERM -- -$pgid`)へシグナルを
+# 転送してから`wait`する構成に変更した(`set -m`でジョブ制御を有効化し、
+# バックグラウンドで起動したプロセスグループのリーダーPIDをそのまま
+# プロセスグループIDとして使う)。これにより、tauri-driverがrun-app.sh
+# のPIDをどう終了させても(SIGTERM/SIGINT経由なら)、Xvfb・
+# dbus-run-session・gnome-keyring-daemon・tsumugi本体を含む配下の
+# プロセス全てに確実にシグナルが届く(実機検証済み: SIGTERMを送って
+# `ps -ef`で残留プロセスが無いことを確認)。
+set -m
+Xvfb :88 -screen 0 1280x1024x24 -nolisten tcp &
+XVFB_PID=$!
+for _ in $(seq 1 30); do
+  DISPLAY=:88 xdpyinfo >/dev/null 2>&1 && break
+  sleep 0.2
+done
+export DISPLAY=:88
+
+dbus-run-session -- bash -c '
   eval "$(echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets)"
   export GNOME_KEYRING_CONTROL
   exec "$0" "$@"
-' "$BINARY" "$@"
+' "$BINARY" "$@" &
+APP_PID=$!
+
+cleanup() {
+  kill -TERM -- "-$APP_PID" 2>/dev/null || true
+  kill -TERM "$XVFB_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+set +e
+wait "$APP_PID"
+EXIT_CODE=$?
+set -e
+cleanup
+exit "$EXIT_CODE"

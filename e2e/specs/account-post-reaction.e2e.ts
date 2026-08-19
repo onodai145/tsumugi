@@ -110,8 +110,22 @@ describe("account → post → reaction", () => {
     await addColumnItem.click();
 
     // ソースの既定値は"home"(AddColumnModal.svelte)なので、そのまま追加するだけでよい。
+    // 「element did not become interactable」の実際の原因はアニメーション待ちの
+    // 問題ではなかった(Modal.svelte自体にtransition/animationは無い、実装確認済み)。
+    // `document.elementFromPoint()`で該当ボタンの中心座標を検証したところ、
+    // `xvfb-run`の既定スクリーンサイズ(640x480、`xvfb-run`本体にハードコード)が
+    // アプリのウィンドウサイズ(tauri.conf.json: 800x600)より小さく、
+    // AddColumnModalが縦に伸びるとこのボタンが物理的にビューポート外に
+    // 出てしまうことが根本原因だった(実機確認済み)。ウィンドウマネージャの
+    // 無いXvfb上ではスクロールしても解決しないため、run-app.sh側でtsumugi
+    // 起動用に十分な大きさのXvfb(1280x1024)をネストして解決した。
+    // ここではscrollIntoView()+waitForClickable()を保険的に残す
+    // (表示・ビューポート内・他要素に隠れていないことまで確認してからのみ
+    // クリックする、という本来あるべき待ち方そのものは妥当なため)。
     const addColumnSubmit = await $('[data-testid="add-column-submit"]');
     await addColumnSubmit.waitForDisplayed({ timeout: 15000 });
+    await addColumnSubmit.scrollIntoView();
+    await addColumnSubmit.waitForClickable({ timeout: 15000 });
     await addColumnSubmit.click();
 
     const textarea = await $('[data-testid="compose-textarea"]');
