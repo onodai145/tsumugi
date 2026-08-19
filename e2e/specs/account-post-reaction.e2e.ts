@@ -119,9 +119,25 @@ describe("account → post → reaction", () => {
     // 出てしまうことが根本原因だった(実機確認済み)。ウィンドウマネージャの
     // 無いXvfb上ではスクロールしても解決しないため、run-app.sh側でtsumugi
     // 起動用に十分な大きさのXvfb(1280x1024)をネストして解決した。
-    // ここではscrollIntoView()+waitForClickable()を保険的に残す
-    // (表示・ビューポート内・他要素に隠れていないことまで確認してからのみ
-    // クリックする、という本来あるべき待ち方そのものは妥当なため)。
+    //
+    // それでもなお実機で断続的に`waitForClickable`が失敗することがあり、
+    // 原因を追ったところ、WebKitGTKのウィンドウ自体の実サイズ(`window.
+    // innerWidth`/`innerHeight`)が起動直後は不安定で、同じ1280x1024の
+    // Xvfb画面でも起動ごとに948x987だったり948x464だったりするという
+    // タイミング競合を実機で確認した(ウィンドウマネージャの無いXvfbでは
+    // レイアウトが初回ペイント後に確定するまでに揺れがあると見られる)。
+    // ここでは対象要素を触る前に`window.innerHeight`が短い間隔で2回連続
+    // 同じ値になるまで待つことで、レイアウトが落ち着いてから操作する。
+    await browser.waitUntil(
+      async () => {
+        const h1 = await browser.execute(() => window.innerHeight);
+        await browser.pause(150);
+        const h2 = await browser.execute(() => window.innerHeight);
+        return h1 === h2 && h1 > 300;
+      },
+      { timeout: 10000, interval: 200 },
+    );
+
     const addColumnSubmit = await $('[data-testid="add-column-submit"]');
     await addColumnSubmit.waitForDisplayed({ timeout: 15000 });
     await addColumnSubmit.scrollIntoView();
@@ -137,8 +153,27 @@ describe("account → post → reaction", () => {
     await submitButton.click();
 
     // 自分のHomeカラムにストリーミングで即座に流れてくるはず。
-    const postedNote = await $(`*=${noteText}`);
-    await postedNote.waitForDisplayed({ timeout: 20000 });
+    // `*=text`(XPath contains()ベース)セレクタは、実機検証の結果
+    // ノート本文自体(data-testid="note-text")には正しくヒットしDOMにも
+    // 存在するのに`waitForDisplayed()`だけが20秒待っても`false`のままに
+    // なることがあった(実機確認済み: 診断コードでDOM上にテキストが
+    // 存在することを確認しつつ`waitForDisplayed`が失敗するケースを観測)。
+    // `*=`セレクタがマッチする実際の要素が意図した`note-text`要素ではなく
+    // 親のより大きなコンテナ側に解決されている可能性を疑い、
+    // `data-testid="note-text"`を明示的に指定したうえで`getText()`の
+    // 内容を`waitUntil`で直接ポーリングする、より曖昧さの無い待ち方に
+    // 変更した。
+    await browser.waitUntil(
+      async () => {
+        const noteTexts = await $$('[data-testid="note-text"]');
+        for (const el of noteTexts) {
+          const text = await el.getText().catch(() => "");
+          if (text.includes(noteText)) return true;
+        }
+        return false;
+      },
+      { timeout: 20000, interval: 300, timeoutMsg: `posted note "${noteText}" did not appear` },
+    );
   });
 
   it("reacts to its own note", async () => {
