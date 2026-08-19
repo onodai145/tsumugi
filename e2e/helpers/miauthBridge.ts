@@ -116,6 +116,16 @@ export async function startMiauthBridge(): Promise<MiauthBridge> {
 
   const context: BrowserContext = await chromium.launchPersistentContext(userDataDir, {
     ignoreHTTPSErrors: true,
+    // Misskeyのフロントエンドはブラウザのlocale(Accept-Language/navigator.language)に
+    // 応じて表示言語を切り替える。ここを指定しないとホストOSのロケール設定に
+    // 依存してしまい、ローカル(日本語ロケール)では「続ける」「許可」が出て
+    // 通っていたテストが、ロケールがen-USなGitHub Actions runner上では英語UI
+    // ("Continue"/"Approve"等)になり、日本語決め打ちのセレクタが一致せず
+    // タイムアウトする(実機のCI失敗で確認済み。account-select画面は
+    // 正しく表示されており、単にボタン文言が英語だったことがスクリーンショットの
+    // bodyTextダンプで判明した)。localeを明示することで実行環境のOSロケールに
+    // 依存しないようにする。
+    locale: "ja-JP",
     args: [
       `--remote-debugging-port=${CDP_PORT}`,
       // このブリッジ専用のChromiumインスタンスに限定した措置。
