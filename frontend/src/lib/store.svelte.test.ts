@@ -490,9 +490,11 @@ describe("app.fillRemainingGap (Issue #148)", () => {
   });
 
   it("targetIdに到達しないままページ上限に達したらgapMarkerを新しい境界で更新する", async () => {
+    // targetId は全ページIDより辞書順で小さい値にする(=時系列でより古い)。
+    // <= 比較で「到達」判定されないようにするため("target"のような非時系列語は使わない)。
     const tab = makeNoteTab(
       [makeNote({ id: "n5", createdAt: 50 })],
-      { gapMarker: { boundaryId: "n4", targetId: "target" } },
+      { gapMarker: { boundaryId: "n4", targetId: "a0" } },
     );
     app.groups = [makeGroup([tab])];
 
@@ -510,16 +512,17 @@ describe("app.fillRemainingGap (Issue #148)", () => {
 
     expect(call).toBe(10); // GAP_CONTINUE_MAX_PAGES
     const live = app.groups[0].tabs[0];
-    expect(live.gapMarker).toEqual({ boundaryId: "page10", targetId: "target" });
+    expect(live.gapMarker).toEqual({ boundaryId: "page10", targetId: "a0" });
     expect(live.fillingGap).toBe(false);
   });
 
-  it("APIが失敗したらgapMarkerを維持しfillingGapをfalseに戻す", async () => {
+  it("APIが失敗したらgapMarkerを維持しfillingGapをfalseに戻し、errorModalをセットする(Issue #183)", async () => {
     const tab = makeNoteTab(
       [makeNote({ id: "n5", createdAt: 50 })],
-      { gapMarker: { boundaryId: "n4", targetId: "target" } },
+      { gapMarker: { boundaryId: "n4", targetId: "a0" } },
     );
     app.groups = [makeGroup([tab])];
+    app.errorModal = null;
     // invoke は Rust側の Err(Error) を reject として伝える(実行時のTauri invoke挙動)。
     // typedError は plain object の reject を {status:"error",error} に変換する。
     invokeMock.mockImplementation(async (cmd: string) => {
@@ -530,7 +533,8 @@ describe("app.fillRemainingGap (Issue #148)", () => {
     await app.fillRemainingGap(tab.id);
 
     const live = app.groups[0].tabs[0];
-    expect(live.gapMarker).toEqual({ boundaryId: "n4", targetId: "target" });
+    expect(live.gapMarker).toEqual({ boundaryId: "n4", targetId: "a0" });
     expect(live.fillingGap).toBe(false);
+    expect(app.errorModal).not.toBeNull();
   });
 });

@@ -1509,15 +1509,15 @@ class AppStore {
           this.#captureInitial(tab.id, fresh);
         }
 
-        if (fetched.some((n) => n.id === targetId)) {
-          tab.gapMarker = null;
+        if (fetched.some((n) => n.id <= targetId)) {
+          if (tab.gapMarker?.targetId === targetId) tab.gapMarker = null;
           return;
         }
         boundaryId = fetched[fetched.length - 1].id;
-        tab.gapMarker = { boundaryId, targetId };
+        if (tab.gapMarker?.targetId === targetId) tab.gapMarker = { boundaryId, targetId };
       }
     } catch (e) {
-      this.#logFailure(e);
+      this.#failModal(e);
     } finally {
       tab.fillingGap = false;
     }

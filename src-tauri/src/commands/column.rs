@@ -785,6 +785,7 @@ async fn fill_gap(
             };
             if page.is_empty() {
                 done[i] = true;
+                reached_target[i] = true;
                 continue;
             }
             any_fetched = true;
