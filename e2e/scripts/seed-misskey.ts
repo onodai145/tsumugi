@@ -1,0 +1,81 @@
+// テスト用Misskeyインスタンスに管理者アカウントを1件だけ作成する。
+// 既に作成済み(2回目以降の実行)は admin/accounts/create が
+// ACCESS_DENIED を返すため、その場合は成功とみなしスキップする。
+import { writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import dns from "node:dns";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// e2eサンドボックスの/etc/hostsにはmisskey.localのエントリが無いため、Node標準の
+// fetch()(undiciベース、デフォルトでnode:dnsのdns.lookup()を経由する)はこのままでは
+// misskey.localを解決できない(実機確認済み: TypeError: fetch failed)。
+// helpers/miauthBridge.tsと同じ発想で、このプロセス内だけmisskey.localを127.0.0.1へ
+// 固定解決する。
+const originalLookup = dns.lookup;
+// @ts-expect-error - overload signatures make a single reassignment awkward; behavior is verified in miauthBridge.ts
+dns.lookup = (hostname: string, options: unknown, callback?: unknown) => {
+  const cb = (typeof options === "function" ? options : callback) as (
+    err: NodeJS.ErrnoException | null,
+    address: string | dns.LookupAddress[],
+    family?: number,
+  ) => void;
+  if (hostname === "misskey.local") {
+    if (typeof options === "object" && options !== null && (options as { all?: boolean }).all) {
+      return cb(null, [{ address: "127.0.0.1", family: 4 }]);
+    }
+    return cb(null, "127.0.0.1", 4);
+  }
+  // @ts-expect-error - passthrough to the original overloaded signature
+  return originalLookup(hostname, options, callback);
+};
+
+const BASE_URL = process.env.E2E_MISSKEY_URL ?? "https://misskey.local:8443";
+const USERNAME = "e2etestadmin";
+const PASSWORD = "e2e-test-user-password";
+const SETUP_PASSWORD = "e2e-test-setup-password";
+const OUT_FILE = join(__dirname, "..", "certs", "seeded-account.json");
+
+async function main() {
+  const res = await fetch(`${BASE_URL}/api/admin/accounts/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: USERNAME,
+      password: PASSWORD,
+      setupPassword: SETUP_PASSWORD,
+    }),
+  });
+
+  if (res.ok) {
+    const body = (await res.json()) as { token: string };
+    writeFileSync(
+      OUT_FILE,
+      JSON.stringify({ username: USERNAME, password: PASSWORD, token: body.token }, null, 2),
+    );
+    console.log(`seed-misskey: created admin account, token written to ${OUT_FILE}`);
+    return;
+  }
+
+  const errBody = (await res.json()) as { error?: { code?: string } };
+  if (errBody.error?.code === "ACCESS_DENIED") {
+    // ACCESS_DENIEDレスポンスにはtokenが含まれない。miauthBridge.tsが読むのは
+    // username/passwordのみ(token非使用、実装確認済み: helpers/miauthBridge.tsは
+    // signIn()でusername/passwordから毎回自前でトークンを取得しに行く)なので、
+    // token無しでも問題ない。ここで書かないと、e2e/certs/を消した(または新規
+    // checkoutの)まま同じMisskeyインスタンス/DBを使い回すローカル反復開発時に、
+    // miauthBridge.tsの起動時readFileSync()がENOENTでクラッシュする。
+    writeFileSync(OUT_FILE, JSON.stringify({ username: USERNAME, password: PASSWORD }, null, 2));
+    console.log(`seed-misskey: instance already set up, skipping (idempotent); wrote ${OUT_FILE}`);
+    return;
+  }
+
+  throw new Error(`seed-misskey: unexpected response ${res.status}: ${JSON.stringify(errBody)}`);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

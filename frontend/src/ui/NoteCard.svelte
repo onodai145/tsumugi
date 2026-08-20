@@ -336,7 +336,7 @@
 
       {#if !inner.cw || cwOpen}
         {#if inner.text}
-          <div class="mt-px whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text" oncopy={handleNyaizeCopy}><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
+          <div class="mt-px whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text" data-testid="note-text" oncopy={handleNyaizeCopy}><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
         {/if}
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
@@ -400,7 +400,7 @@
                 {:else}
                   <UnicodeEmoji char={key} showTitle={false} />
                 {/if}
-                <span class="text-muted-foreground">{count}</span>
+                <span class="text-muted-foreground" data-testid={`note-reaction-count-${key}`}>{count}</span>
               </button>
             </span>
           {/each}

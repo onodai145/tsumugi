@@ -33,7 +33,19 @@ log = "0.4"
 tauri = { version = "2.11.1", features = ["specta"] }
 tauri-plugin-log = "2"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+# rustls-tls-native-roots(rustls-native-certs)はデスクトップ(Linux/macOS/Windows)では
+# OSの信頼ストアを見るため自己ホストインスタンスの独自CA等に対応できるが、Androidでは
+# 依存先のopenssl-probeがTermuxのパス(/data/data/com.termux/...)しか見ておらず
+# 通常インストールのAndroidアプリの実CA置き場(/system/etc/security/cacerts)を一切
+# 探さないため、load_native_certs()が空集合を返しHTTPS/WSSが全滅する(実装確認済み:
+# openssl-probe 0.2.1 の #[cfg(target_os = "android")] 分岐)。rustls-tls-webpki-roots
+# (Mozilla同梱ルート証明書)を追加で有効化し、両者を必ず併用する。reqwest 0.12.28の
+# 実装確認済み: 両feature有効時はどちらか一方が勝つのではなく、同じRootCertStoreに
+# webpki-rootsを先にextend()した後、native-certsをadd()で追記する(完全な加算)。
+# これによりnative-roots解決が効くプラットフォームでは従来通りの恩恵(自己署名/内部CA
+# 対応)を維持しつつ、Androidのような解決失敗プラットフォームでも常にMozillaルート
+# 証明書という最低限のフロアが確保される。
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 thiserror = "2.0.18"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 url = "2.5.8"
@@ -46,7 +58,10 @@ keyring-core = "1.0.0"
 specta = { version = "=2.0.0-rc.25", features = ["derive", "uuid", "url"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
-tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+# reqwestと同じ理由でrustls-tls-webpki-rootsを併用する(実装確認済み: tokio-tungstenite
+# 0.29.0のsrc/tls.rsも同様にRootCertStoreへwebpki-roots→native-certsの順でextend/addし、
+# 両feature併用時はどちらか一方が勝つのではなく加算される)。
+tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3.32", default-features = false, features = ["sink", "std"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "alloc"] }
 tauri-plugin-opener = "2.5.4"

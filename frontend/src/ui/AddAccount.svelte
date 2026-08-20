@@ -88,9 +88,10 @@
         class="flex-1 rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
         placeholder="misskey.example"
         bind:value={host}
+        data-testid="add-account-host-input"
         onkeydown={(e) => e.key === "Enter" && host.trim() && start()}
       />
-      <Button type="button" variant="default" size="default" disabled={busy || !host.trim()} onclick={start}>
+      <Button type="button" variant="default" size="default" disabled={busy || !host.trim()} onclick={start} data-testid="add-account-start">
         {busy ? "…" : "認可ページを開く"}
       </Button>
     </div>
@@ -100,7 +101,7 @@
         ? "スコープが更新されたトークンを取得します。ブラウザで認可を完了したら、下のボタンを押してください。"
         : "ブラウザで認可を完了したら、下のボタンを押してください。"}
     </p>
-    <Button type="button" variant="default" size="default" class="mt-1.5" disabled={busy} onclick={complete}>
+    <Button type="button" variant="default" size="default" class="mt-1.5" disabled={busy} onclick={complete} data-testid="add-account-complete">
       {busy ? "確認中…" : "認可を完了した"}
     </Button>
     <Button

@@ -572,7 +572,7 @@
   {/if}
 
   <div class="mt-1.5 flex justify-end">
-    <Button disabled={busy || !!filterErr || !!tqlErr} onclick={submit}>
+    <Button disabled={busy || !!filterErr || !!tqlErr} onclick={submit} data-testid="add-column-submit">
       {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
     </Button>
   </div>

@@ -1,0 +1,6 @@
+allowBuilds:
+  edgedriver: false
+  esbuild: false
+  geckodriver: false
+patchedDependencies:
+  '@wdio/tauri-service@1.3.0': patches/@wdio__tauri-service@1.3.0.patch
