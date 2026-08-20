@@ -9,12 +9,43 @@ permissions:
   contents: read
 
 jobs:
+  # docs/**やMarkdownのみの変更ではrust-test/frontend-check/android-buildの
+  # 実処理をスキップするためのdiff判定。これらは必須ステータスチェックに
+  # 指定されている(main のブランチ保護)ため、paths-ignoreでジョブ自体の
+  # 起動を止めるとチェックがpendingのままマージがブロックされてしまう。
+  # ジョブは起動させたまま内部のステップをスキップして即successにすることで、
+  # 必須チェックの構成を変えずにビルド・テストの実行時間だけ短縮する。
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # 否定パターンのみのfilterは「何にもマッチしない」("negated patterns only
+          # never matches anything" - action公式README)ため、必ずマッチする
+          # '**' を明示し、predicate-quantifier: every で「'**'にマッチし、かつ
+          # docs/**にも*.mdにもマッチしない」ことを要求する形にしている。
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+
   rust-test:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install system dependencies (Tauri v2 Linux)
+        if: needs.changes.outputs.code == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -29,38 +60,46 @@ jobs:
       # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
       # resolves the current stable Rust release, so it is left unpinned by design.
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.code == 'true'
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
 
       # package.json の packageManager は frontend/ 配下にあり action-setup のデフォルト
       # 検出(リポジトリルート)では拾えないため version を明示指定する。
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           version: 11.3.0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: pnpm install
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
       # cargo test は tauri::generate_context!() をコンパイル時に評価するため、
       # tauri.conf.json の frontendDist(../frontend/dist) が実在している必要がある。
       - name: pnpm build (frontendDist生成)
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm build
 
       - name: cargo test
+        if: needs.changes.outputs.code == 'true'
         working-directory: src-tauri
         run: cargo test
 
   frontend-check:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -68,24 +107,29 @@ jobs:
       # package.json の packageManager は frontend/ 配下にあり action-setup のデフォルト
       # 検出(リポジトリルート)では拾えないため version を明示指定する。
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           version: 11.3.0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: pnpm install
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
       - name: svelte-check
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm check
 
       - name: vitest
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm test
 
@@ -95,7 +139,11 @@ jobs:
   # run-app.shが内側に立てる専用Xvfbの起動確認に使うxdpyinfo(x11-utils)が必要。
   # 外側の`xvfb-run -a pnpm e2e`(design docが指定する固定のエントリポイント)用に
   # xvfbも別途要る。
+  # e2eは必須ステータスチェックではないため、docs-only変更ではジョブ自体を
+  # 起動しない(ランナー起動コストも含めて完全にスキップできる)。
   e2e:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -242,16 +290,19 @@ jobs:
 
   # Android ターゲットがコンパイル・リンクできるかの検証のみ(署名やアーティファクト配布はしない)。
   android-build:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           distribution: temurin
           java-version: "17"
 
       - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
+        if: needs.changes.outputs.code == 'true'
         id: setup-ndk
         with:
           ndk-version: r27c
@@ -261,6 +312,7 @@ jobs:
       # 展開先ディレクトリが変わるとリンク切れになる(clang ラッパーが exit 127 で失敗する)。
       # tauri-apps/tauri の公式CIワークフローと同じ手当てで絶対パスに直す。
       - name: Restore Android NDK symlinks
+        if: needs.changes.outputs.code == 'true'
         run: |
           directory="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           find "$directory" -type l | while read -r link; do
@@ -272,14 +324,17 @@ jobs:
       # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
       # resolves the current stable Rust release, so it is left unpinned by design.
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.code == 'true'
         with:
           targets: aarch64-linux-android
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
 
       - name: Cache cargo-tauri CLI
+        if: needs.changes.outputs.code == 'true'
         id: cache-tauri-cli
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -287,26 +342,30 @@ jobs:
           key: cargo-tauri-cli-v2-${{ runner.os }}
 
       - name: Install tauri-cli
-        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        if: needs.changes.outputs.code == 'true' && steps.cache-tauri-cli.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
 
       # package.json の packageManager は frontend/ 配下にあり action-setup のデフォルト
       # 検出(リポジトリルート)では拾えないため version を明示指定する。
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           version: 11.3.0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: pnpm install
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
       - name: cargo tauri android build (debug, ビルド検証のみ)
+        if: needs.changes.outputs.code == 'true'
         working-directory: src-tauri
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
