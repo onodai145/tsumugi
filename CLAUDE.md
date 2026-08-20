@@ -17,11 +17,18 @@ cargo tauri build             # release build with frontend embedded (frontendDi
 cd src-tauri && cargo test    # Rust tests (real Misskey connectivity tests are #[ignore])
 cd src-tauri && cargo test <test_name>   # run a single test
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
+cd frontend  && pnpm test                # Vitest unit tests
 
 scripts/release.sh X.Y.Z      # bump version in package.json/Cargo.toml/tauri.conf.json/Cargo.lock, generate CHANGELOG.md, create release/vX.Y.Z branch + commit — never hand-edit these version fields with sed
 ```
 
+Operation E2E tests (Playwright/tauri-driver against a throwaway Docker Compose Misskey instance) live in `e2e/` — see `e2e/README.md` for setup and run order, not covered here.
+
 Never run `./target/debug/tsumugi` or `cargo run` directly — Tauri's debug build loads the frontend from the dev server (`devUrl` = `127.0.0.1:5173`); without vite running you get a connection-refused error. Always use `cargo tauri dev`.
+
+`cargo tauri build --debug`'s bundler step can hang 40+ minutes on some dependency-tree changes (unrelated to compilation itself, which finishes in seconds). If you just need a runnable `target/debug/tsumugi` binary (e.g. for `tauri-driver`/E2E), use `cargo build` from `src-tauri/` directly, or `cargo tauri build --debug --no-bundle`.
+
+E2E tests (`e2e/`) launch several background processes (`Xvfb`, `dbus-run-session`, `gnome-keyring-daemon`, the `tsumugi` binary under test) that can be orphaned if a run is killed abruptly. Clean these up by exact PID only (`ps aux` then `kill <pid>`) — never `pkill`/`killall` by name/pattern, since that can match unrelated real processes (e.g. a real browser) on the same machine.
 
 On Linux/Wayland (Hyprland etc.), WebKitGTK's DMABUF renderer can conflict with wlroots compositors and crash rendering with `Gdk Error 71 (protocol error)`. `src-tauri/src/main.rs` sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` by default to work around this; if that doesn't help, fall back to `GDK_BACKEND=x11 cargo tauri dev`.
 
