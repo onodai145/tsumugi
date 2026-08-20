@@ -5,7 +5,7 @@
   import UnicodeEmoji from "./UnicodeEmoji.svelte";
   import Sparkle from "./Sparkle.svelte";
   import CodeBlock from "./CodeBlock.svelte";
-  import { ExternalLink } from "@lucide/svelte";
+  import { ExternalLink, Search } from "@lucide/svelte";
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
   import { openProfile } from "../lib/profileModal.svelte";
@@ -128,7 +128,16 @@
 {:else if node.type === "mathInline" || node.type === "mathBlock"}
   <code class="mfm-code">{p.formula}</code>
 {:else if node.type === "search"}
-  <span>{p.query}</span>
+  <!-- 本家準拠: 「<クエリ> 検索」を検索ボックス風UIとして描画する -->
+  <a
+    class="mfm-search focus-visible:ring-3 focus-visible:ring-ring/50"
+    href={`https://www.google.com/search?q=${encodeURIComponent(p.query)}`}
+    target="_blank"
+    rel="noreferrer noopener"
+  >
+    <span class="mfm-search-query">{p.query}</span>
+    <span class="mfm-search-button"><Search size={14} />検索</span>
+  </a>
 {:else if node.type === "plain"}
   <!-- 本家準拠: $[plain ...] 内は nyaize しない（disableNyaize） -->
   {#each children as c}<Self node={c} {emojis} />{/each}

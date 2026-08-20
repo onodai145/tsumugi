@@ -189,6 +189,38 @@ a:hover {
   padding-left: 10px;
   color: var(--text-dim);
 }
+.mfm-search {
+  display: flex;
+  align-items: stretch;
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px; /* rounded-md相当。style-guide §フォームコントロール */
+  overflow: hidden;
+  color: var(--text);
+  text-decoration: none;
+  width: fit-content;
+  max-width: 100%;
+}
+.mfm-search:hover {
+  text-decoration: none;
+}
+.mfm-search-query {
+  padding: 6px 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mfm-search-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--surface-3);
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .mfm-code {
   background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   border-radius: 4px;
