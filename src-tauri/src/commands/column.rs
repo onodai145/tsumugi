@@ -292,16 +292,16 @@ pub async fn resume_column(
             let account_id = column.account_id.clone();
             tauri::async_runtime::spawn(async move {
                 let Some(state) = app2.try_state::<AppState>() else { return };
-                let gap_notes = fill_gap(&state, &account_id, &resolved, &newest_known_id, gap_limit)
+                let gap_result = fill_gap(&state, &account_id, &resolved, &newest_known_id, gap_limit)
                     .await
-                    .unwrap_or_default();
-                if gap_notes.is_empty() {
+                    .unwrap_or(GapFillResult { notes: vec![], truncated: false, boundary_id: None });
+                if gap_result.notes.is_empty() {
                     return;
                 }
-                let _ = state.cache.cache_notes(&column_id, &gap_notes);
+                let _ = state.cache.cache_notes(&column_id, &gap_result.notes);
                 let _ = crate::events::ColumnGapFill {
                     column_id,
-                    notes: gap_notes,
+                    notes: gap_result.notes,
                 }
                 .emit(&app2);
             });
@@ -706,19 +706,43 @@ fn open_streams_only(
     }
 }
 
+/// `fill_gap` の結果。`newest_known_id` に追いつけたか(=打ち切りが起きたか)を
+/// 呼び出し元(resume_column/gap_fill_on_reconnect)がフロントへ伝えるために持つ。
+struct GapFillResult {
+    notes: Vec<Note>,
+    /// newest_known_id に追いつく前に limit/ページ数上限で打ち切られた場合 true。
+    truncated: bool,
+    /// truncated=true のとき、取得できた中で一番古いノートのid。
+    /// フロントが「続きを取得」で fetch_backfill の until_id に使う。
+    boundary_id: Option<String>,
+}
+
+/// 収集済みノートを重複除去・整形し、`newest_known_id` に追いつけたかを判定する。
+/// ネットワークを伴わない純粋関数にして単体テストしやすくしている。
+fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool, limit: i32) -> GapFillResult {
+    let mut seen = std::collections::HashSet::new();
+    collected.retain(|n| seen.insert(n.id.clone()));
+    collected.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    collected.truncate(limit.max(0) as usize);
+    let truncated = !all_sources_reached_target && !collected.is_empty();
+    let boundary_id = if truncated { collected.last().map(|n| n.id.clone()) } else { None };
+    GapFillResult { notes: collected, truncated, boundary_id }
+}
+
 /// 起動時のギャップ埋め: アプリを閉じていた間に流れたノートを、キャッシュの最新ノートid
 /// (`newest_known_id`)まで REST で遡って取得する。`limit` 件、または既知のノートに追いつく
 /// (取得ページの中に newest_known_id 以前のノートが現れる)まで、どちらか早い方で打ち切る。
 /// ページ数にも上限(GAP_FILL_MAX_PAGES)を設け、長期間閉じていた場合の暴走取得を防ぐ。
+/// 打ち切られた(=追いつけなかった)場合は `GapFillResult::truncated` が true になる。
 async fn fill_gap(
     state: &AppState,
     account_id: &str,
     resolved: &ResolvedSources,
     newest_known_id: &str,
     limit: i32,
-) -> Result<Vec<Note>> {
+) -> Result<GapFillResult> {
     if resolved.kinds.is_empty() {
-        return Ok(vec![]);
+        return Ok(GapFillResult { notes: vec![], truncated: false, boundary_id: None });
     }
     let client = state.client_for(account_id)?;
     let ctx = state.eval_context();
@@ -730,6 +754,9 @@ async fn fill_gap(
     // 途中が埋まらないまま打ち切られてしまうため、ソース単位で打ち切りを判定する。
     let mut cursors: Vec<Option<String>> = vec![None; resolved.kinds.len()];
     let mut done: Vec<bool> = vec![false; resolved.kinds.len()];
+    // done とは別に「newest_known_id に本当に追いついたか」を持つ。done はページ枯渇/失敗
+    // でも true になるため、truncated 判定には使えない。
+    let mut reached_target: Vec<bool> = vec![false; resolved.kinds.len()];
 
     for _ in 0..GAP_FILL_MAX_PAGES {
         if done.iter().all(|d| *d) || collected.len() as i32 >= limit {
@@ -759,6 +786,7 @@ async fn fill_gap(
             for n in page {
                 if n.id.as_str() <= newest_known_id {
                     done[i] = true;
+                    reached_target[i] = true;
                     continue;
                 }
                 if resolved.filter.matches(&n, &ctx)
@@ -775,11 +803,8 @@ async fn fill_gap(
         }
     }
 
-    let mut seen = std::collections::HashSet::new();
-    collected.retain(|n| seen.insert(n.id.clone()));
-    collected.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-    collected.truncate(limit.max(0) as usize);
-    Ok(collected)
+    let all_reached = reached_target.iter().all(|r| *r);
+    Ok(finalize_gap_fill(collected, all_reached, limit))
 }
 
 /// フラッピング再接続時に同一カラムへ複数波のギャップ埋めタスクが多重起動されないよう、
@@ -850,18 +875,18 @@ pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
     if gap_limit == 0 {
         return;
     }
-    let Ok(gap_notes) =
+    let Ok(gap_result) =
         fill_gap(&state, &column.account_id, &resolved, &newest_known_id, gap_limit).await
     else {
         return;
     };
-    if gap_notes.is_empty() {
+    if gap_result.notes.is_empty() {
         return;
     }
-    let _ = state.cache.cache_notes(&column.id, &gap_notes);
+    let _ = state.cache.cache_notes(&column.id, &gap_result.notes);
     let _ = crate::events::ColumnGapFill {
         column_id: column.id.clone(),
-        notes: gap_notes,
+        notes: gap_result.notes,
     }
     .emit(app);
 }
@@ -1029,4 +1054,102 @@ fn filter_notifications(
             None => true,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{User, Visibility};
+
+    fn note(id: &str, created_at: i64) -> Note {
+        Note {
+            id: id.into(),
+            created_at,
+            text: Some("hello".into()),
+            cw: None,
+            visibility: Visibility::Public,
+            local_only: false,
+            user: User {
+                id: "u1".into(),
+                username: "alice".into(),
+                host: None,
+                name: None,
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 0,
+                following_count: 0,
+                notes_count: 0,
+                emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
+            },
+            reply_id: None,
+            renote_id: None,
+            renote: None,
+            files: vec![],
+            poll: None,
+            tags: vec![],
+            mentions: vec![],
+            emojis: std::collections::HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
+            reactions: std::collections::HashMap::new(),
+            reaction_count: 0,
+            renote_count: 0,
+            reply_count: 0,
+            my_reaction: None,
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
+        }
+    }
+
+    #[test]
+    fn finalize_gap_fill_marks_truncated_when_target_not_reached() {
+        let collected = vec![note("n3", 30), note("n2", 20), note("n1", 10)];
+        let result = finalize_gap_fill(collected, false, 100);
+
+        assert!(result.truncated);
+        assert_eq!(result.boundary_id.as_deref(), Some("n1"));
+        assert_eq!(result.notes.len(), 3);
+    }
+
+    #[test]
+    fn finalize_gap_fill_not_truncated_when_all_sources_reached_target() {
+        let collected = vec![note("n2", 20), note("n1", 10)];
+        let result = finalize_gap_fill(collected, true, 100);
+
+        assert!(!result.truncated);
+        assert_eq!(result.boundary_id, None);
+        assert_eq!(result.notes.len(), 2);
+    }
+
+    #[test]
+    fn finalize_gap_fill_truncates_to_limit_and_reports_oldest_kept_as_boundary() {
+        let collected = vec![note("n3", 30), note("n2", 20), note("n1", 10)];
+        let result = finalize_gap_fill(collected, false, 2);
+
+        assert_eq!(result.notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["n3", "n2"]);
+        assert!(result.truncated);
+        assert_eq!(result.boundary_id.as_deref(), Some("n2"));
+    }
+
+    #[test]
+    fn finalize_gap_fill_not_truncated_when_nothing_collected() {
+        let result = finalize_gap_fill(vec![], false, 100);
+
+        assert!(!result.truncated);
+        assert_eq!(result.boundary_id, None);
+        assert!(result.notes.is_empty());
+    }
+
+    #[test]
+    fn finalize_gap_fill_dedupes_by_id() {
+        let collected = vec![note("n1", 10), note("n1", 10)];
+        let result = finalize_gap_fill(collected, true, 100);
+
+        assert_eq!(result.notes.len(), 1);
+    }
 }
