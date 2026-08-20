@@ -42,6 +42,7 @@ import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "
 import { isMobilePlatform } from "./platform";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
+const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1クリックあたりの取得ページ上限（Issue #148）
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // ノートキャッシュ間引きの間隔（6時間）
 
@@ -1480,6 +1481,45 @@ class AppStore {
       this.#logFailure(e);
     } finally {
       tab.loadingMore = false;
+    }
+  }
+
+  /// 起動時ギャップ埋めが打ち切られて残った空白を、ユーザー操作で埋める(Issue #148)。
+  /// tab.gapMarker.targetId に到達するまで fetch_backfill を最大 GAP_CONTINUE_MAX_PAGES 回
+  /// ループ呼び出しする。到達しなければ gapMarker を最新の境界で更新して残す(再クリック可能)。
+  async fillRemainingGap(tabId: string) {
+    const tab = this.#findTab(tabId);
+    if (!tab || !tab.gapMarker || tab.fillingGap) return;
+    tab.fillingGap = true;
+    const { targetId } = tab.gapMarker;
+    let boundaryId = tab.gapMarker.boundaryId;
+    try {
+      for (let page = 0; page < GAP_CONTINUE_MAX_PAGES; page++) {
+        const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId));
+        if (fetched.length === 0) break;
+
+        const known = new Set(tab.notes.map((n) => n.id));
+        const fresh = fetched.filter((n) => !known.has(n.id));
+        if (fresh.length > 0) {
+          const merged = [...tab.notes, ...fresh];
+          merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+          tab.notes = merged.slice(0, MAX_NOTES);
+          // captureInitial 同様に subNote 購読しないと、この先そのノートへの
+          // リアクション追加/削除が noteUpdated イベントとして届かず反映されない(Issue #3)。
+          this.#captureInitial(tab.id, fresh);
+        }
+
+        if (fetched.some((n) => n.id === targetId)) {
+          tab.gapMarker = null;
+          return;
+        }
+        boundaryId = fetched[fetched.length - 1].id;
+        tab.gapMarker = { boundaryId, targetId };
+      }
+    } catch (e) {
+      this.#logFailure(e);
+    } finally {
+      tab.fillingGap = false;
     }
   }
 
