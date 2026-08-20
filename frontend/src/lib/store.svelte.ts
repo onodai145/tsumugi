@@ -65,6 +65,13 @@ export interface TabView {
   notifications: Notification[];
   state: ConnectionState;
   loadingMore: boolean;
+  /// 起動時ギャップ埋めが gap_fill_limit 等で打ち切られたまま残っている空白（Issue #148）。
+  /// boundaryId のノート直後(より過去側)にタイムライン上で区切り線+ボタンを描画する。
+  gapMarker: { boundaryId: string; targetId: string } | null;
+  /// fillRemainingGap の多重実行防止フラグ。loadingMore とは独立して持つ
+  /// (スクロールでの追加読み込みとギャップ埋め継続を同時に走らせても問題ないが、
+  /// ボタンの二重クリックだけは防ぎたいため)。
+  fillingGap: boolean;
   selectedNoteId: string | null;
 }
 
@@ -330,6 +337,8 @@ class AppStore {
       notifications: opened.notifications,
       state: this.#connState.get(opened.column.id) ?? "connecting",
       loadingMore: false,
+      gapMarker: null,
+      fillingGap: false,
       selectedNoteId: null,
     };
   }
@@ -820,6 +829,13 @@ class AppStore {
         }
         merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
         tab.notes = merged.slice(0, MAX_NOTES);
+        // 打ち切られた(=newest_known_idに追いつけなかった)場合のみマーカーをセットする。
+        // truncated=false のイベントで既存マーカーを消すことはしない — このイベントの
+        // newest_known_idは「現在のキャッシュ最新」基準であり、過去に打ち切られた
+        // もっと古い空白とは無関係な場合があるため（Issue #148）。
+        if (e.payload.truncated && e.payload.boundaryId && e.payload.targetId) {
+          tab.gapMarker = { boundaryId: e.payload.boundaryId, targetId: e.payload.targetId };
+        }
       }),
     );
     this.#unlisten.push(

@@ -96,6 +96,8 @@ function makeNotificationOnlyTab(note: Note): TabView {
     notifications: [makeNotification({ note })],
     state: "connected",
     loadingMore: false,
+    gapMarker: null,
+    fillingGap: false,
     selectedNoteId: null,
   };
 }
@@ -354,6 +356,8 @@ function makeNormalTab(overrides: Partial<TabView> = {}): TabView {
     notifications: [],
     state: "connected",
     loadingMore: false,
+    gapMarker: null,
+    fillingGap: false,
     selectedNoteId: null,
     ...overrides,
   };
@@ -421,5 +425,38 @@ describe("ユーザー直接操作の失敗はerrorModalに記録される(Issue
     invokeMock.mockRejectedValueOnce(new Error("width failed"));
     await app.persistGroupWidth("g1", 300);
     expect(app.errorModal).toBeNull();
+  });
+});
+
+function makeNoteTab(notes: Note[], overrides: Partial<TabView> = {}): TabView {
+  return {
+    id: "tab1",
+    accountId: ACCOUNT_ID,
+    kind: { type: "home" },
+    title: "ホーム",
+    customTitle: null,
+    filter: { kind: "keywords", value: [] },
+    notifyDesktop: false,
+    notifySound: false,
+    notifySoundChoice: "",
+    notes,
+    notifications: [],
+    state: "connected",
+    loadingMore: false,
+    gapMarker: null,
+    fillingGap: false,
+    selectedNoteId: null,
+    ...overrides,
+  };
+}
+
+describe("app.fillRemainingGap (Issue #148)", () => {
+  it("gapMarkerが無ければ何もしない", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n1" })]);
+    app.groups = [makeGroup([tab])];
+
+    await app.fillRemainingGap(tab.id);
+
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });
