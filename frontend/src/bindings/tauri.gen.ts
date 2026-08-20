@@ -320,6 +320,12 @@ export type ColumnConnectionState = {
 export type ColumnGapFill = {
 	columnId: string,
 	notes: Note[],
+	/**  newest_known_id に追いつく前に gap_fill_limit 等で打ち切られた場合 true。 */
+	truncated: boolean,
+	/**  truncated=true のとき、続きを取得する際に fetch_backfill の until_id に使う境界ノートid。 */
+	boundaryId: string | null,
+	/**  truncated=true のときの到達目標(元のキャッシュ最新ノートid)。 */
+	targetId: string | null,
 };
 
 /**  視覚的なカラム（タブの集合）。幅と並び順を持つ。 */

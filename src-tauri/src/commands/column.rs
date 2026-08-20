@@ -302,6 +302,13 @@ pub async fn resume_column(
                 let _ = crate::events::ColumnGapFill {
                     column_id,
                     notes: gap_result.notes,
+                    truncated: gap_result.truncated,
+                    boundary_id: gap_result.boundary_id,
+                    target_id: if gap_result.truncated {
+                        Some(newest_known_id)
+                    } else {
+                        None
+                    },
                 }
                 .emit(&app2);
             });
@@ -887,6 +894,13 @@ pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
     let _ = crate::events::ColumnGapFill {
         column_id: column.id.clone(),
         notes: gap_result.notes,
+        truncated: gap_result.truncated,
+        boundary_id: gap_result.boundary_id,
+        target_id: if gap_result.truncated {
+            Some(newest_known_id)
+        } else {
+            None
+        },
     }
     .emit(app);
 }
