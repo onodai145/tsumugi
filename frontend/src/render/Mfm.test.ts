@@ -104,6 +104,15 @@ describe("Mfm", () => {
     expect(container.querySelector("span.mfm-hashtag")?.textContent).toBe("#tag");
   });
 
+  it("renders a search box for the search syntax", () => {
+    const { container } = render(Mfm, { props: { text: "しなちくシステムのからあげ 検索" } });
+    const a = container.querySelector("a.mfm-search");
+    expect(a?.querySelector(".mfm-search-query")?.textContent).toBe("しなちくシステムのからあげ");
+    expect(a?.getAttribute("href")).toBe(
+      `https://www.google.com/search?q=${encodeURIComponent("しなちくシステムのからあげ")}`,
+    );
+  });
+
   it("renders a custom emoji image when a url is supplied", () => {
     const { getByRole } = render(Mfm, {
       props: { text: ":blob_cat:", emojis: { blob_cat: "https://example.com/e.png" } },

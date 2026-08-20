@@ -172,6 +172,11 @@ pub struct UiPrefs {
     /// 既定はON(従来動作維持)。
     #[serde(default = "default_mfm_animation_enabled")]
     pub mfm_animation_enabled: bool,
+    /// MFM検索構文($[search]相当、`<query>\n検索`)をクリックしたときに開く検索URLのテンプレート。
+    /// `{query}` をURLエンコード済みクエリで置換する。`{query}` を含まない/空文字なら
+    /// 既定のGoogle検索にフォールバックする（Issue #217）。
+    #[serde(default = "default_search_engine_url")]
+    pub search_engine_url: String,
 }
 
 fn default_column_opacity() -> i32 {
@@ -221,6 +226,10 @@ fn default_mfm_animation_enabled() -> bool {
     true
 }
 
+fn default_search_engine_url() -> String {
+    "https://www.google.com/search?q={query}".into()
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -249,6 +258,7 @@ impl Default for UiPrefs {
             note_cache_max_size_mb: 0,
             enable_file_logging: false,
             mfm_animation_enabled: default_mfm_animation_enabled(),
+            search_engine_url: default_search_engine_url(),
         }
     }
 }
@@ -371,6 +381,7 @@ mod tests {
                 link: "#569cd6".into(),
             }],
             mfm_animation_enabled: false,
+            search_engine_url: "https://duckduckgo.com/?q={query}".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -389,5 +400,14 @@ mod tests {
         let v: UiPrefs =
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert!(v.mfm_animation_enabled);
+    }
+
+    #[test]
+    fn search_engine_url_defaults_to_google_for_legacy_json() {
+        // search_engine_url 追加前に保存されたJSONも読めること（#[serde(default)]）。
+        // 既定はGoogle検索(追加前の固定挙動を維持)。
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.search_engine_url, "https://www.google.com/search?q={query}");
     }
 }

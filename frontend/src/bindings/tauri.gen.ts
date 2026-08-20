@@ -782,6 +782,12 @@ export type UiPrefs = {
 	 *  既定はON(従来動作維持)。
 	 */
 	mfmAnimationEnabled?: boolean,
+	/**
+	 *  MFM検索構文($[search]相当、`<query>\n検索`)をクリックしたときに開く検索URLのテンプレート。
+	 *  `{query}` をURLエンコード済みクエリで置換する。`{query}` を含まない/空文字なら
+	 *  既定のGoogle検索にフォールバックする（Issue #217）。
+	 */
+	searchEngineUrl?: string,
 };
 
 /**  docs/design/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
