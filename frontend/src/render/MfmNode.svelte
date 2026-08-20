@@ -10,6 +10,7 @@
   import { nyaize } from "../lib/nyaize";
   import { openProfile } from "../lib/profileModal.svelte";
   import { app } from "../lib/store.svelte";
+  import { buildSearchUrl } from "../lib/searchEngine";
 
   // nyaize: 投稿者が isCat のとき本文テキストを にゃん語化する（本家 :nyaize="'respect'" 相当）。
   // link/quote/plain の中身は本家同様 nyaize しない（disableNyaize）。
@@ -131,7 +132,7 @@
   <!-- 本家準拠: 「<クエリ> 検索」を検索ボックス風UIとして描画する -->
   <a
     class="mfm-search focus-visible:ring-3 focus-visible:ring-ring/50"
-    href={`https://www.google.com/search?q=${encodeURIComponent(p.query)}`}
+    href={buildSearchUrl(app.ui.searchEngineUrl, p.query)}
     target="_blank"
     rel="noreferrer noopener"
   >
