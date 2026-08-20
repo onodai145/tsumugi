@@ -139,17 +139,15 @@ jobs:
   # run-app.shが内側に立てる専用Xvfbの起動確認に使うxdpyinfo(x11-utils)が必要。
   # 外側の`xvfb-run -a pnpm e2e`(design docが指定する固定のエントリポイント)用に
   # xvfbも別途要る。
-  # e2eは必須ステータスチェックではないため、docs-only変更ではジョブ自体を
-  # 起動しない(ランナー起動コストも含めて完全にスキップできる)。
   e2e:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install system dependencies (Tauri v2 Linux + WebKitWebDriver + Xvfb + D-Bus/keyring)
+        if: needs.changes.outputs.code == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -171,8 +169,10 @@ jobs:
       # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
       # resolves the current stable Rust release, so it is left unpinned by design.
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.code == 'true'
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
 
@@ -183,6 +183,7 @@ jobs:
       # rust-cacheは~/.cargo/binをキャッシュしないため、android-buildジョブの
       # cargo-tauri CLIキャッシュと同じパターンで別途キャッシュする。
       - name: Cache tauri-driver
+        if: needs.changes.outputs.code == 'true'
         id: cache-tauri-driver
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -190,14 +191,16 @@ jobs:
           key: tauri-driver-${{ runner.os }}
 
       - name: Install tauri-driver
-        if: steps.cache-tauri-driver.outputs.cache-hit != 'true'
+        if: needs.changes.outputs.code == 'true' && steps.cache-tauri-driver.outputs.cache-hit != 'true'
         run: cargo install tauri-driver --locked
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           version: 11.3.0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: needs.changes.outputs.code == 'true'
         with:
           node-version: 22
           cache: pnpm
@@ -206,10 +209,12 @@ jobs:
             e2e/pnpm-lock.yaml
 
       - name: pnpm install (frontend)
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
       - name: pnpm build (frontendDist生成)
+        if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm build
 
@@ -232,14 +237,17 @@ jobs:
       # run-app.shはtarget/debug/tsumugiを直接実行するだけなのでバンドル
       # 成果物も不要。
       - name: cargo build (debugバイナリ、tauri-cli非経由)
+        if: needs.changes.outputs.code == 'true'
         working-directory: src-tauri
         run: cargo build
 
       - name: pnpm install (e2e)
+        if: needs.changes.outputs.code == 'true'
         working-directory: e2e
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright Chromium
+        if: needs.changes.outputs.code == 'true'
         working-directory: e2e
         run: pnpm exec playwright install --with-deps chromium
 
@@ -253,28 +261,32 @@ jobs:
       # 同様、CI上でも不要(必要ならsudoが使えるubuntu-latestだが、既に
       # 動作確認済みの自己完結パスの方をそのまま踏襲する)。
       - name: Generate test CA
+        if: needs.changes.outputs.code == 'true'
         working-directory: e2e
         run: ./scripts/gen-ca.sh
 
       - name: Start Misskey stack
+        if: needs.changes.outputs.code == 'true'
         working-directory: e2e
         run: docker compose up -d --wait
 
       - name: Seed test account
+        if: needs.changes.outputs.code == 'true'
         working-directory: e2e
         run: pnpm seed
 
       - name: Run E2E tests
+        if: needs.changes.outputs.code == 'true'
         working-directory: e2e
         run: xvfb-run -a pnpm e2e
 
       - name: Dump Misskey stack logs on failure
-        if: failure()
+        if: needs.changes.outputs.code == 'true' && failure()
         working-directory: e2e
         run: docker compose logs --no-color > docker-compose.log
 
       - name: Upload E2E artifacts on failure
-        if: failure()
+        if: needs.changes.outputs.code == 'true' && failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-failure-artifacts
@@ -283,8 +295,12 @@ jobs:
             e2e/wdio-logs/
             e2e/docker-compose.log
 
+      # Docker Compose起動(Start Misskey stack)自体がdocs-only変更ではスキップ
+      # されるため、`if: always()`のままだと未起動のスタックに対して
+      # `docker compose down`を叩いてしまう。needs.changes.outputs.codeの
+      # 判定を先に噛ませて、スタックを起動した場合のみ確実に後片付けする。
       - name: Stop Misskey stack
-        if: always()
+        if: needs.changes.outputs.code == 'true' && always()
         working-directory: e2e
         run: docker compose down -v
 
