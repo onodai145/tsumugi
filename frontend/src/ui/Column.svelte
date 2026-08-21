@@ -158,6 +158,20 @@
             tabId={activeTab.id}
             selected={note.id === activeTab.selectedNoteId}
           />
+          {#if activeTab.gapMarker && note.id === activeTab.gapMarker.boundaryId}
+            <div class="flex items-center gap-2 border-y border-border bg-muted/40 px-3.5 py-2 text-sm text-muted-foreground">
+              <span class="flex-1">この間の投稿は省略されています</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={activeTab.fillingGap}
+                onclick={() => app.fillRemainingGap(activeTab.id)}
+              >
+                {activeTab.fillingGap ? "取得中…" : "省略された投稿を表示"}
+              </Button>
+            </div>
+          {/if}
         {/each}
         {#if activeTab.notes.length === 0 && !activeTab.loadingMore}
           <div class="p-3.5 text-center text-sm text-muted-foreground">まだノートがありません</div>

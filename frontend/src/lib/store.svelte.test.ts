@@ -96,6 +96,8 @@ function makeNotificationOnlyTab(note: Note): TabView {
     notifications: [makeNotification({ note })],
     state: "connected",
     loadingMore: false,
+    gapMarker: null,
+    fillingGap: false,
     selectedNoteId: null,
   };
 }
@@ -354,6 +356,8 @@ function makeNormalTab(overrides: Partial<TabView> = {}): TabView {
     notifications: [],
     state: "connected",
     loadingMore: false,
+    gapMarker: null,
+    fillingGap: false,
     selectedNoteId: null,
     ...overrides,
   };
@@ -421,5 +425,116 @@ describe("ユーザー直接操作の失敗はerrorModalに記録される(Issue
     invokeMock.mockRejectedValueOnce(new Error("width failed"));
     await app.persistGroupWidth("g1", 300);
     expect(app.errorModal).toBeNull();
+  });
+});
+
+function makeNoteTab(notes: Note[], overrides: Partial<TabView> = {}): TabView {
+  return {
+    id: "tab1",
+    accountId: ACCOUNT_ID,
+    kind: { type: "home" },
+    title: "ホーム",
+    customTitle: null,
+    filter: { kind: "keywords", value: [] },
+    notifyDesktop: false,
+    notifySound: false,
+    notifySoundChoice: "",
+    notes,
+    notifications: [],
+    state: "connected",
+    loadingMore: false,
+    gapMarker: null,
+    fillingGap: false,
+    selectedNoteId: null,
+    ...overrides,
+  };
+}
+
+describe("app.fillRemainingGap (Issue #148)", () => {
+  it("gapMarkerが無ければ何もしない", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n1" })]);
+    app.groups = [makeGroup([tab])];
+
+    await app.fillRemainingGap(tab.id);
+
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("targetIdに到達したらgapMarkerを消し、取得したノートをマージする", async () => {
+    // id は Misskey の aidx 同様、辞書順が新しい順（sort比較は id 文字列比較のため、
+    // 本物のidに近い辞書順=時系列順のIDを使う。"target"のような非時系列語は使わない）。
+    const existing = [makeNote({ id: "n5", createdAt: 50 }), makeNote({ id: "n1", createdAt: 10 })];
+    const tab = makeNoteTab(existing, { gapMarker: { boundaryId: "n4", targetId: "n1" } });
+    app.groups = [makeGroup([tab])];
+
+    // invoke は Tauri の Result<T,E> の生の解決値を返す(成功時はTをそのまま解決、
+    // typedError側で {status,data} に包む)。ここで {status,data} を返すと二重包装になる。
+    invokeMock.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "fetch_backfill") {
+        expect(args).toMatchObject({ columnId: "tab1", untilId: "n4" });
+        return [makeNote({ id: "n3", createdAt: 30 }), makeNote({ id: "n1", createdAt: 10 })];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.fillRemainingGap(tab.id);
+
+    // app.groups = [...] で渡した時点で Svelte の $state が渡したオブジェクトを
+    // リアクティブプロキシ化するため、以降のミューテーションは元の `tab` 参照ではなく
+    // app.groups 経由で読んだプロキシ側に反映される。
+    const live = app.groups[0].tabs[0];
+    expect(live.gapMarker).toBeNull();
+    expect(live.fillingGap).toBe(false);
+    expect(live.notes.map((n) => n.id)).toEqual(["n5", "n3", "n1"]);
+  });
+
+  it("targetIdに到達しないままページ上限に達したらgapMarkerを新しい境界で更新する", async () => {
+    // targetId は全ページIDより辞書順で小さい値にする(=時系列でより古い)。
+    // <= 比較で「到達」判定されないようにするため("target"のような非時系列語は使わない)。
+    const tab = makeNoteTab(
+      [makeNote({ id: "n5", createdAt: 50 })],
+      { gapMarker: { boundaryId: "n4", targetId: "a0" } },
+    );
+    app.groups = [makeGroup([tab])];
+
+    let call = 0;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "fetch_backfill") {
+        call += 1;
+        return [makeNote({ id: `page${call}`, createdAt: 100 - call })];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.fillRemainingGap(tab.id);
+
+    expect(call).toBe(10); // GAP_CONTINUE_MAX_PAGES
+    const live = app.groups[0].tabs[0];
+    expect(live.gapMarker).toEqual({ boundaryId: "page10", targetId: "a0" });
+    expect(live.fillingGap).toBe(false);
+  });
+
+  it("APIが失敗したらgapMarkerを維持しfillingGapをfalseに戻し、errorModalをセットする(Issue #183)", async () => {
+    const tab = makeNoteTab(
+      [makeNote({ id: "n5", createdAt: 50 })],
+      { gapMarker: { boundaryId: "n4", targetId: "a0" } },
+    );
+    app.groups = [makeGroup([tab])];
+    app.errorModal = null;
+    // invoke は Rust側の Err(Error) を reject として伝える(実行時のTauri invoke挙動)。
+    // typedError は plain object の reject を {status:"error",error} に変換する。
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "fetch_backfill") throw { kind: "network", message: "boom" };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.fillRemainingGap(tab.id);
+
+    const live = app.groups[0].tabs[0];
+    expect(live.gapMarker).toEqual({ boundaryId: "n4", targetId: "a0" });
+    expect(live.fillingGap).toBe(false);
+    expect(app.errorModal).not.toBeNull();
   });
 });

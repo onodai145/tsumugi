@@ -42,6 +42,7 @@ import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "
 import { isMobilePlatform } from "./platform";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
+const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1クリックあたりの取得ページ上限（Issue #148）
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // ノートキャッシュ間引きの間隔（6時間）
 
@@ -65,6 +66,13 @@ export interface TabView {
   notifications: Notification[];
   state: ConnectionState;
   loadingMore: boolean;
+  /// 起動時ギャップ埋めが gap_fill_limit 等で打ち切られたまま残っている空白（Issue #148）。
+  /// boundaryId のノート直後(より過去側)にタイムライン上で区切り線+ボタンを描画する。
+  gapMarker: { boundaryId: string; targetId: string } | null;
+  /// fillRemainingGap の多重実行防止フラグ。loadingMore とは独立して持つ
+  /// (スクロールでの追加読み込みとギャップ埋め継続を同時に走らせても問題ないが、
+  /// ボタンの二重クリックだけは防ぎたいため)。
+  fillingGap: boolean;
   selectedNoteId: string | null;
 }
 
@@ -330,6 +338,8 @@ class AppStore {
       notifications: opened.notifications,
       state: this.#connState.get(opened.column.id) ?? "connecting",
       loadingMore: false,
+      gapMarker: null,
+      fillingGap: false,
       selectedNoteId: null,
     };
   }
@@ -820,6 +830,13 @@ class AppStore {
         }
         merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
         tab.notes = merged.slice(0, MAX_NOTES);
+        // 打ち切られた(=newest_known_idに追いつけなかった)場合のみマーカーをセットする。
+        // truncated=false のイベントで既存マーカーを消すことはしない — このイベントの
+        // newest_known_idは「現在のキャッシュ最新」基準であり、過去に打ち切られた
+        // もっと古い空白とは無関係な場合があるため（Issue #148）。
+        if (e.payload.truncated && e.payload.boundaryId && e.payload.targetId) {
+          tab.gapMarker = { boundaryId: e.payload.boundaryId, targetId: e.payload.targetId };
+        }
       }),
     );
     this.#unlisten.push(
@@ -1464,6 +1481,45 @@ class AppStore {
       this.#logFailure(e);
     } finally {
       tab.loadingMore = false;
+    }
+  }
+
+  /// 起動時ギャップ埋めが打ち切られて残った空白を、ユーザー操作で埋める(Issue #148)。
+  /// tab.gapMarker.targetId に到達するまで fetch_backfill を最大 GAP_CONTINUE_MAX_PAGES 回
+  /// ループ呼び出しする。到達しなければ gapMarker を最新の境界で更新して残す(再クリック可能)。
+  async fillRemainingGap(tabId: string) {
+    const tab = this.#findTab(tabId);
+    if (!tab || !tab.gapMarker || tab.fillingGap) return;
+    tab.fillingGap = true;
+    const { targetId } = tab.gapMarker;
+    let boundaryId = tab.gapMarker.boundaryId;
+    try {
+      for (let page = 0; page < GAP_CONTINUE_MAX_PAGES; page++) {
+        const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId));
+        if (fetched.length === 0) break;
+
+        const known = new Set(tab.notes.map((n) => n.id));
+        const fresh = fetched.filter((n) => !known.has(n.id));
+        if (fresh.length > 0) {
+          const merged = [...tab.notes, ...fresh];
+          merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+          tab.notes = merged.slice(0, MAX_NOTES);
+          // captureInitial 同様に subNote 購読しないと、この先そのノートへの
+          // リアクション追加/削除が noteUpdated イベントとして届かず反映されない(Issue #3)。
+          this.#captureInitial(tab.id, fresh);
+        }
+
+        if (fetched.some((n) => n.id <= targetId)) {
+          if (tab.gapMarker?.targetId === targetId) tab.gapMarker = null;
+          return;
+        }
+        boundaryId = fetched[fetched.length - 1].id;
+        if (tab.gapMarker?.targetId === targetId) tab.gapMarker = { boundaryId, targetId };
+      }
+    } catch (e) {
+      this.#failModal(e);
+    } finally {
+      tab.fillingGap = false;
     }
   }
 
