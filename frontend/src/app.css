@@ -230,30 +230,32 @@ a:hover {
 }
 .mfm-codeblock {
   background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
-  border-radius: 8px;
-  /* 外枠としてのpadding（surface-3の余白フレームを常に見せる）。
-     横スクロール終端側の余白は下のpre自身のpaddingで別途保証する
-     （コンテナ側paddingだけだと終端側の余白がブラウザによって欠落することがある）。 */
-  padding: 10px;
-  overflow-x: auto;
   max-width: 100%;
 }
 .mfm-codeblock pre {
-  margin: 0 10px 0 0;
+  margin: 0;
   background: transparent;
   font-family: ui-monospace, monospace;
   font-size: 0.9em;
-  /* 折り返さない行(white-space:pre)がコンテナ幅を超えると、pre自身の幅は
-     コンテナ幅のまま中身だけ overflow:visible ではみ出し、backgroundがそこまで
-     追従しない。width:max-content で pre 自身をコンテンツ幅まで広げ、
-     横スクロールは親の .mfm-codeblock（overflow-x:auto）に任せる。
-     終端側の余白は padding ではなく margin-right で確保する
-     （コンテナのスクロール可能領域は子のmarginボックスを含めて計算されるため、
-     paddingよりも終端側の欠落が起きにくい）。 */
-  width: max-content;
-  /* margin-right 10px を足しても中身が狭い時に不要な横スクロールが出ないよう、その分差し引く */
-  min-width: calc(100% - 10px);
-  padding-left: 10px;
+  padding: 10px;
+  /* 横スクロールは .mfm-codeblock ではなく pre 自身に持たせる（Issue #166）。
+     以前は .mfm-codeblock 側に overflow-x:auto を、pre側は width:max-content で
+     コンテンツ幅まで広げる構成にしていたが、WebKitGTK実機でスクロールバーへの
+     クリック/ドラッグが機能しない不具合があった（コンソールでのDOM調査で、ドラッグ中に
+     .mfm-codeblock 上で mousedown/mouseup/scroll が一度も発火しないことを確認）。
+     width:100%（intrinsic sizingキーワードを使わない）のpre自身にoverflow-x:autoを
+     持たせる構成に変更したところ、コンソールから直接 scrollLeft を動かす検証で
+     ドラッグが機能するようになることを確認できた。
+     overflow-y は明示的に hidden にする（overflow-x だけ指定すると、CSS Overflow の
+     仕様上 overflow-y は auto 扱いになり、縦スクロールバー分の余地＋横スクロールバーとの
+     「角」が未スタイルの四角として右下に出てしまうため）。
+     ※ この変更後も、原因不明の別要因でノートごとに非決定的にドラッグ不可になる
+     現象が残っている（起動直後に発生しやすく、ノートの表示/非表示で直ったり
+     再発したりする）。CSSでは再現条件を制御できず、Issue #166 に事実を記録した
+     うえで引き続き調査中。 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
 }
 .mfm-codeblock .shiki-plain code {
   color: var(--text);
