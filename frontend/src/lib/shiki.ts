@@ -74,25 +74,29 @@ export async function highlightCode(
   customSyntaxThemes: CustomSyntaxTheme[],
 ): Promise<string> {
   const normalizedLang = (lang ?? "").toLowerCase();
-  if (!BUNDLED_LANGS.includes(normalizedLang as (typeof BUNDLED_LANGS)[number])) {
-    return plainHtml(code);
-  }
+  const isBundled = BUNDLED_LANGS.includes(normalizedLang as (typeof BUNDLED_LANGS)[number]);
+  // 言語未指定・非対応言語は shiki 組み込みの特殊言語 "text"（isPlainLang、文法ロード不要）に
+  // フォールバックする（Issue #229）。構文強調はされないが、独自の plainHtml() と違い
+  // shiki の codeToHtml() を通るためテーマの背景色等は他のコードブロックと統一される。
+  const effectiveLang = isBundled ? normalizedLang : "text";
   try {
     const highlighter = await getHighlighter();
-    const loadedLangs = highlighter.getLoadedLanguages();
-    if (!loadedLangs.includes(normalizedLang)) {
-      await highlighter.loadLanguage(normalizedLang as any);
+    if (isBundled) {
+      const loadedLangs = highlighter.getLoadedLanguages();
+      if (!loadedLangs.includes(normalizedLang)) {
+        await highlighter.loadLanguage(normalizedLang as any);
+      }
     }
 
     if (themeSelection === "auto") {
       return highlighter.codeToHtml(code, {
-        lang: normalizedLang,
+        lang: effectiveLang,
         themes: { light: AUTO_LIGHT_THEME, dark: AUTO_DARK_THEME },
         defaultColor: false,
       });
     }
     if (themeSelection.startsWith("custom:")) {
-      return highlighter.codeToHtml(code, { lang: normalizedLang, theme: CSS_VARIABLES_THEME });
+      return highlighter.codeToHtml(code, { lang: effectiveLang, theme: CSS_VARIABLES_THEME });
     }
     if (themeSelection.startsWith("shiki:")) {
       const themeId = themeSelection.slice("shiki:".length);
@@ -100,11 +104,11 @@ export async function highlightCode(
       if (!loadedThemes.includes(themeId)) {
         await highlighter.loadTheme(themeId as any);
       }
-      return highlighter.codeToHtml(code, { lang: normalizedLang, theme: themeId });
+      return highlighter.codeToHtml(code, { lang: effectiveLang, theme: themeId });
     }
     // 未知の themeSelection 値（旧データ等）は auto 相当にフォールバック
     return highlighter.codeToHtml(code, {
-      lang: normalizedLang,
+      lang: effectiveLang,
       themes: { light: AUTO_LIGHT_THEME, dark: AUTO_DARK_THEME },
       defaultColor: false,
     });
