@@ -55,6 +55,7 @@ If the build fails during Gradle configuration with `A problem occurred configur
 - `session/` — account/token management; tokens go through the OS keyring (`keyring` crate), never through the frontend.
 - `commands/` — the `#[tauri::command]` handlers, grouped by resource (`account`, `column`, `note`, `mute`).
 - `state.rs` — `AppState`, the single Tauri-managed state struct threading together accounts, secrets, connections, mute config, and settings; commands pull what they need from `State<AppState>`.
+- `debug_bridge.rs` — debug-build-only (`#[cfg(all(debug_assertions, desktop, unix))]`), not registered in `specta_builder()`. Opens a Unix domain socket at `app_cache_dir()/debug-bridge.sock` so an agent without a display (e.g. Claude running headless) can execute JS against the user's already-running instance and read back console/DOM state — a Unix socket rather than a `127.0.0.1` TCP port specifically to avoid the localhost-drive-by/DNS-rebinding attack surface a browser tab could otherwise reach. Talk to it with `curl --unix-socket <path> http://localhost/ --data-binary '<js>'`; the body runs as a function body, so (like WebDriver's `execute_script`) a bare expression returns nothing — you must write `return ...`. See `docs/superpowers/specs/2026-08-22-claude-devtools-bridge-design.md` for the design rationale (Issue #232).
 
 ### frontend/src layout
 - `ui/` — Svelte components (columns, compose bar, settings, account management).
