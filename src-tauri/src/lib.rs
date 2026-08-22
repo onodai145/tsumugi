@@ -1,6 +1,6 @@
 mod api;
 mod commands;
-#[cfg(all(debug_assertions, desktop, unix))]
+#[cfg(all(debug_assertions, desktop))]
 mod debug_bridge;
 mod domain;
 mod error;
@@ -234,7 +234,7 @@ pub fn run() {
 
             // Claude等がユーザーの実行中インスタンスに対してJSを実行し、DOM調査/console.log
             // 確認を行うためのデバッグ専用ブリッジ(Issue #232)。デバッグビルド限定。
-            #[cfg(all(debug_assertions, desktop, unix))]
+            #[cfg(all(debug_assertions, desktop))]
             debug_bridge::spawn(app.handle().clone());
 
             Ok(())

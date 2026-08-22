@@ -4,15 +4,16 @@
 
 **Goal:** Claudeがバックグラウンドジョブとして動く際にディスプレイを持たないため見られなかった、tsumugiのフロント側`console.log`/DOM状態を、ユーザーが実行中の実インスタンス(実アカウント・実データ)に対してJSを実行して確認できるようにする（Issue #232）。
 
-**Architecture:** デバッグビルド限定(`#[cfg(all(debug_assertions, desktop, unix))]`)で`src-tauri/src/debug_bridge.rs`が`app_cache_dir()/debug-bridge.sock`にUnixドメインソケットのリスナーを立てる。リクエストはHTTPの最小サブセット(`Content-Length`のみ解釈、メソッド/パス無視)として受け、ボディの生JS文字列を関数本体として`WebviewWindow::eval_with_callback`で評価し、結果を`{"ok":true,"value":...}` / `{"ok":false,"error":"..."}`のJSONで返す。TCP(127.0.0.1)ではなくUnixソケットを採用したのはlocalhost drive-by/DNS rebinding系の攻撃ベクトルを原理的に排除するため(設計ドキュメント参照)。
+**Architecture:** デバッグビルド限定(`#[cfg(all(debug_assertions, desktop))]`)で`src-tauri/src/debug_bridge.rs`がUnix系では`app_cache_dir()/debug-bridge.sock`にUnixドメインソケット、Windowsでは`\\.\pipe\tsumugi-debug-bridge-<USERNAME>`に名前付きパイプのリスナーを立てる。リクエストはHTTPの最小サブセット(`Content-Length`のみ解釈、メソッド/パス無視)として受け、ボディの生JS文字列を関数本体として`WebviewWindow::eval_with_callback`で評価し、結果を`{"ok":true,"value":...}` / `{"ok":false,"error":"..."}`のJSONで返す。TCP(127.0.0.1)ではなくUnixソケット/名前付きパイプを採用したのはlocalhost drive-by/DNS rebinding系の攻撃ベクトルを原理的に排除するため(設計ドキュメント参照)。共有ロジック(`handle_connection`/`read_http_body`)は`AsyncRead + AsyncWrite`にジェネリックにして両OSのストリーム型で使い回す。
 
-**Tech Stack:** Rust (Tauri v2 backend, `src-tauri/`)、tokio(Unixソケット+非同期I/O)。フロントエンド変更なし。
+**Tech Stack:** Rust (Tauri v2 backend, `src-tauri/`)、tokio(Unixドメインソケット/Windows名前付きパイプ+非同期I/O)。フロントエンド変更なし。
 
 ## Global Constraints
 
 - デバッグビルド限定。リリースビルドではモジュールごとコンパイルされない(`cfg`ガード)。
-- Windows/モバイルは対象外(`unix`/`desktop`の`cfg`で除外)。Unixドメインソケット自体がWindows/モバイルでは前提が異なるため。
-- ソケットファイルはパーミッション`0600`。前回異常終了時の残骸ソケットファイルは起動時に削除してからbindする。
+- モバイルは対象外(`desktop`の`cfg`で除外)。
+- Unix系: ソケットファイルはパーミッション`0600`。前回異常終了時の残骸ソケットファイルは起動時に削除してからbindする。
+- Windows: 名前付きパイプ名にユーザー名を含め、同一マシンの他ユーザーとの衝突を避ける。`ServerOptions`の`reject_remote_clients`はデフォルトで有効なためネットワーク越しの到達は元々できない。実機(Windows)での動作確認はできておらず、`cargo check --target x86_64-pc-windows-gnu`によるクロスコンパイル確認のみ(既知の制約として設計ドキュメントに明記)。
 - リクエストボディは関数本体として実行される(WebDriverの`execute_script`と同様、値を受け取るには明示的な`return`が必要)。式1つだけでは自動で値は返らない。
 - 実行したJS文字列は`log::info!`で必ずログする(実データに対する任意JS実行の監査性のため)。
 
@@ -65,6 +66,48 @@ Result: 成功(既存の無関係な警告1件のみ)
 
 Run: `cd src-tauri && cargo test`
 Result: PASS(209 passed, 0 failed, 2 ignored。TSバインディング再生成テスト含む)
+
+---
+
+## Task 1.5: Windows名前付きパイプ対応を追加(ユーザー指摘を受けて後追い)
+
+**背景:** 実装完了後、ユーザーから「Windowsはどうなるのか」と指摘があり、当初は`unix`限定のスコープ外としていた。tokio 1.52.3に`tokio::net::windows::named_pipe`が実在すること(`cfg_net_windows!`マクロで`feature = "net"`のみ要求、追加フィーチャ不要)をソースで確認した上で、Unixドメインソケットと同じ設計(ローカル専用・ファイルシステム上の名前でアクセス制御)がWindowsでも今すぐ実現できると判断し追加した。
+
+**Files:**
+- Modify: `src-tauri/src/debug_bridge.rs`(`handle_connection`/`read_http_body`を`AsyncRead + AsyncWrite`にジェネリック化し、`unix`/`windows_pipe`の2モジュールに分離)
+- Modify: `src-tauri/src/lib.rs`(モジュールcfgゲートから`unix`条件を除去)
+
+- [x] **Step 1: `tokio::net::windows::named_pipe`の実在とフィーチャ要件をソースで確認**
+
+Run: `grep -n "named_pipe\|cfg_net_windows" ~/.cargo/registry/.../tokio-1.52.3/src/net/mod.rs`、`src/net/windows/named_pipe.rs`
+Result: 存在確認。`cfg_net_windows!`は`cfg(all(windows, feature = "net"))`のみ要求(既に追加済みの`net`フィーチャで足りる、追加フィーチャ不要)
+
+- [x] **Step 2: `handle_connection`/`read_http_body`をストリーム型に対してジェネリックにリファクタ**
+
+`UnixStream`決め打ちだった`handle_connection(app: &AppHandle, stream: UnixStream)`と`read_http_body(stream: &mut UnixStream)`を`<S: AsyncRead + AsyncWrite + Unpin>`/`<S: AsyncRead + Unpin>`にジェネリック化。`http_response`/`eval_js`/`find_double_crlf`はストリーム型に依存しないためそのまま。
+
+- [x] **Step 3: `unix`モジュールを既存のUnixドメインソケット実装として切り出す**
+
+`socket_path`/`listen`(bind→パーミッション0600→accept loop)を`#[cfg(unix)] mod unix { ... }`にまとめる。
+
+- [x] **Step 4: `windows_pipe`モジュールを新規実装**
+
+tokioの`named_pipe`ドキュメント推奨パターン(`first_pipe_instance(true)`で最初のサーバーを作り、`connect().await`後に次のサーバーインスタンスを先に用意してから接続済みの方をタスクへ渡す)に従い実装。パイプ名は`\\.\pipe\tsumugi-debug-bridge-<USERNAME>`(同一マシンの他ユーザーとの衝突回避、Unix側の`app_cache_dir`がユーザー専用なのと同じ意図)。`ServerOptions`の`reject_remote_clients`はデフォルト有効のためそのまま使う(明示設定不要)。
+
+- [x] **Step 5: `lib.rs`のモジュールcfgゲートを`#[cfg(all(debug_assertions, desktop, unix))]`から`#[cfg(all(debug_assertions, desktop))]`に変更**
+
+- [x] **Step 6: Linuxでのビルド・テスト・実機動作が壊れていないことを再確認**
+
+Run: `cargo build && cargo test`
+Result: 209 passed(リファクタ前と同数)
+
+Run: `cargo tauri dev`→ `curl --unix-socket ... --data-binary 'return 21 * 2;'`
+Result: `{"ok":true,"value":42}`(リファクタ前と同じ挙動)
+
+- [x] **Step 7: Windowsターゲットへのクロスコンパイルチェック**
+
+Run: `cargo check --target x86_64-pc-windows-gnu --lib`(`rustup target add x86_64-pc-windows-gnu`済み環境)
+Result: 成功(既存の無関係な警告1件のみ)。ただし実機(Windows)での`named_pipe`動作確認はできておらず、コンパイルが通ることの確認のみ(設計ドキュメントに既知の制約として明記)
 
 ---
 

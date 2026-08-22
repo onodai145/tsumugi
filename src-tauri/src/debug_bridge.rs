@@ -1,64 +1,112 @@
 //! デバッグビルド限定: Claude等がユーザーの実行中インスタンスに対して任意のJSを実行し、
-//! DOM調査・`console.log`確認を行うためのUnixドメインソケットブリッジ(Issue #232)。
+//! DOM調査・`console.log`確認を行うためのローカル専用ブリッジ(Issue #232)。
 //!
-//! TCP(127.0.0.1:PORT)ではなくUnixドメインソケットを採用しているのは、ブラウザの
-//! `fetch()`から到達できてしまう(localhost drive-by/DNS rebinding系の攻撃パターン)
-//! TCPの弱点を、Unixドメインソケットなら原理的に排除できるため。
+//! TCP(127.0.0.1:PORT)ではなく、Unix系ではUnixドメインソケット、Windowsでは名前付き
+//! パイプを採用しているのは、ブラウザの`fetch()`から到達できてしまう(localhost
+//! drive-by/DNS rebinding系の攻撃パターン)TCPの弱点を、どちらも原理的に排除できるため。
 //! 詳細: docs/superpowers/specs/2026-08-22-claude-devtools-bridge-design.md
 //!
 //! プロトコルはHTTPのごく最小限のサブセット(リクエストボディ=実行するJS文字列、
-//! `Content-Length`のみ解釈、メソッド/パスは無視)。`curl --unix-socket <path> -d '<js>'
-//! http://localhost/` のような形で叩ける。
+//! `Content-Length`のみ解釈、メソッド/パスは無視)。Unix系では
+//! `curl --unix-socket <path> -d '<js>' http://localhost/`のような形で叩ける。
 
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const MAX_HEADER_BYTES: usize = 8 * 1024;
 const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
-/// ソケットファイルの場所。`app_cache_dir`はアプリ専用でありOS標準の場所なので流用する。
-pub fn socket_path(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_cache_dir()
-        .expect("no app cache dir")
-        .join("debug-bridge.sock")
-}
-
 /// リスナーをバックグラウンドタスクとして起動する。起動に失敗してもこれは補助的な
 /// デバッグ機能に過ぎないため、アプリ本体は止めずログのみ出す。
 pub fn spawn(app: AppHandle) {
-    let path = socket_path(&app);
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = listen(app, &path).await {
-            log::warn!("debug bridge failed to start on {}: {e}", path.display());
+        #[cfg(unix)]
+        if let Err(e) = unix::listen(app).await {
+            log::warn!("debug bridge failed to start: {e}");
+        }
+        #[cfg(windows)]
+        if let Err(e) = windows_pipe::listen(app).await {
+            log::warn!("debug bridge failed to start: {e}");
         }
     });
 }
 
-async fn listen(app: AppHandle, path: &Path) -> std::io::Result<()> {
-    // 前回異常終了時のソケットファイルの残骸があるとbindが失敗するため、先に消しておく。
-    let _ = std::fs::remove_file(path);
-    let listener = UnixListener::bind(path)?;
-    // 同一マシンの他ユーザーから触れないようにする(ソケットファイル自体のパーミッション)。
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    log::info!("debug bridge listening on {}", path.display());
+#[cfg(unix)]
+mod unix {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+    use tokio::net::UnixListener;
 
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = handle_connection(&app, stream).await {
-                log::warn!("debug bridge connection error: {e}");
-            }
-        });
+    /// ソケットファイルの場所。`app_cache_dir`はアプリ専用でありOS標準の場所なので流用する。
+    fn socket_path(app: &AppHandle) -> PathBuf {
+        app.path()
+            .app_cache_dir()
+            .expect("no app cache dir")
+            .join("debug-bridge.sock")
+    }
+
+    pub async fn listen(app: AppHandle) -> std::io::Result<()> {
+        let path = socket_path(&app);
+        // 前回異常終了時のソケットファイルの残骸があるとbindが失敗するため、先に消しておく。
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path)?;
+        // 同一マシンの他ユーザーから触れないようにする(ソケットファイル自体のパーミッション)。
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        log::info!("debug bridge listening on {}", path.display());
+
+        loop {
+            let (stream, _) = listener.accept().await?;
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = handle_connection(&app, stream).await {
+                    log::warn!("debug bridge connection error: {e}");
+                }
+            });
+        }
     }
 }
 
-async fn handle_connection(app: &AppHandle, mut stream: UnixStream) -> std::io::Result<()> {
+#[cfg(windows)]
+mod windows_pipe {
+    use super::*;
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    /// パイプ名。同一マシンの複数ユーザーとの衝突を避けるためユーザー名を含める
+    /// (Unix側のapp_cache_dirがユーザー専用なのと同じ意図)。`reject_remote_clients`は
+    /// `ServerOptions`のデフォルトで有効なので、ネットワーク越しの到達は元々できない。
+    fn pipe_name() -> String {
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        format!(r"\\.\pipe\tsumugi-debug-bridge-{user}")
+    }
+
+    pub async fn listen(app: AppHandle) -> std::io::Result<()> {
+        let name = pipe_name();
+        log::info!("debug bridge listening on {name}");
+
+        // クライアントがsporadicにNotFoundで失敗しないよう、常に次のサーバーインスタンスを
+        // 用意してから接続済みのものをタスクへ渡す(tokioのnamed_pipeドキュメント推奨パターン)。
+        let mut server = ServerOptions::new().first_pipe_instance(true).create(&name)?;
+        loop {
+            server.connect().await?;
+            let connected = server;
+            server = ServerOptions::new().create(&name)?;
+
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = handle_connection(&app, connected).await {
+                    log::warn!("debug bridge connection error: {e}");
+                }
+            });
+        }
+    }
+}
+
+async fn handle_connection<S: AsyncRead + AsyncWrite + Unpin>(
+    app: &AppHandle,
+    mut stream: S,
+) -> std::io::Result<()> {
     let body = match read_http_body(&mut stream).await {
         Ok(body) => body,
         Err(e) => {
@@ -128,7 +176,7 @@ fn http_response(status: u16, reason: &str, body: &str) -> String {
 
 /// リクエストボディだけを読み取る。メソッド/パス/ヘッダーは`Content-Length`以外無視する
 /// (このブリッジはデバッグ専用でありHTTP準拠を目的としないため)。
-async fn read_http_body(stream: &mut UnixStream) -> std::io::Result<Vec<u8>> {
+async fn read_http_body<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
 
