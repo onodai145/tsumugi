@@ -142,11 +142,15 @@
 </div>
 
 {#if confirmDeleteOpen}
+  <!-- NoteCard.svelte のノートメニュー自身のクリックアウト用backdropがz-[1010]で、
+       ConfirmDialogの既定z-1000より上に乗ってクリックを奪ってしまうため、
+       それより高いz-1020を明示的に渡す(ConfirmDialog.svelte参照)。 -->
   <ConfirmDialog
     title="投稿の削除"
     message="この投稿を削除します。取り消せません。よろしいですか？"
     confirmLabel="削除する"
     danger
+    z={1020}
     onConfirm={confirmDelete}
     onCancel={() => (confirmDeleteOpen = false)}
   />
