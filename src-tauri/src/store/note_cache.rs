@@ -116,6 +116,43 @@ impl NoteCacheStore {
         Ok(())
     }
 
+    /// カラムの境界(oldest_fetched_id)を取得。未確定ならNone。
+    pub fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let v: Option<String> = conn
+            .query_row(
+                "SELECT oldest_fetched_id FROM column_fetch_boundary WHERE column_id = ?1",
+                params![column_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(v)
+    }
+
+    /// 境界を new_oldest_id で無条件に新規セット/上書きする(初回REST取得時に使う)。
+    pub fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
+             ON CONFLICT(column_id) DO UPDATE SET oldest_fetched_id = excluded.oldest_fetched_id",
+            params![column_id, new_oldest_id],
+        )?;
+        Ok(())
+    }
+
+    /// 境界を new_oldest_id まで延長する(古い方向へのみ、単調性を保証)。
+    /// 既存値の方が既に古ければ何もしない。
+    pub fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
+             ON CONFLICT(column_id) DO UPDATE SET
+                oldest_fetched_id = MIN(oldest_fetched_id, excluded.oldest_fetched_id)",
+            params![column_id, new_oldest_id],
+        )?;
+        Ok(())
+    }
+
     /// キャッシュ済みノートの総数。Backstageのステータス表示用。
     /// specta が i64 の直接エクスポートを禁止するため i32 で返す(ローカルキャッシュ件数が
     /// 21億件を超えることは実運用上ない)。
@@ -595,6 +632,45 @@ mod tests {
         s.clear_column_notes("colA").unwrap();
         assert_eq!(s.load_cached("colA", 10).unwrap().len(), 0);
         assert_eq!(s.load_cached("colB", 10).unwrap().len(), 1); // 他カラムは残る
+    }
+
+    #[test]
+    fn fetch_boundary_roundtrip() {
+        let s = store();
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+
+        s.set_fetch_boundary("col1", "n100").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n100"));
+    }
+
+    #[test]
+    fn set_fetch_boundary_overwrites_unconditionally() {
+        let s = store();
+        s.set_fetch_boundary("col1", "n100").unwrap();
+        s.set_fetch_boundary("col1", "n999").unwrap(); // より新しい値でも無条件に上書き
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n999"));
+    }
+
+    #[test]
+    fn extend_fetch_boundary_only_moves_older() {
+        let s = store();
+        s.set_fetch_boundary("col1", "n500").unwrap();
+
+        // より古い値(n300)への延長は反映される
+        s.extend_fetch_boundary("col1", "n300").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
+
+        // より新しい値(n800)は無視される(単調性)
+        s.extend_fetch_boundary("col1", "n800").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
+    }
+
+    #[test]
+    fn extend_fetch_boundary_sets_when_absent() {
+        let s = store();
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+        s.extend_fetch_boundary("col1", "n300").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
     }
 
     #[test]

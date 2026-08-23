@@ -109,6 +109,12 @@ CREATE TABLE IF NOT EXISTS column_note (
     PRIMARY KEY (column_id, note_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id);
+
+-- カラムごとの「これより新しいノートはAPI取得済みで完全」境界（Issue #228）
+CREATE TABLE IF NOT EXISTS column_fetch_boundary (
+    column_id         TEXT PRIMARY KEY,
+    oldest_fetched_id TEXT NOT NULL
+);
 "#;
 
 /// 設定DBを開き（無ければ作成し）、スキーマを適用してマイグレーションを行う。
