@@ -172,3 +172,50 @@ describe("プロフィール導線", () => {
     expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
   });
 });
+
+describe("投稿削除メニュー", () => {
+  it("自分の投稿では削除項目を表示する", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const note = makeNote({ user: makeUser({ id: "u1" }) });
+    const { baseElement, getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(getByText("削除")).toBeTruthy();
+    expect(baseElement.querySelector("svg.lucide-trash-2")).toBeTruthy();
+
+    app.accounts.length = 0;
+  });
+
+  it("他人の投稿では削除項目を表示しない", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const note = makeNote({ user: makeUser({ id: "other-user" }) });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("削除")).toBeNull();
+
+    app.accounts.length = 0;
+  });
+});
