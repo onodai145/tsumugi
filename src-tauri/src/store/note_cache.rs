@@ -87,6 +87,25 @@ impl NoteCacheStore {
         Ok(out)
     }
 
+    /// カラムのキャッシュから until_id より古いノートを取得（新しい順、最大 limit 件）。
+    /// backfill のキャッシュ優先パス用（load_cached の until_id 版）。
+    pub fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT n.payload FROM column_note cn
+             JOIN note n ON n.id = cn.note_id
+             WHERE cn.column_id = ?1 AND cn.note_id < ?2
+             ORDER BY cn.created_at DESC, cn.note_id DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![column_id, until_id, limit], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for payload in rows {
+            out.extend(deserialize_note_or_warn(&payload?));
+        }
+        Ok(out)
+    }
+
     /// note_id 単体をキャッシュから取得する（column_note を経由しない）。
     /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映する際、
     /// 対象ノートがどのカラムに属すか気にせず読み書きするために使う。
@@ -671,6 +690,29 @@ mod tests {
         assert!(s.get_fetch_boundary("col1").unwrap().is_none());
         s.extend_fetch_boundary("col1", "n300").unwrap();
         assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
+    }
+
+    #[test]
+    fn load_cached_before_returns_notes_older_than_until_id_desc() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
+
+        let got = s.load_cached_before("col1", "n3", 10).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);
+    }
+
+    #[test]
+    fn load_cached_before_respects_limit_and_column_scope() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
+        s.cache_notes("col2", &[note("m1", 250)]).unwrap();
+
+        let got = s.load_cached_before("col1", "n3", 1).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+
+        // col2 のノートは混ざらない
+        let got_all = s.load_cached_before("col1", "n3", 10).unwrap();
+        assert!(got_all.iter().all(|n| n.id != "m1"));
     }
 
     #[test]
