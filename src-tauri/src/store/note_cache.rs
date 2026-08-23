@@ -293,10 +293,24 @@ fn deserialize_note_or_warn(payload: &str) -> Option<Note> {
 
 /// `select_sql`（`SELECT id FROM note ...` 形式）にマッチするノートと、その関連テーブル
 /// （note_reaction 等）・column_note を削除する（FK制約は張っていないため手動カスケード）。
+/// 削除によって影響を受けたカラムの backfill 境界(column_fetch_boundary)も、生存している
+/// 最古ノートIDまで引き上げる（全滅したカラムは境界ごと削除）。境界が「削除前の完全な範囲」
+/// を主張したままだと、prune後にキャッシュに無いノートを「完全」と誤認して欠落表示になる
+/// ため(Issue #228)。
 /// 戻り値は削除したノート件数。
 fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<i64> {
     conn.execute(&format!("CREATE TEMP TABLE prune_ids AS {select_sql}"), params)?;
     let deleted = conn.execute("DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)", [])? as i64;
+
+    // column_note をカスケード削除する前に、影響を受けるカラムを確定しておく
+    let affected_columns: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT column_id FROM column_note WHERE note_id IN (SELECT id FROM prune_ids)",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
     for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
         conn.execute(
             &format!("DELETE FROM {table} WHERE note_id IN (SELECT id FROM prune_ids)"),
@@ -304,6 +318,32 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
         )?;
     }
     conn.execute("DROP TABLE prune_ids", [])?;
+
+    for column_id in &affected_columns {
+        let survivor: Option<String> = conn
+            .query_row(
+                "SELECT MIN(note_id) FROM column_note WHERE column_id = ?1",
+                params![column_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        match survivor {
+            Some(oldest) => {
+                conn.execute(
+                    "UPDATE column_fetch_boundary SET oldest_fetched_id = ?2
+                     WHERE column_id = ?1 AND oldest_fetched_id < ?2",
+                    params![column_id, oldest],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "DELETE FROM column_fetch_boundary WHERE column_id = ?1",
+                    params![column_id],
+                )?;
+            }
+        }
+    }
     Ok(deleted)
 }
 
@@ -805,6 +845,49 @@ mod tests {
             db_size_bytes(&conn).unwrap()
         };
         assert!(after_size < before_size);
+    }
+
+    #[test]
+    fn prune_raises_boundary_to_surviving_oldest_note_after_keep_exceeded() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
+        s.set_fetch_boundary("col1", "n1").unwrap(); // n1まで(=全件)取得済みと主張
+
+        let deleted = s.prune(2, 0, 0).unwrap(); // 最古のn1が削除される
+        assert_eq!(deleted, 1);
+
+        // n1が消えたので、生存最古のn2まで境界を引き上げる
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n2"));
+    }
+
+    #[test]
+    fn prune_clears_boundary_when_column_fully_pruned() {
+        let s = store();
+        let now = now_epoch();
+        let one_day = 86_400;
+        s.cache_notes("col1", &[note("old", now - 40 * one_day)]).unwrap();
+        s.set_fetch_boundary("col1", "old").unwrap();
+
+        let deleted = s.prune(0, 30, 0).unwrap();
+        assert_eq!(deleted, 1);
+
+        // カラムのキャッシュが全滅したので境界は未確定に戻る
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+    }
+
+    #[test]
+    fn prune_leaves_unaffected_columns_boundary_untouched() {
+        let s = store();
+        s.cache_notes("colA", &[note("a1", 50)]).unwrap();
+        s.cache_notes("colB", &[note("b1", 100), note("b2", 200), note("b3", 300)]).unwrap();
+        s.set_fetch_boundary("colA", "a1").unwrap();
+        s.set_fetch_boundary("colB", "b1").unwrap();
+
+        let deleted = s.prune(3, 0, 0).unwrap(); // 4件中keep=3 → 全体最古のa1のみ削除
+        assert_eq!(deleted, 1);
+
+        assert!(s.get_fetch_boundary("colA").unwrap().is_none());
+        assert_eq!(s.get_fetch_boundary("colB").unwrap().as_deref(), Some("b1")); // 変わらない
     }
 
     #[test]
