@@ -736,6 +736,28 @@ fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool,
     GapFillResult { notes: collected, truncated, boundary_id }
 }
 
+/// backfill 要求(until_id より古いページ)をキャッシュのみで賄えるか判定する純粋関数。
+/// `boundary`(Some) は「これより新しいノートはAPI取得済みで完全」という境界。
+/// `cached` は呼び出し元が事前に `load_cached_before` で取得した結果。
+/// 境界が未確定、要求範囲が境界に届かない(未検証領域を含みうる)、
+/// またはキャッシュ件数が limit に満たない場合は None(=APIへフォールバックすべき)を返す。
+fn cache_backfill_page(
+    boundary: Option<&str>,
+    until_id: &str,
+    cached: Vec<Note>,
+    limit: u32,
+) -> Option<Vec<Note>> {
+    let boundary = boundary?;
+    if until_id <= boundary {
+        return None;
+    }
+    if cached.len() as u32 >= limit {
+        Some(cached)
+    } else {
+        None
+    }
+}
+
 /// 起動時のギャップ埋め: アプリを閉じていた間に流れたノートを、キャッシュの最新ノートid
 /// (`newest_known_id`)まで REST で遡って取得する。`limit` 件、または既知のノートに追いつく
 /// (取得ページの中に newest_known_id 以前のノートが現れる)まで、どちらか早い方で打ち切る。
@@ -1166,5 +1188,37 @@ mod tests {
         let result = finalize_gap_fill(collected, true, 100);
 
         assert_eq!(result.notes.len(), 1);
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_boundary_unknown() {
+        let cached = vec![note("n1", 10); 0]; // 空でも境界未確定なら常にAPIへ
+        let result = cache_backfill_page(None, "n999", cached, 20);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_until_id_at_or_before_boundary() {
+        let cached = vec![note("n1", 10)];
+        // until_id が境界と同じ、または境界より古い場合は「未検証の領域」を含みうるのでAPIへ
+        assert!(cache_backfill_page(Some("n500"), "n500", cached.clone(), 1).is_none());
+        assert!(cache_backfill_page(Some("n500"), "n400", cached, 1).is_none());
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_cached_count_below_limit() {
+        let cached = vec![note("n1", 10), note("n2", 20)];
+        let result = cache_backfill_page(Some("n001"), "n999", cached, 20);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn cache_backfill_page_some_when_within_boundary_and_enough_notes() {
+        let cached = vec![note("n2", 20), note("n1", 10)];
+        let result = cache_backfill_page(Some("n001"), "n999", cached.clone(), 2);
+        assert_eq!(
+            result.unwrap().iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            cached.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()
+        );
     }
 }
