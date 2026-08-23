@@ -364,7 +364,8 @@ pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
         as i32)
 }
 
-/// 過去ページ（上スクロール）。
+/// 過去ページ（上スクロール）。単一ソースのカラムは、要求範囲がbackfill境界より新しければ
+/// キャッシュのみで応答する(Issue #228)。境界未確定・範囲外・件数不足なら通常どおりAPIへ。
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_backfill(
@@ -374,9 +375,30 @@ pub async fn fetch_backfill(
 ) -> Result<Vec<Note>> {
     let column = load_column(&state, &column_id)?;
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
-    let notes = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    state.cache.cache_notes(&column.id, &notes)?;
-    Ok(notes)
+
+    let cache_eligible = resolved.kinds.len() == 1 && !resolved.use_cache;
+    if cache_eligible {
+        let boundary = state.cache.get_fetch_boundary(&column.id).ok().flatten();
+        let cached = match &boundary {
+            Some(b) if until_id.as_str() > b.as_str() => state
+                .cache
+                .load_cached_before(&column.id, &until_id, INITIAL_LIMIT)
+                .unwrap_or_default(),
+            _ => vec![],
+        };
+        if let Some(notes) = cache_backfill_page(boundary.as_deref(), &until_id, cached, INITIAL_LIMIT) {
+            return Ok(notes);
+        }
+    }
+
+    let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
+    state.cache.cache_notes(&column.id, &fetch.notes)?;
+    if cache_eligible {
+        if let Some(oldest) = &fetch.raw_oldest_id {
+            let _ = state.cache.extend_fetch_boundary(&column.id, oldest);
+        }
+    }
+    Ok(fetch.notes)
 }
 
 /// 通知カラムの過去ページ。
@@ -679,10 +701,15 @@ async fn open_stream_and_fetch(
     }
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
-    let notes = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    state.cache.cache_notes(&column.id, &notes)?;
+    let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
+    state.cache.cache_notes(&column.id, &fetch.notes)?;
+    if resolved.kinds.len() == 1 && !resolved.use_cache {
+        if let Some(oldest) = &fetch.raw_oldest_id {
+            let _ = state.cache.set_fetch_boundary(&column.id, oldest);
+        }
+    }
     open_streams_only(app, state, column, &resolved, host, token);
-    Ok((notes, vec![]))
+    Ok((fetch.notes, vec![]))
 }
 
 /// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
@@ -1008,6 +1035,15 @@ pub(crate) async fn notification_gap_fill_on_reconnect(
     .emit(app);
 }
 
+/// `fetch_and_filter_multi` の戻り値。`raw_oldest_id` は単一ソース時のみ、
+/// フィルタ適用前の生APIレスポンスの最古IDを持つ（backfill境界の更新に使う。
+/// フィルタ後の最古IDだと、末尾がフィルタで弾かれた場合に「実際にはもっと深く
+/// APIを見ている」事実を取り逃すため）。複数ソース時はNone(境界追跡の対象外)。
+struct FilteredFetch {
+    notes: Vec<Note>,
+    raw_oldest_id: Option<String>,
+}
+
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
@@ -1016,7 +1052,7 @@ async fn fetch_and_filter_multi(
     account_id: &str,
     resolved: &ResolvedSources,
     until_id: Option<&str>,
-) -> Result<Vec<Note>> {
+) -> Result<FilteredFetch> {
     let mut all: Vec<Note> = Vec::new();
 
     if !resolved.kinds.is_empty() {
@@ -1029,6 +1065,15 @@ async fn fetch_and_filter_multi(
             }
         }
     }
+
+    // 単一ソース時のみ、フィルタ適用前の生レスポンスの最古IDを控える(backfill境界用)。
+    let raw_oldest_id = if resolved.kinds.len() == 1 {
+        all.iter()
+            .min_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)))
+            .map(|n| n.id.clone())
+    } else {
+        None
+    };
 
     if resolved.use_cache {
         let sql_ctx = sql::SqlCtx {
@@ -1064,7 +1109,7 @@ async fn fetch_and_filter_multi(
     filtered.retain(|n| seen.insert(n.id.clone()));
     filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
     filtered.truncate(INITIAL_LIMIT as usize);
-    Ok(filtered)
+    Ok(FilteredFetch { notes: filtered, raw_oldest_id })
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
