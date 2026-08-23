@@ -320,14 +320,15 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
     conn.execute("DROP TABLE prune_ids", [])?;
 
     for column_id in &affected_columns {
-        let survivor: Option<String> = conn
+        let survivor: Option<String> = match conn
             .query_row(
                 "SELECT MIN(note_id) FROM column_note WHERE column_id = ?1",
                 params![column_id],
                 |r| r.get::<_, Option<String>>(0),
-            )
-            .ok()
-            .flatten();
+            ) {
+            Ok(v) => v,
+            Err(e) => return Err(e.into()),
+        };
         match survivor {
             Some(oldest) => {
                 conn.execute(
