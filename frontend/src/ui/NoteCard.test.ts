@@ -218,4 +218,56 @@ describe("投稿削除メニュー", () => {
 
     app.accounts.length = 0;
   });
+
+  it("削除ボタン→確認ダイアログで確定するとdeleteNoteが呼ばれる", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const deleteSpy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
+    const note = makeNote({ id: "n-delete-1", user: makeUser({ id: "u1" }) });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("削除").click();
+    await getByText("削除する").click();
+
+    expect(deleteSpy).toHaveBeenCalledWith("acc1", "n-delete-1");
+
+    deleteSpy.mockRestore();
+    app.accounts.length = 0;
+  });
+
+  it("削除ボタン→確認ダイアログをキャンセルするとdeleteNoteが呼ばれない", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const deleteSpy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
+    const note = makeNote({ id: "n-delete-2", user: makeUser({ id: "u1" }) });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("削除").click();
+    await getByText("キャンセル").click();
+
+    expect(deleteSpy).not.toHaveBeenCalled();
+
+    deleteSpy.mockRestore();
+    app.accounts.length = 0;
+  });
 });
