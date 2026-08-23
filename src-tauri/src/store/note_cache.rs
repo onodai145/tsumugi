@@ -132,6 +132,7 @@ impl NoteCacheStore {
     pub fn clear_column_notes(&self, column_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM column_note WHERE column_id = ?1", params![column_id])?;
+        conn.execute("DELETE FROM column_fetch_boundary WHERE column_id = ?1", params![column_id])?;
         Ok(())
     }
 
@@ -690,6 +691,17 @@ mod tests {
         assert!(s.get_fetch_boundary("col1").unwrap().is_none());
         s.extend_fetch_boundary("col1", "n300").unwrap();
         assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
+    }
+
+    #[test]
+    fn clear_column_notes_also_removes_boundary() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
+        s.set_fetch_boundary("col1", "n1").unwrap();
+
+        s.clear_column_notes("col1").unwrap();
+
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
     }
 
     #[test]
