@@ -379,13 +379,27 @@ pub async fn fetch_backfill(
     let cache_eligible = resolved.kinds.len() == 1 && !resolved.use_cache;
     if cache_eligible {
         let boundary = state.cache.get_fetch_boundary(&column.id).ok().flatten();
-        let cached = match &boundary {
+        let mut cached = match &boundary {
             Some(b) if until_id.as_str() > b.as_str() => state
                 .cache
                 .load_cached_before(&column.id, &until_id, INITIAL_LIMIT)
                 .unwrap_or_default(),
             _ => vec![],
         };
+        // [boundary, until_id) の範囲外(=このセッションでは未検証)の行を除外する。
+        // load_cached_before 自体は下限を持たないため、範囲内の件数が不足していても
+        // セッションをまたいだ古いキャッシュ行で limit を満たしてしまう可能性がある。
+        if let Some(b) = &boundary {
+            cached.retain(|n| n.id.as_str() >= b.as_str());
+        }
+        // ミュート/フィルタ設定はキャッシュ後に変更されうるため、都度再適用する。
+        let ctx = state.eval_context();
+        let mute = state.mute.lock().unwrap().clone();
+        cached.retain(|n| {
+            resolved.filter.matches(n, &ctx)
+                && !crate::filter::mute::is_muted(n, &mute)
+                && !server_muted_note(&state, &column.account_id, n)
+        });
         if let Some(notes) = cache_backfill_page(boundary.as_deref(), &until_id, cached, INITIAL_LIMIT) {
             return Ok(notes);
         }
