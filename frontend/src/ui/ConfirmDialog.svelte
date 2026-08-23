@@ -8,6 +8,13 @@
     confirmLabel = "OK",
     cancelLabel = "キャンセル",
     danger = false,
+    // z-indexレイヤー規約: 基本はz-1000。CompletionPopover等、より前面に
+    // 出す必要がある要素はz-1010を使う(CompletionPopover.svelte参照)。
+    // ドロップダウンメニュー(z-1010)から呼ばれるConfirmDialogは、メニュー自身の
+    // click-outside用backdropの下に隠れてクリックを奪われるため、z-1020を渡すこと
+    // (NoteMenu.svelte参照)。この値はTailwindのz-[...]角括弧クラスが静的文字列
+    // しか拾えないため、style属性で動的に適用する。
+    z = 1000,
     onConfirm,
     onCancel,
   }: {
@@ -16,6 +23,7 @@
     confirmLabel?: string;
     cancelLabel?: string;
     danger?: boolean;
+    z?: number;
     onConfirm: () => void;
     onCancel: () => void;
   } = $props();
@@ -27,7 +35,8 @@
 </script>
 
 <div
-  class="fixed inset-0 z-[1000] grid items-start justify-items-center bg-black/45 pt-[8vh]"
+  class="fixed inset-0 grid items-start justify-items-center bg-black/45 pt-[8vh]"
+  style={`z-index:${z}`}
   use:portal
   onclick={onCancel}
   onkeydown={(e) => e.key === "Escape" && onCancel()}

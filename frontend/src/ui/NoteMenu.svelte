@@ -1,9 +1,13 @@
 <script lang="ts">
   import type { Note, Clip } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
-  import { Star, Paperclip, ChevronRight } from "@lucide/svelte";
+  import { Star, Paperclip, ChevronRight, Trash2 } from "@lucide/svelte";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
 
   let { accountId, note, onclose }: { accountId: string; note: Note; onclose: () => void } = $props();
+
+  const isOwnNote = $derived(app.accounts.find((a) => a.id === accountId)?.userId === note.user.id);
+  let confirmDeleteOpen = $state(false);
 
   let clipSubmenuOpen = $state(false);
   let clips = $state<Clip[] | null>(null);
@@ -17,6 +21,19 @@
   function toggleFavorite() {
     app.toggleFavorite(accountId, note.id);
     onclose();
+  }
+
+  function requestDelete() {
+    confirmDeleteOpen = true;
+  }
+
+  async function confirmDelete() {
+    confirmDeleteOpen = false;
+    try {
+      await app.deleteNote(accountId, note.id);
+    } finally {
+      onclose();
+    }
   }
 
   function openClipSubmenu() {
@@ -111,4 +128,30 @@
       </div>
     {/if}
   </div>
+
+  {#if isOwnNote}
+    <button
+      type="button"
+      class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-muted"
+      onclick={requestDelete}
+    >
+      <Trash2 size={16} />
+      削除
+    </button>
+  {/if}
 </div>
+
+{#if confirmDeleteOpen}
+  <!-- NoteCard.svelte のノートメニュー自身のクリックアウト用backdropがz-[1010]で、
+       ConfirmDialogの既定z-1000より上に乗ってクリックを奪ってしまうため、
+       それより高いz-1020を明示的に渡す(ConfirmDialog.svelte参照)。 -->
+  <ConfirmDialog
+    title="投稿の削除"
+    message="この投稿を削除します。取り消せません。よろしいですか？"
+    confirmLabel="削除する"
+    danger
+    z={1020}
+    onConfirm={confirmDelete}
+    onCancel={() => (confirmDeleteOpen = false)}
+  />
+{/if}

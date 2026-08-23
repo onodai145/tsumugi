@@ -172,3 +172,116 @@ describe("プロフィール導線", () => {
     expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
   });
 });
+
+describe("投稿削除メニュー", () => {
+  // アサーション失敗時にも確実に実行されるよう、account/spy の後始末は
+  // 各 it() 末尾ではなく afterEach に置く(app はファイル全体で共有される
+  // モジュール単位シングルトンのため、失敗による後始末漏れが後続テストに漏れる)。
+  // vi.restoreAllMocks() は使わない — このファイルの他ブロックが
+  // vi.mock(...) のモジュールファクトリで持つ実装(isPermissionGranted等)まで
+  // まとめて剥がしてしまうため、このブロックで張った spy だけを個別に restore する。
+  let deleteSpy: ReturnType<typeof vi.spyOn> | null = null;
+  afterEach(async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.length = 0;
+    deleteSpy?.mockRestore();
+    deleteSpy = null;
+  });
+
+  it("自分の投稿では削除項目を表示する", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const note = makeNote({ user: makeUser({ id: "u1" }) });
+    const { baseElement, getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(getByText("削除")).toBeTruthy();
+    expect(baseElement.querySelector("svg.lucide-trash-2")).toBeTruthy();
+  });
+
+  it("他人の投稿では削除項目を表示しない", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const note = makeNote({ user: makeUser({ id: "other-user" }) });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("削除")).toBeNull();
+  });
+
+  it("削除ボタン→確認ダイアログで確定するとdeleteNoteが呼ばれる", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    deleteSpy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
+    const note = makeNote({ id: "n-delete-1", user: makeUser({ id: "u1" }) });
+    const { baseElement, getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("削除").click();
+
+    // ConfirmDialogがNoteCardのメニュー用backdrop(z-[1010])の下に隠れないよう、
+    // NoteMenuからz=1020が渡っていることをstyle経由で確認する回帰ガード
+    // (jsdomはヒットテストできないため、実クリックの可否そのものは検証できない)。
+    // NoteCard自身のbackdropはTailwindのz-[1010]クラスでインラインstyleを持たないため、
+    // style.zIndexが設定されている要素 = ConfirmDialogのoverlayとして特定する。
+    const overlays = Array.from(baseElement.querySelectorAll('[role="presentation"]')) as HTMLElement[];
+    const confirmOverlay = overlays.find((el) => el.style.zIndex !== "");
+    expect(confirmOverlay?.style.zIndex).toBe("1020");
+
+    await getByText("削除する").click();
+
+    expect(deleteSpy).toHaveBeenCalledWith("acc1", "n-delete-1");
+  });
+
+  it("削除ボタン→確認ダイアログをキャンセルするとdeleteNoteが呼ばれない", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const deleteSpy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
+    const note = makeNote({ id: "n-delete-2", user: makeUser({ id: "u1" }) });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("削除").click();
+    await getByText("キャンセル").click();
+
+    expect(deleteSpy).not.toHaveBeenCalled();
+  });
+});
