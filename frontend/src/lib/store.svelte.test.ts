@@ -450,6 +450,49 @@ function makeNoteTab(notes: Note[], overrides: Partial<TabView> = {}): TabView {
   };
 }
 
+describe("app.loadMore (Issue #239)", () => {
+  it("MAX_NOTES(300件)到達後もbackfillで取得した古いノートを保持し、最古IDが前進すること", async () => {
+    // MAX_NOTES は store.svelte.ts からは export されていないため、ここではリテラルの
+    // 300 を使う(既存の GAP_CONTINUE_MAX_PAGES=10 のテストと同じ慣習)。
+    // id は Misskey の aidx 同様、辞書順が新しい順と一致するよう時系列順の値にする。
+    const notes = Array.from({ length: 300 }, (_, i) =>
+      makeNote({ id: `n${String(300 - i).padStart(4, "0")}`, createdAt: 300 - i }),
+    );
+    const tab = makeNoteTab(notes);
+    app.groups = [makeGroup([tab])];
+
+    const oldestBefore = notes[notes.length - 1].id; // "n0001"
+    const older = makeNote({ id: "n0000", createdAt: 0 });
+
+    invokeMock.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "fetch_backfill") {
+        expect(args).toMatchObject({ untilId: oldestBefore });
+        return [older];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.loadMore(tab.id);
+
+    const live = app.groups[0].tabs[0];
+    // 取得した古いノートが切り捨てられず残っており、最古IDが前進していること。
+    // (このアサーションは修正前は失敗する: 追加直後に slice(0, MAX_NOTES) で捨てられるため)
+    expect(live.notes[live.notes.length - 1].id).toBe("n0000");
+
+    // 2回目の loadMore が同じ until_id を繰り返さないこと(前進した最古IDを使うこと)
+    invokeMock.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "fetch_backfill") {
+        expect(args).toMatchObject({ untilId: "n0000" });
+        return [];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await app.loadMore(tab.id);
+  });
+});
+
 describe("app.fillRemainingGap (Issue #148)", () => {
   it("gapMarkerが無ければ何もしない", async () => {
     const tab = makeNoteTab([makeNote({ id: "n1" })]);

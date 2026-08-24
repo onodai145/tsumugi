@@ -1464,14 +1464,18 @@ class AppStore {
         const oldest = tab.notifications[tab.notifications.length - 1].id;
         const older = await unwrap(commands.fetchNotificationsBackfill(tab.id, oldest));
         const known = new Set(tab.notifications.map((n) => n.id));
-        tab.notifications = [...tab.notifications, ...older.filter((n) => !known.has(n.id))].slice(0, MAX_NOTES);
+        // slice(0, MAX_NOTES) だと新しい方(先頭)を残し、今取得した古い方(末尾)を
+        // その場で切り捨ててしまい、次回の oldest が前進せず pagination が止まる(Issue #239)。
+        // slice(-MAX_NOTES) で末尾(古い方、今スクロールで見ている範囲)を残す。
+        tab.notifications = [...tab.notifications, ...older.filter((n) => !known.has(n.id))].slice(-MAX_NOTES);
       } else {
         if (tab.notes.length === 0) return;
         const oldest = tab.notes[tab.notes.length - 1].id;
         const older = await unwrap(commands.fetchBackfill(tab.id, oldest));
         const known = new Set(tab.notes.map((n) => n.id));
         const fresh = older.filter((n) => !known.has(n.id));
-        tab.notes = [...tab.notes, ...fresh].slice(0, MAX_NOTES);
+        // 同上(Issue #239): 末尾(古い方)を残さないと oldest カーソルが前進せず遡れなくなる。
+        tab.notes = [...tab.notes, ...fresh].slice(-MAX_NOTES);
         // captureInitial 同様に subNote 購読しないと、この先そのノートへの
         // リアクション追加/削除が noteUpdated イベントとして届かず反映されない
         // （Issue #3: リアクションが表示されたりされなかったりする）。
