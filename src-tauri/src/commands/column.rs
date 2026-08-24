@@ -377,8 +377,12 @@ pub async fn fetch_backfill(
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
 
     let cache_eligible = resolved.kinds.len() == 1 && !resolved.use_cache;
+    let boundary = if cache_eligible {
+        state.cache.get_fetch_boundary(&column.id).ok().flatten()
+    } else {
+        None
+    };
     if cache_eligible {
-        let boundary = state.cache.get_fetch_boundary(&column.id).ok().flatten();
         let mut cached = match &boundary {
             Some(b) if until_id.as_str() > b.as_str() => state
                 .cache
@@ -409,7 +413,18 @@ pub async fn fetch_backfill(
     state.cache.cache_notes(&column.id, &fetch.notes)?;
     if cache_eligible {
         if let Some(oldest) = &fetch.raw_oldest_id {
-            let _ = state.cache.extend_fetch_boundary(&column.id, oldest);
+            // 既存の境界と連続している(=until_idが境界以上)場合のみ延長する。
+            // 不連続な場合(例: fillRemainingGapがgap markerのtargetIdまで遡って取得した場合)に
+            // 境界と今回の取得範囲の間の未検証の隙間を「完全」と誤認するのを防ぐ(Issue #228)。
+            // 境界未確定(None)なら連続性を検証できないので、延長せずAPI経由のままにする
+            // (境界はカラム開き直し時の open_stream_and_fetch が改めて確定させる)。
+            let contiguous = match &boundary {
+                Some(b) => until_id.as_str() >= b.as_str(),
+                None => false,
+            };
+            if contiguous {
+                let _ = state.cache.extend_fetch_boundary(&column.id, oldest);
+            }
         }
     }
     Ok(fetch.notes)
@@ -1082,9 +1097,8 @@ async fn fetch_and_filter_multi(
 
     // 単一ソース時のみ、フィルタ適用前の生レスポンスの最古IDを控える(backfill境界用)。
     let raw_oldest_id = if resolved.kinds.len() == 1 {
-        all.iter()
-            .min_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)))
-            .map(|n| n.id.clone())
+        // 境界の比較は全て id の辞書順で行うため、ここも id 基準で最古を選ぶ(Issue #228)。
+        all.iter().min_by(|a, b| a.id.cmp(&b.id)).map(|n| n.id.clone())
     } else {
         None
     };
