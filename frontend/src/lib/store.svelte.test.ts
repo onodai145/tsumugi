@@ -491,6 +491,30 @@ describe("app.loadMore (Issue #239)", () => {
     });
     await app.loadMore(tab.id);
   });
+
+  it("MAX_NOTES超過後も先頭(最新ノート)を切り捨てないこと(遡った後に一番上へ戻ると最新に見えない不具合)", async () => {
+    const notes = Array.from({ length: 300 }, (_, i) =>
+      makeNote({ id: `n${String(300 - i).padStart(4, "0")}`, createdAt: 300 - i }),
+    );
+    const tab = makeNoteTab(notes);
+    app.groups = [makeGroup([tab])];
+    const newestId = notes[0].id; // "n0300"
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "fetch_backfill") return [makeNote({ id: "n0000", createdAt: 0 })];
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.loadMore(tab.id);
+
+    const live = app.groups[0].tabs[0];
+    // 300件を超えても先頭は元々の最新ノートのままであること
+    // (slice(-MAX_NOTES) で先頭=最新側を切り捨てると、一番上へスクロールしても
+    // 最新のノートが表示されなくなる)
+    expect(live.notes[0].id).toBe(newestId);
+    expect(live.notes.length).toBe(301);
+  });
 });
 
 describe("app.fillRemainingGap (Issue #148)", () => {

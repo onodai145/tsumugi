@@ -1464,18 +1464,22 @@ class AppStore {
         const oldest = tab.notifications[tab.notifications.length - 1].id;
         const older = await unwrap(commands.fetchNotificationsBackfill(tab.id, oldest));
         const known = new Set(tab.notifications.map((n) => n.id));
-        // slice(0, MAX_NOTES) だと新しい方(先頭)を残し、今取得した古い方(末尾)を
-        // その場で切り捨ててしまい、次回の oldest が前進せず pagination が止まる(Issue #239)。
-        // slice(-MAX_NOTES) で末尾(古い方、今スクロールで見ている範囲)を残す。
-        tab.notifications = [...tab.notifications, ...older.filter((n) => !known.has(n.id))].slice(-MAX_NOTES);
+        // MAX_NOTES で切り捨てない(Issue #239)。
+        // slice(0, MAX_NOTES)(先頭=新しい方を残す)だと今取得した古い方がその場で
+        // 切り捨てられ oldest カーソルが前進せず遡れなくなる。かといって
+        // slice(-MAX_NOTES)(末尾=古い方を残す)にすると、今度は先頭(最新)側が
+        // 切り捨てられ、一番上へスクロールしても最新に見えなくなる。
+        // MAX_NOTESはライブ配信での無制限な蓄積を防ぐためのもの(仮想化-lite)で、
+        // ユーザが明示的に要求したbackfillの結果には適用しない。
+        tab.notifications = [...tab.notifications, ...older.filter((n) => !known.has(n.id))];
       } else {
         if (tab.notes.length === 0) return;
         const oldest = tab.notes[tab.notes.length - 1].id;
         const older = await unwrap(commands.fetchBackfill(tab.id, oldest));
         const known = new Set(tab.notes.map((n) => n.id));
         const fresh = older.filter((n) => !known.has(n.id));
-        // 同上(Issue #239): 末尾(古い方)を残さないと oldest カーソルが前進せず遡れなくなる。
-        tab.notes = [...tab.notes, ...fresh].slice(-MAX_NOTES);
+        // 同上(Issue #239): MAX_NOTESで切り捨てない。
+        tab.notes = [...tab.notes, ...fresh];
         // captureInitial 同様に subNote 購読しないと、この先そのノートへの
         // リアクション追加/削除が noteUpdated イベントとして届かず反映されない
         // （Issue #3: リアクションが表示されたりされなかったりする）。
