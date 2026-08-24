@@ -364,7 +364,8 @@ pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
         as i32)
 }
 
-/// 過去ページ（上スクロール）。
+/// 過去ページ（上スクロール）。単一ソースのカラムは、要求範囲がbackfill境界より新しければ
+/// キャッシュのみで応答する(Issue #228)。境界未確定・範囲外・件数不足なら通常どおりAPIへ。
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_backfill(
@@ -374,9 +375,59 @@ pub async fn fetch_backfill(
 ) -> Result<Vec<Note>> {
     let column = load_column(&state, &column_id)?;
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
-    let notes = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    state.cache.cache_notes(&column.id, &notes)?;
-    Ok(notes)
+
+    let cache_eligible = resolved.kinds.len() == 1 && !resolved.use_cache;
+    let boundary = if cache_eligible {
+        state.cache.get_fetch_boundary(&column.id).ok().flatten()
+    } else {
+        None
+    };
+    if cache_eligible {
+        let mut cached = match &boundary {
+            Some(b) if until_id.as_str() > b.as_str() => state
+                .cache
+                .load_cached_before(&column.id, &until_id, INITIAL_LIMIT)
+                .unwrap_or_default(),
+            _ => vec![],
+        };
+        // [boundary, until_id) の範囲外(=このセッションでは未検証)の行を除外する。
+        // load_cached_before 自体は下限を持たないため、範囲内の件数が不足していても
+        // セッションをまたいだ古いキャッシュ行で limit を満たしてしまう可能性がある。
+        if let Some(b) = &boundary {
+            cached.retain(|n| n.id.as_str() >= b.as_str());
+        }
+        // ミュート/フィルタ設定はキャッシュ後に変更されうるため、都度再適用する。
+        let ctx = state.eval_context();
+        let mute = state.mute.lock().unwrap().clone();
+        cached.retain(|n| {
+            resolved.filter.matches(n, &ctx)
+                && !crate::filter::mute::is_muted(n, &mute)
+                && !server_muted_note(&state, &column.account_id, n)
+        });
+        if let Some(notes) = cache_backfill_page(boundary.as_deref(), &until_id, cached, INITIAL_LIMIT) {
+            return Ok(notes);
+        }
+    }
+
+    let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
+    state.cache.cache_notes(&column.id, &fetch.notes)?;
+    if cache_eligible {
+        if let Some(oldest) = &fetch.raw_oldest_id {
+            // 既存の境界と連続している(=until_idが境界以上)場合のみ延長する。
+            // 不連続な場合(例: fillRemainingGapがgap markerのtargetIdまで遡って取得した場合)に
+            // 境界と今回の取得範囲の間の未検証の隙間を「完全」と誤認するのを防ぐ(Issue #228)。
+            // 境界未確定(None)なら連続性を検証できないので、延長せずAPI経由のままにする
+            // (境界はカラム開き直し時の open_stream_and_fetch が改めて確定させる)。
+            let contiguous = match &boundary {
+                Some(b) => until_id.as_str() >= b.as_str(),
+                None => false,
+            };
+            if contiguous {
+                let _ = state.cache.extend_fetch_boundary(&column.id, oldest);
+            }
+        }
+    }
+    Ok(fetch.notes)
 }
 
 /// 通知カラムの過去ページ。
@@ -679,10 +730,15 @@ async fn open_stream_and_fetch(
     }
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
-    let notes = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    state.cache.cache_notes(&column.id, &notes)?;
+    let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
+    state.cache.cache_notes(&column.id, &fetch.notes)?;
+    if resolved.kinds.len() == 1 && !resolved.use_cache {
+        if let Some(oldest) = &fetch.raw_oldest_id {
+            let _ = state.cache.set_fetch_boundary(&column.id, oldest);
+        }
+    }
     open_streams_only(app, state, column, &resolved, host, token);
-    Ok((notes, vec![]))
+    Ok((fetch.notes, vec![]))
 }
 
 /// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
@@ -734,6 +790,28 @@ fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool,
     let truncated = !all_sources_reached_target && !collected.is_empty();
     let boundary_id = if truncated { collected.last().map(|n| n.id.clone()) } else { None };
     GapFillResult { notes: collected, truncated, boundary_id }
+}
+
+/// backfill 要求(until_id より古いページ)をキャッシュのみで賄えるか判定する純粋関数。
+/// `boundary`(Some) は「これより新しいノートはAPI取得済みで完全」という境界。
+/// `cached` は呼び出し元が事前に `load_cached_before` で取得した結果。
+/// 境界が未確定、要求範囲が境界に届かない(未検証領域を含みうる)、
+/// またはキャッシュ件数が limit に満たない場合は None(=APIへフォールバックすべき)を返す。
+fn cache_backfill_page(
+    boundary: Option<&str>,
+    until_id: &str,
+    cached: Vec<Note>,
+    limit: u32,
+) -> Option<Vec<Note>> {
+    let boundary = boundary?;
+    if until_id <= boundary {
+        return None;
+    }
+    if cached.len() as u32 >= limit {
+        Some(cached)
+    } else {
+        None
+    }
 }
 
 /// 起動時のギャップ埋め: アプリを閉じていた間に流れたノートを、キャッシュの最新ノートid
@@ -986,6 +1064,15 @@ pub(crate) async fn notification_gap_fill_on_reconnect(
     .emit(app);
 }
 
+/// `fetch_and_filter_multi` の戻り値。`raw_oldest_id` は単一ソース時のみ、
+/// フィルタ適用前の生APIレスポンスの最古IDを持つ（backfill境界の更新に使う。
+/// フィルタ後の最古IDだと、末尾がフィルタで弾かれた場合に「実際にはもっと深く
+/// APIを見ている」事実を取り逃すため）。複数ソース時はNone(境界追跡の対象外)。
+struct FilteredFetch {
+    notes: Vec<Note>,
+    raw_oldest_id: Option<String>,
+}
+
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
@@ -994,7 +1081,7 @@ async fn fetch_and_filter_multi(
     account_id: &str,
     resolved: &ResolvedSources,
     until_id: Option<&str>,
-) -> Result<Vec<Note>> {
+) -> Result<FilteredFetch> {
     let mut all: Vec<Note> = Vec::new();
 
     if !resolved.kinds.is_empty() {
@@ -1007,6 +1094,14 @@ async fn fetch_and_filter_multi(
             }
         }
     }
+
+    // 単一ソース時のみ、フィルタ適用前の生レスポンスの最古IDを控える(backfill境界用)。
+    let raw_oldest_id = if resolved.kinds.len() == 1 {
+        // 境界の比較は全て id の辞書順で行うため、ここも id 基準で最古を選ぶ(Issue #228)。
+        all.iter().min_by(|a, b| a.id.cmp(&b.id)).map(|n| n.id.clone())
+    } else {
+        None
+    };
 
     if resolved.use_cache {
         let sql_ctx = sql::SqlCtx {
@@ -1042,7 +1137,7 @@ async fn fetch_and_filter_multi(
     filtered.retain(|n| seen.insert(n.id.clone()));
     filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
     filtered.truncate(INITIAL_LIMIT as usize);
-    Ok(filtered)
+    Ok(FilteredFetch { notes: filtered, raw_oldest_id })
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
@@ -1166,5 +1261,37 @@ mod tests {
         let result = finalize_gap_fill(collected, true, 100);
 
         assert_eq!(result.notes.len(), 1);
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_boundary_unknown() {
+        let cached = vec![note("n1", 10); 0]; // 空でも境界未確定なら常にAPIへ
+        let result = cache_backfill_page(None, "n999", cached, 20);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_until_id_at_or_before_boundary() {
+        let cached = vec![note("n1", 10)];
+        // until_id が境界と同じ、または境界より古い場合は「未検証の領域」を含みうるのでAPIへ
+        assert!(cache_backfill_page(Some("n500"), "n500", cached.clone(), 1).is_none());
+        assert!(cache_backfill_page(Some("n500"), "n400", cached, 1).is_none());
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_cached_count_below_limit() {
+        let cached = vec![note("n1", 10), note("n2", 20)];
+        let result = cache_backfill_page(Some("n001"), "n999", cached, 20);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn cache_backfill_page_some_when_within_boundary_and_enough_notes() {
+        let cached = vec![note("n2", 20), note("n1", 10)];
+        let result = cache_backfill_page(Some("n001"), "n999", cached.clone(), 2);
+        assert_eq!(
+            result.unwrap().iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            cached.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()
+        );
     }
 }

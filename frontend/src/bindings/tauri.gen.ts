@@ -82,7 +82,10 @@ export const commands = {
 	 *  上限0なら無制限で何もしない。実際に削除した件数を返す。
 	 */
 	pruneNoteCache: () => typedError<number, Error>(__TAURI_INVOKE("prune_note_cache")),
-	/**  過去ページ（上スクロール）。 */
+	/**
+	 *  過去ページ（上スクロール）。単一ソースのカラムは、要求範囲がbackfill境界より新しければ
+	 *  キャッシュのみで応答する(Issue #228)。境界未確定・範囲外・件数不足なら通常どおりAPIへ。
+	 */
 	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
 	/**  通知カラムの過去ページ。 */
 	fetchNotificationsBackfill: (columnId: string, untilId: string) => typedError<Notification[], Error>(__TAURI_INVOKE("fetch_notifications_backfill", { columnId, untilId })),

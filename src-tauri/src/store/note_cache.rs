@@ -87,6 +87,29 @@ impl NoteCacheStore {
         Ok(out)
     }
 
+    /// カラムのキャッシュから until_id より古いノートを取得（新しい順、最大 limit 件）。
+    /// backfill のキャッシュ優先パス用（load_cached の until_id 版）。
+    pub fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT n.payload FROM column_note cn
+             JOIN note n ON n.id = cn.note_id
+             WHERE cn.column_id = ?1 AND cn.note_id < ?2
+             ORDER BY cn.note_id DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![column_id, until_id, limit], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for payload in rows {
+            out.extend(deserialize_note_or_warn(&payload?));
+        }
+        // 絞り込み・LIMITの選抜は境界比較と同じ id 基準で行い、表示順への並べ替えだけを
+        // ここで行う。created_at で選抜すると、連合ノート(idとcreated_atの順序が食い違う)が
+        // 範囲内にあるのに LIMIT の外へ弾かれて静かに欠落する(Issue #228)。
+        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+        Ok(out)
+    }
+
     /// note_id 単体をキャッシュから取得する（column_note を経由しない）。
     /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映する際、
     /// 対象ノートがどのカラムに属すか気にせず読み書きするために使う。
@@ -113,6 +136,52 @@ impl NoteCacheStore {
     pub fn clear_column_notes(&self, column_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM column_note WHERE column_id = ?1", params![column_id])?;
+        conn.execute("DELETE FROM column_fetch_boundary WHERE column_id = ?1", params![column_id])?;
+        Ok(())
+    }
+
+    /// カラムの境界(oldest_fetched_id)を取得。未確定ならNone。
+    pub fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let v: Option<String> = conn
+            .query_row(
+                "SELECT oldest_fetched_id FROM column_fetch_boundary WHERE column_id = ?1",
+                params![column_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(v)
+    }
+
+    /// 境界を new_oldest_id で無条件に新規セット/上書きする(初回REST取得時に使う)。
+    pub fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
+             ON CONFLICT(column_id) DO UPDATE SET oldest_fetched_id = excluded.oldest_fetched_id",
+            params![column_id, new_oldest_id],
+        )?;
+        Ok(())
+    }
+
+    /// 境界を new_oldest_id まで延長する(古い方向へのみ、単調性を保証)。
+    /// 既存値の方が既に古ければ何もしない。
+    pub fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
+             ON CONFLICT(column_id) DO UPDATE SET
+                oldest_fetched_id = MIN(oldest_fetched_id, excluded.oldest_fetched_id)",
+            params![column_id, new_oldest_id],
+        )?;
+        Ok(())
+    }
+
+    /// 全カラムのbackfill境界を削除する(未確定状態に戻す)。ミュート設定変更時など、
+    /// キャッシュされたフィルタ済みノート集合の前提が崩れる操作の後に呼ぶ(Issue #228)。
+    pub fn clear_all_fetch_boundaries(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM column_fetch_boundary", [])?;
         Ok(())
     }
 
@@ -236,10 +305,33 @@ fn deserialize_note_or_warn(payload: &str) -> Option<Note> {
 
 /// `select_sql`（`SELECT id FROM note ...` 形式）にマッチするノートと、その関連テーブル
 /// （note_reaction 等）・column_note を削除する（FK制約は張っていないため手動カスケード）。
+/// 削除によって影響を受けたカラムの backfill 境界(column_fetch_boundary)も、生存している
+/// 最古ノートIDまで引き上げる（全滅したカラムは境界ごと削除）。境界が「削除前の完全な範囲」
+/// を主張したままだと、prune後にキャッシュに無いノートを「完全」と誤認して欠落表示になる
+/// ため(Issue #228)。
 /// 戻り値は削除したノート件数。
 fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<i64> {
     conn.execute(&format!("CREATE TEMP TABLE prune_ids AS {select_sql}"), params)?;
     let deleted = conn.execute("DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)", [])? as i64;
+
+    // column_note をカスケード削除する前に、影響を受けるカラムと、各カラムで削除された
+    // ノートの中の最大ID(=境界を少なくともこの値までは引き上げる必要がある)を確定しておく。
+    let affected_columns: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT column_id FROM column_note WHERE note_id IN (SELECT id FROM prune_ids)",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let max_deleted_by_column: std::collections::HashMap<String, String> = {
+        let mut stmt = conn.prepare(
+            "SELECT column_id, MAX(note_id) FROM column_note
+             WHERE note_id IN (SELECT id FROM prune_ids) GROUP BY column_id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?
+    };
+
     for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
         conn.execute(
             &format!("DELETE FROM {table} WHERE note_id IN (SELECT id FROM prune_ids)"),
@@ -247,6 +339,40 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
         )?;
     }
     conn.execute("DROP TABLE prune_ids", [])?;
+
+    for column_id in &affected_columns {
+        let survivor: Option<String> = match conn
+            .query_row(
+                "SELECT MIN(note_id) FROM column_note WHERE column_id = ?1",
+                params![column_id],
+                |r| r.get::<_, Option<String>>(0),
+            ) {
+            Ok(v) => v,
+            Err(e) => return Err(e.into()),
+        };
+        match survivor {
+            Some(oldest) => {
+                // 削除対象は created_at 基準で選ばれるため、生存最古IDより新しいIDのノートが
+                // 消えていることがある(連合ノート)。その場合は削除された最大IDまで
+                // 引き上げないと、消えた範囲を「完全」と主張し続けてしまう(Issue #228)。
+                let candidate = match max_deleted_by_column.get(column_id) {
+                    Some(max_deleted) if max_deleted.as_str() > oldest.as_str() => max_deleted.clone(),
+                    _ => oldest,
+                };
+                conn.execute(
+                    "UPDATE column_fetch_boundary SET oldest_fetched_id = ?2
+                     WHERE column_id = ?1 AND oldest_fetched_id < ?2",
+                    params![column_id, candidate],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "DELETE FROM column_fetch_boundary WHERE column_id = ?1",
+                    params![column_id],
+                )?;
+            }
+        }
+    }
     Ok(deleted)
 }
 
@@ -598,6 +724,94 @@ mod tests {
     }
 
     #[test]
+    fn fetch_boundary_roundtrip() {
+        let s = store();
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+
+        s.set_fetch_boundary("col1", "n100").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n100"));
+    }
+
+    #[test]
+    fn set_fetch_boundary_overwrites_unconditionally() {
+        let s = store();
+        s.set_fetch_boundary("col1", "n100").unwrap();
+        s.set_fetch_boundary("col1", "n999").unwrap(); // より新しい値でも無条件に上書き
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n999"));
+    }
+
+    #[test]
+    fn extend_fetch_boundary_only_moves_older() {
+        let s = store();
+        s.set_fetch_boundary("col1", "n500").unwrap();
+
+        // より古い値(n300)への延長は反映される
+        s.extend_fetch_boundary("col1", "n300").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
+
+        // より新しい値(n800)は無視される(単調性)
+        s.extend_fetch_boundary("col1", "n800").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
+    }
+
+    #[test]
+    fn extend_fetch_boundary_sets_when_absent() {
+        let s = store();
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+        s.extend_fetch_boundary("col1", "n300").unwrap();
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
+    }
+
+    #[test]
+    fn clear_column_notes_also_removes_boundary() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
+        s.set_fetch_boundary("col1", "n1").unwrap();
+
+        s.clear_column_notes("col1").unwrap();
+
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+    }
+
+    #[test]
+    fn load_cached_before_returns_notes_older_than_until_id_desc() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
+
+        let got = s.load_cached_before("col1", "n3", 10).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);
+    }
+
+    #[test]
+    fn load_cached_before_respects_limit_and_column_scope() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
+        s.cache_notes("col2", &[note("m1", 250)]).unwrap();
+
+        let got = s.load_cached_before("col1", "n3", 1).unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+
+        // col2 のノートは混ざらない
+        let got_all = s.load_cached_before("col1", "n3", 10).unwrap();
+        assert!(got_all.iter().all(|n| n.id != "m1"));
+    }
+
+    /// 連合ノートは id(受信順) と created_at(発信元での投稿時刻) の順序が食い違いうる。
+    /// LIMIT の選抜は必ず id 基準で行い、created_at が古いという理由だけで
+    /// 範囲内のノートが脱落しないこと(Issue #228)。
+    #[test]
+    fn load_cached_before_selects_by_id_not_created_at() {
+        let s = store();
+        // id順: n1 < n2 < n3、created_at順: n2(100) < n3(800) < n1(900)
+        s.cache_notes("col1", &[note("n1", 900), note("n2", 100), note("n3", 800)]).unwrap();
+
+        let got = s.load_cached_before("col1", "n9", 2).unwrap();
+        // id の大きい方から2件(n3, n2)が選抜される。created_at で選ぶと n1, n3 になり n2 が欠落する。
+        let ids: Vec<&str> = got.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["n3", "n2"], "id基準で選抜し created_at DESC で並べること");
+    }
+
+    #[test]
     fn prune_removes_oldest_beyond_keep_and_related_rows() {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
@@ -675,6 +889,77 @@ mod tests {
             db_size_bytes(&conn).unwrap()
         };
         assert!(after_size < before_size);
+    }
+
+    #[test]
+    fn prune_raises_boundary_to_surviving_oldest_note_after_keep_exceeded() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
+        s.set_fetch_boundary("col1", "n1").unwrap(); // n1まで(=全件)取得済みと主張
+
+        let deleted = s.prune(2, 0, 0).unwrap(); // 最古のn1が削除される
+        assert_eq!(deleted, 1);
+
+        // n1が消えたので、生存最古のn2まで境界を引き上げる
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n2"));
+    }
+
+    /// created_at は古いが id は生存最古より新しいノート(連合ノート)が prune で消えた場合、
+    /// 生存最古ID だけでは境界を引き上げられない。削除されたノートの最大IDまで引き上げること(Issue #228)。
+    #[test]
+    fn prune_raises_boundary_past_deleted_note_with_newer_id() {
+        let s = store();
+        // id順: n1 < n2 < n5、created_at順: n5(100) < n1(200) < n2(300)
+        s.cache_notes("col1", &[note("n5", 100), note("n1", 200), note("n2", 300)]).unwrap();
+        s.set_fetch_boundary("col1", "n1").unwrap();
+
+        let deleted = s.prune(2, 0, 0).unwrap(); // created_at 最古の n5 が削除される
+        assert_eq!(deleted, 1);
+
+        // 生存最古IDは n1 のままなので、削除された n5 まで境界を引き上げる必要がある
+        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n5"));
+    }
+
+    #[test]
+    fn clear_all_fetch_boundaries_removes_every_column() {
+        let s = store();
+        s.set_fetch_boundary("col1", "n100").unwrap();
+        s.set_fetch_boundary("col2", "n200").unwrap();
+
+        s.clear_all_fetch_boundaries().unwrap();
+
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+        assert!(s.get_fetch_boundary("col2").unwrap().is_none());
+    }
+
+    #[test]
+    fn prune_clears_boundary_when_column_fully_pruned() {
+        let s = store();
+        let now = now_epoch();
+        let one_day = 86_400;
+        s.cache_notes("col1", &[note("old", now - 40 * one_day)]).unwrap();
+        s.set_fetch_boundary("col1", "old").unwrap();
+
+        let deleted = s.prune(0, 30, 0).unwrap();
+        assert_eq!(deleted, 1);
+
+        // カラムのキャッシュが全滅したので境界は未確定に戻る
+        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
+    }
+
+    #[test]
+    fn prune_leaves_unaffected_columns_boundary_untouched() {
+        let s = store();
+        s.cache_notes("colA", &[note("a1", 50)]).unwrap();
+        s.cache_notes("colB", &[note("b1", 100), note("b2", 200), note("b3", 300)]).unwrap();
+        s.set_fetch_boundary("colA", "a1").unwrap();
+        s.set_fetch_boundary("colB", "b1").unwrap();
+
+        let deleted = s.prune(3, 0, 0).unwrap(); // 4件中keep=3 → 全体最古のa1のみ削除
+        assert_eq!(deleted, 1);
+
+        assert!(s.get_fetch_boundary("colA").unwrap().is_none());
+        assert_eq!(s.get_fetch_boundary("colB").unwrap().as_deref(), Some("b1")); // 変わらない
     }
 
     #[test]
