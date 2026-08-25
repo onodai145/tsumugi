@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { app, NOTIFY_SOUND_PRESETS, playNotifySound } from "../lib/store.svelte";
+  import { app, NOTIFY_SOUND_PRESETS } from "../lib/store.svelte";
   import type { TabView } from "../lib/store.svelte";
+  import { playNotifySound } from "../lib/ipc";
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";

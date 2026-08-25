@@ -34,3 +34,11 @@ export async function unwrapAcc<T>(accountId: string, p: Promise<Result<T>>): Pr
 export function formatError(e: ApiError): string {
   return "message" in e ? `${e.kind}: ${e.message}` : e.kind;
 }
+
+/// 通知音を鳴らす(Issue #12: 実際の再生は Rust 側の play_notify_sound コマンドで行う)。
+/// 呼び出し側は結果を待つ必要がないため fire-and-forget。IPC 層自体の失敗(コマンド未登録等の
+/// 開発時ミスなど)で unhandled promise rejection にならないよう、ここで一括して握りつぶす
+/// (play_notify_sound コマンド自体は常に Ok を返す設計で、失敗は Rust 側で warn ログのみ)。
+export function playNotifySound(choice: string): void {
+  void unwrap(commands.playNotifySound(choice)).catch(() => {});
+}

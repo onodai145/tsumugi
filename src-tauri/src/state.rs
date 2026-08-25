@@ -2,6 +2,7 @@
 
 use crate::domain::{EmojiDef, MuteConfig};
 use crate::session::{AccountManager, SecretStore};
+use crate::sound::SoundPlayer;
 use crate::store::{NoteCacheStore, SettingsStore};
 use crate::stream::ConnectionManager;
 use std::collections::{HashMap, HashSet};
@@ -37,11 +38,25 @@ pub struct AppState {
     /// 再接続ギャップ埋め(Issue #147)が実行中の column_id 集合。フラッピング再接続で同一
     /// カラムに対する多重実行を防ぐためのガード（commands/column.rs 側で挿入/削除する）。
     pub gap_fill_in_flight: Mutex<HashSet<String>>,
+    /// 通知音のネイティブ再生(Issue #12)。
+    pub sound: SoundPlayer,
 }
 
 impl AppState {
     /// 永続化済みアカウントを読み込んで初期化する。
     pub fn new(secrets: Box<dyn SecretStore>, settings: SettingsStore, cache: NoteCacheStore) -> Self {
+        Self::new_with_sound(secrets, settings, cache, SoundPlayer::spawn())
+    }
+
+    /// `sound` フィールドの構築方法を差し替え可能にした内部コンストラクタ。
+    /// 本番経路は `new`(実デバイスを開くスレッドを立てる)、テスト経路は
+    /// `new_for_test`(何も立てない `SoundPlayer::new_for_test`)から呼ばれる。
+    fn new_with_sound(
+        secrets: Box<dyn SecretStore>,
+        settings: SettingsStore,
+        cache: NoteCacheStore,
+        sound: SoundPlayer,
+    ) -> Self {
         let accounts = settings.load_accounts().unwrap_or_else(|e| {
             log::error!("failed to load accounts: {e}");
             Vec::new()
@@ -62,6 +77,7 @@ impl AppState {
             settings,
             cache,
             gap_fill_in_flight: Mutex::new(HashSet::new()),
+            sound,
         }
     }
 
@@ -84,9 +100,16 @@ impl AppState {
 
     #[cfg(test)]
     /// テスト用: keyring を使わずインメモリ DB で構築する。他モジュールのテストからも使う。
+    /// `sound` は実デバイスを開くスレッドを立てない `SoundPlayer::new_for_test` を使う
+    /// (ヘッドレス CI でのテストごとのデバイスプローブ/ALSA ノイズを避けるため)。
     pub(crate) fn new_for_test(settings: SettingsStore) -> Self {
         let cache = NoteCacheStore::new(crate::store::db::open_cache_in_memory().unwrap());
-        Self::new(Box::new(crate::session::MemoryStore::default()), settings, cache)
+        Self::new_with_sound(
+            Box::new(crate::session::MemoryStore::default()),
+            settings,
+            cache,
+            SoundPlayer::new_for_test(),
+        )
     }
 
     /// account_id から (host, token) を引く。未登録なら Invalid、token 欠落なら Unauthorized。

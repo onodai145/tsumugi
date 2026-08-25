@@ -6,6 +6,7 @@ pub mod clip;
 pub mod column;
 pub mod mute;
 pub mod note;
+pub mod sound;
 pub mod user;
 
 // lib.rs は commands::<mod>::* をフルパス参照するため、この再エクスポートは今は未使用。
@@ -34,3 +35,5 @@ pub use user::{
     follow_user, get_user_followers, get_user_following, get_user_notes, get_user_profile,
     unfollow_user, UserProfile,
 };
+#[allow(unused_imports)]
+pub use sound::play_notify_sound;
