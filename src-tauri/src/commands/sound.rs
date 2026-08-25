@@ -39,6 +39,8 @@ pub(crate) fn resolve_audio_bytes(choice: &str) -> Result<Cow<'static, [u8]>> {
 pub async fn play_notify_sound(state: State<'_, AppState>, choice: String) -> Result<()> {
     match resolve_audio_bytes(&choice) {
         Ok(bytes) => state.sound.play(bytes.into_owned()),
+        // 注: この warn は `enable_file_logging` 設定(既定オフ)が有効な場合のみ
+        // ファイルに残る。lib.rs がそれを条件にログプラグイン登録を行っているため。
         Err(e) => log::warn!("通知音: 再生対象の解決に失敗: {e}"),
     }
     Ok(())
