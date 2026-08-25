@@ -20,7 +20,10 @@ android {
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "com.onodai.tsumugi"
-        minSdk = 24
+        // rodio(通知音のネイティブ再生, Issue #12)のAndroidバックエンド(Oboe)がビルド時に
+        // AAudioを無条件でリンクするため、AAudioが存在しないAPI24/25はビルドできない
+        // (リンクエラー: unable to find library -laaudio)。AAudioはAPI26(Android 8.0)から。
+        minSdk = 26
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")

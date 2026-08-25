@@ -32,6 +32,7 @@ Issue #75はTone.js（Web Audio APIベースのJSライブラリ）を使った�
 - 「実際に音を鳴らす」実行部分のみ新しいTauriコマンド`play_notify_sound(choice: String)`としてRust側に切り出す。JS側の`AudioContext`/`playTone`/`playPreset`/`new Audio()`実装は丸ごと削除する
 - 設定画面の「試聴」ボタンも同じコマンドを呼ぶ（プレビューと実通知で実装が分岐しない一本道にする）
 - 対象は**デスクトップ＋Android全プラットフォーム**。「webviewでWeb Audio APIを使う」という同じ仕組みに起因する問題である以上、OSを問わず起こりうるため、Android含め全プラットフォームをスコープに含める（ただしAndroid実機での動作検証は自動化が難しく、手動検証項目とする）
+- **Android: `minSdk`を24→26に引き上げる。** `rodio`のAndroidバックエンド(Oboe)はビルド時に無条件で`AAudio`をリンクするが、AAudioはAPI26(Android 8.0)以降にしか存在せず、API24向けNDKシスルートには`libaaudio.so`が無いためリンクに失敗する(CI `android-build`で発覚)。実行時フォールバック(OpenSL ES)以前のビルド時制約であり、`cpal`/`rodio`側での回避策は無いため、対応するAndroidの最低バージョンを引き上げる（`src-tauri/gen/android/app/build.gradle.kts`）
 
 `choice`文字列の解釈はRust側が持つ：
 - プリセットID（`"beep"`/`"chime"`/`"ping"`/`"pop"`/`""`） → `include_bytes!`で埋め込み済みのWAVを再生
