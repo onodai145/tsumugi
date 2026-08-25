@@ -7,6 +7,7 @@ mod error;
 mod events;
 mod filter;
 mod session;
+mod sound;
 mod state;
 mod store;
 mod stream;

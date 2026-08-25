@@ -2,6 +2,7 @@
 
 use crate::domain::{EmojiDef, MuteConfig};
 use crate::session::{AccountManager, SecretStore};
+use crate::sound::SoundPlayer;
 use crate::store::{NoteCacheStore, SettingsStore};
 use crate::stream::ConnectionManager;
 use std::collections::{HashMap, HashSet};
@@ -37,6 +38,8 @@ pub struct AppState {
     /// 再接続ギャップ埋め(Issue #147)が実行中の column_id 集合。フラッピング再接続で同一
     /// カラムに対する多重実行を防ぐためのガード（commands/column.rs 側で挿入/削除する）。
     pub gap_fill_in_flight: Mutex<HashSet<String>>,
+    /// 通知音のネイティブ再生(Issue #12)。
+    pub sound: SoundPlayer,
 }
 
 impl AppState {
@@ -62,6 +65,7 @@ impl AppState {
             settings,
             cache,
             gap_fill_in_flight: Mutex::new(HashSet::new()),
+            sound: SoundPlayer::spawn(),
         }
     }
 
