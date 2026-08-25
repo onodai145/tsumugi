@@ -35,3 +35,5 @@ pub use user::{
     follow_user, get_user_followers, get_user_following, get_user_notes, get_user_profile,
     unfollow_user, UserProfile,
 };
+#[allow(unused_imports)]
+pub use sound::play_notify_sound;

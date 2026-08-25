@@ -93,6 +93,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::set_ui_prefs,
             commands::mute::read_image_data_url,
             commands::mute::read_audio_data_url,
+            commands::sound::play_notify_sound,
             commands::mute::sync_server_mutes,
             commands::clip::list_clips,
             commands::clip::create_clip,

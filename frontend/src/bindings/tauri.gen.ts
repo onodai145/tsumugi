@@ -219,6 +219,11 @@ export const commands = {
 	/**  ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。 */
 	readAudioDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_audio_data_url", { path })),
 	/**
+	 *  通知音を鳴らす。choice は プリセットID / data URL(カスタム音声)。
+	 *  失敗しても通知フロー全体を止めないため、常に Ok を返す(失敗はログのみ)。
+	 */
+	playNotifySound: (choice: string) => typedError<null, Error>(__TAURI_INVOKE("play_notify_sound", { choice })),
+	/**
 	 *  サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
 	 */

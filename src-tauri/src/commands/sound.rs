@@ -2,8 +2,10 @@
 //! 左右されないよう、実際の再生は Rust 側(rodio)で行う)。
 
 use crate::error::{Error, Result};
+use crate::state::AppState;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::borrow::Cow;
+use tauri::State;
 
 const PRESET_BEEP: &[u8] = include_bytes!("../../assets/sounds/beep.wav");
 const PRESET_CHIME: &[u8] = include_bytes!("../../assets/sounds/chime.wav");
@@ -28,6 +30,18 @@ pub(crate) fn resolve_audio_bytes(choice: &str) -> Result<Cow<'static, [u8]>> {
         "pop" => PRESET_POP,
         _ => PRESET_BEEP, // "beep" と空文字(既定)・未知の文字列はここに含む(JS版のdefault分岐と同じ)
     }))
+}
+
+/// 通知音を鳴らす。choice は プリセットID / data URL(カスタム音声)。
+/// 失敗しても通知フロー全体を止めないため、常に Ok を返す(失敗はログのみ)。
+#[tauri::command]
+#[specta::specta]
+pub async fn play_notify_sound(state: State<'_, AppState>, choice: String) -> Result<()> {
+    match resolve_audio_bytes(&choice) {
+        Ok(bytes) => state.sound.play(bytes.into_owned()),
+        Err(e) => log::warn!("通知音: 再生対象の解決に失敗: {e}"),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
