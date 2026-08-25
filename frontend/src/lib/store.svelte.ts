@@ -813,7 +813,7 @@ class AppStore {
         if ((wantsDesktop || wantsSound) && this.#markNotified(`note:${e.payload.note.id}`)) {
           this.#logDebug(`新着ノート通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
-          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
+          if (wantsSound) void unwrap(commands.playNotifySound(this.#resolveSoundChoice(tab)));
         }
       }),
     );
@@ -901,7 +901,7 @@ class AppStore {
         if ((wantsDesktop || wantsSound) && this.#markNotified(n.id)) {
           this.#logDebug(`通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotify(n);
-          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
+          if (wantsSound) void unwrap(commands.playNotifySound(this.#resolveSoundChoice(tab)));
         }
         if (tab.notifications.some((x) => x.id === n.id)) return;
         tab.notifications = [n, ...tab.notifications].slice(0, MAX_NOTES);
@@ -1827,55 +1827,6 @@ export const NOTIFY_SOUND_PRESETS: { id: string; label: string }[] = [
   { id: "ping", label: "ピン" },
   { id: "pop", label: "ポップ" },
 ];
-
-let audioCtx: AudioContext | null = null;
-function playTone(freq: number, delay: number, dur: number, type: OscillatorType = "sine", peak = 0.15) {
-  audioCtx ??= new AudioContext();
-  const ctx = audioCtx;
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = type;
-  osc.frequency.value = freq;
-  gain.gain.value = 0.0001;
-  osc.connect(gain).connect(ctx.destination);
-  const now = ctx.currentTime + delay;
-  gain.gain.exponentialRampToValueAtTime(peak, now + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-  osc.start(now);
-  osc.stop(now + dur + 0.02);
-}
-
-function playPreset(preset: string) {
-  switch (preset) {
-    case "chime":
-      playTone(660, 0, 0.12);
-      playTone(880, 0.1, 0.16);
-      break;
-    case "ping":
-      playTone(1300, 0, 0.09, "sine", 0.12);
-      break;
-    case "pop":
-      playTone(220, 0, 0.09, "triangle", 0.2);
-      break;
-    case "beep":
-    default:
-      playTone(880, 0, 0.18);
-      break;
-  }
-}
-
-/// 通知音を鳴らす。choice は プリセットID / data URL(カスタム音声) / 空文字(既定=beep)。
-export function playNotifySound(choice: string) {
-  try {
-    if (choice.startsWith("data:")) {
-      void new Audio(choice).play().catch(() => {});
-      return;
-    }
-    playPreset(choice || "beep");
-  } catch {
-    // 音の失敗は無視
-  }
-}
 
 export const app = new AppStore();
 
