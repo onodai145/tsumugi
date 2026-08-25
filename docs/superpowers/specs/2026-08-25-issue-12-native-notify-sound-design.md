@@ -62,7 +62,7 @@ Issue #75はTone.js（Web Audio APIベースのJSライブラリ）を使った�
 
 - `resolve_audio_bytes()`はRust単体テストで、プリセットID4種＋空文字（デフォルトbeep扱い）＋`data:`URL＋不正な文字列（デコード失敗）のケースをカバーする（CIのヘッドレス環境でも音声デバイス無しで検証可能）
 - 実機での「実際に音が鳴るか」「webviewバックグラウンド時も遅延しないか」は自動テスト化が難しいため、手動検証項目として明記する（Linuxデスクトップで最低限確認。Android/macOS/Windowsは可能な範囲で）
-- 既存のフロントエンドテスト（`store.svelte.test.ts`内のsound関連テスト）は、Web Audio API直呼びのテストからTauriコマンド呼び出しのモック検証に置き換える
+- `store.svelte.test.ts`にWeb Audio API直呼びを検証する既存のsound再生テストは存在しなかった（`notifySound`/`notifySoundChoice`はテストフィクスチャのフィールドとして他のテストに登場するのみ）。そのため「置き換え」ではなく、Tauriコマンド呼び出しへの移行に伴う新規カバレッジとして上記のRust単体テストを追加する
 
 ## スコープ外
 
