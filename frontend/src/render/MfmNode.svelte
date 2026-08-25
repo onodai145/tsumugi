@@ -9,6 +9,7 @@
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
   import { openProfile } from "../lib/profileModal.svelte";
+  import { cachedAvatarUrl, fetchAvatarUrl } from "../lib/mentionAvatar.svelte";
   import { app } from "../lib/store.svelte";
   import { buildSearchUrl } from "../lib/searchEngine";
 
@@ -60,6 +61,27 @@
     return Number.isFinite(t) ? t * 1000 : NaN;
   });
   const unixLabel = $derived(Number.isFinite(unixMs) ? new Date(unixMs).toLocaleString() : "");
+
+  // mentionノードのアバターURL。未取得はundefined、解決失敗/アバター無しはnull。
+  let mentionAvatarUrl = $state<string | null | undefined>(undefined);
+
+  $effect(() => {
+    if (node.type !== "mention") return;
+    const username = String(p.username ?? "");
+    const host = (p.host as string | null | undefined) ?? null;
+    const cached = cachedAvatarUrl(username, host);
+    if (cached !== undefined) {
+      mentionAvatarUrl = cached;
+      return;
+    }
+    let cancelled = false;
+    fetchAvatarUrl(username, host).then((url) => {
+      if (!cancelled) mentionAvatarUrl = url;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
 </script>
 
 {#if node.type === "text"}
@@ -115,7 +137,12 @@
     tabindex="0"
     onkeydown={(e) => e.key === "Enter" && openProfile({ username: p.username, host: p.host ?? null })}
     style="cursor: pointer"
-  >{p.acct}</span>
+  >{#if mentionAvatarUrl}<img
+      class="mfm-mention-avatar mr-0.5 inline-block h-4 w-4 rounded-md object-cover align-middle"
+      src={mentionAvatarUrl}
+      alt=""
+      loading="lazy"
+    />{/if}{p.acct}</span>
 {:else if node.type === "hashtag"}
   <span class="mfm-hashtag">#{p.hashtag}</span>
 {:else if node.type === "emojiCode"}
