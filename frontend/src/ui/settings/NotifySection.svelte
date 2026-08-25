@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { app, NOTIFY_SOUND_PRESETS } from "../../lib/store.svelte";
-  import { commands, unwrap } from "../../lib/ipc";
+  import { playNotifySound } from "../../lib/ipc";
   import Dropdown from "../Dropdown.svelte";
   import { Button } from "$lib/components/ui/button";
 
@@ -78,11 +78,11 @@
           {pickingSound ? "読み込み中…" : soundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
         </Button>
         {#if soundChoice.startsWith("data:")}
-          <Button type="button" variant="outline" size="sm" onclick={() => unwrap(commands.playNotifySound(soundChoice))}>試聴</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundChoice)}>試聴</Button>
         {/if}
       </div>
     {:else}
-      <Button type="button" variant="outline" size="sm" onclick={() => unwrap(commands.playNotifySound(soundMode))}>試聴</Button>
+      <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
     {/if}
   </div>
 {/if}

@@ -1,6 +1,6 @@
 // アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
-import { commands, events, unwrap, unwrapAcc, formatError, ForbiddenError } from "./ipc";
+import { commands, events, playNotifySound, unwrap, unwrapAcc, formatError, ForbiddenError } from "./ipc";
 import { invalidateReactionUsers } from "./reactionUsersCache";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -813,7 +813,7 @@ class AppStore {
         if ((wantsDesktop || wantsSound) && this.#markNotified(`note:${e.payload.note.id}`)) {
           this.#logDebug(`新着ノート通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
-          if (wantsSound) void unwrap(commands.playNotifySound(this.#resolveSoundChoice(tab)));
+          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
       }),
     );
@@ -901,7 +901,7 @@ class AppStore {
         if ((wantsDesktop || wantsSound) && this.#markNotified(n.id)) {
           this.#logDebug(`通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotify(n);
-          if (wantsSound) void unwrap(commands.playNotifySound(this.#resolveSoundChoice(tab)));
+          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
         }
         if (tab.notifications.some((x) => x.id === n.id)) return;
         tab.notifications = [n, ...tab.notifications].slice(0, MAX_NOTES);

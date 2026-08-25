@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { app, NOTIFY_SOUND_PRESETS } from "../lib/store.svelte";
   import type { TabView } from "../lib/store.svelte";
-  import { commands, unwrap } from "../lib/ipc";
+  import { playNotifySound } from "../lib/ipc";
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";
@@ -510,11 +510,11 @@
               {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
             </Button>
             {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="sm" onclick={() => unwrap(commands.playNotifySound(notifySoundChoice))}>試聴</Button>
+              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
             {/if}
           </div>
         {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="sm" onclick={() => unwrap(commands.playNotifySound(soundMode))}>試聴</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
         {/if}
       </div>
     {/if}
@@ -561,11 +561,11 @@
               {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
             </Button>
             {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="sm" onclick={() => unwrap(commands.playNotifySound(notifySoundChoice))}>試聴</Button>
+              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
             {/if}
           </div>
         {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="sm" onclick={() => unwrap(commands.playNotifySound(soundMode))}>試聴</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
         {/if}
       </div>
     {/if}
