@@ -28,9 +28,9 @@
 {/snippet}
 
 {#if preview}
-  <div class="url-preview-card mt-2 overflow-hidden rounded-md border border-border text-sm">
+  <div class="url-preview-card mt-2 w-full max-w-[480px] overflow-hidden rounded-md border border-border text-sm">
     {#if preview.thumbnail || (preview.player && isSafeUrl(preview.player.url))}
-      <div class="relative aspect-[21/9] w-full">
+      <div class="preview-media relative aspect-[21/9] w-full">
         {#if preview.sensitive && !revealed}
           <button
             type="button"
@@ -86,6 +86,12 @@
 {/if}
 
 <style>
+  /* 幅広カラムでaspect-ratioのまま伸び続けないよう、MediaGrid（Issue #8）と同じ
+     --media-thumbnail-height（設定→表示で調整可能、既定200px）で高さの上限を揃える。 */
+  .preview-media {
+    max-height: var(--media-thumbnail-height, 200px);
+    background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
+  }
   .sensitive-cover {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   }
