@@ -177,6 +177,13 @@ pub struct UiPrefs {
     /// 既定のGoogle検索にフォールバックする（Issue #217）。
     #[serde(default = "default_search_engine_url")]
     pub search_engine_url: String,
+    /// 投稿本文中のURLにリンクプレビュー(OGP相当)カードを表示するか（Issue #9）。既定はON。
+    #[serde(default = "default_url_preview_enabled")]
+    pub url_preview_enabled: bool,
+    /// カスタムsummalyプロキシのベースURL。空文字なら接続先インスタンスの`/url`を使う（Issue #9）。
+    /// 設定すると、プレビュー対象のURLはインスタンスではなくここへ直接送られる。
+    #[serde(default)]
+    pub summaly_proxy_url: String,
 }
 
 fn default_column_opacity() -> i32 {
@@ -230,6 +237,10 @@ fn default_search_engine_url() -> String {
     "https://www.google.com/search?q={query}".into()
 }
 
+fn default_url_preview_enabled() -> bool {
+    true
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -259,6 +270,8 @@ impl Default for UiPrefs {
             enable_file_logging: false,
             mfm_animation_enabled: default_mfm_animation_enabled(),
             search_engine_url: default_search_engine_url(),
+            url_preview_enabled: default_url_preview_enabled(),
+            summaly_proxy_url: String::new(),
         }
     }
 }
@@ -305,6 +318,8 @@ mod tests {
         assert_eq!(v.enable_file_logging, false);
         assert_eq!(v.code_highlight_theme, "auto");
         assert!(v.custom_syntax_themes.is_empty());
+        assert!(v.url_preview_enabled);
+        assert_eq!(v.summaly_proxy_url, "");
     }
 
     #[test]
@@ -382,6 +397,8 @@ mod tests {
             }],
             mfm_animation_enabled: false,
             search_engine_url: "https://duckduckgo.com/?q={query}".into(),
+            url_preview_enabled: false,
+            summaly_proxy_url: "https://my-proxy.example.com/preview".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -409,5 +426,13 @@ mod tests {
         let v: UiPrefs =
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.search_engine_url, "https://www.google.com/search?q={query}");
+    }
+
+    #[test]
+    fn url_preview_enabled_defaults_to_true_for_legacy_json() {
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert!(v.url_preview_enabled);
+        assert_eq!(v.summaly_proxy_url, "");
     }
 }
