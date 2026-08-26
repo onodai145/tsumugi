@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fetchUrlPreviewMock = vi.fn();
 vi.mock("./ipc", () => ({ commands: { fetchUrlPreview: fetchUrlPreviewMock } }));
-vi.mock("./store.svelte", () => ({ app: { defaultAccountId: () => "acc1" } }));
+const defaultAccountIdMock = vi.fn(() => "acc1");
+vi.mock("./store.svelte", () => ({ app: { defaultAccountId: defaultAccountIdMock } }));
 
 const { cachedUrlPreview, fetchUrlPreview } = await import("./urlPreview");
 
@@ -19,6 +20,7 @@ const PREVIEW = {
 
 beforeEach(() => {
   fetchUrlPreviewMock.mockReset();
+  defaultAccountIdMock.mockReturnValue("acc1");
 });
 
 describe("urlPreview cache", () => {
@@ -70,5 +72,13 @@ describe("urlPreview cache", () => {
     resolveFn({ status: "ok", data: PREVIEW });
     await Promise.all([p1, p2]);
     expect(fetchUrlPreviewMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null and does not call fetchUrlPreview when app.defaultAccountId() is empty", async () => {
+    defaultAccountIdMock.mockReturnValue("");
+    const result = await fetchUrlPreview("https://example.com/no-account");
+    expect(result).toBeNull();
+    expect(fetchUrlPreviewMock).not.toHaveBeenCalled();
+    expect(cachedUrlPreview("https://example.com/no-account")).toBeUndefined();
   });
 });
