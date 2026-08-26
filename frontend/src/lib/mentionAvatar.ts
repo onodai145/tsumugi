@@ -23,9 +23,11 @@ function cacheKey(accountId: string, acct: string): string {
 }
 
 /// キャッシュ済みなら即値を返す（同期的にレンダリング判定するため）。未取得ならundefined。
+/// アカウント未設定（ログイン前等）の間は解決不能なので、未取得と同じくundefinedを返す
+/// （ログイン後に defaultAccountId が変わると $effect が再実行され、自動的に取得が始まる）。
 export function cachedAvatarUrl(username: string, host: string | null): string | null | undefined {
   const accountId = app.defaultAccountId();
-  if (!accountId) return null;
+  if (!accountId) return undefined;
   return cache.get(cacheKey(accountId, acctStr(username, host)));
 }
 
