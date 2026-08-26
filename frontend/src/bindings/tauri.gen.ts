@@ -199,6 +199,12 @@ export const commands = {
 	searchUsers: (accountId: string, query: string) => typedError<User[], Error>(__TAURI_INVOKE("search_users", { accountId, query })),
 	/**  ハッシュタグ補完用のハッシュタグ検索。 */
 	searchHashtags: (accountId: string, query: string) => typedError<string[], Error>(__TAURI_INVOKE("search_hashtags", { accountId, query })),
+	/**
+	 *  投稿本文中のURLのリンクプレビュー(OGP相当)を取得する（Issue #9）。
+	 *  `UiPrefs.summaly_proxy_url` が設定されていればそれを、空ならアカウントの接続先インスタンスの
+	 *  `/url` を使う。いずれも認証不要（トークンは送らない）。
+	 */
+	fetchUrlPreview: (accountId: string, url: string) => typedError<UrlPreview, Error>(__TAURI_INVOKE("fetch_url_preview", { accountId, url })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
@@ -802,6 +808,34 @@ export type UiPrefs = {
 	 *  既定のGoogle検索にフォールバックする（Issue #217）。
 	 */
 	searchEngineUrl?: string,
+	/**  投稿本文中のURLにリンクプレビュー(OGP相当)カードを表示するか（Issue #9）。既定はON。 */
+	urlPreviewEnabled?: boolean,
+	/**
+	 *  カスタムsummalyプロキシのベースURL。空文字なら接続先インスタンスの`/url`を使う（Issue #9）。
+	 *  設定すると、プレビュー対象のURLはインスタンスではなくここへ直接送られる。
+	 */
+	summalyProxyUrl?: string,
+};
+
+/**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */
+export type UrlPlayer = {
+	url: string,
+	width: number | null,
+	height: number | null,
+};
+
+/**  プレビュー結果。`title`以下は summaly の応答でいずれも欠落しうるため `Option`。 */
+export type UrlPreview = {
+	/**  プレビュー対象のURL（summalyが返したものを優先し、無ければ要求したURLをそのまま使う）。 */
+	url: string,
+	title: string | null,
+	description: string | null,
+	thumbnail: string | null,
+	icon: string | null,
+	sitename: string | null,
+	/**  センシティブ判定。フィールド自体が無い応答は false 扱い。 */
+	sensitive?: boolean,
+	player: UrlPlayer | null,
 };
 
 /**  docs/design/filter-dsl-design.md §7。`host` が None ならローカルユーザ。 */
