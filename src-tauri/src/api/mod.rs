@@ -14,6 +14,7 @@ pub mod notes;
 pub mod notifications;
 pub mod hashtags;
 pub mod users;
+pub mod url_preview;
 pub mod normalize;
 
 pub use client::MisskeyClient;
