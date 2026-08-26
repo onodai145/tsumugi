@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/svelte";
 import Mfm from "./Mfm.svelte";
 import { openProfile } from "../lib/profileModal.svelte";
-import { cachedAvatarUrl, fetchAvatarUrl } from "../lib/mentionAvatar.svelte";
+import { cachedAvatarUrl, fetchAvatarUrl } from "../lib/mentionAvatar";
 
 vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
 
-vi.mock("../lib/mentionAvatar.svelte", () => ({
+vi.mock("../lib/mentionAvatar", () => ({
   cachedAvatarUrl: vi.fn(),
   fetchAvatarUrl: vi.fn(),
 }));

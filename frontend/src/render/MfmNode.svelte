@@ -9,7 +9,7 @@
   import { mfmFn, isKnownFn } from "../lib/mfm";
   import { nyaize } from "../lib/nyaize";
   import { openProfile } from "../lib/profileModal.svelte";
-  import { cachedAvatarUrl, fetchAvatarUrl } from "../lib/mentionAvatar.svelte";
+  import { cachedAvatarUrl, fetchAvatarUrl } from "../lib/mentionAvatar";
   import { app } from "../lib/store.svelte";
   import { buildSearchUrl } from "../lib/searchEngine";
 
@@ -75,9 +75,11 @@
       return;
     }
     let cancelled = false;
-    fetchAvatarUrl(username, host).then((url) => {
-      if (!cancelled) mentionAvatarUrl = url;
-    });
+    fetchAvatarUrl(username, host)
+      .then((url) => {
+        if (!cancelled) mentionAvatarUrl = url;
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
