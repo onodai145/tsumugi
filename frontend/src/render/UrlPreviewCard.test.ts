@@ -58,13 +58,13 @@ describe("UrlPreviewCard", () => {
     const sensitive = { ...PREVIEW, thumbnail: "https://example.com/t.png", sensitive: true };
     cachedUrlPreviewMock.mockReturnValue(sensitive);
     render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
-    const cover = screen.getByText("閲覧注意（クリックで表示）");
+    const cover = screen.getByText("閲覧注意");
     expect(document.querySelector("img")).toBeNull();
     cover.click();
     await waitFor(() => expect(document.querySelector("img")).not.toBeNull());
   });
 
-  it("does not embed the iframe until the play button is clicked", async () => {
+  it("does not embed the iframe until the play button is clicked, and expands from the compact thumbnail into the full-width player layout", async () => {
     const withPlayer = {
       ...PREVIEW,
       thumbnail: "https://example.com/t.png",
@@ -73,9 +73,15 @@ describe("UrlPreviewCard", () => {
     cachedUrlPreviewMock.mockReturnValue(withPlayer);
     render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
     expect(document.querySelector("iframe")).toBeNull();
+    // 通常時は横長レイアウト: 小さい固定サイズのサムネイル欄に再生ボタンが乗る
+    expect(document.querySelector(".preview-thumb")).not.toBeNull();
+    expect(document.querySelector(".preview-media")).toBeNull();
     const playButton = screen.getByRole("button", { name: "再生" });
     playButton.click();
+    // 再生後は縦長レイアウトに展開し、小サムネイル欄は無くなる
     await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
+    expect(document.querySelector(".preview-media")).not.toBeNull();
+    expect(document.querySelector(".preview-thumb")).toBeNull();
   });
 
   it("does not linkify the card when preview.url has an unsafe scheme", () => {
