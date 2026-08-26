@@ -74,6 +74,12 @@
       : inner.emojis,
   );
 
+  // MFM再パースは本文変更時のみ行いたいため、リアクション更新等の無関係な再レンダリングで
+  // inner が変わるたびに走らないよう $derived に切り出す(urlPreviewEnabled判定も含める)。
+  const previewUrls = $derived(
+    (app.ui.urlPreviewEnabled ?? true) ? extractPreviewUrls(inner.text ?? "") : [],
+  );
+
   // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）。
   // 同じノートがRenote直後の並列表示や複数カラムで重複して描画されうるため、
   // noteId一致だけでなく自インスタンス固有トークン（マウス）/ tabId+selected（キーボード）
@@ -343,11 +349,9 @@
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
         {/if}
-        {#if app.ui.urlPreviewEnabled ?? true}
-          {#each extractPreviewUrls(inner.text ?? "") as previewUrl (previewUrl)}
-            <UrlPreviewCard url={previewUrl} />
-          {/each}
-        {/if}
+        {#each previewUrls as previewUrl (previewUrl)}
+          <UrlPreviewCard url={previewUrl} {instanceHost} />
+        {/each}
         {#if inner.poll}
           <div class="mt-2 flex flex-col gap-1">
             {#each inner.poll.choices as choice, i}

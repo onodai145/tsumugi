@@ -43,6 +43,27 @@ describe("urlPreview cache", () => {
     expect(cachedUrlPreview("https://example.com/empty")).toBeNull();
   });
 
+  it("treats an icon-only response as no content (icon is not rendered by the card)", async () => {
+    const iconOnly = { ...PREVIEW, url: "https://example.com/icon-only", title: null, icon: "https://example.com/favicon.ico" };
+    fetchUrlPreviewMock.mockResolvedValue({ status: "ok", data: iconOnly });
+    const result = await fetchUrlPreview("https://example.com/icon-only");
+    expect(result).toBeNull();
+    expect(cachedUrlPreview("https://example.com/icon-only")).toBeNull();
+  });
+
+  it("treats an unsafe-scheme player-only response as no content", async () => {
+    const unsafePlayer = {
+      ...PREVIEW,
+      url: "https://example.com/unsafe-player",
+      title: null,
+      player: { url: "javascript:alert(1)", width: 640, height: 360 },
+    };
+    fetchUrlPreviewMock.mockResolvedValue({ status: "ok", data: unsafePlayer });
+    const result = await fetchUrlPreview("https://example.com/unsafe-player");
+    expect(result).toBeNull();
+    expect(cachedUrlPreview("https://example.com/unsafe-player")).toBeNull();
+  });
+
   it("does not cache a typed error (transient failure)", async () => {
     fetchUrlPreviewMock.mockResolvedValue({
       status: "error",

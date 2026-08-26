@@ -38,9 +38,17 @@ export async function fetchUrlPreview(url: string): Promise<UrlPreview | null> {
   return promise;
 }
 
-/// OGPフィールドが1つでもあれば「内容あり」とみなす。
+/// UrlPreviewCard.svelte がリンクとして扱う(http/https)スキームか判定する。
+/// カード側の描画判定(iframe埋め込み・リンク化)と合わせて、危険なスキームは無視する。
+export function isSafeUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+/// UrlPreviewCard.svelte が実際に描画に使うフィールドが1つでもあれば「内容あり」とみなす。
+/// icon はカードが描画しないため対象外。player は isSafeUrl を満たす場合のみ
+/// (安全でないスキームは再生ボタン・iframeとも描画されない)。
 function hasContent(p: UrlPreview): boolean {
-  return !!(p.title || p.description || p.thumbnail || p.icon || p.sitename || p.player);
+  return !!(p.title || p.description || p.thumbnail || p.sitename || (p.player && isSafeUrl(p.player.url)));
 }
 
 async function resolve(url: string): Promise<{ data: UrlPreview | null; permanent: boolean }> {

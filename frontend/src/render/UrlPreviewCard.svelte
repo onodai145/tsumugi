@@ -1,16 +1,13 @@
 <script lang="ts">
   import type { UrlPreview } from "../bindings/tauri.gen";
-  import { cachedUrlPreview, fetchUrlPreview } from "../lib/urlPreview";
+  import { cachedUrlPreview, fetchUrlPreview, isSafeUrl } from "../lib/urlPreview";
+  import { proxiedImageUrl } from "../lib/emoji";
 
-  let { url }: { url: string } = $props();
+  let { url, instanceHost }: { url: string; instanceHost: string | undefined } = $props();
 
   let preview = $state<UrlPreview | null | undefined>(cachedUrlPreview(url));
   let revealed = $state(false);
   let playing = $state(false);
-
-  function isSafeUrl(url: string): boolean {
-    return /^https?:\/\//i.test(url);
-  }
 
   $effect(() => {
     if (preview !== undefined) return;
@@ -51,7 +48,12 @@
           ></iframe>
         {:else}
           {#if preview.thumbnail}
-            <img src={preview.thumbnail} alt="" loading="lazy" class="h-full w-full object-cover" />
+            <img
+              src={instanceHost ? proxiedImageUrl(preview.thumbnail, instanceHost) : preview.thumbnail}
+              alt=""
+              loading="lazy"
+              class="h-full w-full object-cover"
+            />
           {/if}
           {#if preview.player && isSafeUrl(preview.player.url)}
             <button
