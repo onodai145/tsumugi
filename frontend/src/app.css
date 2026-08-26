@@ -180,6 +180,15 @@ a:hover {
   color: var(--accent);
   font-weight: 500;
 }
+/* アバター表示時のみ: アイコンとテキストを背景色付きの1ブロックとして視覚的にまとめる
+   （メンションが複数並んだ際にどのアイコンがどの@acctと対応するか分かりやすくするため。
+   スタイルガイド§2のチップ・小バッジ用トークン(rounded-sm)に合わせる） */
+.mfm-mention-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px 1px 3px;
+  background: var(--surface-2);
+}
 .mfm-hashtag {
   color: var(--accent);
 }

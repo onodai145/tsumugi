@@ -93,16 +93,22 @@ describe("Mfm", () => {
 
   it("renders a mention", () => {
     const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
-    expect(container.querySelector("span.mfm-mention")?.textContent).toBe("@alice@example.com");
+    const mention = container.querySelector("span.mfm-mention");
+    expect(mention?.textContent).toBe("@alice@example.com");
+    // アバター未表示時はチップ用クラスを付与しない
+    expect(mention?.classList.contains("mfm-mention-chip")).toBe(false);
   });
 
   it("キャッシュ済みアバターがあれば即座に表示する", () => {
     vi.mocked(cachedAvatarUrl).mockReturnValue("https://example.com/alice.png");
     const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
-    const img = container.querySelector("span.mfm-mention img.mfm-mention-avatar");
+    const mention = container.querySelector("span.mfm-mention");
+    const img = mention?.querySelector("img.mfm-mention-avatar");
     expect(img?.getAttribute("src")).toBe("https://example.com/alice.png");
     expect(cachedAvatarUrl).toHaveBeenCalledWith("alice", "example.com");
     expect(fetchAvatarUrl).not.toHaveBeenCalled();
+    // アバターとテキストが一体のブロックに見えるよう、チップ用クラスを付与する
+    expect(mention?.classList.contains("mfm-mention-chip")).toBe(true);
   });
 
   it("未キャッシュならfetchAvatarUrlを呼び、解決後にアバターを表示する", async () => {

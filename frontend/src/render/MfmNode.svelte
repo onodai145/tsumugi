@@ -134,13 +134,14 @@
        Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
   <span
     class="mfm-mention rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    class:mfm-mention-chip={!!mentionAvatarUrl}
     onclick={() => openProfile({ username: p.username, host: p.host ?? null })}
     role="button"
     tabindex="0"
     onkeydown={(e) => e.key === "Enter" && openProfile({ username: p.username, host: p.host ?? null })}
     style="cursor: pointer"
   >{#if mentionAvatarUrl}<img
-      class="mfm-mention-avatar mr-0.5 inline-block h-4 w-4 rounded-md object-cover align-middle"
+      class="mfm-mention-avatar mr-1 inline-block h-4 w-4 rounded-md object-cover align-middle"
       src={mentionAvatarUrl}
       alt=""
       loading="lazy"
