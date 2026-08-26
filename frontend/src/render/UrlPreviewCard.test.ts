@@ -73,4 +73,24 @@ describe("UrlPreviewCard", () => {
     playButton.click();
     await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
   });
+
+  it("does not linkify the card when preview.url has an unsafe scheme", () => {
+    const unsafe = { ...PREVIEW, url: "javascript:alert(1)" };
+    cachedUrlPreviewMock.mockReturnValue(unsafe);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a" } });
+    expect(screen.getByText("記事タイトル")).toBeTruthy();
+    expect(document.querySelector("a")).toBeNull();
+  });
+
+  it("does not offer the play button or embed the iframe when preview.player.url has an unsafe scheme", async () => {
+    const unsafePlayer = {
+      ...PREVIEW,
+      thumbnail: "https://example.com/t.png",
+      player: { url: "javascript:alert(1)", width: 640, height: 360 },
+    };
+    cachedUrlPreviewMock.mockReturnValue(unsafePlayer);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a" } });
+    expect(screen.queryByRole("button", { name: "再生" })).toBeNull();
+    expect(document.querySelector("iframe")).toBeNull();
+  });
 });

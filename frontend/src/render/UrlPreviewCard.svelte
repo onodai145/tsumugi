@@ -8,6 +8,10 @@
   let revealed = $state(false);
   let playing = $state(false);
 
+  function isSafeUrl(url: string): boolean {
+    return /^https?:\/\//i.test(url);
+  }
+
   $effect(() => {
     if (preview !== undefined) return;
     let cancelled = false;
@@ -20,9 +24,15 @@
   });
 </script>
 
+{#snippet cardContent(preview: UrlPreview)}
+  {#if preview.sitename}<div class="truncate text-xs text-muted-foreground">{preview.sitename}</div>{/if}
+  {#if preview.title}<div class="line-clamp-1 font-semibold">{preview.title}</div>{/if}
+  {#if preview.description}<div class="line-clamp-2 text-xs text-muted-foreground">{preview.description}</div>{/if}
+{/snippet}
+
 {#if preview}
   <div class="url-preview-card mt-2 overflow-hidden rounded-md border border-border text-sm">
-    {#if preview.thumbnail || preview.player}
+    {#if preview.thumbnail || (preview.player && isSafeUrl(preview.player.url))}
       <div class="relative aspect-[21/9] w-full">
         {#if preview.sensitive && !revealed}
           <button
@@ -32,7 +42,7 @@
           >
             閲覧注意（クリックで表示）
           </button>
-        {:else if playing && preview.player}
+        {:else if playing && preview.player && isSafeUrl(preview.player.url)}
           <iframe
             src={preview.player.url}
             title={preview.title ?? preview.url}
@@ -43,7 +53,7 @@
           {#if preview.thumbnail}
             <img src={preview.thumbnail} alt="" loading="lazy" class="h-full w-full object-cover" />
           {/if}
-          {#if preview.player}
+          {#if preview.player && isSafeUrl(preview.player.url)}
             <button
               type="button"
               class="play-button absolute inset-0 flex items-center justify-center border-0 bg-black/30 text-2xl text-white"
@@ -56,16 +66,20 @@
         {/if}
       </div>
     {/if}
-    <a
-      class="block px-2 py-1.5 text-foreground no-underline"
-      href={preview.url}
-      target="_blank"
-      rel="noreferrer noopener"
-    >
-      {#if preview.sitename}<div class="truncate text-xs text-muted-foreground">{preview.sitename}</div>{/if}
-      {#if preview.title}<div class="line-clamp-1 font-semibold">{preview.title}</div>{/if}
-      {#if preview.description}<div class="line-clamp-2 text-xs text-muted-foreground">{preview.description}</div>{/if}
-    </a>
+    {#if isSafeUrl(preview.url)}
+      <a
+        class="block px-2 py-1.5 text-foreground no-underline"
+        href={preview.url}
+        target="_blank"
+        rel="noreferrer noopener"
+      >
+        {@render cardContent(preview)}
+      </a>
+    {:else}
+      <div class="block px-2 py-1.5 text-foreground">
+        {@render cardContent(preview)}
+      </div>
+    {/if}
   </div>
 {/if}
 
