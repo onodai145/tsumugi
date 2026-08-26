@@ -178,7 +178,14 @@ a:hover {
 }
 .mfm-mention {
   color: var(--accent);
+}
+/* ユーザー名部分のみ太字にし、ホスト部（@example.comなど）は通常のウェイトにする。
+   ホストまで一律で太字だと視認上の主張が強すぎるため */
+.mfm-mention-name {
   font-weight: 500;
+}
+.mfm-mention-host {
+  font-weight: 400;
 }
 /* アバター表示時のみ: アイコンとテキストを背景色付きの1ブロックとして視覚的にまとめる
    （メンションが複数並んだ際にどのアイコンがどの@acctと対応するか分かりやすくするため。

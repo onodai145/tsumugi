@@ -145,7 +145,9 @@
       src={mentionAvatarUrl}
       alt=""
       loading="lazy"
-    />{/if}{p.acct}</span>
+    />{/if}<span class="mfm-mention-name">@{p.username}</span>{#if p.host}<span
+      class="mfm-mention-host">@{p.host}</span
+    >{/if}</span>
 {:else if node.type === "hashtag"}
   <span class="mfm-hashtag">#{p.hashtag}</span>
 {:else if node.type === "emojiCode"}

@@ -99,6 +99,20 @@ describe("Mfm", () => {
     expect(mention?.classList.contains("mfm-mention-chip")).toBe(false);
   });
 
+  it("ユーザー名部分とホスト部分を別要素に分け、ホスト部は太字にしない", () => {
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+    const mention = container.querySelector("span.mfm-mention");
+    expect(mention?.querySelector(".mfm-mention-name")?.textContent).toBe("@alice");
+    expect(mention?.querySelector(".mfm-mention-host")?.textContent).toBe("@example.com");
+  });
+
+  it("ローカルユーザーへのmentionはホスト部要素を持たない", () => {
+    const { container } = render(Mfm, { props: { text: "@bob" } });
+    const mention = container.querySelector("span.mfm-mention");
+    expect(mention?.querySelector(".mfm-mention-name")?.textContent).toBe("@bob");
+    expect(mention?.querySelector(".mfm-mention-host")).toBeNull();
+  });
+
   it("キャッシュ済みアバターがあれば即座に表示する", () => {
     vi.mocked(cachedAvatarUrl).mockReturnValue("https://example.com/alice.png");
     const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
