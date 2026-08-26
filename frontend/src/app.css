@@ -178,7 +178,26 @@ a:hover {
 }
 .mfm-mention {
   color: var(--accent);
+}
+/* ユーザー名部分のみ太字にし、ホスト部（@example.comなど）は通常のウェイトにする。
+   ホストまで一律で太字だと視認上の主張が強すぎるため */
+.mfm-mention-name {
   font-weight: 500;
+}
+.mfm-mention-host {
+  font-weight: 400;
+}
+/* アバター表示時のみ: アイコンとテキストを背景色付きの1ブロックとして視覚的にまとめる
+   （メンションが複数並んだ際にどのアイコンがどの@acctと対応するか分かりやすくするため。
+   スタイルガイド§2のチップ・小バッジ用トークン(rounded-sm)に合わせる）。
+   surface-*はノートカード自体の背景色（--column-opacityでブレンドされる透過カラム機能あり）
+   と同じ変数のため、不透明な単色を使うとカードの透過設定と噛み合わず浮いて見える。
+   代わりにaccentを薄く乗せることで、どのテーマ・透過設定でも馴染むタグ風の見た目にする。 */
+.mfm-mention-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px 1px 3px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .mfm-hashtag {
   color: var(--accent);

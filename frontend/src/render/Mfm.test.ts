@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, render, waitFor } from "@testing-library/svelte";
 import Mfm from "./Mfm.svelte";
 import { openProfile } from "../lib/profileModal.svelte";
+import { cachedAvatarUrl, fetchAvatarUrl } from "../lib/mentionAvatar";
 
 vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
+
+vi.mock("../lib/mentionAvatar", () => ({
+  cachedAvatarUrl: vi.fn(),
+  fetchAvatarUrl: vi.fn(),
+}));
 
 // MfmNode.svelte は UnicodeEmoji.svelte / CodeBlock.svelte を静的importしており、
 // それらが ../lib/store.svelte 経由で ../lib/platform.ts の platform() を
@@ -30,11 +36,16 @@ function mockMatchMedia(matches: boolean) {
 // $[...] を含むケース全般でスタブが要る。
 beforeEach(() => {
   mockMatchMedia(false);
+  // モックのデフォルト: mention既存テストは同期パス（キャッシュ済みnull=アバター無し）で通す
+  vi.mocked(cachedAvatarUrl).mockReturnValue(null);
+  vi.mocked(fetchAvatarUrl).mockResolvedValue(null);
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.mocked(cachedAvatarUrl).mockReset();
+  vi.mocked(fetchAvatarUrl).mockReset();
 });
 
 describe("Mfm", () => {
@@ -82,6 +93,67 @@ describe("Mfm", () => {
 
   it("renders a mention", () => {
     const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+    const mention = container.querySelector("span.mfm-mention");
+    expect(mention?.textContent).toBe("@alice@example.com");
+    // アバター未表示時はチップ用クラスを付与しない
+    expect(mention?.classList.contains("mfm-mention-chip")).toBe(false);
+  });
+
+  it("ユーザー名部分とホスト部分を別要素に分け、ホスト部は太字にしない", () => {
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+    const mention = container.querySelector("span.mfm-mention");
+    expect(mention?.querySelector(".mfm-mention-name")?.textContent).toBe("@alice");
+    expect(mention?.querySelector(".mfm-mention-host")?.textContent).toBe("@example.com");
+  });
+
+  it("ローカルユーザーへのmentionはホスト部要素を持たない", () => {
+    const { container } = render(Mfm, { props: { text: "@bob" } });
+    const mention = container.querySelector("span.mfm-mention");
+    expect(mention?.querySelector(".mfm-mention-name")?.textContent).toBe("@bob");
+    expect(mention?.querySelector(".mfm-mention-host")).toBeNull();
+  });
+
+  it("キャッシュ済みアバターがあれば即座に表示する", () => {
+    vi.mocked(cachedAvatarUrl).mockReturnValue("https://example.com/alice.png");
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+    const mention = container.querySelector("span.mfm-mention");
+    const img = mention?.querySelector("img.mfm-mention-avatar");
+    expect(img?.getAttribute("src")).toBe("https://example.com/alice.png");
+    expect(cachedAvatarUrl).toHaveBeenCalledWith("alice", "example.com");
+    expect(fetchAvatarUrl).not.toHaveBeenCalled();
+    // アバターとテキストが一体のブロックに見えるよう、チップ用クラスを付与する
+    expect(mention?.classList.contains("mfm-mention-chip")).toBe(true);
+  });
+
+  it("未キャッシュならfetchAvatarUrlを呼び、解決後にアバターを表示する", async () => {
+    vi.mocked(cachedAvatarUrl).mockReturnValue(undefined);
+    let resolveFn!: (url: string | null) => void;
+    vi.mocked(fetchAvatarUrl).mockReturnValue(
+      new Promise((r) => {
+        resolveFn = r;
+      }),
+    );
+
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+    expect(fetchAvatarUrl).toHaveBeenCalledWith("alice", "example.com");
+    expect(container.querySelector("img.mfm-mention-avatar")).toBeNull();
+
+    resolveFn("https://example.com/alice.png");
+
+    await waitFor(() => {
+      const img = container.querySelector("img.mfm-mention-avatar");
+      expect(img?.getAttribute("src")).toBe("https://example.com/alice.png");
+    });
+  });
+
+  it("解決に失敗した場合(null)はアバターを表示せずテキストのみのまま", async () => {
+    vi.mocked(cachedAvatarUrl).mockReturnValue(undefined);
+    vi.mocked(fetchAvatarUrl).mockResolvedValue(null);
+
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+
+    await waitFor(() => expect(fetchAvatarUrl).toHaveBeenCalled());
+    expect(container.querySelector("img.mfm-mention-avatar")).toBeNull();
     expect(container.querySelector("span.mfm-mention")?.textContent).toBe("@alice@example.com");
   });
 
