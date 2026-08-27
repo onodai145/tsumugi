@@ -10,8 +10,9 @@ use crate::api::notes::{
     get_reactions, get_renotes, renote as api_renote, vote_poll as api_vote_poll, NoteDraft,
     VisibilityInput,
 };
+use crate::api::url_preview::fetch_url_preview as fetch_url_preview_api;
 use crate::api::users::search_users as api_search_users;
-use crate::domain::{DriveFile, EmojiDef, Note, ReactionUser, SourceItem, User};
+use crate::domain::{DriveFile, EmojiDef, Note, ReactionUser, SourceItem, UrlPreview, User};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use serde::Serialize;
@@ -404,6 +405,26 @@ pub async fn search_hashtags(
 ) -> Result<Vec<String>> {
     let client = state.client_for(&account_id)?;
     api_search_hashtags(&client, &query, 10).await
+}
+
+/// 投稿本文中のURLのリンクプレビュー(OGP相当)を取得する（Issue #9）。
+/// `UiPrefs.summaly_proxy_url` が設定されていればそれを、空ならアカウントの接続先インスタンスの
+/// `/url` を使う。いずれも認証不要（トークンは送らない）。
+#[tauri::command]
+#[specta::specta]
+pub async fn fetch_url_preview(
+    state: State<'_, AppState>,
+    account_id: String,
+    url: String,
+) -> Result<UrlPreview> {
+    let prefs = state.settings.load_ui()?;
+    let proxy_base = if prefs.summaly_proxy_url.trim().is_empty() {
+        let client = state.client_for(&account_id)?;
+        format!("https://{}/url", client.host())
+    } else {
+        prefs.summaly_proxy_url.clone()
+    };
+    fetch_url_preview_api(&state.http, &proxy_base, &url).await
 }
 
 #[cfg(test)]

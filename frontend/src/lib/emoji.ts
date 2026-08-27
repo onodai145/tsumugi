@@ -10,6 +10,13 @@ export function proxiedEmojiUrl(url: string, instanceHost: string): string {
   return `https://${instanceHost}/proxy/image.webp?${params}`;
 }
 
+// メディアプロキシ経由に画像URLを組み替える汎用版（絵文字専用のproxiedEmojiUrlと違い emoji=1 は付けない）。
+// リンクプレビューのサムネイル等、絵文字以外の第三者画像に使う。
+export function proxiedImageUrl(url: string, instanceHost: string): string {
+  const params = new URLSearchParams({ url, fallback: "1" });
+  return `https://${instanceHost}/proxy/image.webp?${params}`;
+}
+
 // name->url マップの値をまとめて proxiedEmojiUrl で変換する。instanceHost が不明な場合は
 // 変換しようがないため、素通しで返す（呼び出し元の表示自体は生URLのまま試みる）。
 export function proxiedEmojiMap(

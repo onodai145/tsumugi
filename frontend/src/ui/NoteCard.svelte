@@ -3,6 +3,7 @@
   import type { Note } from "../bindings/tauri.gen";
   import Mfm from "../render/Mfm.svelte";
   import MediaGrid from "../render/MediaGrid.svelte";
+  import UrlPreviewCard from "../render/UrlPreviewCard.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
@@ -13,6 +14,7 @@
   import { relativeTime } from "../lib/time";
   import { acct, displayName } from "../lib/userDisplay";
   import { app } from "../lib/store.svelte";
+  import { extractPreviewUrls } from "../lib/extractPreviewUrls";
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
   import { handleNyaizeCopy } from "../lib/nyaizeCopy";
@@ -70,6 +72,12 @@
     emojiAcct
       ? { ...app.localEmojiUrls(emojiAcct), ...proxiedEmojiMap(inner.emojis, instanceHost) }
       : inner.emojis,
+  );
+
+  // MFM再パースは本文変更時のみ行いたいため、リアクション更新等の無関係な再レンダリングで
+  // inner が変わるたびに走らないよう $derived に切り出す(urlPreviewEnabled判定も含める)。
+  const previewUrls = $derived(
+    (app.ui.urlPreviewEnabled ?? true) ? extractPreviewUrls(inner.text ?? "") : [],
   );
 
   // リアクションピッカーは store 管理（マウス/キーボードで一元化・同時に1つだけ開く）。
@@ -341,6 +349,9 @@
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
         {/if}
+        {#each previewUrls as previewUrl (previewUrl)}
+          <UrlPreviewCard url={previewUrl} {instanceHost} />
+        {/each}
         {#if inner.poll}
           <div class="mt-2 flex flex-col gap-1">
             {#each inner.poll.choices as choice, i}

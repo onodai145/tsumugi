@@ -14,6 +14,8 @@
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let mfmAnimationEnabled = $state(app.ui.mfmAnimationEnabled ?? true);
   let searchEngineUrl = $state(app.ui.searchEngineUrl ?? DEFAULT_SEARCH_ENGINE_URL);
+  let urlPreviewEnabled = $state(app.ui.urlPreviewEnabled ?? true);
+  let summalyProxyUrl = $state(app.ui.summalyProxyUrl ?? "");
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -213,6 +215,8 @@
         emojiStyle,
         mfmAnimationEnabled,
         searchEngineUrl: searchEngineUrl.trim() || DEFAULT_SEARCH_ENGINE_URL,
+        urlPreviewEnabled,
+        summalyProxyUrl: summalyProxyUrl.trim(),
       });
       saved = true;
     } catch (e) {
@@ -470,6 +474,23 @@
   <p class="mb-4 mt-0 text-xs text-muted-foreground">
     プレースホルダ<code class="mfm-code">{"{query}"}</code>を含むURLを指定すると好きな検索エンジンを使えます。
     空欄や<code class="mfm-code">{"{query}"}</code>を含まない値を保存した場合はGoogle検索に戻ります。
+  </p>
+</div>
+
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
+  <label class="flex items-center gap-2"
+    ><input type="checkbox" bind:checked={urlPreviewEnabled} /> 投稿本文中のURLにリンクプレビューを表示する</label
+  >
+  <span class="text-muted-foreground">カスタムsummalyプロキシURL（任意）</span>
+  <input
+    type="text"
+    class="w-full rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground"
+    placeholder="空欄なら接続先インスタンスの /url を使用"
+    bind:value={summalyProxyUrl}
+  />
+  <p class="mb-0 mt-0 text-xs text-muted-foreground">
+    設定すると、リンクプレビュー対象のURLは接続先インスタンスではなく指定したプロキシへ直接送信されます。
+    信頼できるプロキシのみを指定してください。
   </p>
 </div>
 

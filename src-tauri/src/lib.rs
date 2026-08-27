@@ -85,6 +85,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::read_attachment_preview,
             commands::note::search_users,
             commands::note::search_hashtags,
+            commands::note::fetch_url_preview,
             commands::mute::get_mute,
             commands::mute::set_mute,
             commands::mute::get_notify,

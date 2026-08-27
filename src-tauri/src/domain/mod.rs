@@ -16,6 +16,7 @@ mod notify;
 mod pane;
 mod reaction;
 mod ui;
+mod url_preview;
 mod user;
 
 pub use account::Account;
@@ -29,4 +30,5 @@ pub use notify::NotifyConfig;
 pub use pane::{PaneChild, PaneNode, SplitDirection};
 pub use reaction::{EmojiDef, ReactionSummary, ReactionUser};
 pub use ui::UiPrefs;
+pub use url_preview::{UrlPlayer, UrlPreview};
 pub use user::User;
