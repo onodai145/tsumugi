@@ -3,8 +3,9 @@
   import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
-  import { X, GripVertical } from "@lucide/svelte";
+  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitVertical, Settings } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
+  import { portal } from "../lib/portal";
 
   let {
     group,
@@ -54,6 +55,26 @@
     resizing = false;
     app.persistGroupWidth(group.id, group.width);
   }
+
+  // カラムヘッダーメニュー（タブ追加／下に分割／カラム設定を1つの「⋯」に集約）
+  let menuOpen = $state(false);
+  let menuTrigger = $state<HTMLElement | null>(null);
+  let menuPos = $state<{ left: number; top: number } | null>(null);
+
+  function toggleMenu() {
+    if (menuOpen) {
+      menuOpen = false;
+      return;
+    }
+    const r = menuTrigger?.getBoundingClientRect();
+    if (r) menuPos = { left: r.left, top: r.bottom + 4 };
+    menuOpen = true;
+  }
+
+  function pickMenuItem(action: () => void) {
+    menuOpen = false;
+    action();
+  }
 </script>
 
 <section
@@ -86,8 +107,7 @@
         app.startDragGroup(group.id);
       }}
       ondragend={() => app.endDragGroup()}
-      ondblclick={() => onEditGroup(group.id)}
-      title="ドラッグでカラムを並べ替え（ダブルクリックでカラム設定）"
+      title="ドラッグでカラムを並べ替え"
     ><GripVertical size={16} /></span>
 
     {#each group.tabs as t (t.id)}
@@ -137,9 +157,56 @@
       </div>
     {/each}
 
-    <Button variant="ghost" size="icon-xs" class="text-muted-foreground" title="タブを追加" onclick={() => onAddTab(group.id)}>＋</Button>
-    <Button variant="ghost" size="icon-xs" class="text-muted-foreground" title="下に分割" onclick={() => onSplitDown(group.id)}>⬓</Button>
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      class="text-muted-foreground"
+      title="メニュー"
+      onclick={toggleMenu}
+      bind:ref={menuTrigger}
+    ><MoreHorizontal size={16} /></Button>
   </div>
+
+  {#if menuOpen && menuPos}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (menuOpen = false)} role="presentation">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="fixed w-[160px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+        style={`left:${menuPos.left}px;top:${menuPos.top}px`}
+        onclick={(e) => e.stopPropagation()}
+        role="menu"
+        tabindex="-1"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          onclick={() => pickMenuItem(() => onAddTab(group.id))}
+        >
+          <Plus size={16} /> タブを追加
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          onclick={() => pickMenuItem(() => onSplitDown(group.id))}
+        >
+          <SquareSplitVertical size={16} /> 下に分割
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          onclick={() => pickMenuItem(() => onEditGroup(group.id))}
+        >
+          <Settings size={16} /> カラム設定
+        </button>
+      </div>
+    </div>
+  {/if}
 
   {#if activeTab}
     <div class="flex-1 overflow-y-auto" onscroll={onScroll}>
