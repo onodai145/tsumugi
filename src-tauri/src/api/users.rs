@@ -6,7 +6,13 @@ use crate::domain::User;
 use crate::error::Result;
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashSet;
 
+/// `origin: "combined"`（ローカル+リモートの結合検索）はMisskey側の実装により、
+/// 同一ユーザーがローカル/リモート双方のインデックスにヒットして重複して返ってくることがある。
+/// 呼び出し元(補完候補一覧)はユーザーIDをキーにした一覧描画を行うため、重複が残っていると
+/// Svelte側でkeyed each blockの重複キー例外を引き起こしUIがフリーズする(Issue #244)。
+/// ここでID単位に去重して、以降のAPIレスポンスは常に一意であることを保証する。
 pub async fn search_users(client: &MisskeyClient, query: &str, limit: u32) -> Result<Vec<User>> {
     let body = json!({
         "query": query,
@@ -15,7 +21,13 @@ pub async fn search_users(client: &MisskeyClient, query: &str, limit: u32) -> Re
         "detail": false,
     });
     let raw: Vec<RawUser> = client.post("users/search", &body).await?;
-    Ok(raw.into_iter().map(Into::into).collect())
+    Ok(dedupe_users_by_id(raw.into_iter().map(Into::into).collect()))
+}
+
+/// IDが重複するユーザーを先勝ちで去重する（元の並び順は保つ）。
+fn dedupe_users_by_id(users: Vec<User>) -> Vec<User> {
+    let mut seen = HashSet::new();
+    users.into_iter().filter(|u| seen.insert(u.id.clone())).collect()
 }
 
 /// `users/show` のレスポンス。UserDetailedNotMe は `RawUser` にないフォロー関係フラグを
@@ -107,6 +119,35 @@ pub async fn following(client: &MisskeyClient, user_id: &str, until_id: Option<&
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn user(id: &str) -> User {
+        User {
+            id: id.to_string(),
+            username: id.to_string(),
+            host: None,
+            name: None,
+            avatar_url: None,
+            is_bot: false,
+            is_cat: false,
+            followers_count: 0,
+            following_count: 0,
+            notes_count: 0,
+            emojis: Default::default(),
+            bio: None,
+            banner_url: None,
+        }
+    }
+
+    // origin: "combined" のローカル+リモート結合検索は、Misskey側の実装により同一ユーザーが
+    // 重複して返ってくることがある(Issue #244: 補完候補一覧のkeyed each blockが重複キーで
+    // 例外を投げ、UIがフリーズする原因になっていた)。
+    #[test]
+    fn dedupe_users_by_id_keeps_first_occurrence_and_order() {
+        let users = vec![user("u1"), user("u2"), user("u1"), user("u3")];
+        let deduped = dedupe_users_by_id(users);
+        let ids: Vec<&str> = deduped.iter().map(|u| u.id.as_str()).collect();
+        assert_eq!(ids, vec!["u1", "u2", "u3"]);
+    }
 
     fn raw_following(json_val: serde_json::Value) -> Vec<RawFollowing> {
         serde_json::from_value(json_val).unwrap()
