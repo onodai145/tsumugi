@@ -49,6 +49,11 @@ export const commands = {
 	logout: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("logout", { accountId })),
 	/**  指定アカウントで `/i` を叩き、自分の User を返す。 */
 	whoami: (accountId: string) => typedError<User, Error>(__TAURI_INVOKE("whoami", { accountId })),
+	/**
+	 *  接続先インスタンスの `/api/meta` を取得し、Account.instance を更新して返す
+	 *  （Instance Ticker用、Issue #103）。boot時にフロントから全アカウント分呼ばれる想定。
+	 */
+	refreshInstanceMeta: (accountId: string) => typedError<Account, Error>(__TAURI_INVOKE("refresh_instance_meta", { accountId })),
 	/**  タブを新規作成する。`group_id` が None なら新しい視覚カラム(グループ)を作る。 */
 	addColumn: (accountId: string, kind: ColumnKind, filter: FilterQuery, groupId: string | null) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("add_column", { accountId, kind, filter, groupId })),
 	/**
