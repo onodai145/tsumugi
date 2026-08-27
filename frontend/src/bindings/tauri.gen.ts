@@ -836,6 +836,12 @@ export type UiPrefs = {
 	 *  設定すると、プレビュー対象のURLはインスタンスではなくここへ直接送られる。
 	 */
 	summalyProxyUrl?: string,
+	/**
+	 *  Instance Ticker の表示モード（Issue #103）。
+	 *  "off" = 表示しない / "remote" = リモートユーザーの投稿にのみ表示(既定) /
+	 *  "always" = ローカルユーザー（自分と同一インスタンス）の投稿にも表示。
+	 */
+	instanceTicker?: string,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */
