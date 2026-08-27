@@ -67,7 +67,13 @@
       return;
     }
     const r = menuTrigger?.getBoundingClientRect();
-    if (r) menuPos = { left: r.left, top: r.bottom + 4 };
+    const MENU_WIDTH = 160;
+    const MENU_MARGIN = 8;
+    if (r)
+      menuPos = {
+        left: Math.max(0, Math.min(r.left, window.innerWidth - MENU_WIDTH - MENU_MARGIN)),
+        top: r.bottom + 4,
+      };
     menuOpen = true;
   }
 
