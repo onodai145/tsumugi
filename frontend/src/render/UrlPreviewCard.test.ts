@@ -80,8 +80,25 @@ describe("UrlPreviewCard", () => {
     playButton.click();
     // 再生後は縦長レイアウトに展開し、小サムネイル欄は無くなる
     await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
-    expect(document.querySelector(".preview-media")).not.toBeNull();
+    const media = document.querySelector(".preview-media") as HTMLElement | null;
+    expect(media).not.toBeNull();
     expect(document.querySelector(".preview-thumb")).toBeNull();
+    // player.width/height(640x360)を実際のアスペクト比として反映する（固定比率で引き伸ばさない）
+    expect(media?.style.aspectRatio).toBe("640 / 360");
+  });
+
+  it("falls back to a 16:9 aspect ratio for the expanded player when width/height are missing", async () => {
+    const withPlayer = {
+      ...PREVIEW,
+      thumbnail: "https://example.com/t.png",
+      player: { url: "https://example.com/embed", width: null, height: null },
+    };
+    cachedUrlPreviewMock.mockReturnValue(withPlayer);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+    screen.getByRole("button", { name: "再生" }).click();
+    await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
+    const media = document.querySelector(".preview-media") as HTMLElement | null;
+    expect(media?.style.aspectRatio).toBe("16 / 9");
   });
 
   it("does not linkify the card when preview.url has an unsafe scheme", () => {
