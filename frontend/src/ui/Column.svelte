@@ -94,79 +94,83 @@
   }}
   role="group"
 >
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="tabbar-bg flex min-h-[26px] items-stretch gap-px overflow-x-auto border-b border-border border-t-2"
-    ondragover={(e) => {
-      if (app.draggingTabId) {
-        e.preventDefault();
-        app.dragOverTabBarEnd(group.id);
-      }
-    }}
-  >
+  <!-- メニューボタンはタブ数に関係なく常にカラム右端に固定表示したいため、グリップ＋タブの
+       横スクロール領域(内側のoverflow-x-auto)と分離し、外側のflex行にflex-noneで置く。 -->
+  <div class="tabbar-bg flex min-h-[26px] items-stretch border-b border-border border-t-2">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <span
-      class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing"
-      draggable="true"
-      ondragstart={(e) => {
-        e.dataTransfer?.setData("text/plain", group.id);
-        app.startDragGroup(group.id);
+    <div
+      class="flex min-w-0 flex-1 items-stretch gap-px overflow-x-auto"
+      ondragover={(e) => {
+        if (app.draggingTabId) {
+          e.preventDefault();
+          app.dragOverTabBarEnd(group.id);
+        }
       }}
-      ondragend={() => app.endDragGroup()}
-      title="ドラッグでカラムを並べ替え"
-    ><GripVertical size={16} /></span>
-
-    {#each group.tabs as t (t.id)}
+    >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div
-        class={[
-          "flex cursor-grab items-center active:cursor-grabbing",
-          {
-            "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
-          },
-          app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
-        ]}
+      <span
+        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing"
         draggable="true"
         ondragstart={(e) => {
-          e.dataTransfer?.setData("text/plain", t.id);
-          e.stopPropagation();
-          app.startDragTab(t.id);
+          e.dataTransfer?.setData("text/plain", group.id);
+          app.startDragGroup(group.id);
         }}
-        ondragend={() => app.endDragTab()}
-        ondragover={(e) => {
-          if (app.draggingTabId) {
-            e.preventDefault();
-            e.stopPropagation();
-            app.dragOverTab(group.id, t.id);
-          }
-        }}
-      >
-        <button
-          class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
-          onclick={() => app.setActiveTab(group.id, t.id)}
-          ondblclick={() => onEditTab(t)}
-          title={`${tabName(t)}（ダブルクリックで編集）`}
-        >
-          <span
-            class="h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground data-[state=connected]:bg-[var(--success)] data-[state=connecting]:bg-[var(--warning)] data-[state=reconnecting]:bg-[var(--warning)] data-[state=error]:bg-destructive"
-            data-state={t.state}
-          ></span>{tabName(t)}
-        </button>
-        <button
+        ondragend={() => app.endDragGroup()}
+        title="ドラッグでカラムを並べ替え"
+      ><GripVertical size={16} /></span>
+
+      {#each group.tabs as t (t.id)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
           class={[
-            t.id === group.activeTabId ? "inline-flex" : "hidden",
-            "border-none bg-transparent py-0 pr-1 text-muted-foreground",
+            "flex cursor-grab items-center active:cursor-grabbing",
+            {
+              "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
+            },
+            app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
           ]}
-          title="タブを閉じる"
-          onclick={() => app.closeTab(t.id)}
-        ><X size={12} /></button>
-      </div>
-    {/each}
+          draggable="true"
+          ondragstart={(e) => {
+            e.dataTransfer?.setData("text/plain", t.id);
+            e.stopPropagation();
+            app.startDragTab(t.id);
+          }}
+          ondragend={() => app.endDragTab()}
+          ondragover={(e) => {
+            if (app.draggingTabId) {
+              e.preventDefault();
+              e.stopPropagation();
+              app.dragOverTab(group.id, t.id);
+            }
+          }}
+        >
+          <button
+            class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
+            onclick={() => app.setActiveTab(group.id, t.id)}
+            ondblclick={() => onEditTab(t)}
+            title={`${tabName(t)}（ダブルクリックで編集）`}
+          >
+            <span
+              class="h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground data-[state=connected]:bg-[var(--success)] data-[state=connecting]:bg-[var(--warning)] data-[state=reconnecting]:bg-[var(--warning)] data-[state=error]:bg-destructive"
+              data-state={t.state}
+            ></span>{tabName(t)}
+          </button>
+          <button
+            class={[
+              t.id === group.activeTabId ? "inline-flex" : "hidden",
+              "border-none bg-transparent py-0 pr-1 text-muted-foreground",
+            ]}
+            title="タブを閉じる"
+            onclick={() => app.closeTab(t.id)}
+          ><X size={12} /></button>
+        </div>
+      {/each}
+    </div>
 
     <Button
       variant="ghost"
       size="icon-xs"
-      class="text-muted-foreground"
+      class="flex-none text-muted-foreground"
       title="メニュー"
       onclick={toggleMenu}
       bind:ref={menuTrigger}
