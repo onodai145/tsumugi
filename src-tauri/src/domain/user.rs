@@ -2,6 +2,17 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
+/// 投稿元インスタンスの表示情報（Instance Ticker用、Issue #103）。
+/// リモートユーザーは Misskey の `UserLite.instance` から、ローカルユーザーは
+/// 接続先インスタンスの `/api/meta`（[`Account::instance`]）から埋める。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceInfo {
+    pub name: Option<String>,
+    pub icon_url: Option<String>,
+    pub theme_color: Option<String>,
+}
+
 /// docs/design/filter-dsl-design.md §7。`host` が None ならローカルユーザ。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +40,10 @@ pub struct User {
     /// バナー画像URL。同上、UserLiteコンテキストでは取得されない。
     #[serde(default)]
     pub banner_url: Option<String>,
+    /// 投稿元インスタンス情報。リモートユーザーのみ Some（Misskeyがローカルユーザーには
+    /// このフィールドを付与しない）。追加前に保存されたキャッシュ済みJSONとの後方互換のため default。
+    #[serde(default)]
+    pub instance: Option<InstanceInfo>,
 }
 
 impl User {

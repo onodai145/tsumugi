@@ -1193,6 +1193,7 @@ mod tests {
                 emojis: std::collections::HashMap::new(),
                 bio: None,
                 banner_url: None,
+                instance: None,
             },
             reply_id: None,
             renote_id: None,

@@ -332,6 +332,7 @@ mod tests {
             emojis: std::collections::HashMap::new(),
             bio: None,
             banner_url: None,
+            instance: None,
         }
     }
 
