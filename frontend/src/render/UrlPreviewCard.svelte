@@ -60,6 +60,7 @@
           src={preview.player.url}
           title={preview.title ?? preview.url}
           sandbox="allow-scripts allow-same-origin"
+          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
           class="h-full w-full border-0"
         ></iframe>
       </div>
@@ -108,8 +109,14 @@
 <style>
   /* 幅広カラムでaspect-ratioのまま伸び続けないよう、MediaGrid（Issue #8）と同じ
      --media-thumbnail-height（設定→表示で調整可能、既定200px）で高さの上限を揃える。
-     プレイヤー再生中（縦長展開時）のみ使う。 */
+     プレイヤー再生中（縦長展開時）のみ使う。
+     min-height: 200pxは--media-thumbnail-heightの設定値に関わらず常に確保する。
+     SpotifyのようなwidthなしplayerではCSSのレスポンシブブレークポイント（実測:
+     max-height:151px以下だと簡略レイアウト、200px超だとフルレイアウト）が埋め込み側にあり、
+     ユーザー設定次第で151px以下になると埋め込み内に不自然な余白が出るため
+     （CSS上、min-heightはmax-heightより優先されるので、設定値がこれより小さくても実質無視される）。 */
   .preview-media {
+    min-height: 200px;
     max-height: var(--media-thumbnail-height, 200px);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
   }
