@@ -3,8 +3,9 @@
   import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
-  import { X, GripVertical } from "@lucide/svelte";
+  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitVertical, Settings } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
+  import { portal } from "../lib/portal";
 
   let {
     group,
@@ -54,6 +55,32 @@
     resizing = false;
     app.persistGroupWidth(group.id, group.width);
   }
+
+  // カラムヘッダーメニュー（タブ追加／下に分割／カラム設定を1つの「⋯」に集約）
+  let menuOpen = $state(false);
+  let menuTrigger = $state<HTMLElement | null>(null);
+  let menuPos = $state<{ left: number; top: number } | null>(null);
+
+  function toggleMenu() {
+    if (menuOpen) {
+      menuOpen = false;
+      return;
+    }
+    const r = menuTrigger?.getBoundingClientRect();
+    const MENU_WIDTH = 160;
+    const MENU_MARGIN = 8;
+    if (r)
+      menuPos = {
+        left: Math.max(0, Math.min(r.left, window.innerWidth - MENU_WIDTH - MENU_MARGIN)),
+        top: r.bottom + 4,
+      };
+    menuOpen = true;
+  }
+
+  function pickMenuItem(action: () => void) {
+    menuOpen = false;
+    action();
+  }
 </script>
 
 <section
@@ -67,79 +94,129 @@
   }}
   role="group"
 >
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="tabbar-bg flex min-h-[26px] items-stretch gap-px overflow-x-auto border-b border-border border-t-2"
-    ondragover={(e) => {
-      if (app.draggingTabId) {
-        e.preventDefault();
-        app.dragOverTabBarEnd(group.id);
-      }
-    }}
-  >
+  <!-- メニューボタンはタブ数に関係なく常にカラム右端に固定表示したいため、グリップ＋タブの
+       横スクロール領域(内側のoverflow-x-auto)と分離し、外側のflex行にflex-noneで置く。 -->
+  <div class="tabbar-bg flex min-h-[26px] items-stretch border-b border-border border-t-2">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <span
-      class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing"
-      draggable="true"
-      ondragstart={(e) => {
-        e.dataTransfer?.setData("text/plain", group.id);
-        app.startDragGroup(group.id);
+    <div
+      class="flex min-w-0 flex-1 items-stretch gap-px overflow-x-auto"
+      ondragover={(e) => {
+        if (app.draggingTabId) {
+          e.preventDefault();
+          app.dragOverTabBarEnd(group.id);
+        }
       }}
-      ondragend={() => app.endDragGroup()}
-      ondblclick={() => onEditGroup(group.id)}
-      title="ドラッグでカラムを並べ替え（ダブルクリックでカラム設定）"
-    ><GripVertical size={16} /></span>
-
-    {#each group.tabs as t (t.id)}
+    >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div
-        class={[
-          "flex cursor-grab items-center active:cursor-grabbing",
-          {
-            "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
-          },
-          app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
-        ]}
+      <span
+        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing"
         draggable="true"
         ondragstart={(e) => {
-          e.dataTransfer?.setData("text/plain", t.id);
-          e.stopPropagation();
-          app.startDragTab(t.id);
+          e.dataTransfer?.setData("text/plain", group.id);
+          app.startDragGroup(group.id);
         }}
-        ondragend={() => app.endDragTab()}
-        ondragover={(e) => {
-          if (app.draggingTabId) {
-            e.preventDefault();
+        ondragend={() => app.endDragGroup()}
+        title="ドラッグでカラムを並べ替え"
+      ><GripVertical size={16} /></span>
+
+      {#each group.tabs as t (t.id)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class={[
+            "flex cursor-grab items-center active:cursor-grabbing",
+            {
+              "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
+            },
+            app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
+          ]}
+          draggable="true"
+          ondragstart={(e) => {
+            e.dataTransfer?.setData("text/plain", t.id);
             e.stopPropagation();
-            app.dragOverTab(group.id, t.id);
-          }
-        }}
+            app.startDragTab(t.id);
+          }}
+          ondragend={() => app.endDragTab()}
+          ondragover={(e) => {
+            if (app.draggingTabId) {
+              e.preventDefault();
+              e.stopPropagation();
+              app.dragOverTab(group.id, t.id);
+            }
+          }}
+        >
+          <button
+            class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
+            onclick={() => app.setActiveTab(group.id, t.id)}
+            ondblclick={() => onEditTab(t)}
+            title={`${tabName(t)}（ダブルクリックで編集）`}
+          >
+            <span
+              class="h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground data-[state=connected]:bg-[var(--success)] data-[state=connecting]:bg-[var(--warning)] data-[state=reconnecting]:bg-[var(--warning)] data-[state=error]:bg-destructive"
+              data-state={t.state}
+            ></span>{tabName(t)}
+          </button>
+          <button
+            class={[
+              t.id === group.activeTabId ? "inline-flex" : "hidden",
+              "border-none bg-transparent py-0 pr-1 text-muted-foreground",
+            ]}
+            title="タブを閉じる"
+            onclick={() => app.closeTab(t.id)}
+          ><X size={12} /></button>
+        </div>
+      {/each}
+    </div>
+
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      class="flex-none text-muted-foreground"
+      title="メニュー"
+      onclick={toggleMenu}
+      bind:ref={menuTrigger}
+    ><MoreHorizontal size={16} /></Button>
+  </div>
+
+  {#if menuOpen && menuPos}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (menuOpen = false)} role="presentation">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="fixed w-[160px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+        style={`left:${menuPos.left}px;top:${menuPos.top}px`}
+        onclick={(e) => e.stopPropagation()}
+        role="menu"
+        tabindex="-1"
       >
         <button
-          class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
-          onclick={() => app.setActiveTab(group.id, t.id)}
-          ondblclick={() => onEditTab(t)}
-          title={`${tabName(t)}（ダブルクリックで編集）`}
+          type="button"
+          role="menuitem"
+          class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          onclick={() => pickMenuItem(() => onAddTab(group.id))}
         >
-          <span
-            class="h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground data-[state=connected]:bg-[var(--success)] data-[state=connecting]:bg-[var(--warning)] data-[state=reconnecting]:bg-[var(--warning)] data-[state=error]:bg-destructive"
-            data-state={t.state}
-          ></span>{tabName(t)}
+          <Plus size={16} /> タブを追加
         </button>
         <button
-          class={[
-            t.id === group.activeTabId ? "inline-flex" : "hidden",
-            "border-none bg-transparent py-0 pr-1 text-muted-foreground",
-          ]}
-          title="タブを閉じる"
-          onclick={() => app.closeTab(t.id)}
-        ><X size={12} /></button>
+          type="button"
+          role="menuitem"
+          class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          onclick={() => pickMenuItem(() => onSplitDown(group.id))}
+        >
+          <SquareSplitVertical size={16} /> 下に分割
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          onclick={() => pickMenuItem(() => onEditGroup(group.id))}
+        >
+          <Settings size={16} /> カラム設定
+        </button>
       </div>
-    {/each}
-
-    <Button variant="ghost" size="icon-xs" class="text-muted-foreground" title="タブを追加" onclick={() => onAddTab(group.id)}>＋</Button>
-    <Button variant="ghost" size="icon-xs" class="text-muted-foreground" title="下に分割" onclick={() => onSplitDown(group.id)}>⬓</Button>
-  </div>
+    </div>
+  {/if}
 
   {#if activeTab}
     <div class="flex-1 overflow-y-auto" onscroll={onScroll}>
