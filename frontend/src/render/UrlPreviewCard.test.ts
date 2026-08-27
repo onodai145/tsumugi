@@ -101,6 +101,21 @@ describe("UrlPreviewCard", () => {
     expect(media?.style.aspectRatio).toBe("16 / 9");
   });
 
+  it("uses the fixed height directly (not an aspect ratio) when the player only reports height (e.g. Spotify's width:null oEmbed)", async () => {
+    const withPlayer = {
+      ...PREVIEW,
+      thumbnail: "https://example.com/t.png",
+      player: { url: "https://example.com/embed", width: null, height: 152 },
+    };
+    cachedUrlPreviewMock.mockReturnValue(withPlayer);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+    screen.getByRole("button", { name: "再生" }).click();
+    await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
+    const media = document.querySelector(".preview-media") as HTMLElement | null;
+    expect(media?.style.height).toBe("152px");
+    expect(media?.style.aspectRatio).toBe("");
+  });
+
   it("does not linkify the card when preview.url has an unsafe scheme", () => {
     const unsafe = { ...PREVIEW, url: "javascript:alert(1)" };
     cachedUrlPreviewMock.mockReturnValue(unsafe);

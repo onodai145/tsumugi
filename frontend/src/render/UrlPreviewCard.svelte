@@ -43,14 +43,18 @@
   {@const hasPlayer = preview.player && isSafeUrl(preview.player.url)}
   <div class="url-preview-card mt-2 w-full max-w-[480px] overflow-hidden rounded-md border border-border text-sm">
     {#if playing && hasPlayer && preview.player}
-      <!-- 再生中: 縦長レイアウトに展開し、大きいiframeで再生する。summalyのplayer.width/heightが
-           あれば実際の比率で、無ければ動画の一般的な比率(16:9)にフォールバックする
-           （固定比率だと実際のプレイヤーと縦横比が合わず引き伸ばされて見えるため）。 -->
+      <!-- 再生中: 縦長レイアウトに展開し、大きいiframeで再生する。
+           summalyのplayer.width/heightが両方あれば実際の比率で、
+           height のみ（例: Spotifyのように「幅は可変・高さのみ固定」なoEmbed）なら
+           そのheightをそのまま高さに使い、両方無ければ動画の一般的な比率(16:9)にフォールバックする
+           （width/height不整合のまま比率換算すると、幅可変前提の埋め込みで余白が生じるため）。 -->
       <div
         class="preview-media relative w-full"
-        style="aspect-ratio: {preview.player.width && preview.player.height
-          ? `${preview.player.width} / ${preview.player.height}`
-          : '16 / 9'}"
+        style={preview.player.width && preview.player.height
+          ? `aspect-ratio: ${preview.player.width} / ${preview.player.height}`
+          : preview.player.height
+            ? `height: ${preview.player.height}px`
+            : "aspect-ratio: 16 / 9"}
       >
         <iframe
           src={preview.player.url}
