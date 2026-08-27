@@ -134,6 +134,7 @@ fn build_account(existing_id: Option<String>, host: &str, raw: &RawUser) -> Acco
         user_id: raw.id.clone(),
         display_name: raw.name.clone().unwrap_or_else(|| raw.username.clone()),
         avatar_url: raw.avatar_url.clone(),
+        instance: None,
     }
 }
 

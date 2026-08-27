@@ -125,6 +125,7 @@ mod tests {
             user_id: user_id.to_string(),
             display_name: "Alice".to_string(),
             avatar_url: None,
+            instance: None,
         }
     }
 

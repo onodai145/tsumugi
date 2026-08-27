@@ -1179,6 +1179,7 @@ mod tests {
                 user_id: user_id.into(),
                 display_name: "Me".into(),
                 avatar_url: None,
+                instance: None,
             })
             .unwrap();
         AppState::new_for_test(settings)

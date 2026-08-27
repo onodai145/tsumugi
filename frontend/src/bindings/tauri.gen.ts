@@ -283,6 +283,11 @@ export type Account = {
 	userId: string,
 	displayName: string,
 	avatarUrl: string | null,
+	/**
+	 *  接続先インスタンスの表示情報（Instance Ticker用、Issue #103）。ログイン/起動時に
+	 *  `/api/meta` から取得して埋める。取得前・失敗時は None。
+	 */
+	instance?: InstanceInfo | null,
 };
 
 /**
@@ -483,6 +488,17 @@ export type FilterQuery =
 export type FollowListEntry = {
 	user: User,
 	cursor: string,
+};
+
+/**
+ *  投稿元インスタンスの表示情報（Instance Ticker用、Issue #103）。
+ *  リモートユーザーは Misskey の `UserLite.instance` から、ローカルユーザーは
+ *  接続先インスタンスの `/api/meta`（[`Account::instance`]）から埋める。
+ */
+export type InstanceInfo = {
+	name: string | null,
+	iconUrl: string | null,
+	themeColor: string | null,
 };
 
 export type LatestRelease = {
@@ -862,6 +878,11 @@ export type User = {
 	bio?: string | null,
 	/**  バナー画像URL。同上、UserLiteコンテキストでは取得されない。 */
 	bannerUrl?: string | null,
+	/**
+	 *  投稿元インスタンス情報。リモートユーザーのみ Some（Misskeyがローカルユーザーには
+	 *  このフィールドを付与しない）。追加前に保存されたキャッシュ済みJSONとの後方互換のため default。
+	 */
+	instance?: InstanceInfo | null,
 };
 
 /**  ユーザリスト（List カラムのソース選択用）。 */

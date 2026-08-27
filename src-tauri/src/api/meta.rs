@@ -105,3 +105,59 @@ pub async fn list_emojis(client: &MisskeyClient) -> Result<Vec<EmojiDef>> {
         })
         .collect())
 }
+
+/// 接続先インスタンスの名前・アイコン・テーマカラー（Instance Ticker用、Issue #103）。
+/// `/api/meta` は認証不要だが、他エンドポイントと同じ経路(`client.post`)で叩く。
+/// `detail: false` で軽量なレスポンス(MetaLite相当)にする。
+#[allow(dead_code)] // Phase 3: refresh_instance_meta で使用
+pub async fn fetch_meta(client: &MisskeyClient) -> Result<crate::domain::InstanceInfo> {
+    let raw: RawMeta = client.post("meta", &json!({ "detail": false })).await?;
+    Ok(raw.into())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawMeta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    icon_url: Option<String>,
+    #[serde(default)]
+    theme_color: Option<String>,
+}
+
+impl From<RawMeta> for crate::domain::InstanceInfo {
+    fn from(r: RawMeta) -> Self {
+        crate::domain::InstanceInfo {
+            name: r.name,
+            icon_url: r.icon_url,
+            theme_color: r.theme_color,
+        }
+    }
+}
+
+#[cfg(test)]
+mod meta_info_tests {
+    use super::*;
+
+    #[test]
+    fn raw_meta_maps_all_fields() {
+        let raw: RawMeta = serde_json::from_str(
+            r##"{"name":"Misskey.io","iconUrl":"https://misskey.io/icon.png","themeColor":"#86b300"}"##,
+        )
+        .unwrap();
+        let info: crate::domain::InstanceInfo = raw.into();
+        assert_eq!(info.name, Some("Misskey.io".to_string()));
+        assert_eq!(info.icon_url, Some("https://misskey.io/icon.png".to_string()));
+        assert_eq!(info.theme_color, Some("#86b300".to_string()));
+    }
+
+    #[test]
+    fn raw_meta_defaults_missing_fields_to_none() {
+        let raw: RawMeta = serde_json::from_str(r#"{}"#).unwrap();
+        let info: crate::domain::InstanceInfo = raw.into();
+        assert_eq!(info.name, None);
+        assert_eq!(info.icon_url, None);
+        assert_eq!(info.theme_color, None);
+    }
+}
