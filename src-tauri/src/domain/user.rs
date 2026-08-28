@@ -17,11 +17,20 @@ impl InstanceInfo {
     /// `icon_url` が無い場合、`host` の `/favicon.ico` を補う。Misskeyの `iconUrl` は
     /// 管理者が未設定だと null になるが、`https://{host}/favicon.ico` はブラウザの
     /// 既定favicon探索と同様に多くのインスタンスで実在するため、本家Misskeyの
-    /// インスタンスチッカーもこれをフォールバックに使っている（themeColorには
-    /// 代替手段が無いため、そちらは未設定のままにする）。
+    /// インスタンスチッカー(`MkInstanceTicker.vue`)もこれをフォールバックに使っている。
     pub fn with_favicon_fallback(mut self, host: &str) -> Self {
         if self.icon_url.is_none() {
             self.icon_url = Some(format!("https://{host}/favicon.ico"));
+        }
+        self
+    }
+
+    /// `theme_color` が無い場合、本家Misskeyの `MkInstanceTicker.vue` と同じ既定色
+    /// `#777777`（グレー）を補う。`themeColor` はホストから動的に取得する手段が無く、
+    /// 本家も固定の既定値にフォールバックしている。
+    pub fn with_theme_color_fallback(mut self) -> Self {
+        if self.theme_color.is_none() {
+            self.theme_color = Some("#777777".to_string());
         }
         self
     }
@@ -74,6 +83,24 @@ impl User {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn with_theme_color_fallback_fills_default_gray_when_missing() {
+        let info = InstanceInfo { name: None, icon_url: None, theme_color: None }
+            .with_theme_color_fallback();
+        assert_eq!(info.theme_color, Some("#777777".to_string()));
+    }
+
+    #[test]
+    fn with_theme_color_fallback_keeps_existing_value() {
+        let info = InstanceInfo {
+            name: None,
+            icon_url: None,
+            theme_color: Some("#ff8800".to_string()),
+        }
+        .with_theme_color_fallback();
+        assert_eq!(info.theme_color, Some("#ff8800".to_string()));
+    }
 
     /// emojis フィールド追加前に保存されたキャッシュ済みJSON(SQLiteのnote_cache等)を
     /// 読み込めること。#[serde(default)] が無いと deserialize エラーになる。

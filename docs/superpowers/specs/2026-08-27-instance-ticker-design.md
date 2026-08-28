@@ -71,7 +71,9 @@ pub struct InstanceInfo {
 }
 ```
 
-`faviconUrl` は取得対象に含めない（`/api/meta` の `MetaLite` スキーマに存在しないため、リモート側の値も使わない）。ただし `iconUrl`（リモートは`UserLite.instance.iconUrl`、ローカルは`/api/meta`の`iconUrl`）が未設定の場合、`InstanceInfo::with_favicon_fallback` がホストの `https://{host}/favicon.ico` にフォールバックする（本家Misskeyの `MkInstanceTicker.vue` と同じ挙動）。管理者がアイコンを設定していないインスタンスでも favicon が実在すればアイコン欠落を避けられる。`themeColor` には同様のフォールバック手段が無いため、未設定インスタンスの投稿は色なし（`bg-muted`）表示のままになる。
+`faviconUrl` は取得対象に含めない（`/api/meta` の `MetaLite` スキーマに存在しないため、リモート側の値も使わない）。ただし `iconUrl`（リモートは`UserLite.instance.iconUrl`、ローカルは`/api/meta`の`iconUrl`）が未設定の場合、`InstanceInfo::with_favicon_fallback` がホストの `https://{host}/favicon.ico` にフォールバックする（本家Misskeyの `MkInstanceTicker.vue` と同じ挙動）。管理者がアイコンを設定していないインスタンスでも favicon が実在すればアイコン欠落を避けられる。
+
+`themeColor` が未設定の場合も、本家Misskeyの `MkInstanceTicker.vue` と同じ既定色 `#777777`（グレー）に `InstanceInfo::with_theme_color_fallback` でフォールバックする（本家はホストから動的に取得する手段が無く、固定値にフォールバックしている）。これにより未設定インスタンスの投稿もグラデーション付きで表示される。
 
 ## 表示ロジック（フロント）
 
@@ -93,7 +95,7 @@ else: 非表示
 
 - ヘッダー行（名前・acct・時刻・可視性アイコン）の直後、CW欄より前に新しい行として挿入。
 - `themeColor` 背景 + アイコン（`iconUrl` があれば）+ インスタンス名のピル。角丸はスタイルガイドのxsバッジ相当（`rounded-sm`）。
-- `themeColor` は他インスタンス由来の任意hexであり可読性が保証されないため、相対輝度から文字色（黒/白）を自動選択するヘルパー `lib/color.ts: readableTextColor(hex: string): "#000000" | "#ffffff"` を新設し、単体テストを書く。`themeColor` が null/不正な場合はテーマの `muted` 系配色にフォールバックしプレーン表示にする。
+- `themeColor` は他インスタンス由来の任意hexであり可読性が保証されないため、相対輝度から文字色（黒/白）を自動選択するヘルパー `lib/color.ts: readableTextColor(hex: string): "#000000" | "#ffffff"` を新設し、単体テストを書く。Rust側で`with_theme_color_fallback`により通常は必ず値が入るため、フロント側の `muted` フォールバックは「不正なhex文字列（CSSインジェクション対策で弾いた値）」のときのみ発生する防御的な扱いになる。
 
 ## テスト
 

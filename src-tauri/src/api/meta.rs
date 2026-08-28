@@ -112,7 +112,7 @@ pub async fn list_emojis(client: &MisskeyClient) -> Result<Vec<EmojiDef>> {
 pub async fn fetch_meta(client: &MisskeyClient) -> Result<crate::domain::InstanceInfo> {
     let raw: RawMeta = client.post("meta", &json!({ "detail": false })).await?;
     let info: crate::domain::InstanceInfo = raw.into();
-    Ok(info.with_favicon_fallback(client.host()))
+    Ok(info.with_favicon_fallback(client.host()).with_theme_color_fallback())
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,8 +171,8 @@ mod meta_info_tests {
         )
         .unwrap();
         let info: crate::domain::InstanceInfo = raw.into();
-        let info = info.with_favicon_fallback("misskey.omhnc.net");
+        let info = info.with_favicon_fallback("misskey.omhnc.net").with_theme_color_fallback();
         assert_eq!(info.icon_url, Some("https://misskey.omhnc.net/favicon.ico".to_string()));
-        assert_eq!(info.theme_color, None);
+        assert_eq!(info.theme_color, Some("#777777".to_string()));
     }
 }

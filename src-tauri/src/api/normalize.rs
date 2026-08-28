@@ -74,10 +74,11 @@ impl From<RawUser> for User {
     fn from(r: RawUser) -> Self {
         let instance = r.instance.map(|i| {
             let info: crate::domain::InstanceInfo = i.into();
-            match &r.host {
+            let info = match &r.host {
                 Some(h) => info.with_favicon_fallback(h),
                 None => info,
-            }
+            };
+            info.with_theme_color_fallback()
         });
         User {
             id: r.id,
@@ -493,13 +494,13 @@ mod tests {
 
     #[test]
     fn raw_user_instance_falls_back_to_host_favicon_when_icon_url_missing() {
-        // 本家Misskeyと同様、iconUrlが無いインスタンス(管理者が未設定)ではホストの
-        // /favicon.icoにフォールバックする。themeColorはフォールバック手段が無いためNoneのまま。
+        // 本家Misskeyと同様、iconUrl/themeColorが無いインスタンス(管理者が未設定)では
+        // ホストの/favicon.icoと既定グレー(#777777)にそれぞれフォールバックする。
         let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":null,\"themeColor\":null}}";
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
         let instance = user.instance.expect("instance should be present for remote user");
         assert_eq!(instance.icon_url, Some("https://remote.example/favicon.ico".to_string()));
-        assert_eq!(instance.theme_color, None);
+        assert_eq!(instance.theme_color, Some("#777777".to_string()));
     }
 }
