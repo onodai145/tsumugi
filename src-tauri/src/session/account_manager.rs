@@ -51,7 +51,6 @@ impl AccountManager {
 
     /// account_id の instance を更新する。active は変更しない（メタ取得は
     /// バックグラウンド更新であり、ユーザ操作としての切替とは無関係のため）。
-    #[allow(dead_code)] // Phase 3: refresh_instance_meta で使用
     pub fn update_instance(
         &mut self,
         account_id: &str,

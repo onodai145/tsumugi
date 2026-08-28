@@ -109,7 +109,6 @@ pub async fn list_emojis(client: &MisskeyClient) -> Result<Vec<EmojiDef>> {
 /// 接続先インスタンスの名前・アイコン・テーマカラー（Instance Ticker用、Issue #103）。
 /// `/api/meta` は認証不要だが、他エンドポイントと同じ経路(`client.post`)で叩く。
 /// `detail: false` で軽量なレスポンス(MetaLite相当)にする。
-#[allow(dead_code)] // Phase 3: refresh_instance_meta で使用
 pub async fn fetch_meta(client: &MisskeyClient) -> Result<crate::domain::InstanceInfo> {
     let raw: RawMeta = client.post("meta", &json!({ "detail": false })).await?;
     Ok(raw.into())
