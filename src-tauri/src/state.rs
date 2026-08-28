@@ -173,6 +173,7 @@ mod tests {
                 user_id: "u1".into(),
                 display_name: "Me".into(),
                 avatar_url: None,
+                instance: None,
             })
             .unwrap();
 

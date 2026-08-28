@@ -415,6 +415,7 @@ pub fn migrate_from_legacy_sqlite(
                 user_id: r.get(3)?,
                 display_name: r.get(4)?,
                 avatar_url: r.get(5)?,
+                instance: None,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -512,6 +513,7 @@ mod tests {
             user_id: "u1".into(),
             display_name: "Me".into(),
             avatar_url: Some("http://x/a.png".into()),
+            instance: None,
         }
     }
 

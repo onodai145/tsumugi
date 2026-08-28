@@ -49,6 +49,22 @@ impl AccountManager {
         }
     }
 
+    /// account_id の instance を更新する。active は変更しない（メタ取得は
+    /// バックグラウンド更新であり、ユーザ操作としての切替とは無関係のため）。
+    pub fn update_instance(
+        &mut self,
+        account_id: &str,
+        instance: Option<crate::domain::InstanceInfo>,
+    ) -> Result<Account> {
+        let account = self
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == account_id)
+            .ok_or_else(|| Error::Invalid(format!("unknown account: {account_id}")))?;
+        account.instance = instance;
+        Ok(account.clone())
+    }
+
     /// 既定アカウントを切り替える。未登録なら [`Error::Invalid`]。
     pub fn set_active(&mut self, account_id: &str) -> Result<()> {
         if self.get(account_id).is_some() {
@@ -85,6 +101,7 @@ mod tests {
             user_id: user_id.into(),
             display_name: "Me".into(),
             avatar_url: None,
+            instance: None,
         }
     }
 
@@ -127,5 +144,27 @@ mod tests {
         m.remove("id2").unwrap();
         assert_eq!(m.active_id(), Some("id1"));
         assert!(matches!(m.remove("id2"), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn update_instance_sets_field_without_changing_active() {
+        let mut m = AccountManager::default();
+        m.upsert(acc("id1", "u1"));
+        m.upsert(acc("id2", "u2")); // id2 becomes active
+        let info = crate::domain::InstanceInfo {
+            name: Some("Misskey.io".into()),
+            icon_url: Some("https://misskey.io/icon.png".into()),
+            theme_color: Some("#86b300".into()),
+        };
+        let updated = m.update_instance("id1", Some(info.clone())).unwrap();
+        assert_eq!(updated.instance, Some(info));
+        assert_eq!(m.active_id(), Some("id2")); // 変わらない
+        assert_eq!(m.get("id1").unwrap().instance.as_ref().unwrap().name.as_deref(), Some("Misskey.io"));
+    }
+
+    #[test]
+    fn update_instance_rejects_unknown_account() {
+        let mut m = AccountManager::default();
+        assert!(m.update_instance("nope", None).is_err());
     }
 }

@@ -49,6 +49,11 @@ export const commands = {
 	logout: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("logout", { accountId })),
 	/**  指定アカウントで `/i` を叩き、自分の User を返す。 */
 	whoami: (accountId: string) => typedError<User, Error>(__TAURI_INVOKE("whoami", { accountId })),
+	/**
+	 *  接続先インスタンスの `/api/meta` を取得し、Account.instance を更新して返す
+	 *  （Instance Ticker用、Issue #103）。boot時にフロントから全アカウント分呼ばれる想定。
+	 */
+	refreshInstanceMeta: (accountId: string) => typedError<Account, Error>(__TAURI_INVOKE("refresh_instance_meta", { accountId })),
 	/**  タブを新規作成する。`group_id` が None なら新しい視覚カラム(グループ)を作る。 */
 	addColumn: (accountId: string, kind: ColumnKind, filter: FilterQuery, groupId: string | null) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("add_column", { accountId, kind, filter, groupId })),
 	/**
@@ -283,6 +288,11 @@ export type Account = {
 	userId: string,
 	displayName: string,
 	avatarUrl: string | null,
+	/**
+	 *  接続先インスタンスの表示情報（Instance Ticker用、Issue #103）。ログイン/起動時に
+	 *  `/api/meta` から取得して埋める。取得前・失敗時は None。
+	 */
+	instance?: InstanceInfo | null,
 };
 
 /**
@@ -483,6 +493,17 @@ export type FilterQuery =
 export type FollowListEntry = {
 	user: User,
 	cursor: string,
+};
+
+/**
+ *  投稿元インスタンスの表示情報（Instance Ticker用、Issue #103）。
+ *  リモートユーザーは Misskey の `UserLite.instance` から、ローカルユーザーは
+ *  接続先インスタンスの `/api/meta`（[`Account::instance`]）から埋める。
+ */
+export type InstanceInfo = {
+	name: string | null,
+	iconUrl: string | null,
+	themeColor: string | null,
 };
 
 export type LatestRelease = {
@@ -815,6 +836,12 @@ export type UiPrefs = {
 	 *  設定すると、プレビュー対象のURLはインスタンスではなくここへ直接送られる。
 	 */
 	summalyProxyUrl?: string,
+	/**
+	 *  Instance Ticker の表示モード（Issue #103）。
+	 *  "off" = 表示しない / "remote" = リモートユーザーの投稿にのみ表示(既定) /
+	 *  "always" = ローカルユーザー（自分と同一インスタンス）の投稿にも表示。
+	 */
+	instanceTicker?: string,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */
@@ -862,6 +889,11 @@ export type User = {
 	bio?: string | null,
 	/**  バナー画像URL。同上、UserLiteコンテキストでは取得されない。 */
 	bannerUrl?: string | null,
+	/**
+	 *  投稿元インスタンス情報。リモートユーザーのみ Some（Misskeyがローカルユーザーには
+	 *  このフィールドを付与しない）。追加前に保存されたキャッシュ済みJSONとの後方互換のため default。
+	 */
+	instance?: InstanceInfo | null,
 };
 
 /**  ユーザリスト（List カラムのソース選択用）。 */

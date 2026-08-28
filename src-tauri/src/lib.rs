@@ -34,6 +34,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::account::remove_account,
             commands::account::logout,
             commands::account::whoami,
+            commands::account::refresh_instance_meta,
             commands::column::add_column,
             commands::column::split_pane,
             commands::column::resize_pane,

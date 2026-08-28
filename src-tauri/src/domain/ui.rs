@@ -184,6 +184,11 @@ pub struct UiPrefs {
     /// 設定すると、プレビュー対象のURLはインスタンスではなくここへ直接送られる。
     #[serde(default)]
     pub summaly_proxy_url: String,
+    /// Instance Ticker の表示モード（Issue #103）。
+    /// "off" = 表示しない / "remote" = リモートユーザーの投稿にのみ表示(既定) /
+    /// "always" = ローカルユーザー（自分と同一インスタンス）の投稿にも表示。
+    #[serde(default = "default_instance_ticker")]
+    pub instance_ticker: String,
 }
 
 fn default_column_opacity() -> i32 {
@@ -241,6 +246,10 @@ fn default_url_preview_enabled() -> bool {
     true
 }
 
+fn default_instance_ticker() -> String {
+    "remote".into()
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -272,6 +281,7 @@ impl Default for UiPrefs {
             search_engine_url: default_search_engine_url(),
             url_preview_enabled: default_url_preview_enabled(),
             summaly_proxy_url: String::new(),
+            instance_ticker: default_instance_ticker(),
         }
     }
 }
@@ -399,6 +409,7 @@ mod tests {
             search_engine_url: "https://duckduckgo.com/?q={query}".into(),
             url_preview_enabled: false,
             summaly_proxy_url: "https://my-proxy.example.com/preview".into(),
+            instance_ticker: "always".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -434,5 +445,12 @@ mod tests {
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert!(v.url_preview_enabled);
         assert_eq!(v.summaly_proxy_url, "");
+    }
+
+    #[test]
+    fn instance_ticker_defaults_to_remote_for_legacy_json() {
+        // instance_ticker 追加前に保存された JSON も読めること（#[serde(default)]）。
+        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.instance_ticker, "remote");
     }
 }

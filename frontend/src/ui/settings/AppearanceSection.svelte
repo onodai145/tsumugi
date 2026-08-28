@@ -16,6 +16,7 @@
   let searchEngineUrl = $state(app.ui.searchEngineUrl ?? DEFAULT_SEARCH_ENGINE_URL);
   let urlPreviewEnabled = $state(app.ui.urlPreviewEnabled ?? true);
   let summalyProxyUrl = $state(app.ui.summalyProxyUrl ?? "");
+  let instanceTicker = $state(app.ui.instanceTicker ?? "remote");
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -24,6 +25,12 @@
     { id: "auto", label: "OSに合わせる" },
     { id: "light", label: "ライト" },
     { id: "dark", label: "ダーク" },
+  ];
+
+  const instanceTickerOptions: { id: string; label: string }[] = [
+    { id: "off", label: "表示しない" },
+    { id: "remote", label: "リモートのみ" },
+    { id: "always", label: "常に表示" },
   ];
 
   const emojiStyles: { id: EmojiStyle; label: string }[] = [
@@ -217,6 +224,7 @@
         searchEngineUrl: searchEngineUrl.trim() || DEFAULT_SEARCH_ENGINE_URL,
         urlPreviewEnabled,
         summalyProxyUrl: summalyProxyUrl.trim(),
+        instanceTicker,
       });
       saved = true;
     } catch (e) {
@@ -242,6 +250,25 @@
       >{t.label}</button>
     {/each}
   </div>
+</div>
+
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
+  <span class="text-muted-foreground">Instance Ticker（投稿元インスタンス表示）</span>
+  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
+    {#each instanceTickerOptions as t (t.id)}
+      <button
+        type="button"
+        class={instanceTicker === t.id
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
+        onclick={() => (instanceTicker = t.id)}
+      >{t.label}</button>
+    {/each}
+  </div>
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">
+    ノートの投稿者名の下に、投稿元インスタンスのアイコン・名前をテーマカラーで表示します。
+    「常に表示」はローカルユーザー（自分と同じインスタンス）の投稿にも表示します。
+  </p>
 </div>
 
 {#snippet swatchStrip(colors: ThemeColors)}

@@ -14,6 +14,27 @@ where
     Ok(i64::deserialize(deserializer)?.max(0) as u32)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawInstanceInfo {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub icon_url: Option<String>,
+    #[serde(default)]
+    pub theme_color: Option<String>,
+}
+
+impl From<RawInstanceInfo> for crate::domain::InstanceInfo {
+    fn from(r: RawInstanceInfo) -> Self {
+        crate::domain::InstanceInfo {
+            name: r.name,
+            icon_url: r.icon_url,
+            theme_color: r.theme_color,
+        }
+    }
+}
+
 /// Misskey の User オブジェクト（`i` / `me` / miauth の user）を受ける生型。
 /// UserLite にしか無いフィールドもあるため、集計値は `#[serde(default)]`。
 #[derive(Debug, Clone, Deserialize)]
@@ -45,10 +66,20 @@ pub struct RawUser {
     pub description: Option<String>,
     #[serde(default)]
     pub banner_url: Option<String>,
+    #[serde(default)]
+    pub instance: Option<RawInstanceInfo>,
 }
 
 impl From<RawUser> for User {
     fn from(r: RawUser) -> Self {
+        let instance = r.instance.map(|i| {
+            let info: crate::domain::InstanceInfo = i.into();
+            let info = match &r.host {
+                Some(h) => info.with_favicon_fallback(h),
+                None => info,
+            };
+            info.with_theme_color_fallback()
+        });
         User {
             id: r.id,
             username: r.username,
@@ -63,6 +94,7 @@ impl From<RawUser> for User {
             emojis: r.emojis,
             bio: r.description,
             banner_url: r.banner_url,
+            instance,
         }
     }
 }
@@ -439,5 +471,36 @@ mod tests {
         assert_eq!(raw.followers_count, 0);
         assert_eq!(raw.following_count, 0);
         assert_eq!(raw.notes_count, 0);
+    }
+
+    #[test]
+    fn raw_user_maps_instance_for_remote_user() {
+        let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":\"https://remote.example/icon.png\",\"themeColor\":\"#ff8800\"}}";
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        let user: User = raw.into();
+        let instance = user.instance.expect("instance should be present for remote user");
+        assert_eq!(instance.name, Some("Remote Instance".to_string()));
+        assert_eq!(instance.icon_url, Some("https://remote.example/icon.png".to_string()));
+        assert_eq!(instance.theme_color, Some("#ff8800".to_string()));
+    }
+
+    #[test]
+    fn raw_user_has_no_instance_for_local_user() {
+        let raw: RawUser =
+            serde_json::from_str(r#"{"id":"u1","username":"alice","host":null}"#).unwrap();
+        let user: User = raw.into();
+        assert_eq!(user.instance, None);
+    }
+
+    #[test]
+    fn raw_user_instance_falls_back_to_host_favicon_when_icon_url_missing() {
+        // 本家Misskeyと同様、iconUrl/themeColorが無いインスタンス(管理者が未設定)では
+        // ホストの/favicon.icoと既定グレー(#777777)にそれぞれフォールバックする。
+        let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":null,\"themeColor\":null}}";
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        let user: User = raw.into();
+        let instance = user.instance.expect("instance should be present for remote user");
+        assert_eq!(instance.icon_url, Some("https://remote.example/favicon.ico".to_string()));
+        assert_eq!(instance.theme_color, Some("#777777".to_string()));
     }
 }

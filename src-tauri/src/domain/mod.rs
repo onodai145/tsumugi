@@ -31,4 +31,4 @@ pub use pane::{PaneChild, PaneNode, SplitDirection};
 pub use reaction::{EmojiDef, ReactionSummary, ReactionUser};
 pub use ui::UiPrefs;
 pub use url_preview::{UrlPlayer, UrlPreview};
-pub use user::User;
+pub use user::{InstanceInfo, User};

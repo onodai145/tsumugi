@@ -114,6 +114,18 @@ pub async fn whoami(state: State<'_, AppState>, account_id: String) -> Result<Us
     Ok(raw.into())
 }
 
+/// 接続先インスタンスの `/api/meta` を取得し、Account.instance を更新して返す
+/// （Instance Ticker用、Issue #103）。boot時にフロントから全アカウント分呼ばれる想定。
+#[tauri::command]
+#[specta::specta]
+pub async fn refresh_instance_meta(state: State<'_, AppState>, account_id: String) -> Result<Account> {
+    let client = state.client_for(&account_id)?;
+    let info = crate::api::meta::fetch_meta(&client).await?;
+    let account = state.accounts.lock().unwrap().update_instance(&account_id, Some(info))?;
+    state.settings.upsert_account(&account)?;
+    Ok(account)
+}
+
 /// "https://misskey.io/" や "@x@misskey.io" 混じりでもホスト名へ寄せる。
 fn normalize_host(input: &str) -> Result<String> {
     let s = input.trim();
@@ -134,6 +146,7 @@ fn build_account(existing_id: Option<String>, host: &str, raw: &RawUser) -> Acco
         user_id: raw.id.clone(),
         display_name: raw.name.clone().unwrap_or_else(|| raw.username.clone()),
         avatar_url: raw.avatar_url.clone(),
+        instance: None,
     }
 }
 

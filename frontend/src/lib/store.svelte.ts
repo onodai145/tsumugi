@@ -213,6 +213,7 @@ class AppStore {
     this.bootedAt = Date.now();
     try {
       this.accounts = await unwrap(commands.listAccounts());
+      void this.#refreshInstanceMeta();
       this.mute = await unwrap(commands.getMute());
       const notify = await unwrap(commands.getNotify());
       this.notify = { ...notify, soundChoice: notify.soundChoice ?? "" };
@@ -235,6 +236,7 @@ class AppStore {
         noteCacheLimit: ui.noteCacheLimit ?? 10000,
         noteCacheMaxAgeDays: ui.noteCacheMaxAgeDays ?? 0,
         noteCacheMaxSizeMb: ui.noteCacheMaxSizeMb ?? 0,
+        instanceTicker: ui.instanceTicker ?? "remote",
       };
       this.#applyTheme(this.ui.theme);
       this.#applySyntaxTheme(this.ui.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
@@ -998,6 +1000,25 @@ class AppStore {
         this.#log("warn", "サーバミュート同期: 権限不足。再認証してください", e.accountId);
       } else {
         this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
+      }
+    }
+  }
+
+  /// 全アカウント分の接続先インスタンス情報（アイコン・名前・テーマカラー）を
+  /// バックグラウンドで取得し、全アカウント分の取得がすべて完了してから、成功した
+  /// ものだけまとめて app.accounts へ反映する（Instance Ticker「常に表示」モード用、
+  /// Issue #103）。起動をブロックしないよう boot() からは await せずに呼ぶ。
+  /// 個別の失敗はログのみ（次回起動で再試行される）。
+  async #refreshInstanceMeta() {
+    const results = await Promise.allSettled(
+      this.accounts.map((a) => unwrapAcc(a.id, commands.refreshInstanceMeta(a.id))),
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        const updated = r.value;
+        this.accounts = this.accounts.map((a) => (a.id === updated.id ? updated : a));
+      } else {
+        this.#log("warn", `インスタンス情報の取得に失敗: ${String(r.reason)}`);
       }
     }
   }

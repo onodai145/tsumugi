@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
+import { app } from "../lib/store.svelte";
 
 // store.svelte.ts が起動時に @tauri-apps/plugin-os の platform() を呼ぶため、
 // Tauri ランタイム外(jsdom)で import が失敗しないようスタブする。
@@ -19,7 +20,10 @@ vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
 const { default: NoteCard } = await import("./NoteCard.svelte");
 const { openProfile } = await import("../lib/profileModal.svelte");
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  app.ui = { ...app.ui, instanceTicker: "remote" };
+});
 
 function makeUser(overrides: Partial<User> = {}): User {
   return {
@@ -283,5 +287,88 @@ describe("投稿削除メニュー", () => {
     await getByText("キャンセル").click();
 
     expect(deleteSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("instance ticker", () => {
+  function remoteUser(): User {
+    return makeUser({
+      host: "remote.example",
+      instance: {
+        name: "Remote Instance",
+        iconUrl: "https://remote.example/icon.png",
+        themeColor: "#ff8800",
+      },
+    });
+  }
+
+  it("shows the ticker for a remote author by default (mode=remote)", async () => {
+    const { getByText } = render(NoteCard, {
+      note: makeNote({ user: remoteUser() }),
+    });
+    expect(getByText("Remote Instance")).toBeTruthy();
+  });
+
+  it("hides the ticker entirely when mode=off", async () => {
+    app.ui = { ...app.ui, instanceTicker: "off" };
+    const { queryByText } = render(NoteCard, {
+      note: makeNote({ user: remoteUser() }),
+    });
+    expect(queryByText("Remote Instance")).toBeNull();
+  });
+
+  it("does not show a ticker for a local author when mode=remote", async () => {
+    const { queryByText } = render(NoteCard, {
+      note: makeNote({ user: makeUser({ host: null }) }),
+    });
+    expect(queryByText("Alice")).toBeTruthy(); // 投稿者名は出る
+    expect(document.querySelector("[data-testid='note-instance-ticker']")).toBeNull();
+  });
+
+  it("ignores a malicious themeColor and falls back to the plain style (no CSS injection)", async () => {
+    const maliciousUser = makeUser({
+      host: "evil.example",
+      instance: {
+        name: "Evil Instance",
+        iconUrl: null,
+        themeColor: "red;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999",
+      },
+    });
+    render(NoteCard, { note: makeNote({ user: maliciousUser }) });
+
+    const ticker = document.querySelector("[data-testid='note-instance-ticker']");
+    expect(ticker).toBeTruthy();
+    // 不正な値そのものはstyle属性に一切反映されないが、見た目はthemeColor不在時と
+    // 同じグラデーション（CSS変数var(--color-muted)使用）+ text-muted-foregroundになる。
+    const style = ticker!.getAttribute("style") ?? "";
+    expect(style).not.toContain("red;position:fixed");
+    expect(style).toContain("var(--color-muted)");
+    expect(ticker!.classList.contains("text-muted-foreground")).toBe(true);
+  });
+
+  it("shows the viewing account's instance for a local author when mode=always", async () => {
+    app.ui = { ...app.ui, instanceTicker: "always" };
+    const accountsBackup = app.accounts.slice();
+    app.accounts.push({
+      id: "acc-always-local",
+      host: "local.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+      instance: { name: "Local Instance", iconUrl: null, themeColor: "#112233" },
+    });
+
+    try {
+      const { getByText } = render(NoteCard, {
+        note: makeNote({ user: makeUser({ host: null }) }),
+        accountId: "acc-always-local",
+        emojiAccountId: "acc-always-local",
+      });
+      expect(getByText("Local Instance")).toBeTruthy();
+    } finally {
+      app.accounts.length = 0;
+      app.accounts.push(...accountsBackup);
+    }
   });
 });

@@ -16,4 +16,8 @@ pub struct Account {
     pub user_id: String,
     pub display_name: String,
     pub avatar_url: Option<String>,
+    /// 接続先インスタンスの表示情報（Instance Ticker用、Issue #103）。ログイン/起動時に
+    /// `/api/meta` から取得して埋める。取得前・失敗時は None。
+    #[serde(default)]
+    pub instance: Option<crate::domain::InstanceInfo>,
 }

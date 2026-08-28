@@ -1143,6 +1143,7 @@ mod tests {
                 emojis: HashMap::new(),
                 bio: None,
                 banner_url: None,
+                instance: None,
             },
             reply_id: None,
             renote_id: None,
@@ -1178,6 +1179,7 @@ mod tests {
                 user_id: user_id.into(),
                 display_name: "Me".into(),
                 avatar_url: None,
+                instance: None,
             })
             .unwrap();
         AppState::new_for_test(settings)

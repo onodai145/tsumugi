@@ -12,6 +12,7 @@
   import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
+  import { readableTextColor, isValidHexColor } from "../lib/color";
   import { acct, displayName } from "../lib/userDisplay";
   import { app } from "../lib/store.svelte";
   import { extractPreviewUrls } from "../lib/extractPreviewUrls";
@@ -64,6 +65,26 @@
   const emojiAcct = $derived(emojiAccountId ?? accountId);
   const instanceHost = $derived(
     emojiAcct ? app.accounts.find((a) => a.id === emojiAcct)?.host : undefined,
+  );
+  // Instance Ticker（Issue #103）: リモートユーザーは note.user.instance をそのまま使う。
+  // ローカルユーザーは mode="always" のときだけ、閲覧中アカウントの instance を使う
+  // （accountId ではなく emojiAcct を使うのは、引用Renote内側のSelfが accountId を
+  // 渡さないため。emojiAcct は同じ理由で既存の絵文字プロキシ解決にも使われている）。
+  const ticker = $derived.by(() => {
+    const mode = app.ui.instanceTicker ?? "remote";
+    if (mode === "off") return null;
+    if (inner.user.instance) return inner.user.instance;
+    if (inner.user.host === null && mode === "always") {
+      const acc = emojiAcct ? app.accounts.find((a) => a.id === emojiAcct) : undefined;
+      return acc?.instance ?? null;
+    }
+    return null;
+  });
+  const tickerLabel = $derived(ticker?.name ?? (inner.user.host ?? instanceHost ?? ""));
+  // themeColor はリモートインスタンス管理者が任意設定できる値なので、hexカラーリテラルと
+  // して妥当な場合のみ style へ渡す。不正な値は themeColor 不在時と同じ表示にフォールバック。
+  const safeTickerThemeColor = $derived(
+    ticker?.themeColor && isValidHexColor(ticker.themeColor) ? ticker.themeColor : undefined,
   );
   // 絵文字 name->url: ローカル絵文字（閲覧インスタンス、既にhome instance配信なのでそのまま）を
   // フォールバックに、note.emojis（リモート＋リアクション絵文字、生URLなのでプロキシ変換）を
@@ -332,6 +353,20 @@
           <span class="inline-flex items-center rounded-sm border border-border p-0.5 text-xs text-muted-foreground" title={VIS_LABEL[inner.visibility]}><VisIcon size={12} /></span>
         {/if}
       </header>
+
+      {#if ticker && (safeTickerThemeColor || ticker.iconUrl || tickerLabel)}
+        <div
+          class="mt-1 flex w-full items-center gap-1 overflow-hidden rounded-sm px-1.5 py-0.5 text-xs"
+          data-testid="note-instance-ticker"
+          style={`background:linear-gradient(90deg, ${safeTickerThemeColor ?? "var(--color-muted)"}, transparent);${safeTickerThemeColor ? `color:${readableTextColor(safeTickerThemeColor)}` : ""}`}
+          class:text-muted-foreground={!safeTickerThemeColor}
+        >
+          {#if ticker.iconUrl}
+            <img src={ticker.iconUrl} alt="" class="size-3 flex-none rounded-full object-cover" />
+          {/if}
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap">{tickerLabel}</span>
+        </div>
+      {/if}
 
       {#if inner.cw}
         <div class="mt-0.5">
