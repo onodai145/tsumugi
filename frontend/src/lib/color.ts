@@ -5,9 +5,11 @@ const HEX_RE = /^#([0-9a-fA-F]{6})$/;
 
 // Instance Ticker の themeColor はリモートインスタンス管理者が任意の文字列を設定できる
 // ため、style属性へ直接埋め込む前に「hexカラーリテラルそのものである」ことを検証する。
-// `;` などを含む値を通すとCSSインジェクション（UIリドレス）につながるため、
-// #rgb/#rgba/#rrggbb/#rrggbbaa のいずれか以外は一切許可しない。
-const VALID_HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+// `;` などを含む値を通すとCSSインジェクション（UIリドレス）につながるため、厳密な
+// #rrggbb（6桁）以外は一切許可しない。readableTextColor の HEX_RE と同じ形式に
+// 揃えることで、3/4/8桁hexが通って可読性フォールバック（白文字）と背景色が
+// 噛み合わなくなる事態を防ぐ。
+const VALID_HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 export function isValidHexColor(value: string): boolean {
   return VALID_HEX_COLOR_RE.test(value);

@@ -27,11 +27,14 @@ describe("readableTextColor", () => {
 });
 
 describe("isValidHexColor", () => {
-  it("accepts standard hex color forms", () => {
-    expect(isValidHexColor("#fff")).toBe(true);
-    expect(isValidHexColor("#ffff")).toBe(true);
+  it("accepts strict 6-digit hex color", () => {
     expect(isValidHexColor("#ff8800")).toBe(true);
-    expect(isValidHexColor("#ff8800cc")).toBe(true);
+  });
+
+  it("rejects non-6-digit hex forms (readableTextColor only supports #rrggbb)", () => {
+    expect(isValidHexColor("#fff")).toBe(false);
+    expect(isValidHexColor("#ffff")).toBe(false);
+    expect(isValidHexColor("#ff8800cc")).toBe(false);
   });
 
   it("rejects a value with an embedded CSS declaration (injection attempt)", () => {
