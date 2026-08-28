@@ -20,7 +20,10 @@ vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
 const { default: NoteCard } = await import("./NoteCard.svelte");
 const { openProfile } = await import("../lib/profileModal.svelte");
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  app.ui = { ...app.ui, instanceTicker: "remote" };
+});
 
 function makeUser(overrides: Partial<User> = {}): User {
   return {
@@ -312,7 +315,6 @@ describe("instance ticker", () => {
       note: makeNote({ user: remoteUser() }),
     });
     expect(queryByText("Remote Instance")).toBeNull();
-    app.ui = { ...app.ui, instanceTicker: "remote" };
   });
 
   it("does not show a ticker for a local author when mode=remote", async () => {
@@ -341,5 +343,31 @@ describe("instance ticker", () => {
     expect(ticker!.getAttribute("style")).toBeFalsy();
     expect(ticker!.classList.contains("bg-muted")).toBe(true);
     expect(ticker!.classList.contains("text-muted-foreground")).toBe(true);
+  });
+
+  it("shows the viewing account's instance for a local author when mode=always", async () => {
+    app.ui = { ...app.ui, instanceTicker: "always" };
+    const accountsBackup = app.accounts.slice();
+    app.accounts.push({
+      id: "acc-always-local",
+      host: "local.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+      instance: { name: "Local Instance", iconUrl: null, themeColor: "#112233" },
+    });
+
+    try {
+      const { getByText } = render(NoteCard, {
+        note: makeNote({ user: makeUser({ host: null }) }),
+        accountId: "acc-always-local",
+        emojiAccountId: "acc-always-local",
+      });
+      expect(getByText("Local Instance")).toBeTruthy();
+    } finally {
+      app.accounts.length = 0;
+      app.accounts.push(...accountsBackup);
+    }
   });
 });
