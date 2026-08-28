@@ -469,8 +469,10 @@ describe("readableTextColor", () => {
     expect(readableTextColor("#ffffff")).toBe("#000000");
   });
 
-  it("returns white text for a saturated dark accent color", () => {
-    expect(readableTextColor("#ff0000")).toBe("#ffffff");
+  it("returns black text for a saturated red accent color", () => {
+    // WCAG相対輝度は緑チャンネルの重みが大きいため(0.7152)、純赤(#ff0000)の輝度は0.2126で
+    // しきい値0.179を上回り、黒文字の方がコントラスト比が高くなる(黒5.25 vs 白4.00)。
+    expect(readableTextColor("#ff0000")).toBe("#000000");
   });
 
   it("returns black text for a pale accent color", () => {
