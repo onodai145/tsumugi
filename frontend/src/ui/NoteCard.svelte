@@ -12,7 +12,7 @@
   import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
-  import { readableTextColor } from "../lib/color";
+  import { readableTextColor, isValidHexColor } from "../lib/color";
   import { acct, displayName } from "../lib/userDisplay";
   import { app } from "../lib/store.svelte";
   import { extractPreviewUrls } from "../lib/extractPreviewUrls";
@@ -81,6 +81,11 @@
     return null;
   });
   const tickerLabel = $derived(ticker?.name ?? (inner.user.host ?? instanceHost ?? ""));
+  // themeColor はリモートインスタンス管理者が任意設定できる値なので、hexカラーリテラルと
+  // して妥当な場合のみ style へ渡す。不正な値は themeColor 不在時と同じ表示にフォールバック。
+  const safeTickerThemeColor = $derived(
+    ticker?.themeColor && isValidHexColor(ticker.themeColor) ? ticker.themeColor : undefined,
+  );
   // 絵文字 name->url: ローカル絵文字（閲覧インスタンス、既にhome instance配信なのでそのまま）を
   // フォールバックに、note.emojis（リモート＋リアクション絵文字、生URLなのでプロキシ変換）を
   // 上書きで重ねる。
@@ -349,15 +354,15 @@
         {/if}
       </header>
 
-      {#if ticker && (ticker.themeColor || ticker.iconUrl || tickerLabel)}
+      {#if ticker && (safeTickerThemeColor || ticker.iconUrl || tickerLabel)}
         <div
           class="mt-1 inline-flex w-fit max-w-full items-center gap-1 overflow-hidden rounded-sm px-1.5 py-0.5 text-xs"
           data-testid="note-instance-ticker"
-          style={ticker.themeColor
-            ? `background:${ticker.themeColor};color:${readableTextColor(ticker.themeColor)}`
+          style={safeTickerThemeColor
+            ? `background:${safeTickerThemeColor};color:${readableTextColor(safeTickerThemeColor)}`
             : undefined}
-          class:bg-muted={!ticker.themeColor}
-          class:text-muted-foreground={!ticker.themeColor}
+          class:bg-muted={!safeTickerThemeColor}
+          class:text-muted-foreground={!safeTickerThemeColor}
         >
           {#if ticker.iconUrl}
             <img src={ticker.iconUrl} alt="" class="size-3 flex-none rounded-full object-cover" />

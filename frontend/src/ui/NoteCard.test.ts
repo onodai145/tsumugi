@@ -322,4 +322,24 @@ describe("instance ticker", () => {
     expect(queryByText("Alice")).toBeTruthy(); // 投稿者名は出る
     expect(document.querySelector("[data-testid='note-instance-ticker']")).toBeNull();
   });
+
+  it("ignores a malicious themeColor and falls back to the plain style (no CSS injection)", async () => {
+    const maliciousUser = makeUser({
+      host: "evil.example",
+      instance: {
+        name: "Evil Instance",
+        iconUrl: null,
+        themeColor: "red;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999",
+      },
+    });
+    render(NoteCard, { note: makeNote({ user: maliciousUser }) });
+
+    const ticker = document.querySelector("[data-testid='note-instance-ticker']");
+    expect(ticker).toBeTruthy();
+    // 不正なthemeColorはstyle属性に一切反映されず、themeColor不在時と同じ
+    // フォールバック（style未設定 + bg-muted/text-muted-foreground）になる。
+    expect(ticker!.getAttribute("style")).toBeFalsy();
+    expect(ticker!.classList.contains("bg-muted")).toBe(true);
+    expect(ticker!.classList.contains("text-muted-foreground")).toBe(true);
+  });
 });

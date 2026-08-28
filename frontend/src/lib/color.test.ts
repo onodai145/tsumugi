@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readableTextColor } from "./color";
+import { isValidHexColor, readableTextColor } from "./color";
 
 describe("readableTextColor", () => {
   it("returns white text for a dark background", () => {
@@ -23,5 +23,29 @@ describe("readableTextColor", () => {
   it("falls back to white text for an invalid hex value", () => {
     expect(readableTextColor("not-a-color")).toBe("#ffffff");
     expect(readableTextColor("")).toBe("#ffffff");
+  });
+});
+
+describe("isValidHexColor", () => {
+  it("accepts standard hex color forms", () => {
+    expect(isValidHexColor("#fff")).toBe(true);
+    expect(isValidHexColor("#ffff")).toBe(true);
+    expect(isValidHexColor("#ff8800")).toBe(true);
+    expect(isValidHexColor("#ff8800cc")).toBe(true);
+  });
+
+  it("rejects a value with an embedded CSS declaration (injection attempt)", () => {
+    expect(
+      isValidHexColor(
+        "red;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999",
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects other malformed or non-hex values", () => {
+    expect(isValidHexColor("ff8800")).toBe(false); // no leading #
+    expect(isValidHexColor("#ff88zz")).toBe(false); // non-hex chars
+    expect(isValidHexColor("#ff8800a")).toBe(false); // wrong length (7 hex digits)
+    expect(isValidHexColor("")).toBe(false);
   });
 });
