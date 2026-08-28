@@ -111,7 +111,8 @@ pub async fn list_emojis(client: &MisskeyClient) -> Result<Vec<EmojiDef>> {
 /// `detail: false` で軽量なレスポンス(MetaLite相当)にする。
 pub async fn fetch_meta(client: &MisskeyClient) -> Result<crate::domain::InstanceInfo> {
     let raw: RawMeta = client.post("meta", &json!({ "detail": false })).await?;
-    Ok(raw.into())
+    let info: crate::domain::InstanceInfo = raw.into();
+    Ok(info.with_favicon_fallback(client.host()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,6 +158,21 @@ mod meta_info_tests {
         let info: crate::domain::InstanceInfo = raw.into();
         assert_eq!(info.name, None);
         assert_eq!(info.icon_url, None);
+        assert_eq!(info.theme_color, None);
+    }
+
+    /// fetch_meta の実体は「RawMeta→InstanceInfo変換 + favicon フォールバック」の合成。
+    /// ネットワーク呼び出し自体はこのプロジェクトの慣例上モックしないため（api/drive.rs等
+    /// 参照）、この合成が実際に適用先で使う形と一致することをここで確認する。
+    #[test]
+    fn instance_info_from_meta_without_icon_falls_back_to_host_favicon() {
+        let raw: RawMeta = serde_json::from_str(
+            r##"{"name":"しーもハウス","iconUrl":null,"themeColor":null}"##,
+        )
+        .unwrap();
+        let info: crate::domain::InstanceInfo = raw.into();
+        let info = info.with_favicon_fallback("misskey.omhnc.net");
+        assert_eq!(info.icon_url, Some("https://misskey.omhnc.net/favicon.ico".to_string()));
         assert_eq!(info.theme_color, None);
     }
 }

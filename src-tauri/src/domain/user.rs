@@ -13,6 +13,20 @@ pub struct InstanceInfo {
     pub theme_color: Option<String>,
 }
 
+impl InstanceInfo {
+    /// `icon_url` が無い場合、`host` の `/favicon.ico` を補う。Misskeyの `iconUrl` は
+    /// 管理者が未設定だと null になるが、`https://{host}/favicon.ico` はブラウザの
+    /// 既定favicon探索と同様に多くのインスタンスで実在するため、本家Misskeyの
+    /// インスタンスチッカーもこれをフォールバックに使っている（themeColorには
+    /// 代替手段が無いため、そちらは未設定のままにする）。
+    pub fn with_favicon_fallback(mut self, host: &str) -> Self {
+        if self.icon_url.is_none() {
+            self.icon_url = Some(format!("https://{host}/favicon.ico"));
+        }
+        self
+    }
+}
+
 /// docs/design/filter-dsl-design.md §7。`host` が None ならローカルユーザ。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]

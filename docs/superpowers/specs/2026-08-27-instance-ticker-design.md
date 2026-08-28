@@ -71,7 +71,7 @@ pub struct InstanceInfo {
 }
 ```
 
-`faviconUrl` は取得対象に含めない（`/api/meta` の `MetaLite` スキーマに存在しないため、リモート側の値も使わずアイコンなし扱いで揃える）。
+`faviconUrl` は取得対象に含めない（`/api/meta` の `MetaLite` スキーマに存在しないため、リモート側の値も使わない）。ただし `iconUrl`（リモートは`UserLite.instance.iconUrl`、ローカルは`/api/meta`の`iconUrl`）が未設定の場合、`InstanceInfo::with_favicon_fallback` がホストの `https://{host}/favicon.ico` にフォールバックする（本家Misskeyの `MkInstanceTicker.vue` と同じ挙動）。管理者がアイコンを設定していないインスタンスでも favicon が実在すればアイコン欠落を避けられる。`themeColor` には同様のフォールバック手段が無いため、未設定インスタンスの投稿は色なし（`bg-muted`）表示のままになる。
 
 ## 表示ロジック（フロント）
 
