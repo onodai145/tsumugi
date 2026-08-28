@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
+import { app } from "../lib/store.svelte";
 
 // store.svelte.ts が起動時に @tauri-apps/plugin-os の platform() を呼ぶため、
 // Tauri ランタイム外(jsdom)で import が失敗しないようスタブする。
@@ -283,5 +284,42 @@ describe("投稿削除メニュー", () => {
     await getByText("キャンセル").click();
 
     expect(deleteSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("instance ticker", () => {
+  function remoteUser(): User {
+    return makeUser({
+      host: "remote.example",
+      instance: {
+        name: "Remote Instance",
+        iconUrl: "https://remote.example/icon.png",
+        themeColor: "#ff8800",
+      },
+    });
+  }
+
+  it("shows the ticker for a remote author by default (mode=remote)", async () => {
+    const { getByText } = render(NoteCard, {
+      note: makeNote({ user: remoteUser() }),
+    });
+    expect(getByText("Remote Instance")).toBeTruthy();
+  });
+
+  it("hides the ticker entirely when mode=off", async () => {
+    app.ui = { ...app.ui, instanceTicker: "off" };
+    const { queryByText } = render(NoteCard, {
+      note: makeNote({ user: remoteUser() }),
+    });
+    expect(queryByText("Remote Instance")).toBeNull();
+    app.ui = { ...app.ui, instanceTicker: "remote" };
+  });
+
+  it("does not show a ticker for a local author when mode=remote", async () => {
+    const { queryByText } = render(NoteCard, {
+      note: makeNote({ user: makeUser({ host: null }) }),
+    });
+    expect(queryByText("Alice")).toBeTruthy(); // 投稿者名は出る
+    expect(document.querySelector("[data-testid='note-instance-ticker']")).toBeNull();
   });
 });
