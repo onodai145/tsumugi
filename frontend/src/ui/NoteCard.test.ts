@@ -338,10 +338,11 @@ describe("instance ticker", () => {
 
     const ticker = document.querySelector("[data-testid='note-instance-ticker']");
     expect(ticker).toBeTruthy();
-    // 不正なthemeColorはstyle属性に一切反映されず、themeColor不在時と同じ
-    // フォールバック（style未設定 + bg-muted/text-muted-foreground）になる。
-    expect(ticker!.getAttribute("style")).toBeFalsy();
-    expect(ticker!.classList.contains("bg-muted")).toBe(true);
+    // 不正な値そのものはstyle属性に一切反映されないが、見た目はthemeColor不在時と
+    // 同じグラデーション（CSS変数var(--color-muted)使用）+ text-muted-foregroundになる。
+    const style = ticker!.getAttribute("style") ?? "";
+    expect(style).not.toContain("red;position:fixed");
+    expect(style).toContain("var(--color-muted)");
     expect(ticker!.classList.contains("text-muted-foreground")).toBe(true);
   });
 

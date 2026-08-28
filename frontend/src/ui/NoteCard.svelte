@@ -358,10 +358,7 @@
         <div
           class="mt-1 flex w-full items-center gap-1 overflow-hidden rounded-sm px-1.5 py-0.5 text-xs"
           data-testid="note-instance-ticker"
-          style={safeTickerThemeColor
-            ? `background:linear-gradient(90deg, ${safeTickerThemeColor}, transparent);color:${readableTextColor(safeTickerThemeColor)}`
-            : undefined}
-          class:bg-muted={!safeTickerThemeColor}
+          style={`background:linear-gradient(90deg, ${safeTickerThemeColor ?? "var(--color-muted)"}, transparent);${safeTickerThemeColor ? `color:${readableTextColor(safeTickerThemeColor)}` : ""}`}
           class:text-muted-foreground={!safeTickerThemeColor}
         >
           {#if ticker.iconUrl}
