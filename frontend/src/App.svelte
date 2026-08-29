@@ -124,7 +124,9 @@
     </header>
   {/if}
 
-  <main class="min-h-0 min-w-0 flex-1">
+  <!-- スマホUIではheaderが無いため、main自身がステータスバー分のセーフエリアを確保しないと
+       カラムのタブバーがステータスバーに被る(Issue #257)。PC版はheaderが既に確保している。 -->
+  <main class="min-h-0 min-w-0 flex-1" class:pt-[env(safe-area-inset-top)]={useMobileUi}>
     {#if app.booting}
       <div class="grid h-full place-items-center p-6 text-center text-muted-foreground">起動中…</div>
     {:else if showAdd || reauthAccount || app.accounts.length === 0}

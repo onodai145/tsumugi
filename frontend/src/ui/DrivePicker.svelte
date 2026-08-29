@@ -101,7 +101,7 @@
 </script>
 
 <div
-  class="fixed inset-0 z-[60] grid items-start justify-items-center bg-black/45 pt-[8vh]"
+  class="fixed inset-0 z-[60] grid items-start justify-items-center bg-black/45 pt-[max(8vh,env(safe-area-inset-top))]"
   onclick={onclose}
   onkeydown={(e) => e.key === "Escape" && onclose()}
   role="presentation"
