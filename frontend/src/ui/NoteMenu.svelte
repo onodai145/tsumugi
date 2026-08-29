@@ -20,7 +20,7 @@
 
   function copyText() {
     if (note.text) {
-      navigator.clipboard.writeText(note.text);
+      navigator.clipboard.writeText(note.text).catch((e) => console.error("本文のコピーに失敗しました", e));
     }
     onclose();
   }
