@@ -2,6 +2,191 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-08-29
+
+### 🚀 Features
+
+- ＋カラム・設定ボタンを下部バー左端のハンバーガーメニューへ移設
+- 投稿バーにリアクション受け入れ設定を追加
+- Nyaize文字対応表ユーティリティを追加
+- Nyaizeコピーイベントハンドラを追加
+- Nyaize済みテキストに元テキストをdata属性で保持
+- ノートカードにnyaizeコピーハンドラを接続
+- MFM検索構文の検索エンジンを設定で切り替え可能にする
+- ColumnGapFillイベントにギャップ打ち切り情報を追加
+- TabViewにgapMarkerを追加しギャップ埋め打ち切りを検知する
+- FillRemainingGapでギャップ埋め打ち切り分を手動取得できるようにする
+- タイムラインにギャップ埋め打ち切りの区切り線とボタンを表示する
+- デバッグビルド限定のdevtools用Unixソケットブリッジを追加
+- Windows名前付きパイプでもデバッグブリッジを使えるようにする
+- 自分の投稿をその他メニューから削除できるようにする
+- カラム単位のbackfill境界(column_fetch_boundary)を追加
+- カラムキャッシュのuntil_id指定取得(load_cached_before)を追加
+- Backfillのキャッシュ応答可否判定(cache_backfill_page)を追加
+- Fetch_backfillでbackfill境界内はキャッシュから応答する
+- 通知音プリセットのWAVアセットを追加
+- 通知音choiceをバイト列に解決するresolve_audio_bytesを追加
+- 通知音をネイティブ再生するSoundPlayerを追加
+- Play_notify_soundコマンドを追加してTSバインディングを再生成
+- 通知音の再生をplay_notify_soundコマンド呼び出しに置き換え
+- メンションアバターのセッション内キャッシュモジュールを追加
+- 本文中のメンションにアバターアイコンを表示する
+- UrlPreview型とUiPrefsのリンクプレビュー設定を追加
+- Summalyプロキシからのリンクプレビュー取得・正規化を追加
+- Fetch_url_previewコマンドを追加してTSバインディングを生成
+- 本文からリンクプレビュー対象URLを抽出するユーティリティを追加
+- リンクプレビューのセッションキャッシュを追加
+- UrlPreviewCardコンポーネントを追加
+- ノートにリンクプレビューを表示し設定UIを追加
+- カラムヘッダーのボタンをメニューに集約
+- User.instanceにInstance Ticker用インスタンス情報を追加
+- Account.instanceと/api/meta取得を追加
+- Refresh_instance_metaコマンドを追加
+- UiPrefs.instanceTicker設定を追加
+- 背景色から可読な文字色を選ぶreadableTextColorを追加
+- Boot時に全アカウントのインスタンス情報を取得
+- 外観設定にInstance Tickerの表示モードを追加
+- NoteCardにInstance Tickerを表示
+- Instance Tickerをカラム幅いっぱいのグラデーション表示に変更
+- Instance Tickerのアイコン未設定時にホストのfaviconへフォールバック
+- ThemeColor未設定時に本家準拠の既定グレー(#777777)へフォールバック
+- 不正なthemeColor時のフォールバックもグラデーション表示に統一
+- ノートメニューに内容コピー項目を追加
+
+### 🐛 Bug Fixes
+
+- カスタム対話要素にキーボードフォーカスの視覚表示を追加
+- AppMenuの高さをBackstageバーに揃えて余白を解消
+- AppMenuをログ展開時も下部バーの下端に固定
+- AppMenuボタンをoutline variantにしてログボタンと揃える
+- ギャップ埋め設定をデータセクションへ移動しデバッグ設定を区別
+- データセクションにh3見出しを追加
+- リアクション受け入れ選択肢の文言をMisskey本家に揃える
+- リアクション受け入れボタンにアプリ内共通のリアクションアイコンを追加
+- Nyaizeコピーの安全対策(nyaize対象外選択のフォールバック/絵文字・改行欠落/DP性能上限)を追加
+- SeedスクリプトのESM対応とtypescriptバージョン固定
+- MiAuthブリッジのセッション確立をlocalStorage注入+永続コンテキストへ修正
+- E2E実行時のブラウザ起動先とmisskey.local名前解決を修正
+- Node側fetch()のmisskey.local名前解決とCA証明書読み込みを修正
+- @wdio/tauri-serviceのプラグイン未検出ポーリングをパッチで抑制
+- ReqwestのTLSルート証明書をOS信頼ストア参照に変更
+- E2E実行時にtsumugiのTLS検証がテストCAを信頼するよう修正
+- Gnome-keyring-daemon起動とmisskey.local名前解決をLD_PRELOAD方式に統合
+- Add-column-submitボタンのクリック不能問題とE2Eプロセス残留を修正
+- Tokio-tungsteniteのTLSルート証明書をOS信頼ストア参照に変更
+- ウィンドウレイアウト安定待ちとノート表示セレクタの曖昧さを解消
+- Android向けTLSルート証明書解決失敗に備えwebpki-rootsを併用
+- MiAuthブリッジのブラウザlocaleをja-JPに固定
+- MFMの検索構文を検索ボックスUIとして描画する
+- 最終レビュー指摘(収束条件/エラー表示/枯渇誤検知/競合)を修正
+- コードブロックの横スクロールをpre自身に持たせ、スクロールバーへのドラッグ不可を軽減する
+- 言語未指定のコードブロックをshikiのtext特殊言語でテーマ適用する
+- 削除確認ダイアログがメニューの背景に隠れてクリックできない不具合を修正
+- Clear_column_notesでbackfill境界も削除する
+- Pruneでbackfill境界を生存範囲まで引き上げる
+- Pruneのboundary取得でDBエラーを握りつぶさないようにする
+- Backfillキャッシュ提供ページに境界下限とミュート再適用を追加
+- キャッシュ取得とprune境界引き上げをid基準に揃える
+- 非連続な範囲での境界延長を防ぎミュート変更時に境界を破棄する
+- LoadMoreのMAX_NOTES上限到達後にbackfillが遡れなくなる不具合を修正
+- LoadMoreのbackfill結果をMAX_NOTESで切り捨てないようにする
+- 通知音デコードのパニック捕捉と出力デバイス再オープン処理を追加
+- PlayNotifySound呼び出しにcatchを付けて共通ヘルパーへ集約
+- CIにlibasound2-devを追加してrodio依存のalsa-sysビルドを通す
+- Rodio(Oboe)のAAudio要件に合わせてAndroid minSdkを26に引き上げ
+- MinSdkVersionはtauri.conf.json側で指定しないとcargo tauri android buildに反映されないため追加
+- メンションアバターのキャッシュ設計をレビュー指摘に対応
+- CachedAvatarUrlのアカウント未設定時の戻り値をコメントに合わせる
+- メンションアバターをチップ化してテキストとの対応を分かりやすくする
+- メンションチップの背景を単色からアクセント薄塗りに変更
+- メンションのホスト部を太字にせずユーザー名のみ強調する
+- リンクプレビューの危険なURLスキームを拒否する
+- 最終レビュー指摘(空プレビューのキャッシュ・サムネイルのプロキシ化・URL抽出の再計算)を修正
+- リンクプレビューカードの幅と高さに上限を設ける
+- リンクプレビューカードを横長レイアウトに変更
+- プレイヤー展開時のアスペクト比を実際のサイズから算出する
+- Player.widthが無くheightのみの埋め込み(Spotify等)は固定高さを使う
+- プレイヤー展開時の高さに常時200pxの下限を設ける
+- ユーザー検索の重複結果を去重する
+- メニューの画面外はみ出しとガイド記述のずれを修正
+- メニューをタブスクロール領域から切り離しカラム右端に固定
+- InstanceTicker themeColorの検証を追加してCSS注入を防止
+- IsValidHexColorをreadableTextColorと同じ6桁形式に統一
+- Refresh_instance_metaで実際に使われている関数のdead_code属性を削除
+- 最終レビュー指摘のコメント修正・テスト堅牢化・カバレッジ追加
+- スマホUIでカラムタブバーがステータスバーに被る問題を修正
+- レビュー指摘を反映（ユーザーガイド更新・クリップボードエラー処理など）
+
+### 🚜 Refactor
+
+- 角丸をスタイルガイドのスケールに統一
+- フォントサイズをスタイルガイドのスケールに統一
+- アイコンサイズをスタイルガイドのスケールに統一
+- 設定のDisplaySectionをテーマ・背景セクションに分割
+- 表示をレイアウトに改名し絵文字・フォント・MFMアニメをテーマへ再分類
+- テーマセクションを外観に改名
+- Fill_gapがnewest_known_idへの到達可否を返すようにする
+
+### 📚 Documentation
+
+- UIスタイルガイドを追加
+- スタイルガイドにタイポグラフィ・アイコン・フォーカス指針を追加
+- リアクション受け入れ設定の設計書を追加
+- リアクション受け入れ設定の実装計画を追加
+- CLAUDE.mdにスタイルガイドへの参照を追記
+- Nyaize前文字列コピー(#168)の設計spec
+- Nyaize前文字列コピー(#168)の実装計画書
+- Issue #132 E2E自動化設計スペックを追加
+- Issue #132 CA証明書登録の冗長化対応を追記
+- Issue #132 E2E自動化の実装計画を追加
+- E2Eディレクトリの実行手順READMEを追加
+- E2Eテストとビルドのハング回避策をCLAUDE.mdに追記
+- Issue #148起動時ギャップ埋め打ち切り分の続き取得設計を追加
+- Issue #148 ギャップ埋め続き取得の実装計画を追加
+- Issue #232 デバッグ用devtoolsブリッジの設計を追記
+- CLAUDE.mdにdebug_bridgeモジュールの説明を追加
+- Issue #234 投稿削除機能の設計を追記
+- Issue #234 投稿削除機能の実装計画を追加
+- Issue #228 backfillキャッシュ優先化の設計を追加
+- Issue #12 通知音のRustネイティブ再生移行の設計を追加
+- Issue #12 通知音Rustネイティブ再生の実装計画を追加
+- 設計doc内の実在しないテスト移行の記述を修正
+- メンションアバターアイコン表示の設計docを追加（Issue #102）
+- メンションアバターアイコン実装計画を追加（Issue #102）
+- OGP/リンクプレビュー対応の設計を追加(Issue #9)
+- カスタムsummalyプロキシURL設定を設計に追加(Issue #9)
+- OGP/リンクプレビュー実装計画を追加(Issue #9)
+- カラムヘッダーミートボールメニュー化の設計を追加
+- カラムヘッダーメニュー化の実装計画を追加
+- Instance Ticker実装計画を追加
+- Instance Ticker実装計画を追加
+- Task 5テストのWCAG輝度計算ミスを修正
+- ノート本文コピー機能の設計spec追加
+- メニュー項目名を「内容をコピー」に修正
+- ノート本文コピー機能の実装計画追加
+
+### 🧪 Testing
+
+- Tauri-driverスパイクでE2E基盤の疎通を確認
+- E2E用CA証明書の生成・登録スクリプトを追加
+- E2E用Docker Compose Misskeyスタックを追加
+- E2Eテスト管理者アカウントのseedスクリプトを追加
+- E2E実行時にアプリを本番環境から分離するラッパーを追加
+- MiAuth同意画面のPlaywright CDPブリッジを追加
+- E2Eセレクタ用のdata-testid属性を追加
+- アカウント追加→投稿→リアクションのE2Eシナリオを実装
+- E2Eのノートスコープ・Xvfb起動失敗検知・seed冪等時のファイル書き込みを修正
+- MiAuthフロー失敗調査用の診断ログ・スクリーンショットを追加
+- 投稿削除の確認ダイアログフローをテストする
+- 空accountIdでのfetchUrlPreview挙動を検証するテストを追加
+
+### ⚙️ Miscellaneous Tasks
+
+- E2EテストジョブをGitHub Actionsに追加
+- E2E失敗アーティファクトのSHAピン誤りとログ出力先未設定を修正
+- Docs-only変更でrust-test/frontend-check/android-build/e2eの実処理をスキップ
+- E2eも必須ステータスチェックとしてdocs-onlyスキップ方式に統一
+- TSバインディング再生成とplanドキュメントを追加
 ## [0.9.0] - 2026-08-13
 
 ### 🚀 Features
