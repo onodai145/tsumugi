@@ -29,15 +29,15 @@
 ## ダウンロード
 
 <!-- release-download-links:start -->
-最新版 v0.9.0（[Releases ページ](https://github.com/onodai145/tsumugi/releases/latest)）
+最新版 v0.10.0（[Releases ページ](https://github.com/onodai145/tsumugi/releases/latest)）
 
 | Windows | macOS | Linux | Android |
 |---|---|---|---|
-| [msi（標準）](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi_0.9.0_x64_en-US.msi) | [dmg（標準）](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi_0.9.0_universal.dmg) | [AppImage（インストール不要）](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi_0.9.0_amd64.AppImage) | [universal](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi-v0.9.0-android-universal.apk)（不明な場合はこれ） |
-| [exe（NSIS）](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi_0.9.0_x64-setup.exe) | [tar.gz](https://github.com/onodai145/tsumugi/releases/latest/download/tsumugi_universal.app.tar.gz) | [deb（Debian/Ubuntu）](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi_0.9.0_amd64.deb) | [arm64-v8a](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi-v0.9.0-android-arm64-v8a.apk) |
-| [ポータブル（インストール不要）](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi-v0.9.0-portable-windows-x64.exe) | | [rpm（Fedora/RHEL）](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi-0.9.0-1.x86_64.rpm) | [armeabi-v7a](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi-v0.9.0-android-armeabi-v7a.apk) |
-| | | | [x86_64](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi-v0.9.0-android-x86_64.apk) |
-| | | | [x86](https://github.com/onodai145/tsumugi/releases/download/v0.9.0/tsumugi-v0.9.0-android-x86.apk) |
+| [msi（標準）](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi_0.10.0_x64_en-US.msi) | [dmg（標準）](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi_0.10.0_universal.dmg) | [AppImage（インストール不要）](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi_0.10.0_amd64.AppImage) | [universal](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi-v0.10.0-android-universal.apk)（不明な場合はこれ） |
+| [exe（NSIS）](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi_0.10.0_x64-setup.exe) | [tar.gz](https://github.com/onodai145/tsumugi/releases/latest/download/tsumugi_universal.app.tar.gz) | [deb（Debian/Ubuntu）](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi_0.10.0_amd64.deb) | [arm64-v8a](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi-v0.10.0-android-arm64-v8a.apk) |
+| [ポータブル（インストール不要）](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi-v0.10.0-portable-windows-x64.exe) | | [rpm（Fedora/RHEL）](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi-0.10.0-1.x86_64.rpm) | [armeabi-v7a](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi-v0.10.0-android-armeabi-v7a.apk) |
+| | | | [x86_64](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi-v0.10.0-android-x86_64.apk) |
+| | | | [x86](https://github.com/onodai145/tsumugi/releases/download/v0.10.0/tsumugi-v0.10.0-android-x86.apk) |
 <!-- release-download-links:end -->
 
 ## 開発者向け情報
