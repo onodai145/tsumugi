@@ -185,11 +185,18 @@ describe("投稿削除メニュー", () => {
   // vi.mock(...) のモジュールファクトリで持つ実装(isPermissionGranted等)まで
   // まとめて剥がしてしまうため、このブロックで張った spy だけを個別に restore する。
   let deleteSpy: ReturnType<typeof vi.spyOn> | null = null;
+  const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   afterEach(async () => {
     const { app } = await import("../lib/store.svelte");
     app.accounts.length = 0;
     deleteSpy?.mockRestore();
     deleteSpy = null;
+    if (originalClipboardDescriptor) {
+      Object.defineProperty(navigator, "clipboard", originalClipboardDescriptor);
+    } else {
+      // @ts-expect-error テスト用スタブで追加したプロパティを取り除く(元は存在しなかった)
+      delete navigator.clipboard;
+    }
   });
 
   it("自分の投稿では削除項目を表示する", async () => {
@@ -287,6 +294,44 @@ describe("投稿削除メニュー", () => {
     await getByText("キャンセル").click();
 
     expect(deleteSpy).not.toHaveBeenCalled();
+  });
+
+  it("本文がある投稿では「内容をコピー」項目を表示し、クリックでクリップボードにコピーしてメニューを閉じる", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const note = makeNote({ text: "**bold** です" });
+    const { getByLabelText, getByText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("内容をコピー").click();
+
+    expect(writeText).toHaveBeenCalledWith("**bold** です");
+    expect(queryByText("内容をコピー")).toBeNull();
+  });
+
+  it("本文がnullのノートでは「内容をコピー」項目を表示しない", async () => {
+    const note = makeNote({ text: null });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("内容をコピー")).toBeNull();
+  });
+
+  it("本文が空文字のノートでは「内容をコピー」項目を表示しない", async () => {
+    const note = makeNote({ text: "" });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("内容をコピー")).toBeNull();
   });
 });
 
