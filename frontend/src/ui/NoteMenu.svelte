@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Note, Clip } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
-  import { Star, Paperclip, ChevronRight, Trash2 } from "@lucide/svelte";
+  import { Star, Paperclip, ChevronRight, Trash2, Copy } from "@lucide/svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
   let { accountId, note, onclose }: { accountId: string; note: Note; onclose: () => void } = $props();
@@ -17,6 +17,13 @@
   let newClipName = $state("");
   let clipRowEl = $state<HTMLElement | null>(null);
   let submenuSide = $state<"right" | "left">("right");
+
+  function copyText() {
+    if (note.text) {
+      navigator.clipboard.writeText(note.text);
+    }
+    onclose();
+  }
 
   function toggleFavorite() {
     app.toggleFavorite(accountId, note.id);
@@ -79,6 +86,12 @@
 </script>
 
 <div class="w-[200px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
+  {#if note.text}
+    <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={copyText}>
+      <Copy size={16} />
+      内容をコピー
+    </button>
+  {/if}
   <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={toggleFavorite}>
     <Star size={16} />
     {note.isFavoritedByMe ? "お気に入り解除" : "お気に入り登録"}

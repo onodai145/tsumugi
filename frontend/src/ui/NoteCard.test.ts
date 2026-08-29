@@ -288,6 +288,32 @@ describe("投稿削除メニュー", () => {
 
     expect(deleteSpy).not.toHaveBeenCalled();
   });
+
+  it("本文がある投稿では「内容をコピー」項目を表示し、クリックでクリップボードにコピーする", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const note = makeNote({ text: "**bold** です" });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("内容をコピー").click();
+
+    expect(writeText).toHaveBeenCalledWith("**bold** です");
+  });
+
+  it("本文が空のノートでは「内容をコピー」項目を表示しない", async () => {
+    const note = makeNote({ text: null });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("内容をコピー")).toBeNull();
+  });
 });
 
 describe("instance ticker", () => {
