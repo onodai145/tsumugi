@@ -189,6 +189,19 @@ describe("notification-only note actions (Issue #50 follow-up)", () => {
 
     expect(invokeMock).not.toHaveBeenCalled();
   });
+
+  it("noteを直接渡せば、どのタブにも通知にも無くてもリアクションを送る", async () => {
+    app.groups = [makeGroup([makeNotificationOnlyTab(makeNote({ id: "unrelated" }))])];
+    const note = makeNote({ id: "search-only-note" });
+
+    await app.toggleReaction(ACCOUNT_ID, note.id, "👍", note);
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "react",
+      expect.objectContaining({ accountId: ACCOUNT_ID, noteId: note.id, reaction: "👍" }),
+    );
+    expect(note.myReaction).toBe("👍");
+  });
 });
 
 describe("app.getUserProfile / followUser / unfollowUser", () => {

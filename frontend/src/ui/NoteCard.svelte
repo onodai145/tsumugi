@@ -138,7 +138,7 @@
     app.reactPicker = null;
     if (accountId) {
       const wasMine = inner.myReaction === reaction;
-      app.toggleReaction(accountId, inner.id, reaction);
+      app.toggleReaction(accountId, inner.id, reaction, inner);
       if (!wasMine) {
         const host = app.accounts.find((a) => a.id === accountId)?.host;
         const stored =

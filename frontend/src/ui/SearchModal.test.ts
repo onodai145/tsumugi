@@ -43,11 +43,11 @@ function makeUser(): User {
   };
 }
 
-function makeNote(id: string, createdAt: number): Note {
+function makeNote(id: string, createdAt: number, text = "hello"): Note {
   return {
     id,
     createdAt,
-    text: "hello",
+    text,
     cw: null,
     visibility: "public",
     localOnly: false,
@@ -91,7 +91,7 @@ describe("SearchModal", () => {
       props: { onclose: () => {} },
     });
     await fireEvent.input(getByPlaceholderText("本文に含まれる語"), { target: { value: "rust" } });
-    await fireEvent.input(getByPlaceholderText("@user@host"), { target: { value: "@bob@example.com" } });
+    await fireEvent.input(getByPlaceholderText(/^@user@host/), { target: { value: "@bob@example.com" } });
     await fireEvent.click(getByTestId("search-submit"));
 
     await waitFor(() => expect(getByText("hello")).toBeTruthy());
@@ -151,6 +151,33 @@ describe("SearchModal", () => {
         expect.objectContaining({ untilId: "n1" }),
       ),
     );
+  });
+
+  it("次のページが前のページと同じノートIDを含んでいても重複表示しない", async () => {
+    app.accounts = [makeAccount()];
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "search_cache_notes" && args?.untilId == null) {
+        return Promise.resolve([makeNote("n1", 200, "first")]);
+      }
+      if (cmd === "search_cache_notes" && args?.untilId === "n1") {
+        // バックエンドの id < ? 絞り込みと created_at DESC 順のズレにより、
+        // 前ページと同じ id が再度返ってくることがある(Issue #248 レビュー指摘)。
+        return Promise.resolve([makeNote("n1", 200, "first"), makeNote("n2", 100, "second")]);
+      }
+      return Promise.resolve([]);
+    });
+    const { getByTestId, getAllByText } = render(SearchModal, { props: { onclose: () => {} } });
+    await fireEvent.click(getByTestId("search-submit"));
+    await waitFor(() => expect(getAllByText("first").length).toBe(1));
+
+    const list = document.querySelector('[data-testid="search-results-scroll"]') as HTMLElement;
+    Object.defineProperty(list, "scrollTop", { value: 500, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(list, "scrollHeight", { value: 1200, configurable: true });
+    await fireEvent.scroll(list);
+
+    await waitFor(() => expect(getAllByText("second").length).toBe(1));
+    expect(getAllByText("first").length).toBe(1);
   });
 
   it("エキスパートモードでは組み立てたTQLではなく入力したTQLをそのまま送る", async () => {

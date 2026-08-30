@@ -1656,8 +1656,9 @@ class AppStore {
     return m;
   }
 
-  async toggleReaction(accountId: string, noteId: string, reaction: string) {
+  async toggleReaction(accountId: string, noteId: string, reaction: string, note?: Note) {
     const targets = this.#collectNotes(noteId);
+    if (note && !targets.includes(note)) targets.push(note);
     if (targets.length === 0) return;
     const backups = targets.map((n) => snapshotReaction(n));
     const already = targets[0].myReaction;
@@ -1684,8 +1685,9 @@ class AppStore {
     }
   }
 
-  async toggleFavorite(accountId: string, noteId: string) {
+  async toggleFavorite(accountId: string, noteId: string, note?: Note) {
     const targets = this.#collectNotes(noteId);
+    if (note && !targets.includes(note)) targets.push(note);
     if (targets.length === 0) return;
     const backups = targets.map((n) => ({ n, was: n.isFavoritedByMe }));
     const already = targets[0].isFavoritedByMe;

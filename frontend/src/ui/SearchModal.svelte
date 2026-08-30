@@ -72,7 +72,9 @@
       const page = await app.searchCacheNotes(accountId, filter, untilId, 20);
       if (myGen !== requestGen) return;
       if (page.length === 0) done = true;
-      notes = [...notes, ...page];
+      const seen = new Set(notes.map((n) => n.id));
+      const deduped = page.filter((n) => !seen.has(n.id));
+      notes = [...notes, ...deduped];
     } catch (e) {
       if (myGen !== requestGen) return;
       err = String(e);
@@ -140,7 +142,7 @@
         <span class="text-muted-foreground">ユーザー</span>
         <input
           class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-          placeholder="@user@host"
+          placeholder="@user@host（自インスタンスのユーザーは @user）"
           bind:value={userAcct}
         />
       </label>
