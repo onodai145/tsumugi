@@ -339,12 +339,16 @@
   :global(.flatpickr-day.today) {
     border-color: var(--color-primary);
   }
-  /* 年/時/分の数値inputと月のselectはブラウザ既定の白背景フォームコントロールとして
-     描画されるため、明示的にbackground/borderも載せ替えないとpopoverの背景から浮いて
-     「テーマが当たらずグレーのまま」に見える(色だけ変えても背景が既定のままだった)。 */
+  /* 年/時/分の数値inputと月のselectは、WebKitGTKではネイティブ(GTKテーマ)の
+     枠+背景をOSが直接描画し、background-color等のCSSを与えても無視される
+     （computed styleの値自体はCSS通りになるが実際の描画には反映されない）。
+     -webkit-appearance/appearance を none にしてネイティブウィジェット描画を止めないと
+     常にGTKテーマの灰色のままになる。それを止めた上でbackground/borderを載せる。 */
   :global(.numInputWrapper input),
   :global(.flatpickr-time input),
   :global(.flatpickr-current-month .flatpickr-monthDropdown-months) {
+    -webkit-appearance: none;
+    appearance: none;
     background: var(--color-muted);
     color: var(--color-popover-foreground);
     border: 1px solid var(--color-border);
