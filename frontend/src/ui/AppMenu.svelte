@@ -2,10 +2,14 @@
   // Issue #96: 「＋カラム」「設定」ボタンを投稿欄の隣（旧header）から、画面下部バーの
   // 左端のハンバーガーメニューへ移設。位置計算・portal・外側クリックで閉じる挙動は
   // Dropdown.svelte と同じパターン。画面最下部のバーなので常に上方向に開く。
-  import { Menu, Plus, Settings } from "@lucide/svelte";
+  import { Menu, Plus, Search, Settings } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
 
-  let { onAddColumn, onOpenSettings }: { onAddColumn: () => void; onOpenSettings: () => void } = $props();
+  let {
+    onAddColumn,
+    onOpenSearch,
+    onOpenSettings,
+  }: { onAddColumn: () => void; onOpenSearch: () => void; onOpenSettings: () => void } = $props();
 
   let open = $state(false);
   let trigger = $state<HTMLElement | null>(null);
@@ -67,6 +71,15 @@
         onclick={() => pick(onAddColumn)}
       >
         <Plus size={16} /> カラム追加
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+        data-testid="app-menu-search"
+        onclick={() => pick(onOpenSearch)}
+      >
+        <Search size={16} /> 検索
       </button>
       <button
         type="button"

@@ -6,6 +6,7 @@
   import Pane from "./ui/Pane.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
+  import SearchModal from "./ui/SearchModal.svelte";
   import ColumnSettings from "./ui/ColumnSettings.svelte";
   import ComposeBar from "./ui/ComposeBar.svelte";
   import Settings from "./ui/Settings.svelte";
@@ -25,6 +26,7 @@
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
+  let showSearch = $state(false);
   let editTab = $state<TabView | null>(null);
   type SettingsSection = "accounts" | "layout" | "notify" | "mute" | "keys";
   let showSettings = $state(false);
@@ -95,7 +97,7 @@
       return;
     }
     // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
-    if (showAdd || showAddColumn || showSettings || app.showComposeModal || app.errorModal) return;
+    if (showAdd || showAddColumn || showSearch || showSettings || app.showComposeModal || app.errorModal) return;
     const action = keymap.get(eventToChord(e));
     if (!action) return;
     e.preventDefault();
@@ -156,7 +158,11 @@
     <!-- AppMenu(＋カラム/設定)はBackstageバー左端に並べるが、Backstage.svelte自体はログ専用の
          責務を保つため変更しない。Backstageは幅いっぱいに描画されるよう flex-1 の枠で包む。 -->
     <div class="flex flex-none">
-      <AppMenu onAddColumn={openAddColumn} onOpenSettings={() => openSettings("accounts")} />
+      <AppMenu
+        onAddColumn={openAddColumn}
+        onOpenSearch={() => (showSearch = true)}
+        onOpenSettings={() => openSettings("accounts")}
+      />
       <div class="min-w-0 flex-1">
         <Backstage
           onReauth={(accountId) => {
@@ -210,6 +216,9 @@
         }
       }}
     />
+  {/if}
+  {#if showSearch}
+    <SearchModal onclose={() => (showSearch = false)} />
   {/if}
   {#if columnSettingsGroupId}
     <ColumnSettings groupId={columnSettingsGroupId} onclose={() => (columnSettingsGroupId = null)} />
