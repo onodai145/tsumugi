@@ -91,6 +91,7 @@ describe("SearchModal", () => {
       props: { onclose: () => {} },
     });
     await fireEvent.input(getByPlaceholderText("本文に含まれる語"), { target: { value: "rust" } });
+    await fireEvent.click(getByText("詳細条件を指定（ユーザー・インスタンス・日時）"));
     await fireEvent.input(getByPlaceholderText(/^@user@host/), { target: { value: "@bob@example.com" } });
     await fireEvent.click(getByTestId("search-submit"));
 

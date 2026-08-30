@@ -1,10 +1,14 @@
 <script lang="ts">
+  import flatpickr from "flatpickr";
+  import "flatpickr/dist/flatpickr.min.css";
+  import type { Instance as FlatpickrInstance } from "flatpickr/dist/types/instance";
   import { app } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";
   import NoteCard from "./NoteCard.svelte";
   import Modal from "./Modal.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { X } from "@lucide/svelte";
   import type { FilterQuery, Note } from "../bindings/tauri.gen";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -12,16 +16,42 @@
   let uiMode = $state<"guided" | "expert">("guided");
   let accountId = $state(app.defaultAccountId());
   let keyword = $state("");
+  // キーワード以外は使う人が少ない想定のオプション項目のため既定では畳んでおく。
+  let showAdvanced = $state(false);
   let userAcct = $state("");
   let host = $state("");
-  // WebKitGTKはdatetime-localの組み合わせピッカーUIがdate/time単体より未成熟（日付しか
-  // 操作できず入力しづらい）ため、日付欄と時刻欄を分けて素直なネイティブウィジェットにする。
-  let dateFrom = $state("");
-  let dateFromTime = $state("");
-  let dateTo = $state("");
-  let dateToTime = $state("");
+  // WebKitGTKはdatetime-local/date/timeいずれもネイティブの日付・時刻ピッカーUIが未成熟
+  // （時刻が操作できない・空欄がプレースホルダー色の不一致で埋まって見える等）なので、
+  // ネイティブinputではなくflatpickr（自前描画、OSウィジェットに依存しない）を使う。
+  let dateFrom = $state<Date | null>(null);
+  let dateTo = $state<Date | null>(null);
+  let dateFromFp: FlatpickrInstance | undefined;
+  let dateToFp: FlatpickrInstance | undefined;
   let tqlText = $state("");
   let tqlErr = $state<string | null>(null);
+
+  // flatpickrをSvelteのバインディングなしに素のinputへ被せるアクション。fpインスタンスは
+  // クリアボタン(fp.clear())から使えるよう呼び出し元に返す。defaultHour/defaultMinuteは
+  // 日付だけクリックして時刻を触らなかった場合の既定値（開始側は0時、終了側はその日の終わり）。
+  function datePicker(
+    node: HTMLInputElement,
+    opts: { defaultHour: number; onChange: (d: Date | null) => void; onCreate: (fp: FlatpickrInstance) => void },
+  ) {
+    const fp: FlatpickrInstance = flatpickr(node, {
+      enableTime: true,
+      time_24hr: true,
+      dateFormat: "Y-m-d H:i",
+      defaultHour: opts.defaultHour,
+      defaultMinute: opts.defaultHour === 0 ? 0 : 59,
+      onChange: (dates) => opts.onChange(dates[0] ?? null),
+    });
+    opts.onCreate(fp);
+    return {
+      destroy() {
+        fp.destroy();
+      },
+    };
+  }
 
   let notes = $state<Note[]>([]);
   let busy = $state(false);
@@ -41,15 +71,8 @@
     if (keyword.trim()) parts.push(`text -> ${tqlStr(keyword.trim())}`);
     if (userAcct.trim()) parts.push(`user.acct == ${tqlStr(userAcct.trim())}`);
     if (host.trim()) parts.push(`host == ${tqlStr(host.trim())}`);
-    // 時刻欄が空なら開始は0時、終了はその日の終わり(23:59)を補って範囲指定を直感的にする。
-    if (dateFrom) {
-      const epoch = Math.floor(new Date(`${dateFrom}T${dateFromTime || "00:00"}`).getTime() / 1000);
-      parts.push(`created_at >= ${epoch}`);
-    }
-    if (dateTo) {
-      const epoch = Math.floor(new Date(`${dateTo}T${dateToTime || "23:59"}`).getTime() / 1000);
-      parts.push(`created_at <= ${epoch}`);
-    }
+    if (dateFrom) parts.push(`created_at >= ${Math.floor(dateFrom.getTime() / 1000)}`);
+    if (dateTo) parts.push(`created_at <= ${Math.floor(dateTo.getTime() / 1000)}`);
     return parts.join(" && ");
   }
 
@@ -154,63 +177,88 @@
             bind:value={keyword}
           />
         </label>
-        <label class="flex flex-col gap-1 text-sm">
-          <span class="text-muted-foreground">ユーザー</span>
-          <input
-            class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-            placeholder="@user@host（自インスタンスのユーザーは @user）"
-            bind:value={userAcct}
-          />
-        </label>
-        <label class="flex flex-col gap-1 text-sm">
-          <span class="text-muted-foreground">インスタンス</span>
-          <input
-            class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-            placeholder="example.com（空欄で全インスタンス対象）"
-            bind:value={host}
-          />
-        </label>
-        <div class="flex gap-2.5">
-          <label class="flex flex-1 flex-col gap-1 text-sm">
-            <span class="text-muted-foreground">日時（開始・空欄でその日の0時）</span>
-            <div class="flex gap-1.5">
-              <input
-                type="date"
-                class="w-0 flex-1 rounded-lg border border-border bg-muted px-2 py-2 font-[inherit] text-foreground"
-                bind:value={dateFrom}
-              />
-              <input
-                type="time"
-                class="w-0 flex-1 rounded-lg border border-border bg-muted px-2 py-2 font-[inherit] text-foreground"
-                bind:value={dateFromTime}
-                disabled={!dateFrom}
-              />
-            </div>
+
+        <button
+          type="button"
+          class="self-start text-xs text-muted-foreground underline"
+          onclick={() => (showAdvanced = !showAdvanced)}
+        >{showAdvanced ? "詳細条件を隠す" : "詳細条件を指定（ユーザー・インスタンス・日時）"}</button>
+
+        {#if showAdvanced}
+          <label class="flex flex-col gap-1 text-sm">
+            <span class="text-muted-foreground">ユーザー</span>
+            <input
+              class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+              placeholder="@user@host（自インスタンスのユーザーは @user）"
+              bind:value={userAcct}
+            />
           </label>
-          <label class="flex flex-1 flex-col gap-1 text-sm">
-            <span class="text-muted-foreground">日時（終了・空欄でその日の23:59）</span>
-            <div class="flex gap-1.5">
-              <input
-                type="date"
-                class="w-0 flex-1 rounded-lg border border-border bg-muted px-2 py-2 font-[inherit] text-foreground"
-                bind:value={dateTo}
-              />
-              <input
-                type="time"
-                class="w-0 flex-1 rounded-lg border border-border bg-muted px-2 py-2 font-[inherit] text-foreground"
-                bind:value={dateToTime}
-                disabled={!dateTo}
-              />
-            </div>
+          <label class="flex flex-col gap-1 text-sm">
+            <span class="text-muted-foreground">インスタンス</span>
+            <input
+              class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+              placeholder="misskey.example（空欄で全インスタンス対象）"
+              bind:value={host}
+            />
           </label>
-        </div>
+          <div class="flex gap-2.5">
+            <label class="flex flex-1 flex-col gap-1 text-sm">
+              <span class="text-muted-foreground">日時（開始）</span>
+              <div class="flex gap-1.5">
+                <input
+                  type="text"
+                  readonly
+                  class="w-0 flex-1 rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+                  placeholder="未指定"
+                  use:datePicker={{
+                    defaultHour: 0,
+                    onChange: (d) => (dateFrom = d),
+                    onCreate: (fp) => (dateFromFp = fp),
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-xs"
+                  onclick={() => dateFromFp?.clear()}
+                  disabled={!dateFrom}
+                  title="クリア"
+                ><X size={14} /></Button>
+              </div>
+            </label>
+            <label class="flex flex-1 flex-col gap-1 text-sm">
+              <span class="text-muted-foreground">日時（終了）</span>
+              <div class="flex gap-1.5">
+                <input
+                  type="text"
+                  readonly
+                  class="w-0 flex-1 rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+                  placeholder="未指定"
+                  use:datePicker={{
+                    defaultHour: 23,
+                    onChange: (d) => (dateTo = d),
+                    onCreate: (fp) => (dateToFp = fp),
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-xs"
+                  onclick={() => dateToFp?.clear()}
+                  disabled={!dateTo}
+                  title="クリア"
+                ><X size={14} /></Button>
+              </div>
+            </label>
+          </div>
+        {/if}
       {:else}
         <label class="flex flex-col gap-1 text-sm">
           <span class="text-muted-foreground">TQL（cacheソースのwhere句。空欄で全件）</span>
           <TqlCompletionField
             mode="predicate"
             bind:value={tqlText}
-            placeholder={'例: has_files && user.acct == "@alice@example.com"'}
+            placeholder={'例: has_files && user.acct == "@alice@misskey.example"'}
             invalid={!!tqlErr}
             oninput={onTqlInput}
           />
@@ -244,3 +292,60 @@
     {/if}
   </div>
 </Modal>
+
+<style>
+  /* flatpickrはカレンダーpopupをinputの外(通常body直下)に生成するため、Svelteのscoped CSSが
+     効かずすべて:globalが必要。app.cssのカラートークンに載せ替えてライト/ダーク両対応にする。 */
+  :global(.flatpickr-calendar) {
+    background: var(--color-popover);
+    color: var(--color-popover-foreground);
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    font-family: inherit;
+  }
+  :global(.flatpickr-calendar.arrowTop:before),
+  :global(.flatpickr-calendar.arrowTop:after) {
+    display: none;
+  }
+  :global(.flatpickr-months .flatpickr-month),
+  :global(.flatpickr-current-month),
+  :global(.flatpickr-weekday) {
+    color: var(--color-popover-foreground);
+    fill: var(--color-popover-foreground);
+  }
+  :global(.flatpickr-weekdays) {
+    background: transparent;
+  }
+  :global(.flatpickr-day) {
+    color: var(--color-popover-foreground);
+  }
+  :global(.flatpickr-day.flatpickr-disabled),
+  :global(.flatpickr-day.prevMonthDay),
+  :global(.flatpickr-day.nextMonthDay) {
+    color: var(--color-muted-foreground);
+  }
+  :global(.flatpickr-day:hover) {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+  :global(.flatpickr-day.selected) {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-foreground);
+  }
+  :global(.flatpickr-day.today) {
+    border-color: var(--color-primary);
+  }
+  :global(.numInputWrapper input),
+  :global(.flatpickr-time input) {
+    color: var(--color-popover-foreground);
+  }
+  :global(.flatpickr-time .flatpickr-am-pm) {
+    color: var(--color-popover-foreground);
+  }
+  :global(.flatpickr-months .flatpickr-prev-month svg),
+  :global(.flatpickr-months .flatpickr-next-month svg) {
+    fill: var(--color-popover-foreground);
+  }
+</style>
