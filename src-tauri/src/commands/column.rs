@@ -6,12 +6,13 @@ use crate::api::meta::{fetch_antennas, fetch_followed_channels, fetch_user_lists
 use crate::api::notes::fetch_notes;
 use crate::api::notifications::fetch_notifications;
 use crate::domain::{
-    Column, ColumnGroup, ColumnKind, FilterQuery, Note, Notification, PaneNode, SourceItem,
-    SplitDirection, User, UserList,
+    Column, ColumnGroup, ColumnKind, FilterQuery, MuteConfig, Note, Notification, PaneNode,
+    SourceItem, SplitDirection, User, UserList,
 };
 use crate::error::{Error, Result};
-use crate::filter::{ast, parser, sql, CompiledFilter};
+use crate::filter::{ast, eval::EvalContext, parser, sql, CompiledFilter};
 use crate::state::AppState;
+use crate::store::NoteCacheStore;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
@@ -1073,6 +1074,65 @@ struct FilteredFetch {
     raw_oldest_id: Option<String>,
 }
 
+/// キャッシュDB検索(Issue #248)の中核ロジック。SQL射影で粗く絞り込んだ後、
+/// `fetch_and_filter` の cache 経路と同じ二段構成(in-memory フィルタ + ミュート除外)で
+/// 再検証する。AppState を直接取らず必要な値だけを受け取ることで単体テスト可能にしている。
+fn search_cache_core(
+    cache: &NoteCacheStore,
+    filter: &FilterQuery,
+    eval_ctx: &EvalContext,
+    mute: &MuteConfig,
+    until_id: Option<&str>,
+    limit: u32,
+    is_server_muted: impl Fn(&Note) -> bool,
+) -> Result<Vec<Note>> {
+    let compiled = CompiledFilter::compile(filter).map_err(Error::Invalid)?;
+    let sql_ctx = sql::SqlCtx {
+        my_ids: eval_ctx.my_user_ids.iter().cloned().collect(),
+        following_ids: None,
+    };
+    let where_sql = match &compiled {
+        CompiledFilter::Tql(expr) => sql::build_where(expr, &sql_ctx).map_err(Error::Invalid)?,
+        _ => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
+    };
+    let raw = cache.search_cache(&where_sql, until_id, limit)?;
+    let mut filtered: Vec<Note> = raw
+        .into_iter()
+        .filter(|n| {
+            compiled.matches(n, eval_ctx)
+                && !crate::filter::mute::is_muted(n, mute)
+                && !is_server_muted(n)
+        })
+        .collect();
+    filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    filtered.truncate(limit as usize);
+    Ok(filtered)
+}
+
+/// 検索モーダル(Issue #248)専用: 特定カラムに紐づかない一回性のキャッシュDB検索。
+/// `filter` は cache ソースの where 句のみを渡す(source節は無し、常にキャッシュ全体が対象)。
+#[tauri::command]
+#[specta::specta]
+pub async fn search_cache_notes(
+    state: State<'_, AppState>,
+    account_id: String,
+    filter: FilterQuery,
+    until_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<Note>> {
+    let mute = state.mute.lock().unwrap().clone();
+    let eval_ctx = state.eval_context();
+    search_cache_core(
+        &state.cache,
+        &filter,
+        &eval_ctx,
+        &mute,
+        until_id.as_deref(),
+        limit,
+        |n| server_muted_note(&state, &account_id, n),
+    )
+}
+
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
@@ -1215,6 +1275,108 @@ mod tests {
             is_favorited_by_me: false,
             is_pinned: false,
         }
+    }
+
+    fn cache_with(notes: &[Note]) -> NoteCacheStore {
+        let store = NoteCacheStore::new(crate::store::db::open_cache_in_memory().unwrap());
+        store.cache_notes("col1", notes).unwrap();
+        store
+    }
+
+    #[test]
+    fn search_cache_core_filters_by_tql_predicate_and_orders_desc() {
+        let mut n1 = note("n1", 100);
+        n1.text = Some("hello needle".into());
+        let mut n2 = note("n2", 200);
+        n2.text = Some("hello world".into());
+        let mut n3 = note("n3", 300);
+        n3.text = Some("needle again".into());
+        let cache = cache_with(&[n1, n2, n3]);
+
+        let filter = FilterQuery::Tql("text -> \"needle\"".into());
+        let got = search_cache_core(
+            &cache,
+            &filter,
+            &EvalContext::default(),
+            &MuteConfig::default(),
+            None,
+            10,
+            |_| false,
+        )
+        .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n1"]);
+    }
+
+    #[test]
+    fn search_cache_core_with_empty_predicate_returns_all_desc_order() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 300), note("n3", 200)]);
+
+        let filter = FilterQuery::Tql(String::new());
+        let got = search_cache_core(
+            &cache,
+            &filter,
+            &EvalContext::default(),
+            &MuteConfig::default(),
+            None,
+            10,
+            |_| false,
+        )
+        .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
+    }
+
+    #[test]
+    fn search_cache_core_excludes_locally_muted_notes() {
+        let mut n1 = note("n1", 100);
+        n1.text = Some("spoiler content".into());
+        let cache = cache_with(&[n1, note("n2", 200)]);
+
+        let filter = FilterQuery::Tql(String::new());
+        let mute = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+        let got = search_cache_core(&cache, &filter, &EvalContext::default(), &mute, None, 10, |_| false)
+            .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+    }
+
+    #[test]
+    fn search_cache_core_excludes_notes_the_closure_marks_server_muted() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 200)]);
+
+        let filter = FilterQuery::Tql(String::new());
+        let got = search_cache_core(
+            &cache,
+            &filter,
+            &EvalContext::default(),
+            &MuteConfig::default(),
+            None,
+            10,
+            |n| n.id == "n2",
+        )
+        .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+    }
+
+    #[test]
+    fn search_cache_core_respects_until_id_boundary() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 200), note("n3", 300)]);
+
+        let filter = FilterQuery::Tql(String::new());
+        let got = search_cache_core(
+            &cache,
+            &filter,
+            &EvalContext::default(),
+            &MuteConfig::default(),
+            Some("n3"),
+            10,
+            |_| false,
+        )
+        .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);
     }
 
     #[test]
