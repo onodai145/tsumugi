@@ -46,6 +46,16 @@
       defaultHour: opts.defaultHour,
       defaultMinute: opts.defaultHour === 0 ? 0 : 59,
       onChange: (dates) => opts.onChange(dates[0] ?? null),
+      // flatpickr本体はヘッダを常に「月セレクト→年input」の順でDOM生成し、これを入れ替える
+      // 設定は無い。buildMonths()自体は初期化時に1度しか呼ばれない(月送りは値の更新のみ)
+      // ので、onReadyで年側のwrapperを月セレクトの前に差し替えれば以後も維持される。
+      onReady: (_selectedDates, _dateStr, instance) => {
+        const yearWrapper = instance.currentYearElement.closest(".numInputWrapper");
+        const monthSelect = instance.monthsDropdownContainer;
+        if (yearWrapper && monthSelect?.parentElement) {
+          monthSelect.parentElement.insertBefore(yearWrapper, monthSelect);
+        }
+      },
     });
     opts.onCreate(fp);
     return {
@@ -322,6 +332,14 @@
   :global(span.flatpickr-weekday) {
     color: var(--color-popover-foreground);
   }
+  /* 日本の慣習に合わせ土曜=青・日曜=赤にする。firstDayOfWeekが既定の0(日曜始まり)なので、
+     曜日ヘッダ・日付セルとも7列グリッドの1列目=日曜・7列目=土曜になる。 */
+  :global(.flatpickr-weekdaycontainer span.flatpickr-weekday:nth-child(1)) {
+    color: var(--danger);
+  }
+  :global(.flatpickr-weekdaycontainer span.flatpickr-weekday:nth-child(7)) {
+    color: var(--info);
+  }
   :global(.flatpickr-weekdays) {
     background: transparent;
   }
@@ -332,6 +350,18 @@
   :global(.flatpickr-day.prevMonthDay),
   :global(.flatpickr-day.nextMonthDay) {
     color: var(--color-muted-foreground);
+  }
+  /* :not()で選択中/前後月/無効セルを除外し、cascadeの並び順に依存せず正しく上書きされる
+     ようにする（土日色 vs 選択中の白文字 vs 前後月の淡色、が競合しないように）。 */
+  :global(
+    .flatpickr-day:nth-child(7n + 1):not(.selected):not(.prevMonthDay):not(.nextMonthDay):not(.flatpickr-disabled)
+  ) {
+    color: var(--danger);
+  }
+  :global(
+    .flatpickr-day:nth-child(7n):not(.selected):not(.prevMonthDay):not(.nextMonthDay):not(.flatpickr-disabled)
+  ) {
+    color: var(--info);
   }
   :global(.flatpickr-day:hover) {
     background: var(--color-accent);
