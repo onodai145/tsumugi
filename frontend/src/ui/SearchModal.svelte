@@ -311,10 +311,16 @@
     display: none;
   }
   :global(.flatpickr-months .flatpickr-month),
-  :global(.flatpickr-current-month),
-  :global(.flatpickr-weekday) {
+  :global(.flatpickr-current-month) {
     color: var(--color-popover-foreground);
     fill: var(--color-popover-foreground);
+  }
+  /* flatpickr本体が `span.flatpickr-weekday { color: rgba(0,0,0,0.54); }` を要素+クラスの
+     セレクタで持っており、こちらをクラス単体(.flatpickr-weekday)で上書きしても詳細度で
+     負けて常に元の色が勝つ（読み込み順に関係なく曜日だけ暗いまま沈んで見えた原因）。
+     詳細度を合わせるため要素セレクタを揃える。 */
+  :global(span.flatpickr-weekday) {
+    color: var(--color-popover-foreground);
   }
   :global(.flatpickr-weekdays) {
     background: transparent;
@@ -361,6 +367,14 @@
   :global(.flatpickr-time .flatpickr-time-separator),
   :global(.flatpickr-time .flatpickr-am-pm) {
     color: var(--color-popover-foreground);
+  }
+  /* flatpickr本体の `.flatpickr-time input:hover, .flatpickr-time input:focus { background: #eee; }`
+     は疑似クラスの分だけ上のbaseルールより詳細度が高く、フォーカス時(＝実際に時刻を
+     入力しようとした瞬間)だけ強制的に#eee(明るいグレー)に戻っていた。同じ詳細度で
+     上書きする。 */
+  :global(.flatpickr-time input:hover),
+  :global(.flatpickr-time input:focus) {
+    background: var(--color-accent);
   }
   :global(.flatpickr-time) {
     border-top: 1px solid var(--color-border);
