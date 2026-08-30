@@ -339,12 +339,27 @@
   :global(.flatpickr-day.today) {
     border-color: var(--color-primary);
   }
+  /* 年/時/分の数値inputと月のselectはブラウザ既定の白背景フォームコントロールとして
+     描画されるため、明示的にbackground/borderも載せ替えないとpopoverの背景から浮いて
+     「テーマが当たらずグレーのまま」に見える(色だけ変えても背景が既定のままだった)。 */
   :global(.numInputWrapper input),
-  :global(.flatpickr-time input) {
+  :global(.flatpickr-time input),
+  :global(.flatpickr-current-month .flatpickr-monthDropdown-months) {
+    background: var(--color-muted);
+    color: var(--color-popover-foreground);
+    border: 1px solid var(--color-border);
+    border-radius: 0.25rem;
+  }
+  :global(.flatpickr-current-month .flatpickr-monthDropdown-months .flatpickr-monthDropdown-month) {
+    background: var(--color-muted);
     color: var(--color-popover-foreground);
   }
+  :global(.flatpickr-time .flatpickr-time-separator),
   :global(.flatpickr-time .flatpickr-am-pm) {
     color: var(--color-popover-foreground);
+  }
+  :global(.flatpickr-time) {
+    border-top: 1px solid var(--color-border);
   }
   :global(.flatpickr-months .flatpickr-prev-month svg),
   :global(.flatpickr-months .flatpickr-next-month svg) {
