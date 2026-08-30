@@ -66,6 +66,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::rename_column,
             commands::column::set_column_notify,
             commands::column::update_column,
+            commands::column::search_cache_notes,
             commands::note::post_note,
             commands::note::renote,
             commands::note::delete_note_cmd,

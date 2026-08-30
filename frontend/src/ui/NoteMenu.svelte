@@ -26,7 +26,7 @@
   }
 
   function toggleFavorite() {
-    app.toggleFavorite(accountId, note.id);
+    app.toggleFavorite(accountId, note.id, note);
     onclose();
   }
 

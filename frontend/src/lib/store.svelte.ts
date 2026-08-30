@@ -1214,6 +1214,20 @@ class AppStore {
     }
   }
 
+  /// 検索モーダル(Issue #248)用: 特定カラムに紐づかないキャッシュDB検索。
+  /// 呼び出し元(SearchModal)が自前のエラー表示を持つため this.#fail()（バナー表示）は呼ばない。
+  async searchCacheNotes(accountId: string, filter: FilterQuery, untilId?: string, limit = 20) {
+    try {
+      return await unwrapAcc(
+        accountId,
+        commands.searchCacheNotes(accountId, filter, untilId ?? null, limit),
+      );
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
   async setNotify(config: NotifyConfig) {
     if (config.desktop && !(await isPermissionGranted())) {
@@ -1642,8 +1656,9 @@ class AppStore {
     return m;
   }
 
-  async toggleReaction(accountId: string, noteId: string, reaction: string) {
+  async toggleReaction(accountId: string, noteId: string, reaction: string, note?: Note) {
     const targets = this.#collectNotes(noteId);
+    if (note && !targets.includes(note)) targets.push(note);
     if (targets.length === 0) return;
     const backups = targets.map((n) => snapshotReaction(n));
     const already = targets[0].myReaction;
@@ -1670,8 +1685,9 @@ class AppStore {
     }
   }
 
-  async toggleFavorite(accountId: string, noteId: string) {
+  async toggleFavorite(accountId: string, noteId: string, note?: Note) {
     const targets = this.#collectNotes(noteId);
+    if (note && !targets.includes(note)) targets.push(note);
     if (targets.length === 0) return;
     const backups = targets.map((n) => ({ n, was: n.isFavoritedByMe }));
     const already = targets[0].isFavoritedByMe;

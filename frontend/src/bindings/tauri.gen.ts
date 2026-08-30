@@ -143,6 +143,11 @@ export const commands = {
 	 *  アカウントは変更しない。フィルタ変更でキャッシュが不整合になるためクリアして再取得する。
 	 */
 	updateColumn: (columnId: string, kind: ColumnKind, filter: FilterQuery, title: string | null) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("update_column", { columnId, kind, filter, title })),
+	/**
+	 *  検索モーダル(Issue #248)専用: 特定カラムに紐づかない一回性のキャッシュDB検索。
+	 *  `filter` は cache ソースの where 句のみを渡す(source節は無し、常にキャッシュ全体が対象)。
+	 */
+	searchCacheNotes: (accountId: string, filter: FilterQuery, untilId: string | null, limit: number) => typedError<Note[], Error>(__TAURI_INVOKE("search_cache_notes", { accountId, filter, untilId, limit })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
