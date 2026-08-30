@@ -1,6 +1,7 @@
 <script lang="ts">
   import flatpickr from "flatpickr";
   import "flatpickr/dist/flatpickr.min.css";
+  import { Japanese } from "flatpickr/dist/l10n/ja.js";
   import type { Instance as FlatpickrInstance } from "flatpickr/dist/types/instance";
   import { app } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
@@ -41,6 +42,7 @@
       enableTime: true,
       time_24hr: true,
       dateFormat: "Y-m-d H:i",
+      locale: Japanese,
       defaultHour: opts.defaultHour,
       defaultMinute: opts.defaultHour === 0 ? 0 : 59,
       onChange: (dates) => opts.onChange(dates[0] ?? null),
