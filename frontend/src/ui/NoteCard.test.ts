@@ -354,6 +354,18 @@ describe("instance ticker", () => {
     expect(getByText("Remote Instance")).toBeTruthy();
   });
 
+  // Instance Ticker(Issue #103)実装前にキャッシュされたノートはpayloadにuser.instanceが
+  // 無いため(search機能はキャッシュのみを読み、再取得による最新化が起きない)、リモート
+  // ユーザーと分かっていてもtickerが一切出ない問題があった。host名だけの簡素な表示に
+  // フォールバックする。
+  it("falls back to a plain host-only ticker for a remote author with no instance info", async () => {
+    const { getByText } = render(NoteCard, {
+      note: makeNote({ user: makeUser({ host: "old.example", instance: undefined }) }),
+    });
+    expect(getByText("old.example")).toBeTruthy();
+    expect(document.querySelector("[data-testid='note-instance-ticker']")).toBeTruthy();
+  });
+
   it("hides the ticker entirely when mode=off", async () => {
     app.ui = { ...app.ui, instanceTicker: "off" };
     const { queryByText } = render(NoteCard, {

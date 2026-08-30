@@ -74,11 +74,16 @@
     const mode = app.ui.instanceTicker ?? "remote";
     if (mode === "off") return null;
     if (inner.user.instance) return inner.user.instance;
-    if (inner.user.host === null && mode === "always") {
+    if (inner.user.host === null) {
+      if (mode !== "always") return null;
       const acc = emojiAcct ? app.accounts.find((a) => a.id === emojiAcct) : undefined;
       return acc?.instance ?? null;
     }
-    return null;
+    // リモートユーザーだが instance（名称/アイコン/テーマ色）が無い。Instance Ticker
+    // 実装前にキャッシュされたノート等、payloadにこのフィールドが無いまま保存された
+    // ケースがある（キャッシュは再取得されるまで古いスキーマのまま残る）。host名だけの
+    // 簡素な表示にフォールバックし、リモート発であること自体は分かるようにする。
+    return { name: inner.user.host, iconUrl: null, themeColor: null };
   });
   const tickerLabel = $derived(ticker?.name ?? (inner.user.host ?? instanceHost ?? ""));
   // themeColor はリモートインスタンス管理者が任意設定できる値なので、hexカラーリテラルと
