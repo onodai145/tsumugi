@@ -1,9 +1,10 @@
 //! `user` テーブル(正規化済みユーザー情報)への読み書きと、note payload 内の
 //! user 参照(スタブ `{"id": ...}` ⇔ フル `User`)の変換ヘルパー(Issue #263)。
 
-use crate::domain::{Note, User};
+use crate::domain::{InstanceInfo, Note, User};
 use crate::error::Result;
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 
 /// `user` テーブルへ upsert する。UserLite に常に含まれる列は常に最新値で上書きし、
 /// UserLite では省略されうる列(`bio`/`banner_url`/`instance_*`)は、新しい値が
@@ -95,6 +96,96 @@ pub(crate) fn has_legacy_full_user(note_value: &serde_json::Value) -> bool {
         return true;
     }
     note_value.get("renote").map(has_legacy_full_user).unwrap_or(false)
+}
+
+/// note_value の `user.id`(本体+renote分)を出現順にすべて集める(重複可、呼び出し元で
+/// dedupする想定)。stub_user_refs 済み・旧形式どちらの形にも対応する(常に `["user"]["id"]`
+/// を見るだけなので形式を問わない)。
+pub(crate) fn collect_user_id_refs(note_value: &serde_json::Value, out: &mut Vec<String>) {
+    if let Some(id) = note_value.get("user").and_then(|u| u.get("id")).and_then(|v| v.as_str()) {
+        out.push(id.to_string());
+    }
+    if let Some(renote) = note_value.get("renote") {
+        if renote.is_object() {
+            collect_user_id_refs(renote, out);
+        }
+    }
+}
+
+/// note_value の `user` スタブ(本体+renote分)を users から引いてフルオブジェクトへ埋め戻す。
+/// 参照先のいずれかが users に無ければ false を返す(このノートは復元不可、呼び出し元でスキップする)。
+pub(crate) fn hydrate_user_refs(note_value: &mut serde_json::Value, users: &HashMap<String, User>) -> bool {
+    let Some(id) = note_value
+        .get("user")
+        .and_then(|u| u.get("id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return false;
+    };
+    let Some(user) = users.get(&id) else {
+        return false;
+    };
+    note_value["user"] = serde_json::to_value(user).unwrap_or(serde_json::Value::Null);
+
+    if note_value.get("renote").map(|r| r.is_object()).unwrap_or(false) {
+        return hydrate_user_refs(&mut note_value["renote"], users);
+    }
+    true
+}
+
+/// `user` テーブルから id 一覧に対応する行をまとめて引く(1クエリ、N+1にしない)。
+/// 見つからない id は結果のマップに含まれない(呼び出し元は hydrate_user_refs の false で検知する)。
+pub(crate) fn fetch_users_by_ids(conn: &Connection, ids: &[String]) -> Result<HashMap<String, User>> {
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT id, username, host, name, avatar_url, is_bot, is_cat,
+                followers_count, following_count, notes_count, emojis,
+                bio, banner_url, instance_name, instance_icon_url, instance_theme_color
+         FROM user WHERE id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let bind_params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    let rows = stmt.query_map(bind_params.as_slice(), |r| {
+        let emojis_json: String = r.get(10)?;
+        let instance_name: Option<String> = r.get(13)?;
+        let instance_icon_url: Option<String> = r.get(14)?;
+        let instance_theme_color: Option<String> = r.get(15)?;
+        let instance = if instance_name.is_some() || instance_icon_url.is_some() || instance_theme_color.is_some() {
+            Some(InstanceInfo {
+                name: instance_name,
+                icon_url: instance_icon_url,
+                theme_color: instance_theme_color,
+            })
+        } else {
+            None
+        };
+        Ok(User {
+            id: r.get(0)?,
+            username: r.get(1)?,
+            host: r.get(2)?,
+            name: r.get(3)?,
+            avatar_url: r.get(4)?,
+            is_bot: r.get::<_, i64>(5)? != 0,
+            is_cat: r.get::<_, i64>(6)? != 0,
+            followers_count: r.get(7)?,
+            following_count: r.get(8)?,
+            notes_count: r.get(9)?,
+            emojis: serde_json::from_str(&emojis_json).unwrap_or_default(),
+            bio: r.get(11)?,
+            banner_url: r.get(12)?,
+            instance,
+        })
+    })?;
+    for row in rows {
+        let user = row?;
+        out.insert(user.id.clone(), user);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -275,5 +366,78 @@ mod tests {
             "renote": { "id": "n0", "user": { "id": "u2" } }
         });
         assert!(!has_legacy_full_user(&already_stubbed));
+    }
+
+    #[test]
+    fn collect_user_id_refs_collects_top_level_and_renote() {
+        let v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "renote": { "id": "n0", "user": { "id": "u2" }, "renote": null }
+        });
+        let mut ids = Vec::new();
+        collect_user_id_refs(&v, &mut ids);
+        assert_eq!(ids, vec!["u1".to_string(), "u2".to_string()]);
+    }
+
+    #[test]
+    fn hydrate_user_refs_fills_in_full_user_and_returns_true() {
+        let mut v = json!({ "id": "n1", "user": { "id": "u1" } });
+        let mut users = HashMap::new();
+        users.insert("u1".to_string(), user_lite("u1", "Alice"));
+
+        assert!(hydrate_user_refs(&mut v, &users));
+        assert_eq!(v["user"]["username"], json!("alice"));
+        assert_eq!(v["user"]["name"], json!("Alice"));
+    }
+
+    #[test]
+    fn hydrate_user_refs_returns_false_when_user_missing() {
+        let mut v = json!({ "id": "n1", "user": { "id": "u1" } });
+        let users = HashMap::new();
+        assert!(!hydrate_user_refs(&mut v, &users));
+    }
+
+    #[test]
+    fn hydrate_user_refs_hydrates_renote_author_too() {
+        let mut v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "renote": { "id": "n0", "user": { "id": "u2" }, "renote": null }
+        });
+        let mut users = HashMap::new();
+        users.insert("u1".to_string(), user_lite("u1", "Alice"));
+        users.insert("u2".to_string(), user_lite("u2", "Bob"));
+
+        assert!(hydrate_user_refs(&mut v, &users));
+        assert_eq!(v["renote"]["user"]["name"], json!("Bob"));
+    }
+
+    #[test]
+    fn fetch_users_by_ids_returns_stored_instance_info() {
+        let conn = open_cache_in_memory().unwrap();
+        let mut with_instance = user_lite("u1", "Alice");
+        with_instance.instance = Some(InstanceInfo {
+            name: Some("Remote".into()),
+            icon_url: Some("https://remote.example/icon.png".into()),
+            theme_color: Some("#ff8800".into()),
+        });
+        upsert_user(&conn, &with_instance).unwrap();
+        upsert_user(&conn, &user_lite("u2", "Bob")).unwrap(); // instance無し
+
+        let ids = vec!["u1".to_string(), "u2".to_string(), "u3".to_string()];
+        let users = fetch_users_by_ids(&conn, &ids).unwrap();
+
+        assert_eq!(users.len(), 2); // u3 は存在しないので含まれない
+        let instance = users["u1"].instance.as_ref().unwrap();
+        assert_eq!(instance.name.as_deref(), Some("Remote"));
+        assert!(users["u2"].instance.is_none());
+    }
+
+    #[test]
+    fn fetch_users_by_ids_returns_empty_map_for_empty_input() {
+        let conn = open_cache_in_memory().unwrap();
+        let users = fetch_users_by_ids(&conn, &[]).unwrap();
+        assert!(users.is_empty());
     }
 }
