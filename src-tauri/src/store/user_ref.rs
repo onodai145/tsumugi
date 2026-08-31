@@ -1,7 +1,7 @@
 //! `user` テーブル(正規化済みユーザー情報)への読み書きと、note payload 内の
 //! user 参照(スタブ `{"id": ...}` ⇔ フル `User`)の変換ヘルパー(Issue #263)。
 
-use crate::domain::User;
+use crate::domain::{Note, User};
 use crate::error::Result;
 use rusqlite::{params, Connection};
 
@@ -62,12 +62,23 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
     Ok(())
 }
 
+/// ノート本体+renote(入れ子)分の User をすべて集める(重複排除はしない)。
+/// upsert_note が「note.payload に埋め込まれる全ユーザー」をキャッシュへ反映するために使う。
+pub(crate) fn collect_users(note: &Note) -> Vec<&User> {
+    let mut out = vec![&note.user];
+    if let Some(renote) = &note.renote {
+        out.extend(collect_users(renote));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::InstanceInfo;
+    use crate::domain::{DriveFile, InstanceInfo, Visibility};
     use crate::store::db::open_cache_in_memory;
     use std::collections::HashMap;
+    use std::collections::HashMap as Map;
 
     fn user_lite(id: &str, name: &str) -> User {
         User {
@@ -85,6 +96,37 @@ mod tests {
             bio: None,
             banner_url: None,
             instance: None,
+        }
+    }
+
+    fn bare_note(id: &str, user: User) -> Note {
+        Note {
+            id: id.into(),
+            created_at: 100,
+            text: Some("hi".into()),
+            cw: None,
+            visibility: Visibility::Home,
+            local_only: false,
+            user,
+            reply_id: None,
+            renote_id: None,
+            renote: None,
+            files: Vec::<DriveFile>::new(),
+            poll: None,
+            tags: vec![],
+            mentions: vec![],
+            emojis: Map::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
+            reactions: Map::new(),
+            reaction_count: 0,
+            renote_count: 0,
+            reply_count: 0,
+            my_reaction: None,
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
         }
     }
 
@@ -142,5 +184,20 @@ mod tests {
 
         let (_, _, instance_name) = row(&conn, "u1");
         assert_eq!(instance_name, Some("Remote".to_string()));
+    }
+
+    #[test]
+    fn collect_users_returns_just_author_when_no_renote() {
+        let n = bare_note("n1", user_lite("u1", "Alice"));
+        let users = collect_users(&n);
+        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["u1"]);
+    }
+
+    #[test]
+    fn collect_users_includes_renote_author() {
+        let mut n = bare_note("n1", user_lite("u1", "Alice"));
+        n.renote = Some(Box::new(bare_note("n0", user_lite("u2", "Bob"))));
+        let users = collect_users(&n);
+        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["u1", "u2"]);
     }
 }
