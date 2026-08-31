@@ -237,6 +237,19 @@ fn migrate_cache(conn: &Connection) -> Result<()> {
             WHERE EXISTS (SELECT 1 FROM note WHERE note.id = column_note.note_id)",
         )?;
     }
+    // Issue #263: user テーブルをフル正規化テーブルに格上げする列を追加。
+    // note.payload に埋め込まれていたユーザー情報(instance含む)をここへ集約する。
+    if !column_exists(conn, "user", "instance_name")? {
+        conn.execute_batch(
+            "ALTER TABLE user ADD COLUMN avatar_url TEXT;
+             ALTER TABLE user ADD COLUMN bio TEXT;
+             ALTER TABLE user ADD COLUMN banner_url TEXT;
+             ALTER TABLE user ADD COLUMN emojis TEXT NOT NULL DEFAULT '{}';
+             ALTER TABLE user ADD COLUMN instance_name TEXT;
+             ALTER TABLE user ADD COLUMN instance_icon_url TEXT;
+             ALTER TABLE user ADD COLUMN instance_theme_color TEXT;",
+        )?;
+    }
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_cn_column_created \
          ON column_note(column_id, created_at DESC, note_id DESC)",
@@ -360,6 +373,7 @@ mod tests {
         // 旧スキーマ（column_note に created_at 列が無い状態）を模倣
         conn.execute_batch(
             "CREATE TABLE note (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+             CREATE TABLE user (id TEXT PRIMARY KEY, username TEXT NOT NULL);
              CREATE TABLE column_note (
                  column_id TEXT NOT NULL, note_id TEXT NOT NULL, received_at INTEGER NOT NULL,
                  PRIMARY KEY (column_id, note_id)
@@ -423,5 +437,42 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("db-wal"));
         let _ = std::fs::remove_file(path.with_extension("db-shm"));
+    }
+
+    #[test]
+    fn migrate_cache_adds_user_normalization_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 列追加前の旧 user テーブル
+        conn.execute_batch(
+            "CREATE TABLE user (
+                id TEXT PRIMARY KEY, username TEXT NOT NULL, host TEXT, name TEXT,
+                is_bot INTEGER NOT NULL DEFAULT 0, is_cat INTEGER NOT NULL DEFAULT 0,
+                followers_count INTEGER NOT NULL DEFAULT 0,
+                following_count INTEGER NOT NULL DEFAULT 0,
+                notes_count INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE note (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+            CREATE TABLE column_note (
+                column_id TEXT NOT NULL, note_id TEXT NOT NULL, received_at INTEGER NOT NULL,
+                PRIMARY KEY (column_id, note_id)
+            );",
+        )
+        .unwrap();
+
+        migrate_cache(&conn).unwrap();
+
+        for col in [
+            "avatar_url",
+            "bio",
+            "banner_url",
+            "emojis",
+            "instance_name",
+            "instance_icon_url",
+            "instance_theme_color",
+        ] {
+            assert!(column_exists(&conn, "user", col).unwrap(), "missing column: {col}");
+        }
+        // 冪等: 2回目呼んでもエラーにならない
+        migrate_cache(&conn).unwrap();
     }
 }
