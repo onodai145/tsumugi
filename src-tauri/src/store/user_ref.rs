@@ -72,6 +72,31 @@ pub(crate) fn collect_users(note: &Note) -> Vec<&User> {
     out
 }
 
+/// note_value の `user`(本体+renote分)を `{"id": ...}` スタブへ差し替える。
+/// upsert_note の保存直前に呼び、payload に生ユーザー情報を持たせない。
+pub(crate) fn stub_user_refs(note_value: &mut serde_json::Value) {
+    if let Some(id) = note_value.get("user").and_then(|u| u.get("id")).cloned() {
+        note_value["user"] = serde_json::json!({ "id": id });
+    }
+    if note_value.get("renote").map(|r| r.is_object()).unwrap_or(false) {
+        stub_user_refs(&mut note_value["renote"]);
+    }
+}
+
+/// user_value が旧形式(フルオブジェクト埋め込み)かどうか。スタブは `id` のみなので
+/// `username` の有無で判定する(UserLiteは常にusernameを含む)。
+pub(crate) fn is_legacy_full_user(user_value: &serde_json::Value) -> bool {
+    user_value.get("username").is_some()
+}
+
+/// note_value の `user`(本体+renote分)のいずれかが旧形式かどうかを再帰的に判定する。
+pub(crate) fn has_legacy_full_user(note_value: &serde_json::Value) -> bool {
+    if note_value.get("user").map(is_legacy_full_user).unwrap_or(false) {
+        return true;
+    }
+    note_value.get("renote").map(has_legacy_full_user).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +224,56 @@ mod tests {
         n.renote = Some(Box::new(bare_note("n0", user_lite("u2", "Bob"))));
         let users = collect_users(&n);
         assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["u1", "u2"]);
+    }
+
+    use serde_json::json;
+
+    #[test]
+    fn stub_user_refs_replaces_top_level_user_with_id_only() {
+        let mut v = json!({
+            "id": "n1",
+            "user": { "id": "u1", "username": "alice", "isBot": false }
+        });
+        stub_user_refs(&mut v);
+        assert_eq!(v["user"], json!({ "id": "u1" }));
+    }
+
+    #[test]
+    fn stub_user_refs_recurses_into_renote() {
+        let mut v = json!({
+            "id": "n1",
+            "user": { "id": "u1", "username": "alice" },
+            "renote": {
+                "id": "n0",
+                "user": { "id": "u2", "username": "bob" },
+                "renote": null
+            }
+        });
+        stub_user_refs(&mut v);
+        assert_eq!(v["user"], json!({ "id": "u1" }));
+        assert_eq!(v["renote"]["user"], json!({ "id": "u2" }));
+    }
+
+    #[test]
+    fn is_legacy_full_user_true_for_object_with_username_false_for_stub() {
+        assert!(is_legacy_full_user(&json!({ "id": "u1", "username": "alice" })));
+        assert!(!is_legacy_full_user(&json!({ "id": "u1" })));
+    }
+
+    #[test]
+    fn has_legacy_full_user_detects_legacy_shape_in_renote_only() {
+        let v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "renote": { "id": "n0", "user": { "id": "u2", "username": "bob" } }
+        });
+        assert!(has_legacy_full_user(&v));
+
+        let already_stubbed = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "renote": { "id": "n0", "user": { "id": "u2" } }
+        });
+        assert!(!has_legacy_full_user(&already_stubbed));
     }
 }
