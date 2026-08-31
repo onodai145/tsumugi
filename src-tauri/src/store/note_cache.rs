@@ -3,6 +3,7 @@
 
 use crate::domain::{Note, Visibility};
 use crate::error::Result;
+use crate::store::user_ref::{collect_users, stub_user_refs, upsert_user};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::Mutex;
 
@@ -413,7 +414,9 @@ fn shrink_to_size(conn: &Connection, budget_bytes: i64) -> Result<i64> {
 
 /// note + user + 関連テーブルを upsert する。関連は入れ替え（DELETE→INSERT）。
 fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
-    let payload = serde_json::to_string(n)?;
+    let mut payload_value = serde_json::to_value(n)?;
+    stub_user_refs(&mut payload_value);
+    let payload = serde_json::to_string(&payload_value)?;
     let text_length = n.text.as_deref().map(|t| t.chars().count()).unwrap_or(0) as i64;
     let has_link = n.text.as_deref().map(has_url).unwrap_or(false) as i64;
 
@@ -460,17 +463,10 @@ fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
         ],
     )?;
 
-    let u = &n.user;
-    conn.execute(
-        "INSERT OR REPLACE INTO user (
-            id, username, host, name, is_bot, is_cat,
-            followers_count, following_count, notes_count
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            u.id, u.username, u.host, u.name, u.is_bot as i64, u.is_cat as i64,
-            u.followers_count, u.following_count, u.notes_count
-        ],
-    )?;
+    // 本体+renote分すべての User を正規化テーブルへ反映する(Issue #263)。
+    for user in collect_users(n) {
+        upsert_user(conn, user)?;
+    }
 
     // 関連テーブルは入れ替え
     for table in ["note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
@@ -569,6 +565,52 @@ mod tests {
         let mut v = serde_json::to_value(n).unwrap();
         v["emojis"] = serde_json::json!(["old_style_name"]);
         serde_json::to_string(&v).unwrap()
+    }
+
+    #[test]
+    fn upsert_note_stores_stubbed_user_in_payload() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
+
+        let raw_payload: String = {
+            let conn = s.conn.lock().unwrap();
+            conn.query_row("SELECT payload FROM note WHERE id = 'n1'", [], |r| r.get(0)).unwrap()
+        };
+        let v: serde_json::Value = serde_json::from_str(&raw_payload).unwrap();
+        assert_eq!(v["user"], serde_json::json!({ "id": "u1" }));
+    }
+
+    #[test]
+    fn upsert_note_upserts_both_note_and_renote_authors_into_user_table() {
+        let s = store();
+        let mut n = note("n1", 100);
+        n.renote = Some(Box::new({
+            let mut renoted = note("n0", 50);
+            renoted.user = User {
+                id: "u2".into(),
+                username: "bob".into(),
+                host: None,
+                name: Some("Bob".into()),
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 0,
+                following_count: 0,
+                notes_count: 0,
+                emojis: HashMap::new(),
+                bio: None,
+                banner_url: None,
+                instance: None,
+            };
+            renoted
+        }));
+        s.cache_notes("col1", &[n]).unwrap();
+
+        let conn = s.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM user WHERE id IN ('u1','u2')", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 
     #[test]
