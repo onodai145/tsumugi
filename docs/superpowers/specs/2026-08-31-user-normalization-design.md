@@ -30,7 +30,7 @@ ALTER TABLE user ADD COLUMN instance_icon_url TEXT;
 ALTER TABLE user ADD COLUMN instance_theme_color TEXT;
 ```
 
-3列に分割するのは、将来TQLで `instance.name` 等を単体カラムとしてSQL射影・検索したくなった場合に備えるため。`InstanceInfo` が Some のときは3列とも埋まり、None のときは3列とも NULL という不変量を書き込み側で常に保つ（部分的な欠損は発生させない）。
+3列に分割するのは、将来TQLで `instance.name` 等を単体カラムとしてSQL射影・検索したくなった場合に備えるため。単一の書き込みでは `InstanceInfo` が Some のとき3列とも同じSome値、None のとき3列ともNoneが渡される。ただし書き込みパスは`COALESCE`で「新しい値がNULLなら既存値を残す」方針（後述）を取るため、異なる時点の書き込みが混在した結果、テーブル上は3列が独立に埋まる場合がある（例: ある書き込みで `instance_name` だけ既存値があり他2列がNULLのまま、別の書き込みで `instance_icon_url` だけ新たに埋まる、など）。したがって3列がすべて揃っているかNULLかという不変量はテーブル上では保証されない。
 
 ## 書き込みパス
 

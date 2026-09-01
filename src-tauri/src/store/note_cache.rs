@@ -4,8 +4,8 @@
 use crate::domain::{Note, Visibility};
 use crate::error::Result;
 use crate::store::user_ref::{
-    collect_user_id_refs, collect_users, fetch_users_by_ids, has_legacy_full_user,
-    hydrate_user_refs, is_legacy_full_user, stub_user_refs, upsert_user,
+    collect_user_id_refs, collect_users, fetch_users_by_ids, fill_user_from_snapshot,
+    has_legacy_full_user, hydrate_user_refs, is_legacy_full_user, stub_user_refs, upsert_user,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::Mutex;
@@ -352,7 +352,7 @@ fn self_heal_node(conn: &Connection, node: &mut serde_json::Value) -> Result<boo
     if let Some(user_value) = node.get("user").cloned() {
         if is_legacy_full_user(&user_value) {
             if let Ok(user) = serde_json::from_value::<crate::domain::User>(user_value.clone()) {
-                upsert_user(conn, &user)?;
+                fill_user_from_snapshot(conn, &user)?;
                 if let Some(id) = user_value.get("id").cloned() {
                     node["user"] = serde_json::json!({ "id": id });
                     changed = true;
@@ -365,7 +365,6 @@ fn self_heal_node(conn: &Connection, node: &mut serde_json::Value) -> Result<boo
     }
     Ok(changed)
 }
-
 
 /// `select_sql`（`SELECT id FROM note ...` 形式）にマッチするノートと、その関連テーブル
 /// （note_reaction 等）・column_note を削除する（FK制約は張っていないため手動カスケード）。
@@ -483,6 +482,14 @@ fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
     let text_length = n.text.as_deref().map(|t| t.chars().count()).unwrap_or(0) as i64;
     let has_link = n.text.as_deref().map(has_url).unwrap_or(false) as i64;
 
+    // note行より先にuserをupsertする(Issue #263 最終レビュー指摘)。
+    // upsert_note はトランザクション外で呼ばれることがあるため、クラッシュ時に
+    // 「参照されないuser行が残るだけ」で済むようにし、「userの無いnote行が
+    // 永久に読めなくなる」事態(hydrate_user_refs失敗でスキップされ続ける)を避ける。
+    for user in collect_users(n) {
+        upsert_user(conn, user)?;
+    }
+
     conn.execute(
         "INSERT OR REPLACE INTO note (
             id, created_at, text, text_length, cw, visibility, local_only, user_id,
@@ -525,11 +532,6 @@ fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
             payload,
         ],
     )?;
-
-    // 本体+renote分すべての User を正規化テーブルへ反映する(Issue #263)。
-    for user in collect_users(n) {
-        upsert_user(conn, user)?;
-    }
 
     // 関連テーブルは入れ替え
     for table in ["note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
@@ -1129,6 +1131,77 @@ mod tests {
         // user テーブルへ抽出されていること
         let name: String = conn.query_row("SELECT name FROM user WHERE id = 'u_legacy'", [], |r| r.get(0)).unwrap();
         assert_eq!(name, "Carol");
+    }
+
+    #[test]
+    fn load_cached_self_heals_legacy_renote_author_instance() {
+        let s = store();
+        {
+            let conn = s.conn.lock().unwrap();
+            // 本体(u_main)も renote元(u_renote_author)も旧形式(userフルオブジェクト埋め込み)。
+            // renote元著者にはinstance情報が付いている。
+            let mut n = note("n_with_renote", 200);
+            let mut v = serde_json::to_value(&n).unwrap();
+            v["user"] = serde_json::json!({
+                "id": "u_main", "username": "mainuser", "host": null, "name": "Main User",
+                "avatarUrl": null, "isBot": false, "isCat": false,
+                "followersCount": 0, "followingCount": 0, "notesCount": 0,
+                "emojis": {}, "bio": null, "bannerUrl": null, "instance": null
+            });
+            v["renote"] = serde_json::json!({
+                "id": "n_renoted", "createdAt": 100, "text": "original", "cw": null,
+                "visibility": "public", "localOnly": false,
+                "user": {
+                    "id": "u_renote_author", "username": "renoteauthor", "host": "remote.example",
+                    "name": "Renote Author", "avatarUrl": null, "isBot": false, "isCat": false,
+                    "followersCount": 0, "followingCount": 0, "notesCount": 0,
+                    "emojis": {}, "bio": null, "bannerUrl": null,
+                    "instance": { "name": "Remote", "iconUrl": "https://remote.example/icon.png", "themeColor": "#ff8800" }
+                },
+                "replyId": null, "renoteId": null, "renote": null, "files": [], "poll": null,
+                "tags": [], "mentions": [], "emojis": {}, "channelId": null, "via": null, "lang": null,
+                "reactions": {}, "reactionCount": 0, "renoteCount": 0, "replyCount": 0,
+                "myReaction": null, "isRenotedByMe": false, "isFavoritedByMe": false, "isPinned": false
+            });
+            n.id = "n_with_renote".to_string();
+            let payload = serde_json::to_string(&v).unwrap();
+            conn.execute(
+                "INSERT INTO note (
+                    id, created_at, text, text_length, cw, visibility, local_only, user_id,
+                    reply_id, reply_user_id, renote_id, channel_id, via, lang,
+                    files_count, has_poll, has_link, is_pinned,
+                    reaction_count, renote_count, reply_count, my_reaction,
+                    is_renoted_by_me, is_favorited_by_me, payload
+                ) VALUES ('n_with_renote', 200, '', 0, NULL, 'home', 0, 'u_main', NULL, NULL, 'n_renoted', NULL, NULL, NULL,
+                    0, 0, 0, 0, 0, 0, 0, NULL, 0, 0, ?1)",
+                params![payload],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', 'n_with_renote', 0, 200)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let got = s.load_cached("col1", 10).unwrap();
+        assert_eq!(got.len(), 1);
+        let renote = got[0].renote.as_ref().expect("renote should be present");
+        let instance = renote.user.instance.as_ref().expect("renote author instance should be hydrated");
+        assert_eq!(instance.name.as_deref(), Some("Remote"));
+
+        // 両方(本体+renote分)がuserテーブルへ抽出されていること
+        let conn = s.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM user WHERE id IN ('u_main','u_renote_author')", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+
+        // payloadが本体+renote分ともスタブへ書き戻されていること
+        let raw: String = conn.query_row("SELECT payload FROM note WHERE id = 'n_with_renote'", [], |r| r.get(0)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["user"], serde_json::json!({ "id": "u_main" }));
+        assert_eq!(v["renote"]["user"], serde_json::json!({ "id": "u_renote_author" }));
     }
 
     #[test]

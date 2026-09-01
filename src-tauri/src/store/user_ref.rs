@@ -63,6 +63,65 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
     Ok(())
 }
 
+/// 自己修復パス専用のupsert。ペイロードは「そのノートがキャッシュされた時点のスナップショット」
+/// であり最新とは限らないため、`upsert_user`(ライブ書き込みパス、常に最新のUserLiteを前提に
+/// 常時上書き)と異なり、**全列**を「既存値が無い場合のみ埋める」方針にする(Issue #263 最終レビュー指摘)。
+/// これにより、古いノートを読んだだけで直近の name/avatar_url/emojis/*_count が
+/// 古いスナップショットで上書きされる回帰を防ぐ。
+/// `is_bot`/`is_cat`/`*_count`は0がデフォルト値であり「値が無い」ことを表現できないため、
+/// これらは常に既存値を維持する(=スナップショット側の値は無視する)。
+/// `emojis`は`NOT NULL DEFAULT '{}'`で明示的なNULLを取れないため、
+/// 「既存値が空オブジェクト('{}')なら埋める」という扱いにする(NULLIFで擬似NULL化)。
+pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<()> {
+    let emojis_json = serde_json::to_string(&user.emojis)?;
+    let (instance_name, instance_icon_url, instance_theme_color) = match &user.instance {
+        Some(i) => (i.name.clone(), i.icon_url.clone(), i.theme_color.clone()),
+        None => (None, None, None),
+    };
+    conn.execute(
+        "INSERT INTO user (
+            id, username, host, name, avatar_url, is_bot, is_cat,
+            followers_count, following_count, notes_count, emojis,
+            bio, banner_url, instance_name, instance_icon_url, instance_theme_color
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ON CONFLICT(id) DO UPDATE SET
+            username = COALESCE(user.username, excluded.username),
+            host = COALESCE(user.host, excluded.host),
+            name = COALESCE(user.name, excluded.name),
+            avatar_url = COALESCE(user.avatar_url, excluded.avatar_url),
+            is_bot = user.is_bot,
+            is_cat = user.is_cat,
+            followers_count = user.followers_count,
+            following_count = user.following_count,
+            notes_count = user.notes_count,
+            emojis = COALESCE(NULLIF(user.emojis, '{}'), excluded.emojis),
+            bio = COALESCE(user.bio, excluded.bio),
+            banner_url = COALESCE(user.banner_url, excluded.banner_url),
+            instance_name = COALESCE(user.instance_name, excluded.instance_name),
+            instance_icon_url = COALESCE(user.instance_icon_url, excluded.instance_icon_url),
+            instance_theme_color = COALESCE(user.instance_theme_color, excluded.instance_theme_color)",
+        params![
+            user.id,
+            user.username,
+            user.host,
+            user.name,
+            user.avatar_url,
+            user.is_bot as i64,
+            user.is_cat as i64,
+            user.followers_count,
+            user.following_count,
+            user.notes_count,
+            emojis_json,
+            user.bio,
+            user.banner_url,
+            instance_name,
+            instance_icon_url,
+            instance_theme_color,
+        ],
+    )?;
+    Ok(())
+}
+
 /// ノート本体+renote(入れ子)分の User をすべて集める(重複排除はしない)。
 /// upsert_note が「note.payload に埋め込まれる全ユーザー」をキャッシュへ反映するために使う。
 pub(crate) fn collect_users(note: &Note) -> Vec<&User> {
@@ -300,6 +359,26 @@ mod tests {
 
         let (_, _, instance_name) = row(&conn, "u1");
         assert_eq!(instance_name, Some("Remote".to_string()));
+    }
+
+    #[test]
+    fn fill_user_from_snapshot_does_not_clobber_fresher_live_data() {
+        let conn = open_cache_in_memory().unwrap();
+        // 直近のライブ書き込み(upsert_note経由を想定)で最新のemojis/nameが入っている
+        let mut fresh = user_lite("u1", "Alice (new name)");
+        fresh.emojis = HashMap::from([("wave".to_string(), "https://example.com/wave.png".to_string())]);
+        upsert_user(&conn, &fresh).unwrap();
+
+        // 数年前にキャッシュされた古いノートを自己修復で読む: 古いname、emojisキー無し(=空マップ)
+        let mut stale_snapshot = user_lite("u1", "Alice (old name)");
+        stale_snapshot.emojis = HashMap::new();
+        fill_user_from_snapshot(&conn, &stale_snapshot).unwrap();
+
+        let (name, emojis_json): (String, String) = conn
+            .query_row("SELECT name, emojis FROM user WHERE id = 'u1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(name, "Alice (new name)", "古いスナップショットが直近のnameを上書きしてはいけない");
+        assert!(emojis_json.contains("wave"), "古いスナップショットが直近のemojisを消してはいけない");
     }
 
     #[test]
