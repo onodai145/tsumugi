@@ -618,3 +618,37 @@ describe("app.fillRemainingGap (Issue #148)", () => {
     expect(app.errorModal).not.toBeNull();
   });
 });
+
+describe("AppStore.now (共有tick)", () => {
+  afterEach(() => {
+    app.teardown();
+    vi.useRealTimers();
+  });
+
+  it("boot()後、5秒ごとにnowが更新される", async () => {
+    vi.useFakeTimers();
+    const before = app.now;
+    // boot()はネットワーク呼び出しを含み失敗しうるが、失敗してもfinallyでタイマーは起動される
+    const bootPromise = app.boot();
+    await vi.advanceTimersByTimeAsync(0);
+    await bootPromise.catch(() => {});
+
+    vi.setSystemTime(Date.now() + 5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(app.now).toBeGreaterThan(before);
+  });
+
+  it("teardown()後はnowが更新されなくなる", async () => {
+    vi.useFakeTimers();
+    const bootPromise = app.boot();
+    await vi.advanceTimersByTimeAsync(0);
+    await bootPromise.catch(() => {});
+
+    app.teardown();
+    const after = app.now;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(app.now).toBe(after);
+  });
+});

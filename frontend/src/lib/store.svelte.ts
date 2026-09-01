@@ -166,6 +166,10 @@ class AppStore {
   bootedAt = $state(Date.now());
   noteCount = $state(0);
   noteRatePerMin = $state(0);
+  // ノート/通知カードの相対時刻表示を定期的に再計算させるための共有時計（Issue #256）。
+  // カードごとにsetIntervalを持たせず、アプリ全体で1本のタイマーを共有する。
+  now = $state(Date.now());
+  #clockTimer: ReturnType<typeof setInterval> | null = null;
   #statsTimer: ReturnType<typeof setInterval> | null = null;
   // 新バージョン通知（Issue #4）。起動時/「Tsumugiについて」表示時/数時間おきに確認する。
   updateAvailable = $state<LatestRelease | null>(null);
@@ -194,6 +198,10 @@ class AppStore {
   teardown() {
     for (const u of this.#unlisten) u();
     this.#unlisten = [];
+    if (this.#clockTimer !== null) {
+      clearInterval(this.#clockTimer);
+      this.#clockTimer = null;
+    }
     if (this.#statsTimer !== null) {
       clearInterval(this.#statsTimer);
       this.#statsTimer = null;
@@ -276,6 +284,9 @@ class AppStore {
     void this.#pruneNoteCache();
     if (this.#pruneTimer !== null) clearInterval(this.#pruneTimer);
     this.#pruneTimer = setInterval(() => void this.#pruneNoteCache(), PRUNE_INTERVAL_MS);
+
+    if (this.#clockTimer !== null) clearInterval(this.#clockTimer);
+    this.#clockTimer = setInterval(() => (this.now = Date.now()), 5_000);
   }
 
   /// 設定の上限に従ってノートキャッシュから古いノートを削除する（Issue #6）。失敗しても
