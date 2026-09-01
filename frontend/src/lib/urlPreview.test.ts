@@ -5,7 +5,7 @@ vi.mock("./ipc", () => ({ commands: { fetchUrlPreview: fetchUrlPreviewMock } }))
 const defaultAccountIdMock = vi.fn(() => "acc1");
 vi.mock("./store.svelte", () => ({ app: { defaultAccountId: defaultAccountIdMock } }));
 
-const { cachedUrlPreview, fetchUrlPreview } = await import("./urlPreview");
+const { cachedUrlPreview, fetchUrlPreview, resolvedThumbnailUrl } = await import("./urlPreview");
 
 const PREVIEW = {
   url: "https://example.com/a",
@@ -101,5 +101,28 @@ describe("urlPreview cache", () => {
     expect(result).toBeNull();
     expect(fetchUrlPreviewMock).not.toHaveBeenCalled();
     expect(cachedUrlPreview("https://example.com/no-account")).toBeUndefined();
+  });
+});
+
+describe("resolvedThumbnailUrl", () => {
+  it("leaves the thumbnail untouched when it is already served through instanceHost's own proxy (Issue #265)", () => {
+    const alreadyProxied = "https://misskey.example/proxy/preview.webp?url=https%3A%2F%2Fremote.example%2Ft.png&preview=1";
+    expect(resolvedThumbnailUrl(alreadyProxied, "misskey.example")).toBe(alreadyProxied);
+  });
+
+  it("wraps a thumbnail hosted elsewhere in the media proxy", () => {
+    expect(resolvedThumbnailUrl("https://remote.example/t.png", "misskey.example")).toBe(
+      `https://misskey.example/proxy/image.webp?${new URLSearchParams({ url: "https://remote.example/t.png", fallback: "1" })}`,
+    );
+  });
+
+  it("leaves the thumbnail untouched when instanceHost is undefined", () => {
+    expect(resolvedThumbnailUrl("https://remote.example/t.png", undefined)).toBe("https://remote.example/t.png");
+  });
+
+  it("falls back to proxying when the thumbnail is not a parseable absolute URL", () => {
+    expect(resolvedThumbnailUrl("/relative.png", "misskey.example")).toBe(
+      `https://misskey.example/proxy/image.webp?${new URLSearchParams({ url: "/relative.png", fallback: "1" })}`,
+    );
   });
 });

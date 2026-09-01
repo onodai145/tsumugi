@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { UrlPreview } from "../bindings/tauri.gen";
-  import { cachedUrlPreview, fetchUrlPreview, isSafeUrl } from "../lib/urlPreview";
-  import { proxiedImageUrl } from "../lib/emoji";
+  import { cachedUrlPreview, fetchUrlPreview, isSafeUrl, resolvedThumbnailUrl } from "../lib/urlPreview";
 
   let { url, instanceHost }: { url: string; instanceHost: string | undefined } = $props();
 
@@ -81,7 +80,7 @@
             {:else}
               {#if preview.thumbnail}
                 <img
-                  src={instanceHost ? proxiedImageUrl(preview.thumbnail, instanceHost) : preview.thumbnail}
+                  src={resolvedThumbnailUrl(preview.thumbnail, instanceHost)}
                   alt=""
                   loading="lazy"
                   class="h-full w-full object-cover"
