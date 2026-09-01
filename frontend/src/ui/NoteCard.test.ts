@@ -429,3 +429,26 @@ describe("instance ticker", () => {
     }
   });
 });
+
+describe("投稿時刻の自動更新", () => {
+  it("app.nowが進むと相対時刻の表示が更新される", async () => {
+    vi.useFakeTimers();
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const note = makeNote({ createdAt: nowSec - 30 }); // 30秒前
+      const { getByTitle } = render(NoteCard, { props: { note } });
+
+      const timeEl = getByTitle(new Date(note.createdAt * 1000).toLocaleString());
+      expect(timeEl.textContent?.trim()).toBe("30s");
+
+      // 90秒進める（分単位表示に切り替わるはず）
+      vi.setSystemTime(Date.now() + 90_000);
+      app.now = Date.now();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(timeEl.textContent?.trim()).toBe("2m");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
