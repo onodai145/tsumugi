@@ -11,6 +11,15 @@ vi.mock("../lib/urlPreview", () => ({
   cachedUrlPreview: (url: string) => cachedUrlPreviewMock(url),
   fetchUrlPreview: (url: string) => fetchUrlPreviewMock(url),
   isSafeUrl: (url: string) => /^https?:\/\//i.test(url),
+  resolvedThumbnailUrl: (thumbnail: string, instanceHost: string | undefined) => {
+    if (!instanceHost) return thumbnail;
+    try {
+      if (new URL(thumbnail).host === instanceHost) return thumbnail;
+    } catch {
+      // 相対URL等パース不能な場合はそのまま素通しし、下のproxiedImageUrlに委ねる
+    }
+    return `https://${instanceHost}/proxy/image.webp?${new URLSearchParams({ url: thumbnail, fallback: "1" })}`;
+  },
 }));
 
 afterEach(() => {
@@ -140,6 +149,17 @@ describe("UrlPreviewCard", () => {
     render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
     const img = document.querySelector("img");
     expect(img?.getAttribute("src")).toBe("https://remote.example/t.png");
+  });
+
+  it("does not double-proxy a thumbnail summaly already served through the instance's own proxy (Issue #265)", () => {
+    const withThumb = {
+      ...PREVIEW,
+      thumbnail: "https://misskey.example/proxy/preview.webp?url=https%3A%2F%2Fremote.example%2Ft.png&preview=1",
+    };
+    cachedUrlPreviewMock.mockReturnValue(withThumb);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: "misskey.example" } });
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(withThumb.thumbnail);
   });
 
   it("does not offer the play button or embed the iframe when preview.player.url has an unsafe scheme", async () => {

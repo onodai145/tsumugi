@@ -1,5 +1,6 @@
 import { commands } from "./ipc";
 import { app } from "./store.svelte";
+import { proxiedImageUrl } from "./emoji";
 import type { UrlPreview } from "../bindings/tauri.gen";
 
 // リンクプレビュー(OGP相当)のセッション内キャッシュ(Issue #9)。lib/mentionAvatar.tsと同構造だが、
@@ -36,6 +37,24 @@ export async function fetchUrlPreview(url: string): Promise<UrlPreview | null> {
     .finally(() => inflight.delete(url));
   inflight.set(url, promise);
   return promise;
+}
+
+/// UrlPreviewCard.svelte がサムネイル画像に使う実際のsrcを解決する(Issue #265)。
+/// Misskeyのsummalyは通常thumbnailを自インスタンスの`/proxy/preview.webp?url=...`(既にプロキシ済み)
+/// で返す。これを気付かず`proxiedImageUrl`でさらに`/proxy/image.webp?url=<上記URL>`と二重に包むと、
+/// 対象インスタンスのプロキシが自分自身へのプロキシURLを弾いて404を返し、サムネイルが出ない
+/// (Misskey web側では同じthumbnail URLをそのまま使うため再現しない。一度web側で表示すると直る、
+/// というIssue報告は、web側の閲覧そのものがバグを直しているわけではなく、単に二重プロキシを踏んで
+/// いないから最初から映っているだけ)。
+/// thumbnailのホストが既にinstanceHost自身なら、既にプロキシ済みとみなしそのまま使う。
+export function resolvedThumbnailUrl(thumbnail: string, instanceHost: string | undefined): string {
+  if (!instanceHost) return thumbnail;
+  try {
+    if (new URL(thumbnail).host === instanceHost) return thumbnail;
+  } catch {
+    // 相対URL等パース不能な場合はそのまま素通しし、下のproxiedImageUrlに委ねる
+  }
+  return proxiedImageUrl(thumbnail, instanceHost);
 }
 
 /// UrlPreviewCard.svelte がリンクとして扱う(http/https)スキームか判定する。
