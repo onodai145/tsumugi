@@ -620,6 +620,19 @@ describe("app.fillRemainingGap (Issue #148)", () => {
 });
 
 describe("AppStore.now (共有tick)", () => {
+  beforeEach(() => {
+    // boot() は list_accounts の結果を this.accounts に代入し、その直後に
+    // #refreshInstanceMeta() を await せず呼ぶ(fire-and-forget)。デフォルトの
+    // モック({status:"ok",data:null}を返す)だと typedError の二重ラップにより
+    // this.accounts が配列でなくなり、#refreshInstanceMeta 内の
+    // this.accounts.map が例外を投げて未捕捉rejectionになる。
+    // list_accounts だけ実配列を返すよう上書きする。
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_accounts") return [];
+      return { status: "ok", data: null };
+    });
+  });
+
   afterEach(() => {
     app.teardown();
     vi.useRealTimers();
