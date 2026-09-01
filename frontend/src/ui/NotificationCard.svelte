@@ -67,6 +67,13 @@
     achievementEarned: Trophy,
   };
   const IconComp = $derived(icons[n.type] ?? Bell);
+
+  // app.now（Issue #256、5秒ごとに更新される共有tick）を依存として読むことで、
+  // 時間経過に合わせて相対時刻表示を再計算させる。
+  const displayTime = $derived.by(() => {
+    app.now;
+    return relativeTime(n.createdAt);
+  });
 </script>
 
 <article class="border-b border-border px-3 py-2 [content-visibility:auto] [contain-intrinsic-size:auto_80px]">
@@ -107,7 +114,7 @@
         </span>
       {/if}
     </span>
-    <span class="text-sm text-muted-foreground">{relativeTime(n.createdAt)}</span>
+    <span class="text-sm text-muted-foreground">{displayTime}</span>
   </div>
   {#if n.note}
     <div class="ml-[30px]" data-testid="notification-note-preview">
