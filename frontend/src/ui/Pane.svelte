@@ -33,6 +33,10 @@
   }
   function onRowSplitResizeMove(e: PointerEvent, child: PaneChild) {
     if (!rowResizing || rowResizing.nodeId !== child.node.id) return;
+    if (e.buttons === 0) {
+      rowResizing = null;
+      return;
+    }
     child.size = Math.min(720, Math.max(220, rowResizing.startW + (e.clientX - rowResizing.startX)));
   }
   function onRowSplitResizeUp(child: PaneChild) {
@@ -54,11 +58,34 @@
     startSizeB: number;
   } | null>(null);
 
+  // colAutoFlush: onColSplitResizeDownで発生したauto解除(setPaneAuto)の永続化を、
+  // onColSplitResizeUpのresizePane呼び出しより前に完了させるための直列化キュー。
+  // 両方ともRust側でread-tree→1ノード変更→木全体保存という同じ形の処理をしており、
+  // 並行に飛ばすとC1と同じ「後発の保存が先発の変更を握り潰す」レースが起きるため、
+  // 常にこのPromiseを経由して1本の直列実行チェーンにまとめる。
+  let colAutoFlush: Promise<unknown> = Promise.resolve();
+
   function onColSplitResizeDown(e: PointerEvent, a: PaneChild, b: PaneChild) {
     const boundary = e.currentTarget as HTMLElement;
     const elA = boundary.previousElementSibling as HTMLElement | null;
     const elB = boundary.nextElementSibling as HTMLElement | null;
     if (!elA || !elB) return;
+    const flips: string[] = [];
+    if (a.auto) {
+      a.auto = false;
+      flips.push(a.node.id);
+    }
+    if (b.auto) {
+      b.auto = false;
+      flips.push(b.node.id);
+    }
+    if (flips.length > 0) {
+      colAutoFlush = (async () => {
+        for (const nodeId of flips) {
+          await app.setPaneAuto(nodeId, false);
+        }
+      })();
+    }
     colResizing = {
       a,
       b,
@@ -72,6 +99,10 @@
   }
   function onColSplitResizeMove(e: PointerEvent) {
     if (!colResizing) return;
+    if (e.buttons === 0) {
+      colResizing = null;
+      return;
+    }
     const { a, b, startY, startHeightA, startHeightB, startSizeA, startSizeB } = colResizing;
     const totalPx = startHeightA + startHeightB;
     const totalWeight = startSizeA + startSizeB;
@@ -82,12 +113,13 @@
     a.size = newHeightA * weightPerPx;
     b.size = totalWeight - a.size;
   }
-  function onColSplitResizeUp() {
+  async function onColSplitResizeUp() {
     if (!colResizing) return;
     const { a, b } = colResizing;
     colResizing = null;
-    app.resizePane(a.node.id, a.size ?? 50);
-    app.resizePane(b.node.id, b.size ?? 50);
+    await colAutoFlush;
+    await app.resizePane(a.node.id, a.size ?? 50);
+    await app.resizePane(b.node.id, b.size ?? 50);
   }
 </script>
 
@@ -137,7 +169,7 @@
       <div class="relative flex flex-col min-h-0 min-w-0" style={child.auto ? "flex:1 1 0" : `flex:0 0 ${child.size}%`}>
         <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} stretch={true} />
       </div>
-      {#if i < node.children.length - 1 && !child.auto && !node.children[i + 1].auto}
+      {#if i < node.children.length - 1}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="h-1.5 flex-none cursor-row-resize hover:bg-[color-mix(in_srgb,var(--color-primary)_40%,transparent)]"
