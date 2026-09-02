@@ -69,7 +69,12 @@ describe("ComposeBar 下書き", () => {
       const { getByTestId } = render(ComposeBar);
       await vi.advanceTimersByTimeAsync(0); // マウント時のget_auto_draft(非同期)を先に消化する
       await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "書きかけ" } });
-      await vi.advanceTimersByTimeAsync(2000);
+      // 2000msのデバウンスであること自体を検証する: 直前(1900ms)ではまだ呼ばれておらず、
+      // 2000msに達した時点で初めて呼ばれることを確認する(単に「いつかは呼ばれる」だけでは
+      // デバウンスの有無を区別できないため)。
+      await vi.advanceTimersByTimeAsync(1900);
+      expect(invokeMock).not.toHaveBeenCalledWith("save_auto_draft", expect.anything());
+      await vi.advanceTimersByTimeAsync(100);
       expect(invokeMock).toHaveBeenCalledWith(
         "save_auto_draft",
         expect.objectContaining({ accountId: "acc1" }),
@@ -81,6 +86,11 @@ describe("ComposeBar 下書き", () => {
 
   it("空に戻すとclear_auto_draftを呼ぶ", async () => {
     const { getByTestId } = render(ComposeBar);
+    // マウント直後(自動復元完了直後)の時点では、まだ何も入力していないので
+    // clear_auto_draftが呼ばれてはならない(復元しようとしている自動下書きを誤って
+    // 消してしまう回帰: 自動保存effectと自動復元effectの宣言順序に依存するハザードへの
+    // リグレッションガード)。
+    expect(invokeMock).not.toHaveBeenCalledWith("clear_auto_draft", expect.anything());
     await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "a" } });
     await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "" } });
     await waitFor(() => {
