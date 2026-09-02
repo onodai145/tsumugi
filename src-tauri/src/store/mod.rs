@@ -1,4 +1,6 @@
-//! 永続化（SQLite）。設定（Account/Column）を保存し、再起動時に復元する。
+//! 永続化。設定（Account/Column, settings.rs）と下書き（draft.rs）はプレーンテキスト(JSON)の
+//! 1ファイル、ノートキャッシュ（note_cache.rs, 破棄前提）のみ rusqlite 経由の SQLite。
+//! いずれも再起動時に復元する。
 
 pub mod db;
 pub mod draft;
