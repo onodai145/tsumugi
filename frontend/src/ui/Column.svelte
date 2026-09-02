@@ -3,7 +3,7 @@
   import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
-  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitVertical, Settings } from "@lucide/svelte";
+  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitHorizontal, SquareSplitVertical, Settings } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { portal } from "../lib/portal";
   import { edgeFromPointer } from "../lib/paneEdge";
@@ -14,6 +14,7 @@
     onEditTab,
     onEditGroup,
     onSplitDown,
+    onSplitRight,
     stretch = false,
   }: {
     group: GroupView;
@@ -21,6 +22,7 @@
     onEditTab: (tab: TabView) => void;
     onEditGroup: (groupId: string) => void;
     onSplitDown: (groupId: string) => void;
+    onSplitRight: (groupId: string) => void;
     stretch?: boolean;
   } = $props();
 
@@ -204,6 +206,14 @@
           onclick={() => pickMenuItem(() => onAddTab(group.id))}
         >
           <Plus size={16} /> タブを追加
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+          onclick={() => pickMenuItem(() => onSplitRight(group.id))}
+        >
+          <SquareSplitHorizontal size={16} /> 右に分割
         </button>
         <button
           type="button"

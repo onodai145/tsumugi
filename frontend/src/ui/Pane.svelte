@@ -11,6 +11,7 @@
     onEditTab,
     onEditGroup,
     onSplitDown,
+    onSplitRight,
     stretch = false,
   }: {
     node: PaneNode;
@@ -18,6 +19,7 @@
     onEditTab: (tab: TabView) => void;
     onEditGroup: (groupId: string) => void;
     onSplitDown: (groupId: string) => void;
+    onSplitRight: (groupId: string) => void;
     stretch?: boolean;
   } = $props();
 </script>
@@ -25,7 +27,7 @@
 {#if node.type === "leaf"}
   {@const group = app.groups.find((g) => g.id === node.groupId)}
   {#if group}
-    <Column {group} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {stretch} />
+    <Column {group} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} {stretch} />
   {/if}
 {:else if node.direction === "row"}
   <!-- flex-auto(flex:1 1 auto)は親(.columns、flex-direction:row)のflex子として残り幅
@@ -38,7 +40,7 @@
         <!-- Leafの幅は今まで通りColumn.svelte側(ColumnGroup.width/auto)が決める。
              child.size/autoは(このSliceでは)Leafの実際の幅とは同期していないため、
              ここでラップして使うと二重管理・食い違いの原因になる。 -->
-        <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} />
+        <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} />
       {:else}
         <!-- ネストしたSplit(例: 下に分割された塊)にはColumn.svelteに相当する幅指定元が
              無いため、PaneChild.size/autoをそのままflex指定に使う。 -->
@@ -46,7 +48,7 @@
           class="flex flex-col h-full min-h-0 min-w-0"
           style={child.auto ? "flex:1 1 0;min-width:220px" : `flex:0 0 ${child.size}px`}
         >
-          <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} />
+          <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} />
         </div>
       {/if}
     {/each}
@@ -55,7 +57,7 @@
   <div class="flex flex-col flex-auto h-full min-h-0">
     {#each node.children as child (child.node.id)}
       <div class="flex flex-col min-h-0 min-w-0" style={child.auto ? "flex:1 1 0" : `flex:0 0 ${child.size}%`}>
-        <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} stretch={true} />
+        <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} stretch={true} />
       </div>
     {/each}
   </div>
