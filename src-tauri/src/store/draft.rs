@@ -304,6 +304,34 @@ mod tests {
     }
 
     #[test]
+    fn manual_drafts_are_isolated_per_account() {
+        let s = DraftStore::new_in_memory();
+        s.save_manual("acc1", &input("m1")).unwrap();
+        s.save_manual("acc2", &input("m2")).unwrap();
+        let acc1_list = s.list_manual("acc1").unwrap();
+        assert_eq!(acc1_list.len(), 1);
+        assert_eq!(acc1_list[0].text, "m1");
+        let acc2_list = s.list_manual("acc2").unwrap();
+        assert_eq!(acc2_list.len(), 1);
+        assert_eq!(acc2_list[0].text, "m2");
+    }
+
+    #[test]
+    fn delete_manual_is_scoped_to_the_calling_account() {
+        let s = DraftStore::new_in_memory();
+        s.save_manual("acc1", &input("m1")).unwrap();
+        let id = s.list_manual("acc1").unwrap()[0].id.clone();
+
+        // 別アカウントからの削除は無視される(対象のdraftはそのまま残る)
+        s.delete_manual("acc2", &id).unwrap();
+        assert_eq!(s.list_manual("acc1").unwrap().len(), 1);
+
+        // 正しいアカウントからの削除は反映される
+        s.delete_manual("acc1", &id).unwrap();
+        assert!(s.list_manual("acc1").unwrap().is_empty());
+    }
+
+    #[test]
     fn persists_to_plain_text_json_file_and_reloads() {
         let path = std::env::temp_dir().join(format!("tsumugi-drafts-test-{}.json", uuid::Uuid::new_v4()));
         {
