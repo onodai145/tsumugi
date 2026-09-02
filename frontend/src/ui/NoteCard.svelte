@@ -408,20 +408,18 @@
             ><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
             {#if isLongText && !textExpanded}
               <div class="note-text-fade pointer-events-none absolute inset-x-0 bottom-0 h-10"></div>
+              <div class="absolute inset-x-0 bottom-0 flex justify-center pb-0.5">
+                <button
+                  type="button"
+                  class="cw-toggle rounded-md border border-border px-2 py-px text-sm text-foreground"
+                  data-testid="note-text-expand"
+                  onclick={() => (textExpanded = true)}
+                >
+                  もっと見る
+                </button>
+              </div>
             {/if}
           </div>
-          {#if isLongText && !textExpanded}
-            <div class="mt-1 flex justify-center">
-              <button
-                type="button"
-                class="cw-toggle rounded-md border border-border px-2 py-px text-sm text-foreground"
-                data-testid="note-text-expand"
-                onclick={() => (textExpanded = true)}
-              >
-                もっと見る
-              </button>
-            </div>
-          {/if}
         {/if}
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
