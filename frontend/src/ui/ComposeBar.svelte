@@ -952,15 +952,6 @@
       <Button type="button" variant="outline" size="sm" class={useCw ? "border-primary text-primary" : ""} onclick={() => (useCw = !useCw)}>CW</Button>
       <Button type="button" variant="outline" size="sm" class={usePoll ? "border-primary text-primary" : ""} onclick={() => (usePoll = !usePoll)}>投票</Button>
       <Button type="button" variant="outline" size="sm" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon-sm"
-        title="下書き"
-        bind:ref={draftMenuTrigger}
-        onclick={toggleDraftMenu}
-        disabled={busy || !accountId}
-      ><FileText size={16} class="size-4" /></Button>
       <ReactionAcceptanceSelect bind:value={reactionAcceptance} />
       {#if useChannel}
         {#if channelsLoading}
@@ -985,6 +976,15 @@
       </label>
     </div>
     <div class="flex flex-none flex-wrap items-center gap-1.5">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
+        title="下書き"
+        bind:ref={draftMenuTrigger}
+        onclick={toggleDraftMenu}
+        disabled={busy || !accountId}
+      ><FileText size={16} class="size-4" /></Button>
       <Button type="button" size="sm" disabled={busy} onclick={submit} data-testid="compose-submit">{busy ? "…" : "投稿"}</Button>
     </div>
   </div>
