@@ -65,6 +65,12 @@ export const commands = {
 	resizePane: (nodeId: string, size: number | null) => typedError<null, Error>(__TAURI_INVOKE("resize_pane", { nodeId, size })),
 	/**  ペインノード(Leaf/Splitどちらのidでも可)のauto(自動幅調整)フラグを更新する。 */
 	setPaneAuto: (nodeId: string, auto: boolean) => typedError<null, Error>(__TAURI_INVOKE("set_pane_auto", { nodeId, auto })),
+	/**
+	 *  dragged_group_idを木から取り外し(親が1子になれば畳む)、target_group_idの指定エッジに
+	 *  挿入する(内部的には「remove_group→insert_sibling_at」の組み合わせ)。
+	 *  dragged_group_id == target_group_idの場合は何もしない(同じ場所への無意味なドロップ)。
+	 */
+	movePane: (draggedGroupId: string, targetGroupId: string, edge: Edge) => typedError<null, Error>(__TAURI_INVOKE("move_pane", { draggedGroupId, targetGroupId, edge })),
 	/**  永続化済みペイン分割ツリー(起動時のレイアウト復元用)。 */
 	loadPaneLayout: () => typedError<PaneNode, Error>(__TAURI_INVOKE("load_pane_layout")),
 	/**
@@ -518,6 +524,8 @@ export type DriveFile = {
 	/**  元のファイル名（メディア以外はダウンロードリンクの表示名に使う） */
 	name?: string,
 };
+
+export type Edge = "left" | "right" | "top" | "bottom";
 
 /**
  *  リアクションピッカー用の絵文字定義（インスタンス単位でキャッシュ）。

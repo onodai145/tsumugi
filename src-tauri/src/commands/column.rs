@@ -6,7 +6,7 @@ use crate::api::meta::{fetch_antennas, fetch_followed_channels, fetch_user_lists
 use crate::api::notes::fetch_notes;
 use crate::api::notifications::fetch_notifications;
 use crate::domain::{
-    Column, ColumnGroup, ColumnKind, FilterQuery, MuteConfig, Note, Notification, PaneNode,
+    Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note, Notification, PaneNode,
     SourceItem, SplitDirection, User, UserList,
 };
 use crate::error::{Error, Result};
@@ -166,6 +166,25 @@ pub async fn set_pane_auto(state: State<'_, AppState>, node_id: String, auto: bo
     let mut root = state.settings.load_pane_layout()?;
     if !root.set_auto(&node_id, auto) {
         return Err(Error::Invalid(format!("unknown pane node: {node_id}")));
+    }
+    state.settings.save_pane_layout(&root)
+}
+
+/// dragged_group_idを木から取り外し(親が1子になれば畳む)、target_group_idの指定エッジに
+/// 挿入する(内部的には「remove_group→insert_sibling_at」の組み合わせ)。
+/// dragged_group_id == target_group_idの場合は何もしない(同じ場所への無意味なドロップ)。
+#[tauri::command]
+#[specta::specta]
+pub async fn move_pane(state: State<'_, AppState>, dragged_group_id: String, target_group_id: String, edge: Edge) -> Result<()> {
+    if dragged_group_id == target_group_id {
+        return Ok(());
+    }
+    let mut root = state.settings.load_pane_layout()?;
+    if !root.remove_group(&dragged_group_id) {
+        return Err(Error::Invalid(format!("unknown dragged group: {dragged_group_id}")));
+    }
+    if !root.insert_sibling_at(&target_group_id, &dragged_group_id, edge.direction(), edge.before()) {
+        return Err(Error::Invalid(format!("unknown target group: {target_group_id}")));
     }
     state.settings.save_pane_layout(&root)
 }

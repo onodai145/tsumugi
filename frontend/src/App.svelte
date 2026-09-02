@@ -76,6 +76,13 @@
     openAddTab(newGroupId);
   }
 
+  async function splitRight(groupId: string) {
+    const newGroupId = await app.splitPane(groupId, "row");
+    if (!newGroupId) return;
+    pendingSplitGroupId = newGroupId;
+    openAddTab(newGroupId);
+  }
+
   function onGlobalKey(e: KeyboardEvent) {
     const el = document.activeElement as HTMLElement | null;
     // 入力中はキーバインドを無効化（タイプを妨げない）
@@ -149,7 +156,7 @@
       </div>
     {:else}
       <div class="flex h-full overflow-x-auto">
-        <Pane node={app.paneRoot} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} onSplitDown={splitDown} />
+        <Pane node={app.paneRoot} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} onSplitDown={splitDown} onSplitRight={splitRight} />
       </div>
     {/if}
   </main>
