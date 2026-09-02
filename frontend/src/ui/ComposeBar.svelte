@@ -183,13 +183,20 @@
     }
   }
 
+  // ボタンを投稿ボタンの隣(ツールバー右端)に置いているため、素直に左揃えで開くと
+  // ポップオーバー(幅280px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
+  // ビューポート内に収まるようクランプする(絵文字ピッカーと同様)。
+  const DRAFT_MENU_W = 280;
   function toggleDraftMenu() {
     if (showDraftMenu) {
       showDraftMenu = false;
       return;
     }
     const r = draftMenuTrigger?.getBoundingClientRect();
-    if (r) draftMenuPos = { left: r.left, top: r.bottom + 4 };
+    if (r) {
+      const left = Math.min(Math.max(8, r.right - DRAFT_MENU_W), window.innerWidth - DRAFT_MENU_W - 8);
+      draftMenuPos = { left, top: r.bottom + 4 };
+    }
     showDraftMenu = true;
     void loadManualDrafts();
   }
