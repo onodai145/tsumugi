@@ -411,14 +411,16 @@
             {/if}
           </div>
           {#if isLongText && !textExpanded}
-            <button
-              type="button"
-              class="cw-toggle mt-1 rounded-md border border-border px-2 py-px text-sm text-foreground"
-              data-testid="note-text-expand"
-              onclick={() => (textExpanded = true)}
-            >
-              もっと見る
-            </button>
+            <div class="mt-1 flex justify-center">
+              <button
+                type="button"
+                class="cw-toggle rounded-md border border-border px-2 py-px text-sm text-foreground"
+                data-testid="note-text-expand"
+                onclick={() => (textExpanded = true)}
+              >
+                もっと見る
+              </button>
+            </div>
           {/if}
         {/if}
         {#if inner.files.length > 0}
