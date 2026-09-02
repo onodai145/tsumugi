@@ -13,6 +13,28 @@ pub enum SplitDirection {
     Column,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Edge {
+    pub fn direction(self) -> SplitDirection {
+        match self {
+            Edge::Left | Edge::Right => SplitDirection::Row,
+            Edge::Top | Edge::Bottom => SplitDirection::Column,
+        }
+    }
+
+    pub fn before(self) -> bool {
+        matches!(self, Edge::Left | Edge::Top)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum PaneNode {
@@ -70,20 +92,24 @@ impl PaneNode {
     /// reference の位置を新しい direction の Split でラップする(内部2子は
     /// default_wrap_child)。reference が見つからなければ false。
     pub fn insert_sibling(&mut self, reference_group_id: &str, new_group_id: &str, direction: SplitDirection) -> bool {
+        self.insert_sibling_at(reference_group_id, new_group_id, direction, false)
+    }
+
+    /// insert_siblingの一般化版。beforeがtrueならreferenceの手前に、falseなら直後に
+    /// 新規Leafを挿入する(挙動の詳細はinsert_siblingのドキュメントコメント参照。
+    /// before/afterの違いは「新規Leafとreferenceのどちらが子リストで先に来るか」だけで、
+    /// size折半・auto継承・ラップの計算方法自体は同じ)。
+    pub fn insert_sibling_at(&mut self, reference_group_id: &str, new_group_id: &str, direction: SplitDirection, before: bool) -> bool {
         if let PaneNode::Leaf { group_id, .. } = self {
             if group_id != reference_group_id {
                 return false;
             }
             let old = std::mem::replace(self, PaneNode::new_leaf(String::new()));
             let (w, auto) = Self::default_wrap_child(direction);
-            *self = PaneNode::Split {
-                id: uuid::Uuid::new_v4().to_string(),
-                direction,
-                children: vec![
-                    PaneChild { node: old, size: w, auto },
-                    PaneChild { node: PaneNode::new_leaf(new_group_id), size: w, auto },
-                ],
-            };
+            let new_child = PaneChild { node: PaneNode::new_leaf(new_group_id), size: w, auto };
+            let old_child = PaneChild { node: old, size: w, auto };
+            let children = if before { vec![new_child, old_child] } else { vec![old_child, new_child] };
+            *self = PaneNode::Split { id: uuid::Uuid::new_v4().to_string(), direction, children };
             return true;
         }
         let PaneNode::Split { direction: my_dir, children, .. } = self else {
@@ -93,36 +119,31 @@ impl PaneNode {
             .iter()
             .position(|c| matches!(&c.node, PaneNode::Leaf { group_id, .. } if group_id == reference_group_id))
         {
+            let insert_at = if before { idx } else { idx + 1 };
             if *my_dir == direction {
                 if direction == SplitDirection::Column && children[idx].auto {
-                    // referenceがauto: sizeは弄らず、新規Leafもautoにするだけで
-                    // flexboxがauto同士で残りを均等割りしてくれる。
                     children.insert(
-                        idx + 1,
+                        insert_at,
                         PaneChild { node: PaneNode::new_leaf(new_group_id), size: DEFAULT_COLUMN_AUTO_FALLBACK_PERCENT, auto: true },
                     );
                 } else {
                     let half = children[idx].size / 2.0;
                     children[idx].size = half;
-                    children.insert(idx + 1, PaneChild { node: PaneNode::new_leaf(new_group_id), size: half, auto: false });
+                    children.insert(insert_at, PaneChild { node: PaneNode::new_leaf(new_group_id), size: half, auto: false });
                 }
             } else {
                 let old_child = children.remove(idx);
                 let (w, auto) = Self::default_wrap_child(direction);
-                let wrapped = PaneNode::Split {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    direction,
-                    children: vec![
-                        PaneChild { node: old_child.node, size: w, auto },
-                        PaneChild { node: PaneNode::new_leaf(new_group_id), size: w, auto },
-                    ],
-                };
+                let new_child = PaneChild { node: PaneNode::new_leaf(new_group_id), size: w, auto };
+                let old_wrapped = PaneChild { node: old_child.node, size: w, auto };
+                let inner_children = if before { vec![new_child, old_wrapped] } else { vec![old_wrapped, new_child] };
+                let wrapped = PaneNode::Split { id: uuid::Uuid::new_v4().to_string(), direction, children: inner_children };
                 children.insert(idx, PaneChild { node: wrapped, size: old_child.size, auto: old_child.auto });
             }
             return true;
         }
         for child in children.iter_mut() {
-            if child.node.insert_sibling(reference_group_id, new_group_id, direction) {
+            if child.node.insert_sibling_at(reference_group_id, new_group_id, direction, before) {
                 return true;
             }
         }
@@ -357,6 +378,91 @@ mod tests {
     fn insert_sibling_returns_false_when_reference_not_found() {
         let mut root = PaneNode::new_leaf("a");
         assert!(!root.insert_sibling("nope", "c", SplitDirection::Column));
+    }
+
+    #[test]
+    fn edge_direction_and_before() {
+        assert_eq!(Edge::Left.direction(), SplitDirection::Row);
+        assert!(Edge::Left.before());
+        assert_eq!(Edge::Right.direction(), SplitDirection::Row);
+        assert!(!Edge::Right.before());
+        assert_eq!(Edge::Top.direction(), SplitDirection::Column);
+        assert!(Edge::Top.before());
+        assert_eq!(Edge::Bottom.direction(), SplitDirection::Column);
+        assert!(!Edge::Bottom.before());
+    }
+
+    #[test]
+    fn insert_sibling_at_before_same_direction_inserts_ahead_of_reference() {
+        // root: Split(Row)[ Leaf(a, size=300), Leaf(b, size=300) ] に、aの手前(before)へcを挿入。
+        let mut root = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Row,
+            children: vec![
+                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
+                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+            ],
+        };
+        assert!(root.insert_sibling_at("a", "c", SplitDirection::Row, true));
+        let PaneNode::Split { children, .. } = &root else { panic!("root must stay Split") };
+        assert_eq!(children.len(), 3);
+        // 新規(c)がaの手前、aは元の位置のまま(半分ずつに折半)
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "c");
+        assert_eq!(children[0].size, 150.0);
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "a");
+        assert_eq!(children[1].size, 150.0);
+        assert_eq!(children[2].size, 300.0); // bは無関係、変化なし
+    }
+
+    #[test]
+    fn insert_sibling_at_after_same_direction_matches_existing_insert_sibling() {
+        // before=false は既存のinsert_sibling(常に直後へ挿入)と同じ構造になる。
+        // 新規Leaf(c)のidはinsert_sibling/insert_sibling_at呼び出しのたびに乱数生成される
+        // ため、id自体は比較せず、size/auto/group_idの並びが一致することだけを見る。
+        let mut a = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Row,
+            children: vec![
+                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
+                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+            ],
+        };
+        let mut b = a.clone();
+        assert!(a.insert_sibling("a", "c", SplitDirection::Row));
+        assert!(b.insert_sibling_at("a", "c", SplitDirection::Row, false));
+        let PaneNode::Split { children: children_a, .. } = &a else { panic!("expected Split") };
+        let PaneNode::Split { children: children_b, .. } = &b else { panic!("expected Split") };
+        assert_eq!(children_a.len(), children_b.len());
+        for (x, y) in children_a.iter().zip(children_b.iter()) {
+            assert_eq!(x.size, y.size);
+            assert_eq!(x.auto, y.auto);
+            let PaneNode::Leaf { group_id: gx, .. } = &x.node else { panic!("expected leaf") };
+            let PaneNode::Leaf { group_id: gy, .. } = &y.node else { panic!("expected leaf") };
+            assert_eq!(gx, gy);
+        }
+    }
+
+    #[test]
+    fn insert_sibling_at_before_wraps_reference_when_direction_differs() {
+        // root: Leaf(a) のみ。Column方向・before=trueで挿入すると、Split(Column)[c, a]になる
+        // (aが後ろに来る=「aの上に分割」)。
+        let mut root = PaneNode::new_leaf("a");
+        assert!(root.insert_sibling_at("a", "c", SplitDirection::Column, true));
+        let PaneNode::Split { direction, children, .. } = &root else { panic!("root must become Split") };
+        assert_eq!(*direction, SplitDirection::Column);
+        assert_eq!(children.len(), 2);
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "c");
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        assert_eq!(group_id, "a");
+    }
+
+    #[test]
+    fn insert_sibling_at_returns_false_when_reference_not_found() {
+        let mut root = PaneNode::new_leaf("a");
+        assert!(!root.insert_sibling_at("nope", "c", SplitDirection::Column, true));
     }
 
     #[test]

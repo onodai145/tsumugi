@@ -27,7 +27,7 @@ pub use mute::MuteConfig;
 pub use note::{DriveFile, Note, Poll, PollChoice, Visibility};
 pub use notification::Notification;
 pub use notify::NotifyConfig;
-pub use pane::{PaneChild, PaneNode, SplitDirection};
+pub use pane::{Edge, PaneChild, PaneNode, SplitDirection};
 pub use reaction::{EmojiDef, ReactionSummary, ReactionUser};
 pub use ui::UiPrefs;
 pub use url_preview::{UrlPlayer, UrlPreview};
