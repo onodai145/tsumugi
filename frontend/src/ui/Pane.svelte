@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PaneNode } from "../bindings/tauri.gen";
+  import type { PaneChild, PaneNode } from "../bindings/tauri.gen";
   import type { TabView } from "../lib/store.svelte";
   import { app } from "../lib/store.svelte";
   import Column from "./Column.svelte";
@@ -22,6 +22,24 @@
     onSplitRight: (groupId: string) => void;
     stretch?: boolean;
   } = $props();
+
+  // Row内のネストしたSplit子の幅(px)ドラッグリサイズ。Leaf子はColumn.svelte自身の
+  // ハンドル(group.width)を使うのでここでは扱わない。
+  let rowResizing = $state<{ nodeId: string; startX: number; startW: number } | null>(null);
+
+  function onRowSplitResizeDown(e: PointerEvent, child: PaneChild) {
+    rowResizing = { nodeId: child.node.id, startX: e.clientX, startW: child.size ?? 300 };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onRowSplitResizeMove(e: PointerEvent, child: PaneChild) {
+    if (!rowResizing || rowResizing.nodeId !== child.node.id) return;
+    child.size = Math.min(720, Math.max(220, rowResizing.startW + (e.clientX - rowResizing.startX)));
+  }
+  function onRowSplitResizeUp(child: PaneChild) {
+    if (!rowResizing || rowResizing.nodeId !== child.node.id) return;
+    rowResizing = null;
+    app.resizePane(child.node.id, child.size ?? 300);
+  }
 </script>
 
 {#if node.type === "leaf"}
@@ -45,10 +63,21 @@
         <!-- ネストしたSplit(例: 下に分割された塊)にはColumn.svelteに相当する幅指定元が
              無いため、PaneChild.size/autoをそのままflex指定に使う。 -->
         <div
-          class="flex flex-col h-full min-h-0 min-w-0"
+          class="relative flex flex-col h-full min-h-0 min-w-0"
           style={child.auto ? "flex:1 1 0;min-width:220px" : `flex:0 0 ${child.size}px`}
         >
           <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} />
+          {#if !child.auto}
+            <div
+              class="absolute right-[-3px] top-0 h-full w-1.5 cursor-col-resize hover:bg-[color-mix(in_srgb,var(--color-primary)_40%,transparent)]"
+              style="z-index:5"
+              onpointerdown={(e) => onRowSplitResizeDown(e, child)}
+              onpointermove={(e) => onRowSplitResizeMove(e, child)}
+              onpointerup={() => onRowSplitResizeUp(child)}
+              role="separator"
+              aria-label="幅を変更"
+            ></div>
+          {/if}
         </div>
       {/if}
     {/each}
