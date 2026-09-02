@@ -70,28 +70,38 @@
     const elA = boundary.previousElementSibling as HTMLElement | null;
     const elB = boundary.nextElementSibling as HTMLElement | null;
     if (!elA || !elB) return;
+    const heightA = elA.getBoundingClientRect().height;
+    const heightB = elB.getBoundingClientRect().height;
+    // auto解除時は、child.sizeの既定フォールバック(50)ではなく実測の高さから
+    // コンテナ全体に対する実際のシェア(%)を算出して固定化する。兄弟が3つ以上いる
+    // Column分割では、autoの子はflex:1 1 0で残り領域を均等に分け合っているため、
+    // 均等割りでない実際のシェアを使わないと、固定化した瞬間に他のauto兄弟が
+    // 不当に圧迫される(Issue #275)。
+    const containerHeight = boundary.parentElement?.getBoundingClientRect().height ?? 0;
     const flips: string[] = [];
     if (a.auto) {
+      if (containerHeight > 0) a.size = (heightA / containerHeight) * 100;
       a.auto = false;
       flips.push(a.node.id);
     }
     if (b.auto) {
+      if (containerHeight > 0) b.size = (heightB / containerHeight) * 100;
       b.auto = false;
       flips.push(b.node.id);
     }
     if (flips.length > 0) {
-      colAutoFlush = (async () => {
+      colAutoFlush = colAutoFlush.then(async () => {
         for (const nodeId of flips) {
           await app.setPaneAuto(nodeId, false);
         }
-      })();
+      });
     }
     colResizing = {
       a,
       b,
       startY: e.clientY,
-      startHeightA: elA.getBoundingClientRect().height,
-      startHeightB: elB.getBoundingClientRect().height,
+      startHeightA: heightA,
+      startHeightB: heightB,
       startSizeA: a.size ?? 50,
       startSizeB: b.size ?? 50,
     };
@@ -117,9 +127,11 @@
     if (!colResizing) return;
     const { a, b } = colResizing;
     colResizing = null;
+    colAutoFlush = colAutoFlush.then(async () => {
+      await app.resizePane(a.node.id, a.size ?? 50);
+      await app.resizePane(b.node.id, b.size ?? 50);
+    });
     await colAutoFlush;
-    await app.resizePane(a.node.id, a.size ?? 50);
-    await app.resizePane(b.node.id, b.size ?? 50);
   }
 </script>
 
