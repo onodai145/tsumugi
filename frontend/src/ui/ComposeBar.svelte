@@ -7,11 +7,11 @@
   import Dropdown from "./Dropdown.svelte";
   import DrivePicker from "./DrivePicker.svelte";
   import Modal from "./Modal.svelte";
-  import { commands, unwrap, formatError } from "../lib/ipc";
+  import { commands, unwrap, unwrapAcc, formatError } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ImagePlus, SmilePlus, X } from "@lucide/svelte";
+  import { FileText, ImagePlus, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
   import { emojiKeyToInsertText } from "../lib/emojiKey";
   import CompletionPopover from "./CompletionPopover.svelte";
@@ -26,6 +26,9 @@
     DriveFile,
     Note,
     SourceItem,
+    Draft,
+    DraftInput,
+    DraftNoteSnapshot,
   } from "../bindings/tauri.gen";
 
   // expanded: モバイルの投稿モーダルなど、常に複数行分の入力欄を確保したい文脈向け
@@ -91,6 +94,11 @@
     | { kind: "drive"; id: string; file: DriveFile }
     | { kind: "clipboard"; id: string; name: string; bytes: number[]; previewUrl: string };
 
+  /// 返信/引用コンテキストとして保持する最小限の形。banner表示(user.username/text)と
+  /// submit時の.id参照にしか使わないため、下書き復元時にNote全体を持たずに済むよう
+  /// フルのNote型ではなくこの最小型で持つ。
+  type ComposeContextNote = { id: string; text: string | null; user: { username: string } };
+
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
   function extLower(name: string): string {
@@ -109,6 +117,14 @@
   let showEmojiPicker = $state(false);
   let emojiPickerTrigger = $state<HTMLElement | null>(null);
   let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
+  let showDraftMenu = $state(false);
+  let draftMenuTrigger = $state<HTMLElement | null>(null);
+  let draftMenuPos = $state<{ left: number; top: number } | null>(null);
+  let manualDrafts = $state<Draft[]>([]);
+  let draftsLoading = $state(false);
+  /// 呼び出し中の手動下書きのID(投稿成功時にこれを自動削除する)。手動保存/新規入力/
+  /// 自動下書き復元時はnullに戻す。
+  let loadedDraftId = $state<string | null>(null);
 
   // ボタンをテキストエリア右上に重ねて配置しているため、素直に左揃えで開くと
   // ポップオーバー(幅300px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
@@ -144,6 +160,47 @@
     showAttachMenu = true;
   }
 
+  function snapshotToContextNote(s: DraftNoteSnapshot): ComposeContextNote {
+    return { id: s.id, text: s.text, user: { username: s.username } };
+  }
+
+  function contextNoteToSnapshot(n: ComposeContextNote): DraftNoteSnapshot {
+    return { id: n.id, username: n.user.username, text: n.text };
+  }
+
+  async function loadManualDrafts() {
+    if (!accountId) {
+      manualDrafts = [];
+      return;
+    }
+    draftsLoading = true;
+    try {
+      manualDrafts = await unwrapAcc(accountId, commands.listDrafts(accountId));
+    } catch {
+      manualDrafts = [];
+    } finally {
+      draftsLoading = false;
+    }
+  }
+
+  // ボタンを投稿ボタンの隣(ツールバー右端)に置いているため、素直に左揃えで開くと
+  // ポップオーバー(幅280px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
+  // ビューポート内に収まるようクランプする(絵文字ピッカーと同様)。
+  const DRAFT_MENU_W = 280;
+  function toggleDraftMenu() {
+    if (showDraftMenu) {
+      showDraftMenu = false;
+      return;
+    }
+    const r = draftMenuTrigger?.getBoundingClientRect();
+    if (r) {
+      const left = Math.min(Math.max(8, r.right - DRAFT_MENU_W), window.innerWidth - DRAFT_MENU_W - 8);
+      draftMenuPos = { left, top: r.bottom + 4 };
+    }
+    showDraftMenu = true;
+    void loadManualDrafts();
+  }
+
   async function chooseLocalUpload() {
     showAttachMenu = false;
     await pickFiles();
@@ -167,8 +224,8 @@
   let uploadingAttachmentId = $state<string | null>(null);
   let failedAttachmentId = $state<string | null>(null);
   let err = $state<string | null>(null);
-  let replyTo = $state<Note | undefined>(undefined);
-  let quoteOf = $state<Note | undefined>(undefined);
+  let replyTo = $state<ComposeContextNote | undefined>(undefined);
+  let quoteOf = $state<ComposeContextNote | undefined>(undefined);
   let textarea = $state<HTMLTextAreaElement | undefined>(undefined);
   let cursorPos = $state(0);
   let suppressAt = $state<number | null>(null);
@@ -320,6 +377,77 @@
     }
   });
 
+  /// 自動一時保存: text/cw/添付/投票のいずれかが非空の間、入力変更を2秒デバウンスして
+  /// save_auto_draftを呼ぶ。全て空になったらclear_auto_draftで消す(空の下書きを残さない)。
+  /// 復元(下の自動復元effect)が完了するまでは、text等が一時的に空/暫定アカウントのままの
+  /// タイミングで「空なのでclear」と誤判定し、これから復元しようとしている自動下書きを
+  /// 消してしまうため、autoRestoreDoneがtrueになるまでこの効果は実質何もしない(依存値は
+  /// 読むが save/clear は呼ばない)。$stateにせず素のクロージャ変数にすることで、この値自体の
+  /// 変化がリアクティブな再実行トリガーにならないようにしている(lastSyncedAccountIdと同じ
+  /// パターン)。
+  let autoRestoreDone = false;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    // 依存関係として拾うため、使う値をすべて先に読む
+    const snapshot = { text, cw, useCw, attachmentsLen: attachments.length, usePoll, hasAccount: !!accountId };
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
+    if (!snapshot.hasAccount || !autoRestoreDone) return;
+    const acc = accountId!;
+    const nonEmpty =
+      snapshot.text.trim() !== "" ||
+      (snapshot.useCw && snapshot.cw.trim() !== "") ||
+      snapshot.attachmentsLen > 0 ||
+      snapshot.usePoll;
+    if (!nonEmpty) {
+      void unwrapAcc(acc, commands.clearAutoDraft(acc)).catch(() => {});
+      return;
+    }
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = undefined;
+      void unwrapAcc(acc, commands.saveAutoDraft(acc, buildDraftInput())).catch(() => {});
+    }, 2000);
+    return () => clearTimeout(autoSaveTimer);
+  });
+
+  // コンポーネントのアンマウント時、デバウンス中(まだ発火していない)自動保存が残っていれば
+  // 即座に確定させる。モバイルの投稿モーダル(App.svelte)はComposeBarを都度マウント/アンマウント
+  // するため、これが無いと閉じる直前2秒以内に入力した内容が保存されずに失われる
+  // (上の$effectのクリーンアップはキーストローク毎の再実行時にも走るため、そこでflushすると
+  // デバウンスがキーストローク毎保存になってしまい使えない。onDestroyは実際のアンマウント時
+  // にしか走らないため、ここでのみflushする)。
+  onDestroy(() => {
+    if (autoSaveTimer === undefined) return;
+    clearTimeout(autoSaveTimer);
+    if (!accountId) return;
+    void unwrapAcc(accountId, commands.saveAutoDraft(accountId, buildDraftInput())).catch(() => {});
+  });
+
+  /// マウント時の自動復元。app.bootingが終わるまで待ってから一度だけ試みる:
+  /// ComposeBarはapp.accountsが非空になった時点でマウントされるが、既定アカウント設定
+  /// (app.ui.defaultAccountId)はそれより後にawaitを挟んで非同期に読み込まれる
+  /// (store.svelte.tsのboot())。そのため、bootingがtrueのうちにaccountIdを読むと
+  /// 複数アカウント環境では暫定的なfallback値(accounts[0])を掴むことがあり、誤った
+  /// アカウントで復元を試みて「無し」と判定した直後に上の自動保存effectが「空なのでclear」を
+  /// 呼んでしまい、accountIdが後から正しい既定アカウントへ補正された際にその正しいアカウントの
+  /// 自動下書きを事故的に消してしまう。これを避けるため、boot完了(accountIdが安定した後)まで
+  /// 待ってから一度だけ復元を試みる。
+  $effect(() => {
+    if (app.booting || autoRestoreDone) return;
+    autoRestoreDone = true;
+    if (!accountId || text.trim() || replyTo || quoteOf) return;
+    const acc = accountId;
+    unwrapAcc(acc, commands.getAutoDraft(acc))
+      .then((d) => {
+        if (!d) return;
+        // 復元試行中、他の初期化(app.compose消費など)で既に何か入力/文脈が付いていたら
+        // 上書きしない
+        if (text.trim() || replyTo || quoteOf) return;
+        void loadDraft(d);
+      })
+      .catch(() => {});
+  });
+
   function acctOf(u: Note["user"]): string {
     return u.host ? `@${u.username}@${u.host}` : `@${u.username}`;
   }
@@ -411,6 +539,103 @@
     ];
   }
 
+  function computePollExpiresAt(): number | null {
+    if (pollExpiryMode === "at" && pollExpiresAt) return new Date(pollExpiresAt).getTime();
+    if (pollExpiryMode === "after") return Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
+    return null;
+  }
+
+  function buildDraftInput(): DraftInput {
+    const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
+    return {
+      text,
+      cw: useCw && cw.trim() ? cw : null,
+      visibility,
+      localOnly,
+      reactionAcceptance,
+      channelId: useChannel && channelId ? channelId : null,
+      poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt: computePollExpiresAt() } : null,
+      fileIds: attachments.flatMap((a) => (a.kind === "drive" ? [a.file.id] : [])),
+      replyNote: replyTo ? contextNoteToSnapshot(replyTo) : null,
+      quoteNote: quoteOf ? contextNoteToSnapshot(quoteOf) : null,
+    };
+  }
+
+  async function saveCurrentAsDraft() {
+    if (!accountId) return;
+    try {
+      await unwrapAcc(accountId, commands.saveDraft(accountId, buildDraftInput()));
+      await loadManualDrafts();
+    } catch (e) {
+      err = String(e);
+    }
+  }
+
+  async function deleteManualDraft(id: string) {
+    if (!accountId) return;
+    try {
+      await unwrapAcc(accountId, commands.deleteDraft(accountId, id));
+      manualDrafts = manualDrafts.filter((d) => d.id !== id);
+      if (loadedDraftId === id) loadedDraftId = null;
+    } catch (e) {
+      err = String(e);
+    }
+  }
+
+  async function loadDraft(d: Draft) {
+    text = d.text;
+    cw = d.cw ?? "";
+    useCw = d.cw != null;
+    visibility = d.visibility;
+    localOnly = d.localOnly;
+    reactionAcceptance = d.reactionAcceptance;
+    if (d.channelId) {
+      useChannel = true;
+      channelId = d.channelId;
+    } else {
+      useChannel = false;
+      channelId = "";
+    }
+    if (d.poll) {
+      usePoll = true;
+      const padded = [...d.poll.choices];
+      while (padded.length < 2) padded.push("");
+      pollChoices = padded;
+      pollMultiple = d.poll.multiple;
+      if (d.poll.expiresAt != null) {
+        pollExpiryMode = "at";
+        // datetime-local入力/computePollExpiresAtは共にローカル時刻として文字列を扱うため、
+        // toISOString()(UTC)ではなくローカル成分から組み立てる(でないとタイムゾーン分ずれる)。
+        const dt = new Date(d.poll.expiresAt);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        pollExpiresAt = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+      } else {
+        pollExpiryMode = "none";
+        pollExpiresAt = "";
+      }
+    } else {
+      usePoll = false;
+      pollChoices = ["", ""];
+      pollMultiple = false;
+      pollExpiryMode = "none";
+      pollExpiresAt = "";
+    }
+    replyTo = d.replyNote ? snapshotToContextNote(d.replyNote) : undefined;
+    quoteOf = d.quoteNote ? snapshotToContextNote(d.quoteNote) : undefined;
+    attachments = [];
+    if (d.fileIds.length > 0 && accountId) {
+      const acc = accountId;
+      const results = await Promise.allSettled(
+        d.fileIds.map((id) => unwrapAcc(acc, commands.getDriveFile(acc, id))),
+      );
+      attachments = results.flatMap((r) =>
+        r.status === "fulfilled" ? [{ kind: "drive" as const, id: r.value.id, file: r.value }] : [],
+      );
+    }
+    loadedDraftId = d.kind === "manual" ? d.id : null;
+    showDraftMenu = false;
+  }
+
   async function submit() {
     err = null;
     if (!accountId) {
@@ -423,12 +648,7 @@
     }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
     if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
-    let expiresAt: number | null = null;
-    if (pollExpiryMode === "at" && pollExpiresAt) {
-      expiresAt = new Date(pollExpiresAt).getTime();
-    } else if (pollExpiryMode === "after") {
-      expiresAt = Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
-    }
+    const expiresAt = computePollExpiresAt();
 
     busy = true;
     failedAttachmentId = null;
@@ -466,6 +686,12 @@
         reactionAcceptance,
       };
       await app.postNote(accountId, draft);
+      const draftToDelete = loadedDraftId;
+      void unwrapAcc(accountId, commands.clearAutoDraft(accountId)).catch(() => {});
+      if (draftToDelete) {
+        void unwrapAcc(accountId, commands.deleteDraft(accountId, draftToDelete)).catch(() => {});
+      }
+      loadedDraftId = null;
       text = "";
       cw = "";
       useCw = false;
@@ -757,6 +983,15 @@
       </label>
     </div>
     <div class="flex flex-none flex-wrap items-center gap-1.5">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
+        title="下書き"
+        bind:ref={draftMenuTrigger}
+        onclick={toggleDraftMenu}
+        disabled={busy || !accountId}
+      ><FileText size={16} class="size-4" /></Button>
       <Button type="button" size="sm" disabled={busy} onclick={submit} data-testid="compose-submit">{busy ? "…" : "投稿"}</Button>
     </div>
   </div>
@@ -801,6 +1036,48 @@
         title={accountId ? undefined : "アカウントを選択してください"}
         onclick={chooseDrivePicker}
       >ドライブから選択</button>
+    </div>
+  </div>
+{/if}
+
+{#if showDraftMenu && draftMenuPos}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (showDraftMenu = false)} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="fixed w-[280px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+      style={`left:${draftMenuPos.left}px;top:${draftMenuPos.top}px`}
+      onclick={(e) => e.stopPropagation()}
+      role="menu"
+      tabindex="-1"
+    >
+      <button
+        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"
+        type="button"
+        onclick={saveCurrentAsDraft}
+      >現在の内容を下書き保存</button>
+      <div class="my-1 border-t border-border"></div>
+      {#if draftsLoading}
+        <div class="px-2.5 py-[7px] text-sm text-muted-foreground">読み込み中…</div>
+      {:else if manualDrafts.length === 0}
+        <div class="px-2.5 py-[7px] text-sm text-muted-foreground">保存済みの下書きはありません</div>
+      {:else}
+        <div class="max-h-[280px] overflow-y-auto">
+          {#each manualDrafts as d (d.id)}
+            <div class="flex items-center gap-1">
+              <button
+                class="min-w-0 flex-1 truncate rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"
+                type="button"
+                title={d.text}
+                onclick={() => loadDraft(d)}
+              >{d.text.trim() || "(本文なし)"}</button>
+              <Button type="button" variant="ghost" size="icon-xs" class="flex-none text-muted-foreground" title="削除" onclick={() => deleteManualDraft(d.id)}><X size={12} /></Button>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
 {/if}

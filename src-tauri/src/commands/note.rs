@@ -1,7 +1,8 @@
 //! 投稿・リアクション系 command（Phase 3）。
 
 use crate::api::drive::{
-    list_files as api_list_files, list_folders as api_list_folders, upload_bytes as api_upload_bytes,
+    list_files as api_list_files, list_folders as api_list_folders, show_file as api_show_file,
+    upload_bytes as api_upload_bytes,
 };
 use crate::api::hashtags::search_hashtags as api_search_hashtags;
 use crate::api::meta::list_emojis;
@@ -206,6 +207,18 @@ pub async fn list_drive_files(
 ) -> Result<Vec<DriveFile>> {
     let client = state.client_for(&account_id)?;
     api_list_files(&client, folder_id.as_deref(), until_id.as_deref()).await
+}
+
+/// 単一ドライブファイルのメタ情報取得(下書き復元時の添付再構成用)。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_drive_file(
+    state: State<'_, AppState>,
+    account_id: String,
+    file_id: String,
+) -> Result<DriveFile> {
+    let client = state.client_for(&account_id)?;
+    api_show_file(&client, &file_id).await
 }
 
 /// ドライブのフォルダ一覧（添付ピッカーのフォルダナビゲーション用）。

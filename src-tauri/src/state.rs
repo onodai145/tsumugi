@@ -3,7 +3,7 @@
 use crate::domain::{EmojiDef, MuteConfig};
 use crate::session::{AccountManager, SecretStore};
 use crate::sound::SoundPlayer;
-use crate::store::{NoteCacheStore, SettingsStore};
+use crate::store::{DraftStore, NoteCacheStore, SettingsStore};
 use crate::stream::ConnectionManager;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -34,6 +34,7 @@ pub struct AppState {
     /// 起動時/アカウント追加時に同期し、受信ノート・通知の抑制に使う（Krile MuteBlockManager 相当）。
     pub server_mutes: Mutex<HashMap<String, HashSet<String>>>,
     pub settings: SettingsStore,
+    pub drafts: DraftStore,
     pub cache: NoteCacheStore,
     /// 再接続ギャップ埋め(Issue #147)が実行中の column_id 集合。フラッピング再接続で同一
     /// カラムに対する多重実行を防ぐためのガード（commands/column.rs 側で挿入/削除する）。
@@ -44,8 +45,13 @@ pub struct AppState {
 
 impl AppState {
     /// 永続化済みアカウントを読み込んで初期化する。
-    pub fn new(secrets: Box<dyn SecretStore>, settings: SettingsStore, cache: NoteCacheStore) -> Self {
-        Self::new_with_sound(secrets, settings, cache, SoundPlayer::spawn())
+    pub fn new(
+        secrets: Box<dyn SecretStore>,
+        settings: SettingsStore,
+        drafts: DraftStore,
+        cache: NoteCacheStore,
+    ) -> Self {
+        Self::new_with_sound(secrets, settings, drafts, cache, SoundPlayer::spawn())
     }
 
     /// `sound` フィールドの構築方法を差し替え可能にした内部コンストラクタ。
@@ -54,6 +60,7 @@ impl AppState {
     fn new_with_sound(
         secrets: Box<dyn SecretStore>,
         settings: SettingsStore,
+        drafts: DraftStore,
         cache: NoteCacheStore,
         sound: SoundPlayer,
     ) -> Self {
@@ -75,6 +82,7 @@ impl AppState {
             mute: Mutex::new(mute),
             server_mutes: Mutex::new(HashMap::new()),
             settings,
+            drafts,
             cache,
             gap_fill_in_flight: Mutex::new(HashSet::new()),
             sound,
@@ -107,6 +115,7 @@ impl AppState {
         Self::new_with_sound(
             Box::new(crate::session::MemoryStore::default()),
             settings,
+            DraftStore::new_in_memory(),
             cache,
             SoundPlayer::new_for_test(),
         )

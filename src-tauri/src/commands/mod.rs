@@ -4,6 +4,7 @@ pub mod account;
 pub mod app;
 pub mod clip;
 pub mod column;
+pub mod draft;
 pub mod mute;
 pub mod note;
 pub mod sound;

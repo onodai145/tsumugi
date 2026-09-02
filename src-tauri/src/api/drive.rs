@@ -72,6 +72,14 @@ pub async fn list_files(
     Ok(raw.into_iter().map(DriveFile::from).collect())
 }
 
+/// 単一ファイルのメタ情報を取得する(下書き復元時、保存済み file_id から添付情報を
+/// 再構成するために使う)。対象が削除済み等で存在しない場合は Err を返す
+/// (呼び出し側で個別に無視できるよう、ここではエラーを握りつぶさない)。
+pub async fn show_file(client: &MisskeyClient, file_id: &str) -> Result<DriveFile> {
+    let raw: RawFile = client.post("drive/files/show", &json!({ "fileId": file_id })).await?;
+    Ok(raw.into())
+}
+
 /// フォルダ一覧の取得上限は固定100件で、`list_files`と違い`untilId`によるページングは未実装。
 /// 直下のサブフォルダが100件を超えるドライブでは超過分が表示されない既知の制限（未対応、対応時はここを見直すこと）。
 fn list_folders_body(folder_id: Option<&str>) -> Value {
