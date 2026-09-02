@@ -91,6 +91,11 @@
     | { kind: "drive"; id: string; file: DriveFile }
     | { kind: "clipboard"; id: string; name: string; bytes: number[]; previewUrl: string };
 
+  /// 返信/引用コンテキストとして保持する最小限の形。banner表示(user.username/text)と
+  /// submit時の.id参照にしか使わないため、下書き復元時にNote全体を持たずに済むよう
+  /// フルのNote型ではなくこの最小型で持つ。
+  type ComposeContextNote = { id: string; text: string | null; user: { username: string } };
+
   const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
   function extLower(name: string): string {
@@ -167,8 +172,8 @@
   let uploadingAttachmentId = $state<string | null>(null);
   let failedAttachmentId = $state<string | null>(null);
   let err = $state<string | null>(null);
-  let replyTo = $state<Note | undefined>(undefined);
-  let quoteOf = $state<Note | undefined>(undefined);
+  let replyTo = $state<ComposeContextNote | undefined>(undefined);
+  let quoteOf = $state<ComposeContextNote | undefined>(undefined);
   let textarea = $state<HTMLTextAreaElement | undefined>(undefined);
   let cursorPos = $state(0);
   let suppressAt = $state<number | null>(null);
