@@ -19,32 +19,55 @@
 
 ## データモデル
 
-新規テーブル `drafts`（`src-tauri/src/store/draft.rs`、既存の `settings.rs` / `user_ref.rs` と同じ rusqlite ベースのパターンに倣う）。
+**保存方式（訂正）**: 当初案では「SQLiteに新規テーブル」としていたが誤り。`store/settings.rs`（Account/Column等）は現在 **rusqliteではなくプレーンテキストJSONファイル**（`app_config_dir/settings.json`、tmp書き込み→renameで保存）に置き換わっている。SQLiteが使われているのは `store/note_cache.rs`（`app_cache_dir/cache.db`）のみで、`db.rs` が明記する通りノートキャッシュは「破棄しても再取得で復元できる」設計（マイグレーションも持たない）。下書きはユーザが書いた再取得不能なデータなので、キャッシュDBに置くのは不適切。よって `settings.rs` と同じJSON永続化パターンに倣い、**専用の `store/draft.rs` に `DraftStore`（`app_config_dir/drafts.json` バッキング）を新設**する。設定本体（accounts/columns/pane_layout等）と書き込み頻度・ライフサイクルが異なる（自動保存で2秒間隔の書き込みが起こりうる）ため、`SettingsStore` に相乗りせず別ファイルに分離し、自動保存の頻繁な書き込みが無関係な設定を巻き込んで再書き込みしないようにする。
 
 ```rust
+// src-tauri/src/store/draft.rs
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub enum DraftKind { Manual, Auto }
 
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct Draft {
-    pub id: String,               // uuid（Autoの場合はaccount_id単位で1件のみ存在、idは固定でなくupsert時に再生成でよい）
+    pub id: String,               // uuid（Autoの場合もaccount_id単位で1件のみ存在、upsert時に再生成でよい）
     pub account_id: String,
     pub kind: DraftKind,
     pub text: String,
     pub cw: Option<String>,
-    pub visibility: VisibilityInput,
+    pub visibility: VisibilityInput,          // crate::api::notes::VisibilityInput
     pub local_only: bool,
-    pub reaction_acceptance: ReactionAcceptanceInput,
+    pub reaction_acceptance: ReactionAcceptanceInput, // crate::api::notes::ReactionAcceptanceInput
     pub channel_id: Option<String>,
-    pub poll: Option<PollDraftSnapshot>,   // choices, multiple, expires_at
-    pub file_ids: Vec<String>,             // 既にドライブへアップロード済みのファイルID
-    pub reply_note: Option<NoteSnapshot>,  // 表示用の最小限のスナップショット（id, user, text抜粋）
-    pub quote_note: Option<NoteSnapshot>,
+    pub poll: Option<PollDraftSnapshot>,      // choices, multiple, expires_at
+    pub file_ids: Vec<String>,                // 既にドライブへアップロード済みのファイルID
+    pub reply_note: Option<DraftNoteSnapshot>,
+    pub quote_note: Option<DraftNoteSnapshot>,
     pub created_at: i64,
     pub updated_at: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PollDraftSnapshot {
+    pub choices: Vec<String>,
+    pub multiple: bool,
+    pub expires_at: Option<i64>,
+}
+
+/// 返信/引用先ノートの表示用最小スナップショット。ComposeBarのバナー表示
+/// （`{返信|引用}: @{username} — {text}`）に必要なフィールドのみを持つ。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftNoteSnapshot {
+    pub id: String,
+    pub username: String,
+    pub text: Option<String>,
+}
 ```
 
-- `reply_note` / `quote_note` は返信・引用先ノートの**保存時点でのスナップショット**を保持する（`id` + `user` + `text`の抜粋程度）。復元時にMisskey側へ再取得はしない。対象ノートが削除済み・アクセス不能でも、保存済みスナップショットをそのままバナー表示に使う。実際の投稿時に `replyId`/`renoteId` が無効であればMisskey APIがエラーを返すので、それは既存のエラー表示（`formatError`）に任せる。
-- `file_ids` は既にアップロード済みのファイルIDのみを保持する（アップロード中の一時ファイルは対象外）。復元時にDrive APIからメタ情報を再取得してサムネイル表示する。取得できない（削除済み等）ファイルIDは復元時に静かに無視する。
+- `reply_note` / `quote_note` は返信・引用先ノートの**保存時点でのスナップショット**（上記 `DraftNoteSnapshot`）を保持する。復元時にMisskey側へ再取得はしない。対象ノートが削除済み・アクセス不能でも、保存済みスナップショットをそのままバナー表示に使う。実際の投稿時に `replyId`/`renoteId` が無効であればMisskey APIがエラーを返すので、それは既存のエラー表示（`formatError`）に任せる。
+- `file_ids` は**既にドライブへアップロード済み（`AttachmentItem`の`kind: "drive"`）の添付のみ**を保存する。アップロード前のローカルファイル（`kind: "local"`）やクリップボード画像（`kind: "clipboard"`）は、パスが一時的だったりバイト列が大きすぎたりして永続化に適さないため、下書き保存の対象外とする（保存時に静かに除外する）。復元時は `file_ids` それぞれについて新設の `get_drive_file` コマンド（`drive/files/show`、`src-tauri/src/api/drive.rs` に `show_file` を追加）でメタ情報を再取得し、`AttachmentItem`の`kind: "drive"`として復元する。取得できない（削除済み等）ファイルIDは復元時に静かに無視する。
 
 ## Rustコマンド
 
@@ -71,8 +94,8 @@ pub struct Draft {
 
 ## テスト
 
-- Rust: `store/draft.rs` に保存/一覧/削除/auto upsert のユニットテスト。`commands/draft.rs` に既存コマンドテストと同様のパターンでコマンドレベルテストを追加。
-- Frontend: `ComposeBar.test.ts`（存在すれば）に、自動保存のデバウンス発火、非空→空遷移でのclear呼び出し、手動下書き選択時の状態復元、投稿成功後の自動削除、をユニットテストで追加する。
+- Rust: `store/draft.rs` に `DraftStore::new_in_memory()`（`settings.rs`と同じテスト用バッキング）を使い、保存/一覧/削除/auto upsertのユニットテストを追加。`commands/draft.rs` に既存コマンドテストと同様のパターンでコマンドレベルテストを追加。
+- Frontend: `ComposeBar.svelte` に対する新規 `ComposeBar.test.ts`（`NoteCard.test.ts` と同じ `@testing-library/svelte` + Tauri API モックのパターンに倣う）に、自動保存のデバウンス発火、非空→空遷移でのclear呼び出し、手動下書き選択時の状態復元、投稿成功後の自動削除、をユニットテストで追加する。
 
 ## 非対象（YAGNI）
 
