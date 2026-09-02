@@ -370,6 +370,62 @@
     }
   });
 
+  /// 自動一時保存: text/cw/添付/投票のいずれかが非空の間、入力変更を2秒デバウンスして
+  /// save_auto_draftを呼ぶ。全て空になったらclear_auto_draftで消す(空の下書きを残さない)。
+  /// 復元(下の自動復元effect)が完了するまでは、text等が一時的に空/暫定アカウントのままの
+  /// タイミングで「空なのでclear」と誤判定し、これから復元しようとしている自動下書きを
+  /// 消してしまうため、autoRestoreDoneがtrueになるまでこの効果は実質何もしない(依存値は
+  /// 読むが save/clear は呼ばない)。$stateにせず素のクロージャ変数にすることで、この値自体の
+  /// 変化がリアクティブな再実行トリガーにならないようにしている(lastSyncedAccountIdと同じ
+  /// パターン)。
+  let autoRestoreDone = false;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    // 依存関係として拾うため、使う値をすべて先に読む
+    const snapshot = { text, cw, useCw, attachmentsLen: attachments.length, usePoll, hasAccount: !!accountId };
+    clearTimeout(autoSaveTimer);
+    if (!snapshot.hasAccount || !autoRestoreDone) return;
+    const acc = accountId!;
+    const nonEmpty =
+      snapshot.text.trim() !== "" ||
+      (snapshot.useCw && snapshot.cw.trim() !== "") ||
+      snapshot.attachmentsLen > 0 ||
+      snapshot.usePoll;
+    if (!nonEmpty) {
+      void unwrapAcc(acc, commands.clearAutoDraft(acc)).catch(() => {});
+      return;
+    }
+    autoSaveTimer = setTimeout(() => {
+      void unwrapAcc(acc, commands.saveAutoDraft(acc, buildDraftInput())).catch(() => {});
+    }, 2000);
+    return () => clearTimeout(autoSaveTimer);
+  });
+
+  /// マウント時の自動復元。app.bootingが終わるまで待ってから一度だけ試みる:
+  /// ComposeBarはapp.accountsが非空になった時点でマウントされるが、既定アカウント設定
+  /// (app.ui.defaultAccountId)はそれより後にawaitを挟んで非同期に読み込まれる
+  /// (store.svelte.tsのboot())。そのため、bootingがtrueのうちにaccountIdを読むと
+  /// 複数アカウント環境では暫定的なfallback値(accounts[0])を掴むことがあり、誤った
+  /// アカウントで復元を試みて「無し」と判定した直後に上の自動保存effectが「空なのでclear」を
+  /// 呼んでしまい、accountIdが後から正しい既定アカウントへ補正された際にその正しいアカウントの
+  /// 自動下書きを事故的に消してしまう。これを避けるため、boot完了(accountIdが安定した後)まで
+  /// 待ってから一度だけ復元を試みる。
+  $effect(() => {
+    if (app.booting || autoRestoreDone) return;
+    autoRestoreDone = true;
+    if (!accountId || text.trim() || replyTo || quoteOf) return;
+    const acc = accountId;
+    unwrapAcc(acc, commands.getAutoDraft(acc))
+      .then((d) => {
+        if (!d) return;
+        // 復元試行中、他の初期化(app.compose消費など)で既に何か入力/文脈が付いていたら
+        // 上書きしない
+        if (text.trim() || replyTo || quoteOf) return;
+        void loadDraft(d);
+      })
+      .catch(() => {});
+  });
+
   function acctOf(u: Note["user"]): string {
     return u.host ? `@${u.username}@${u.host}` : `@${u.username}`;
   }
@@ -608,6 +664,12 @@
         reactionAcceptance,
       };
       await app.postNote(accountId, draft);
+      const draftToDelete = loadedDraftId;
+      void unwrapAcc(accountId, commands.clearAutoDraft(accountId)).catch(() => {});
+      if (draftToDelete) {
+        void unwrapAcc(accountId, commands.deleteDraft(accountId, draftToDelete)).catch(() => {});
+      }
+      loadedDraftId = null;
       text = "";
       cw = "";
       useCw = false;
