@@ -410,6 +410,20 @@ class AppStore {
     const msg = String(e);
     this.#log("error", msg, e instanceof ForbiddenError ? e.accountId : undefined);
   }
+
+  /// paneRoot(ペイン分割ツリー)を読み書きするコマンド(splitPane/discardEmptyGroup/
+  /// setPaneAuto/resizePane/movePane)はどれもRust側で「木全体を読む→1ノード変更→
+  /// 木全体を保存」という同じ形をしており、2つが並行に飛ぶと後発の保存が先発の変更を
+  /// 握り潰すレースになる(Issue #274/#276)。呼び出し元の場所を問わず必ずこのキュー
+  /// を経由させることで、アプリ全体でこの種の書き込みを1本の直列実行チェーンにまとめる。
+  #paneWriteQueue: Promise<unknown> = Promise.resolve();
+
+  #queuePaneWrite<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.#paneWriteQueue.then(fn, fn);
+    this.#paneWriteQueue = result.catch(() => {});
+    return result;
+  }
+
   clearLogs() {
     this.logs = [];
   }
@@ -677,12 +691,14 @@ class AppStore {
     this.draggingGroupId = null;
     this.dragOverEdgeTarget = null;
     if (!draggedId || !target) return;
-    try {
-      await unwrap(commands.movePane(draggedId, target.groupId, target.edge));
-      this.paneRoot = await unwrap(commands.loadPaneLayout());
-    } catch (e) {
-      this.#logFailure(e);
-    }
+    await this.#queuePaneWrite(async () => {
+      try {
+        await unwrap(commands.movePane(draggedId, target.groupId, target.edge));
+        this.paneRoot = await unwrap(commands.loadPaneLayout());
+      } catch (e) {
+        this.#logFailure(e);
+      }
+    });
   }
 
   setGroupWidthLocal(groupId: string, width: number) {
@@ -710,16 +726,18 @@ class AppStore {
   // ---- ペイン分割(Issue #31 Slice 1: 下方向のみ) ----
 
   async splitPane(groupId: string, direction: "row" | "column"): Promise<string | null> {
-    try {
-      const newGroup = await unwrap(commands.splitPane(groupId, direction));
-      const paneRoot = await unwrap(commands.loadPaneLayout());
-      this.groups = [...this.groups, { id: newGroup.id, width: newGroup.width, auto: newGroup.auto, tabs: [], activeTabId: "" }];
-      this.paneRoot = paneRoot;
-      return newGroup.id;
-    } catch (e) {
-      this.#logFailure(e);
-      return null;
-    }
+    return this.#queuePaneWrite(async () => {
+      try {
+        const newGroup = await unwrap(commands.splitPane(groupId, direction));
+        const paneRoot = await unwrap(commands.loadPaneLayout());
+        this.groups = [...this.groups, { id: newGroup.id, width: newGroup.width, auto: newGroup.auto, tabs: [], activeTabId: "" }];
+        this.paneRoot = paneRoot;
+        return newGroup.id;
+      } catch (e) {
+        this.#logFailure(e);
+        return null;
+      }
+    });
   }
 
   /// splitPaneで作ったがタブ追加をキャンセルされた空グループを後始末する
@@ -728,14 +746,16 @@ class AppStore {
   async discardEmptyGroup(groupId: string) {
     const g = this.groups.find((x) => x.id === groupId);
     if (!g || g.tabs.length > 0) return; // 既にタブが追加済みなら何もしない
-    try {
-      await unwrap(commands.discardEmptyGroup(groupId));
-      const paneRoot = await unwrap(commands.loadPaneLayout());
-      this.groups = this.groups.filter((x) => x.id !== groupId);
-      this.paneRoot = paneRoot;
-    } catch (e) {
-      this.#logFailure(e);
-    }
+    await this.#queuePaneWrite(async () => {
+      try {
+        await unwrap(commands.discardEmptyGroup(groupId));
+        const paneRoot = await unwrap(commands.loadPaneLayout());
+        this.groups = this.groups.filter((x) => x.id !== groupId);
+        this.paneRoot = paneRoot;
+      } catch (e) {
+        this.#logFailure(e);
+      }
+    });
   }
 
   /// groupIdのLeafがColumn分割の直下に居れば、そのノードid・現在のsize(固定時は
@@ -794,21 +814,25 @@ class AppStore {
   }
 
   async setPaneAuto(nodeId: string, auto: boolean) {
-    try {
-      await unwrap(commands.setPaneAuto(nodeId, auto));
-      this.paneRoot = await unwrap(commands.loadPaneLayout());
-    } catch (e) {
-      this.#logFailure(e);
-    }
+    await this.#queuePaneWrite(async () => {
+      try {
+        await unwrap(commands.setPaneAuto(nodeId, auto));
+        this.paneRoot = await unwrap(commands.loadPaneLayout());
+      } catch (e) {
+        this.#logFailure(e);
+      }
+    });
   }
 
   async resizePane(nodeId: string, size: number) {
-    try {
-      await unwrap(commands.resizePane(nodeId, size));
-      this.paneRoot = await unwrap(commands.loadPaneLayout());
-    } catch (e) {
-      this.#logFailure(e);
-    }
+    await this.#queuePaneWrite(async () => {
+      try {
+        await unwrap(commands.resizePane(nodeId, size));
+        this.paneRoot = await unwrap(commands.loadPaneLayout());
+      } catch (e) {
+        this.#logFailure(e);
+      }
+    });
   }
 
   async #subscribe() {

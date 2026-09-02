@@ -58,13 +58,6 @@
     startSizeB: number;
   } | null>(null);
 
-  // colAutoFlush: onColSplitResizeDownで発生したauto解除(setPaneAuto)の永続化を、
-  // onColSplitResizeUpのresizePane呼び出しより前に完了させるための直列化キュー。
-  // 両方ともRust側でread-tree→1ノード変更→木全体保存という同じ形の処理をしており、
-  // 並行に飛ばすとC1と同じ「後発の保存が先発の変更を握り潰す」レースが起きるため、
-  // 常にこのPromiseを経由して1本の直列実行チェーンにまとめる。
-  let colAutoFlush: Promise<unknown> = Promise.resolve();
-
   function onColSplitResizeDown(e: PointerEvent, a: PaneChild, b: PaneChild) {
     const boundary = e.currentTarget as HTMLElement;
     const elA = boundary.previousElementSibling as HTMLElement | null;
@@ -78,23 +71,15 @@
     // 均等割りでない実際のシェアを使わないと、固定化した瞬間に他のauto兄弟が
     // 不当に圧迫される(Issue #275)。
     const containerHeight = boundary.parentElement?.getBoundingClientRect().height ?? 0;
-    const flips: string[] = [];
     if (a.auto) {
       if (containerHeight > 0) a.size = (heightA / containerHeight) * 100;
       a.auto = false;
-      flips.push(a.node.id);
+      void app.setPaneAuto(a.node.id, false);
     }
     if (b.auto) {
       if (containerHeight > 0) b.size = (heightB / containerHeight) * 100;
       b.auto = false;
-      flips.push(b.node.id);
-    }
-    if (flips.length > 0) {
-      colAutoFlush = colAutoFlush.then(async () => {
-        for (const nodeId of flips) {
-          await app.setPaneAuto(nodeId, false);
-        }
-      });
+      void app.setPaneAuto(b.node.id, false);
     }
     colResizing = {
       a,
@@ -123,15 +108,12 @@
     a.size = newHeightA * weightPerPx;
     b.size = totalWeight - a.size;
   }
-  async function onColSplitResizeUp() {
+  function onColSplitResizeUp() {
     if (!colResizing) return;
     const { a, b } = colResizing;
     colResizing = null;
-    colAutoFlush = colAutoFlush.then(async () => {
-      await app.resizePane(a.node.id, a.size ?? 50);
-      await app.resizePane(b.node.id, b.size ?? 50);
-    });
-    await colAutoFlush;
+    void app.resizePane(a.node.id, a.size ?? 50);
+    void app.resizePane(b.node.id, b.size ?? 50);
   }
 </script>
 
