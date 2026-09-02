@@ -6,6 +6,7 @@
   import { X, GripVertical, MoreHorizontal, Plus, SquareSplitVertical, Settings } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { portal } from "../lib/portal";
+  import { edgeFromPointer } from "../lib/paneEdge";
 
   let {
     group,
@@ -89,8 +90,14 @@
   class:opacity-55={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
   ondragover={(e) => {
+    if (!app.draggingGroupId) return;
     e.preventDefault();
-    app.dragOverGroup(group.id);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const edge = edgeFromPointer(e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height);
+    app.dragOverPaneEdge(group.id, edge);
+  }}
+  ondragleave={(e) => {
+    if (app.dragOverEdgeTarget?.groupId === group.id) app.dragOverPaneEdge(group.id, null);
   }}
   role="group"
 >
@@ -267,6 +274,20 @@
       onpointerup={onResizeUp}
       role="separator"
       aria-label="幅を変更"
+    ></div>
+  {/if}
+
+  {#if app.draggingGroupId && app.draggingGroupId !== group.id && app.dragOverEdgeTarget?.groupId === group.id}
+    {@const edge = app.dragOverEdgeTarget.edge}
+    <div
+      class="pointer-events-none absolute bg-[color-mix(in_srgb,var(--color-primary)_35%,transparent)]"
+      style:left={edge === "right" ? "auto" : "0"}
+      style:right={edge === "left" ? "auto" : "0"}
+      style:top={edge === "bottom" ? "auto" : "0"}
+      style:bottom={edge === "top" ? "auto" : "0"}
+      style:width={edge === "left" || edge === "right" ? "35%" : "auto"}
+      style:height={edge === "top" || edge === "bottom" ? "35%" : "auto"}
+      style="z-index:6"
     ></div>
   {/if}
 </section>
