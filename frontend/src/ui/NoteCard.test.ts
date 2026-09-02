@@ -472,6 +472,14 @@ describe("本文の折りたたみ", () => {
     expect(getByTestId("note-text").classList.contains("note-text-collapsed")).toBe(false);
   });
 
+  it("サロゲートペア(絵文字)151文字は.lengthでは302だが実文字数は300文字未満のため折りたたまない", () => {
+    const note = makeNote({ text: "🐱".repeat(151) });
+    const { queryByTestId, getByTestId } = render(NoteCard, { props: { note } });
+
+    expect(queryByTestId("note-text-expand")).toBeNull();
+    expect(getByTestId("note-text").classList.contains("note-text-collapsed")).toBe(false);
+  });
+
   it("「もっと見る」をクリックすると全文表示になりボタンが消える", async () => {
     const note = makeNote({ text: "あ".repeat(301) });
     const { getByTestId, queryByTestId } = render(NoteCard, { props: { note } });
