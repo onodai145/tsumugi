@@ -75,7 +75,7 @@
     const { a, b, startY, startHeightA, startHeightB, startSizeA, startSizeB } = colResizing;
     const totalPx = startHeightA + startHeightB;
     const totalWeight = startSizeA + startSizeB;
-    if (totalPx <= 0 || totalWeight <= 0) return;
+    if (totalPx < 2 * MIN_COLUMN_PANE_PX || totalWeight <= 0) return;
     const deltaY = e.clientY - startY;
     const newHeightA = Math.min(totalPx - MIN_COLUMN_PANE_PX, Math.max(MIN_COLUMN_PANE_PX, startHeightA + deltaY));
     const weightPerPx = totalWeight / totalPx;
