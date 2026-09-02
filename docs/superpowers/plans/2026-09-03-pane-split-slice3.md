@@ -71,7 +71,9 @@
 
     #[test]
     fn insert_sibling_at_after_same_direction_matches_existing_insert_sibling() {
-        // before=false は既存のinsert_sibling(常に直後へ挿入)と同じ結果になる。
+        // before=false は既存のinsert_sibling(常に直後へ挿入)と同じ構造になる。
+        // 新規Leaf(c)のidはinsert_sibling/insert_sibling_at呼び出しのたびに乱数生成される
+        // ため、id自体は比較せず、size/auto/group_idの並びが一致することだけを見る。
         let mut a = PaneNode::Split {
             id: "root".into(),
             direction: SplitDirection::Row,
@@ -83,7 +85,16 @@
         let mut b = a.clone();
         assert!(a.insert_sibling("a", "c", SplitDirection::Row));
         assert!(b.insert_sibling_at("a", "c", SplitDirection::Row, false));
-        assert_eq!(a, b);
+        let PaneNode::Split { children: children_a, .. } = &a else { panic!("expected Split") };
+        let PaneNode::Split { children: children_b, .. } = &b else { panic!("expected Split") };
+        assert_eq!(children_a.len(), children_b.len());
+        for (x, y) in children_a.iter().zip(children_b.iter()) {
+            assert_eq!(x.size, y.size);
+            assert_eq!(x.auto, y.auto);
+            let PaneNode::Leaf { group_id: gx, .. } = &x.node else { panic!("expected leaf") };
+            let PaneNode::Leaf { group_id: gy, .. } = &y.node else { panic!("expected leaf") };
+            assert_eq!(gx, gy);
+        }
     }
 
     #[test]
@@ -349,7 +360,7 @@ describe("edgeFromPointer", () => {
   });
 
   it("returns null when neither axis is within the 25% margin", () => {
-    expect(edgeFromPointer(80, 80, 800, 800)).toBeNull();
+    expect(edgeFromPointer(250, 250, 800, 800)).toBeNull();
   });
 });
 ```
@@ -677,7 +688,7 @@ git commit -m "feat: 右に分割ボタンを追加"
   let rowResizing = $state<{ nodeId: string; startX: number; startW: number } | null>(null);
 
   function onRowSplitResizeDown(e: PointerEvent, child: PaneChild) {
-    rowResizing = { nodeId: child.node.id, startX: e.clientX, startW: child.size };
+    rowResizing = { nodeId: child.node.id, startX: e.clientX, startW: child.size ?? 300 };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
   function onRowSplitResizeMove(e: PointerEvent, child: PaneChild) {
@@ -687,7 +698,7 @@ git commit -m "feat: 右に分割ボタンを追加"
   function onRowSplitResizeUp(child: PaneChild) {
     if (!rowResizing || rowResizing.nodeId !== child.node.id) return;
     rowResizing = null;
-    app.resizePane(child.node.id, child.size);
+    app.resizePane(child.node.id, child.size ?? 300);
   }
 ```
 
@@ -783,8 +794,8 @@ git commit -m "feat: Row内ネストSplit子の幅をドラッグでリサイズ
       startY: e.clientY,
       startHeightA: elA.getBoundingClientRect().height,
       startHeightB: elB.getBoundingClientRect().height,
-      startSizeA: a.size,
-      startSizeB: b.size,
+      startSizeA: a.size ?? 50,
+      startSizeB: b.size ?? 50,
     };
     boundary.setPointerCapture(e.pointerId);
   }
@@ -804,8 +815,8 @@ git commit -m "feat: Row内ネストSplit子の幅をドラッグでリサイズ
     if (!colResizing) return;
     const { a, b } = colResizing;
     colResizing = null;
-    app.resizePane(a.node.id, a.size);
-    app.resizePane(b.node.id, b.size);
+    app.resizePane(a.node.id, a.size ?? 50);
+    app.resizePane(b.node.id, b.size ?? 50);
   }
 ```
 
