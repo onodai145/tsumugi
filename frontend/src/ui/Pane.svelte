@@ -40,6 +40,55 @@
     rowResizing = null;
     app.resizePane(child.node.id, child.size ?? 300);
   }
+
+  // Column分割の境界(children[i]とchildren[i+1]の間)のペアドラッグリサイズ。
+  // 2子の合計ウェイトを保ったまま、ポインタのY移動量をpx→ウェイトに変換して増減させる。
+  const MIN_COLUMN_PANE_PX = 60;
+  let colResizing = $state<{
+    a: PaneChild;
+    b: PaneChild;
+    startY: number;
+    startHeightA: number;
+    startHeightB: number;
+    startSizeA: number;
+    startSizeB: number;
+  } | null>(null);
+
+  function onColSplitResizeDown(e: PointerEvent, a: PaneChild, b: PaneChild) {
+    const boundary = e.currentTarget as HTMLElement;
+    const elA = boundary.previousElementSibling as HTMLElement | null;
+    const elB = boundary.nextElementSibling as HTMLElement | null;
+    if (!elA || !elB) return;
+    colResizing = {
+      a,
+      b,
+      startY: e.clientY,
+      startHeightA: elA.getBoundingClientRect().height,
+      startHeightB: elB.getBoundingClientRect().height,
+      startSizeA: a.size ?? 50,
+      startSizeB: b.size ?? 50,
+    };
+    boundary.setPointerCapture(e.pointerId);
+  }
+  function onColSplitResizeMove(e: PointerEvent) {
+    if (!colResizing) return;
+    const { a, b, startY, startHeightA, startHeightB, startSizeA, startSizeB } = colResizing;
+    const totalPx = startHeightA + startHeightB;
+    const totalWeight = startSizeA + startSizeB;
+    if (totalPx <= 0 || totalWeight <= 0) return;
+    const deltaY = e.clientY - startY;
+    const newHeightA = Math.min(totalPx - MIN_COLUMN_PANE_PX, Math.max(MIN_COLUMN_PANE_PX, startHeightA + deltaY));
+    const weightPerPx = totalWeight / totalPx;
+    a.size = newHeightA * weightPerPx;
+    b.size = totalWeight - a.size;
+  }
+  function onColSplitResizeUp() {
+    if (!colResizing) return;
+    const { a, b } = colResizing;
+    colResizing = null;
+    app.resizePane(a.node.id, a.size ?? 50);
+    app.resizePane(b.node.id, b.size ?? 50);
+  }
 </script>
 
 {#if node.type === "leaf"}
@@ -84,10 +133,21 @@
   </div>
 {:else}
   <div class="flex flex-col flex-auto h-full min-h-0">
-    {#each node.children as child (child.node.id)}
-      <div class="flex flex-col min-h-0 min-w-0" style={child.auto ? "flex:1 1 0" : `flex:0 0 ${child.size}%`}>
+    {#each node.children as child, i (child.node.id)}
+      <div class="relative flex flex-col min-h-0 min-w-0" style={child.auto ? "flex:1 1 0" : `flex:0 0 ${child.size}%`}>
         <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} stretch={true} />
       </div>
+      {#if i < node.children.length - 1 && !child.auto && !node.children[i + 1].auto}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="h-1.5 flex-none cursor-row-resize hover:bg-[color-mix(in_srgb,var(--color-primary)_40%,transparent)]"
+          onpointerdown={(e) => onColSplitResizeDown(e, child, node.children[i + 1])}
+          onpointermove={onColSplitResizeMove}
+          onpointerup={onColSplitResizeUp}
+          role="separator"
+          aria-label="高さを変更"
+        ></div>
+      {/if}
     {/each}
   </div>
 {/if}
