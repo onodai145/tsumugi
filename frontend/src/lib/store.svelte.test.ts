@@ -618,3 +618,50 @@ describe("app.fillRemainingGap (Issue #148)", () => {
     expect(app.errorModal).not.toBeNull();
   });
 });
+
+describe("AppStore.now (共有tick)", () => {
+  beforeEach(() => {
+    // boot() は list_accounts の結果を this.accounts に代入し、その直後に
+    // #refreshInstanceMeta() を await せず呼ぶ(fire-and-forget)。デフォルトの
+    // モック({status:"ok",data:null}を返す)だと typedError の二重ラップにより
+    // this.accounts が配列でなくなり、#refreshInstanceMeta 内の
+    // this.accounts.map が例外を投げて未捕捉rejectionになる。
+    // list_accounts だけ実配列を返すよう上書きする。
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_accounts") return [];
+      return { status: "ok", data: null };
+    });
+  });
+
+  afterEach(() => {
+    app.teardown();
+    vi.useRealTimers();
+  });
+
+  it("boot()後、5秒ごとにnowが更新される", async () => {
+    vi.useFakeTimers();
+    const before = app.now;
+    // boot()はネットワーク呼び出しを含み失敗しうるが、失敗してもfinallyでタイマーは起動される
+    const bootPromise = app.boot();
+    await vi.advanceTimersByTimeAsync(0);
+    await bootPromise.catch(() => {});
+
+    vi.setSystemTime(Date.now() + 5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(app.now).toBeGreaterThan(before);
+  });
+
+  it("teardown()後はnowが更新されなくなる", async () => {
+    vi.useFakeTimers();
+    const bootPromise = app.boot();
+    await vi.advanceTimersByTimeAsync(0);
+    await bootPromise.catch(() => {});
+
+    app.teardown();
+    const after = app.now;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(app.now).toBe(after);
+  });
+});

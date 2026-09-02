@@ -58,6 +58,13 @@
   const isPureRenote = $derived(!note.text && !!note.renote);
   const inner = $derived(isPureRenote ? note.renote! : note);
 
+  // app.now（Issue #256、5秒ごとに更新される共有tick）を依存として読むことで、
+  // 時間経過に合わせて相対時刻表示を再計算させる。
+  const displayTime = $derived.by(() => {
+    app.now;
+    return relativeTime(inner.createdAt);
+  });
+
   // quoted はスタイリング(コンパクト表示)専用。アクション表示可否は showActions で制御し、
   // 未指定時は従来通り !quoted にフォールバックする。
   const effectiveShowActions = $derived(showActions ?? !quoted);
@@ -351,7 +358,7 @@
           style="cursor: pointer"
         >{acct(inner.user)}</span>
         <span class="ml-auto text-xs text-muted-foreground" title={new Date(inner.createdAt * 1000).toLocaleString()}>
-          {relativeTime(inner.createdAt)}
+          {displayTime}
         </span>
         {#if inner.visibility !== "public"}
           {@const VisIcon = VIS_ICON[inner.visibility]}

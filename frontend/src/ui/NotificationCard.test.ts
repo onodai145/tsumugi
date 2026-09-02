@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() =
 
 const { default: NotificationCard } = await import("./NotificationCard.svelte");
 const { closeProfile, currentProfileTarget, currentProfileAccountId } = await import("../lib/profileModal.svelte");
+const { app } = await import("../lib/store.svelte");
 
 afterEach(() => cleanup());
 
@@ -138,5 +139,27 @@ describe("NotificationCard profile navigation", () => {
     const actor = container.querySelector('[data-testid="notification-actor"]') as HTMLElement;
     await fireEvent.click(actor);
     expect(currentProfileTarget()).toEqual({ userId: "u9" });
+  });
+});
+
+describe("通知時刻の自動更新", () => {
+  it("app.nowが進むと相対時刻の表示が更新される", async () => {
+    vi.useFakeTimers();
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const notification = makeNotification({ createdAt: nowSec - 30 });
+      const { container } = render(NotificationCard, { props: { notification } });
+
+      const timeEl = container.querySelector(".text-sm.text-muted-foreground") as HTMLElement;
+      expect(timeEl.textContent?.trim()).toBe("30s");
+
+      vi.setSystemTime(Date.now() + 90_000);
+      app.now = Date.now();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(timeEl.textContent?.trim()).toBe("2m");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
