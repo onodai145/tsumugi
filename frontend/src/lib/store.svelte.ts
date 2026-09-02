@@ -28,6 +28,7 @@ import type {
   LatestRelease,
   Clip,
   PaneNode,
+  Edge,
   TqlEditMode,
   TqlCompletionItem,
 } from "../bindings/tauri.gen";
@@ -654,24 +655,31 @@ class AppStore {
   // ---- グループの並べ替え / 幅 ----
 
   draggingGroupId = $state<string | null>(null);
+  dragOverEdgeTarget = $state<{ groupId: string; edge: Edge } | null>(null);
 
   startDragGroup(id: string) {
     this.draggingGroupId = id;
+    this.dragOverEdgeTarget = null;
   }
-  dragOverGroup(overId: string) {
-    const from = this.groups.findIndex((c) => c.id === this.draggingGroupId);
-    const to = this.groups.findIndex((c) => c.id === overId);
-    if (from < 0 || to < 0 || from === to) return;
-    const arr = [...this.groups];
-    const [moved] = arr.splice(from, 1);
-    arr.splice(to, 0, moved);
-    this.groups = arr;
+  /// groupId(ドロップ先候補)上でのエッジ判定結果をハイライト用に保持するだけ。
+  /// 木構造はここでは変更しない(実際の移動はendDragGroupでmovePaneを1回呼ぶ)。
+  /// 自分自身へのドロップ(groupId === draggingGroupId)は常に対象外。
+  dragOverPaneEdge(groupId: string, edge: Edge | null) {
+    if (!edge || groupId === this.draggingGroupId) {
+      this.dragOverEdgeTarget = null;
+      return;
+    }
+    this.dragOverEdgeTarget = { groupId, edge };
   }
   async endDragGroup() {
-    if (!this.draggingGroupId) return;
+    const draggedId = this.draggingGroupId;
+    const target = this.dragOverEdgeTarget;
     this.draggingGroupId = null;
+    this.dragOverEdgeTarget = null;
+    if (!draggedId || !target) return;
     try {
-      await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
+      await unwrap(commands.movePane(draggedId, target.groupId, target.edge));
+      this.paneRoot = await unwrap(commands.loadPaneLayout());
     } catch (e) {
       this.#logFailure(e);
     }
