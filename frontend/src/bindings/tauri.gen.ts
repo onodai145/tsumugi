@@ -215,6 +215,36 @@ export const commands = {
 	 *  `/url` を使う。いずれも認証不要（トークンは送らない）。
 	 */
 	fetchUrlPreview: (accountId: string, url: string) => typedError<UrlPreview, Error>(__TAURI_INVOKE("fetch_url_preview", { accountId, url })),
+	/**  単一ドライブファイルのメタ情報取得(下書き復元時の添付再構成用)。 */
+	getDriveFile: (accountId: string, fileId: string) => typedError<DriveFile, Error>(__TAURI_INVOKE("get_drive_file", { accountId, fileId })),
+	/**  アカウントの手動保存下書き一覧(更新日時降順)。 */
+	listDrafts: (accountId: string) => typedError<Draft[], Error>(__TAURI_INVOKE("list_drafts", { accountId })),
+	/**  手動下書きを新規保存する(既存の上書きはしない)。 */
+	saveDraft: (accountId: string, input: DraftInput) => typedError<null, Error>(__TAURI_INVOKE("save_draft", { accountId, input })),
+	/**  手動下書きを削除する。 */
+	deleteDraft: (accountId: string, draftId: string) => typedError<null, Error>(__TAURI_INVOKE("delete_draft", { accountId, draftId })),
+	/**  アカウントの自動一時下書き(あれば1件)。 */
+	getAutoDraft: (accountId: string) => typedError<{
+	id: string,
+	accountId: string,
+	kind: DraftKind,
+	text: string,
+	cw: string | null,
+	visibility: VisibilityInput,
+	localOnly: boolean,
+	reactionAcceptance: ReactionAcceptanceInput,
+	channelId: string | null,
+	poll: PollDraftSnapshot | null,
+	fileIds: string[],
+	replyNote: DraftNoteSnapshot | null,
+	quoteNote: DraftNoteSnapshot | null,
+	createdAt: number,
+	updatedAt: number,
+} | null, Error>(__TAURI_INVOKE("get_auto_draft", { accountId })),
+	/**  自動一時下書きをupsertする(アカウントにつき1件)。 */
+	saveAutoDraft: (accountId: string, input: DraftInput) => typedError<null, Error>(__TAURI_INVOKE("save_auto_draft", { accountId, input })),
+	/**  自動一時下書きを消す。 */
+	clearAutoDraft: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("clear_auto_draft", { accountId })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
@@ -435,6 +465,47 @@ export type CustomTheme = {
 	id: string,
 	name: string,
 	colors: ThemeColors,
+};
+
+export type Draft = {
+	id: string,
+	accountId: string,
+	kind: DraftKind,
+	text: string,
+	cw: string | null,
+	visibility: VisibilityInput,
+	localOnly: boolean,
+	reactionAcceptance: ReactionAcceptanceInput,
+	channelId: string | null,
+	poll: PollDraftSnapshot | null,
+	fileIds: string[],
+	replyNote: DraftNoteSnapshot | null,
+	quoteNote: DraftNoteSnapshot | null,
+	createdAt: number,
+	updatedAt: number,
+};
+
+/**  下書き保存/更新の入力(id/account_id/kind/created_at/updated_atはStore側が管理)。 */
+export type DraftInput = {
+	text: string,
+	cw: string | null,
+	visibility: VisibilityInput,
+	localOnly: boolean,
+	reactionAcceptance: ReactionAcceptanceInput,
+	channelId: string | null,
+	poll: PollDraftSnapshot | null,
+	fileIds: string[],
+	replyNote: DraftNoteSnapshot | null,
+	quoteNote: DraftNoteSnapshot | null,
+};
+
+export type DraftKind = "manual" | "auto";
+
+/**  返信/引用先ノートの表示用最小スナップショット(ComposeBarのバナー表示に必要な分のみ)。 */
+export type DraftNoteSnapshot = {
+	id: string,
+	username: string,
+	text: string | null,
 };
 
 export type DriveFile = {
@@ -661,6 +732,12 @@ export type PollChoice = {
 	text: string,
 	votes: number,
 	isVoted: boolean,
+};
+
+export type PollDraftSnapshot = {
+	choices: string[],
+	multiple: boolean,
+	expiresAt: number | null,
 };
 
 export type PollInput = PollInput_Serialize | PollInput_Deserialize;

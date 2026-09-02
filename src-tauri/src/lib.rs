@@ -14,7 +14,7 @@ mod stream;
 
 use session::KeyringStore;
 use state::AppState;
-use store::{db, NoteCacheStore, SettingsStore};
+use store::{db, DraftStore, NoteCacheStore, SettingsStore};
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
 
@@ -88,6 +88,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::search_users,
             commands::note::search_hashtags,
             commands::note::fetch_url_preview,
+            commands::note::get_drive_file,
+            commands::draft::list_drafts,
+            commands::draft::save_draft,
+            commands::draft::delete_draft,
+            commands::draft::get_auto_draft,
+            commands::draft::save_auto_draft,
+            commands::draft::clear_auto_draft,
             commands::mute::get_mute,
             commands::mute::set_mute,
             commands::mute::get_notify,
@@ -200,6 +207,9 @@ pub fn run() {
                 }
             };
 
+            let drafts_path = config_dir.join("drafts.json");
+            let drafts = DraftStore::new(drafts_path).expect("failed to open drafts file");
+
             // 設定(UiPrefs.enable_file_logging)でON/OFFする(Issue #12: 「謎のタイミングで
             // 通知が来る」の調査用に、リリースビルドでもWS再接続/pingタイムアウトのログを
             // 残せるようにする)。既定ターゲット(Stdout + LogDir)のうち LogDir 側がアプリの
@@ -219,7 +229,7 @@ pub fn run() {
             let cache_conn =
                 db::open_cache(&cache_dir.join("cache.db")).expect("failed to open cache db");
             let cache = NoteCacheStore::new(cache_conn);
-            app.manage(AppState::new(Box::new(KeyringStore), settings, cache));
+            app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache));
 
             // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の
             // 未確定文字列インライン表示)を無効化しているため、明示的に再度有効化する。
