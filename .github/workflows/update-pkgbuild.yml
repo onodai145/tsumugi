@@ -2,7 +2,7 @@ name: update-pkgbuild
 
 on:
   release:
-    types: [released]
+    types: [released, published]
 
 permissions:
   contents: write
