@@ -98,6 +98,42 @@ describe("ComposeBar 下書き", () => {
     });
   });
 
+  it("デバウンスが既に発火済みの場合、アンマウント時にsave_auto_draftを再送しない", async () => {
+    vi.useFakeTimers();
+    try {
+      const { getByTestId, unmount } = render(ComposeBar);
+      await vi.advanceTimersByTimeAsync(0); // マウント時のget_auto_draft(非同期)を先に消化する
+      await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "デバウンス完了済み" } });
+      await vi.advanceTimersByTimeAsync(2000); // デバウンスを確定させる(save_auto_draftが1回発火)
+      const saveCallsBeforeUnmount = invokeMock.mock.calls.filter((c) => c[0] === "save_auto_draft").length;
+      expect(saveCallsBeforeUnmount).toBe(1);
+      unmount();
+      const saveCallsAfterUnmount = invokeMock.mock.calls.filter((c) => c[0] === "save_auto_draft").length;
+      expect(saveCallsAfterUnmount).toBe(1); // 発火済みタイマーをonDestroyが誤って再送しない
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("デバウンス確定前にアンマウントされてもsave_auto_draftがflushされる", async () => {
+    vi.useFakeTimers();
+    try {
+      const { getByTestId, unmount } = render(ComposeBar);
+      await vi.advanceTimersByTimeAsync(0); // マウント時のget_auto_draft(非同期)を先に消化する
+      await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "閉じる直前の入力" } });
+      // 2000msのデバウンスが確定する前(モバイル投稿モーダルを閉じる操作を模す)にアンマウントする
+      await vi.advanceTimersByTimeAsync(500);
+      expect(invokeMock).not.toHaveBeenCalledWith("save_auto_draft", expect.anything());
+      unmount();
+      expect(invokeMock).toHaveBeenCalledWith(
+        "save_auto_draft",
+        expect.objectContaining({ accountId: "acc1" }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("手動下書きを呼び出すとtextが復元され、投稿成功後にdelete_draftが呼ばれる", async () => {
     const draft = {
       id: "d1",

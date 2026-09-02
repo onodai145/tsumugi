@@ -11,7 +11,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { FileText, ImagePlus, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
   import { emojiKeyToInsertText } from "../lib/emojiKey";
   import CompletionPopover from "./CompletionPopover.svelte";
@@ -384,6 +384,7 @@
     // 依存関係として拾うため、使う値をすべて先に読む
     const snapshot = { text, cw, useCw, attachmentsLen: attachments.length, usePoll, hasAccount: !!accountId };
     clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
     if (!snapshot.hasAccount || !autoRestoreDone) return;
     const acc = accountId!;
     const nonEmpty =
@@ -396,9 +397,23 @@
       return;
     }
     autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = undefined;
       void unwrapAcc(acc, commands.saveAutoDraft(acc, buildDraftInput())).catch(() => {});
     }, 2000);
     return () => clearTimeout(autoSaveTimer);
+  });
+
+  // コンポーネントのアンマウント時、デバウンス中(まだ発火していない)自動保存が残っていれば
+  // 即座に確定させる。モバイルの投稿モーダル(App.svelte)はComposeBarを都度マウント/アンマウント
+  // するため、これが無いと閉じる直前2秒以内に入力した内容が保存されずに失われる
+  // (上の$effectのクリーンアップはキーストローク毎の再実行時にも走るため、そこでflushすると
+  // デバウンスがキーストローク毎保存になってしまい使えない。onDestroyは実際のアンマウント時
+  // にしか走らないため、ここでのみflushする)。
+  onDestroy(() => {
+    if (autoSaveTimer === undefined) return;
+    clearTimeout(autoSaveTimer);
+    if (!accountId) return;
+    void unwrapAcc(accountId, commands.saveAutoDraft(accountId, buildDraftInput())).catch(() => {});
   });
 
   /// マウント時の自動復元。app.bootingが終わるまで待ってから一度だけ試みる:
@@ -529,7 +544,7 @@
       text,
       cw: useCw && cw.trim() ? cw : null,
       visibility,
-      localOnly: useChannel || localOnly,
+      localOnly,
       reactionAcceptance,
       channelId: useChannel && channelId ? channelId : null,
       poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt: computePollExpiresAt() } : null,
