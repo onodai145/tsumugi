@@ -175,6 +175,13 @@
     noteMenuPos = { left, top: r.bottom + 6 };
   });
 
+  // 本文が長すぎる場合に折りたたむ(Issue #252)。文字数のみで判定し、改行数は見ない。
+  // サロゲートペア(絵文字等)を1文字として数えるためスプレッド展開でカウントする。
+  const TEXT_COLLAPSE_THRESHOLD = 300;
+  const isLongText = $derived(!!inner.text && [...inner.text].length > TEXT_COLLAPSE_THRESHOLD);
+  // 一度展開したら畳み直す操作は提供しない(CWのトグルと違い往復させる必要性が薄いため)。
+  let textExpanded = $state(false);
+
   // 投票済み(multiple=falseは1択でもう投票不可)・期限切れなら投票不可。
   const pollExpired = $derived(!!inner.poll?.expiresAt && inner.poll.expiresAt * 1000 < Date.now());
   const pollAlreadyVoted = $derived(!inner.poll?.multiple && !!inner.poll?.choices.some((c) => c.isVoted));
@@ -391,7 +398,28 @@
 
       {#if !inner.cw || cwOpen}
         {#if inner.text}
-          <div class="mt-px whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text" data-testid="note-text" oncopy={handleNyaizeCopy}><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
+          <div class="relative">
+            <div
+              class={isLongText && !textExpanded
+                ? "note-text-collapsed mt-px overflow-hidden whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text"
+                : "mt-px whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text"}
+              data-testid="note-text"
+              oncopy={handleNyaizeCopy}
+            ><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
+            {#if isLongText && !textExpanded}
+              <div class="note-text-fade pointer-events-none absolute inset-x-0 bottom-0 h-10"></div>
+              <div class="absolute inset-x-0 bottom-0 flex justify-center pb-0.5">
+                <button
+                  type="button"
+                  class="cw-toggle rounded-md border border-border px-2 py-px text-sm text-foreground"
+                  data-testid="note-text-expand"
+                  onclick={() => (textExpanded = true)}
+                >
+                  もっと見る
+                </button>
+              </div>
+            {/if}
+          </div>
         {/if}
         {#if inner.files.length > 0}
           <MediaGrid files={inner.files} />
@@ -587,6 +615,16 @@
   }
   .cw-toggle {
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
+  }
+  .note-text-collapsed {
+    max-height: 150px;
+  }
+  .note-text-fade {
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      color-mix(in srgb, var(--surface-1) var(--column-opacity, 100%), transparent)
+    );
   }
   .poll-choice {
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
