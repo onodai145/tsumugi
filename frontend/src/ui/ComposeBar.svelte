@@ -7,9 +7,9 @@
   import Dropdown from "./Dropdown.svelte";
   import DrivePicker from "./DrivePicker.svelte";
   import Modal from "./Modal.svelte";
-  import { commands, unwrap, formatError } from "../lib/ipc";
+  import { commands, unwrap, unwrapAcc, formatError } from "../lib/ipc";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { ImagePlus, SmilePlus, X } from "@lucide/svelte";
+  import { FileText, ImagePlus, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
   import { tick } from "svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
@@ -26,6 +26,9 @@
     DriveFile,
     Note,
     SourceItem,
+    Draft,
+    DraftInput,
+    DraftNoteSnapshot,
   } from "../bindings/tauri.gen";
 
   // expanded: モバイルの投稿モーダルなど、常に複数行分の入力欄を確保したい文脈向け
@@ -114,6 +117,14 @@
   let showEmojiPicker = $state(false);
   let emojiPickerTrigger = $state<HTMLElement | null>(null);
   let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
+  let showDraftMenu = $state(false);
+  let draftMenuTrigger = $state<HTMLElement | null>(null);
+  let draftMenuPos = $state<{ left: number; top: number } | null>(null);
+  let manualDrafts = $state<Draft[]>([]);
+  let draftsLoading = $state(false);
+  /// 呼び出し中の手動下書きのID(投稿成功時にこれを自動削除する)。手動保存/新規入力/
+  /// 自動下書き復元時はnullに戻す。
+  let loadedDraftId = $state<string | null>(null);
 
   // ボタンをテキストエリア右上に重ねて配置しているため、素直に左揃えで開くと
   // ポップオーバー(幅300px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
@@ -147,6 +158,40 @@
     const r = attachTrigger?.getBoundingClientRect();
     if (r) attachMenuPos = { left: r.left, top: r.bottom + 4 };
     showAttachMenu = true;
+  }
+
+  function snapshotToContextNote(s: DraftNoteSnapshot): ComposeContextNote {
+    return { id: s.id, text: s.text, user: { username: s.username } };
+  }
+
+  function contextNoteToSnapshot(n: ComposeContextNote): DraftNoteSnapshot {
+    return { id: n.id, username: n.user.username, text: n.text };
+  }
+
+  async function loadManualDrafts() {
+    if (!accountId) {
+      manualDrafts = [];
+      return;
+    }
+    draftsLoading = true;
+    try {
+      manualDrafts = await unwrapAcc(accountId, commands.listDrafts(accountId));
+    } catch {
+      manualDrafts = [];
+    } finally {
+      draftsLoading = false;
+    }
+  }
+
+  function toggleDraftMenu() {
+    if (showDraftMenu) {
+      showDraftMenu = false;
+      return;
+    }
+    const r = draftMenuTrigger?.getBoundingClientRect();
+    if (r) draftMenuPos = { left: r.left, top: r.bottom + 4 };
+    showDraftMenu = true;
+    void loadManualDrafts();
   }
 
   async function chooseLocalUpload() {
@@ -416,6 +461,103 @@
     ];
   }
 
+  function computePollExpiresAt(): number | null {
+    if (pollExpiryMode === "at" && pollExpiresAt) return new Date(pollExpiresAt).getTime();
+    if (pollExpiryMode === "after") return Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
+    return null;
+  }
+
+  function buildDraftInput(): DraftInput {
+    const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
+    return {
+      text,
+      cw: useCw && cw.trim() ? cw : null,
+      visibility,
+      localOnly: useChannel || localOnly,
+      reactionAcceptance,
+      channelId: useChannel && channelId ? channelId : null,
+      poll: usePoll && choices.length >= 2 ? { choices, multiple: pollMultiple, expiresAt: computePollExpiresAt() } : null,
+      fileIds: attachments.flatMap((a) => (a.kind === "drive" ? [a.file.id] : [])),
+      replyNote: replyTo ? contextNoteToSnapshot(replyTo) : null,
+      quoteNote: quoteOf ? contextNoteToSnapshot(quoteOf) : null,
+    };
+  }
+
+  async function saveCurrentAsDraft() {
+    if (!accountId) return;
+    try {
+      await unwrapAcc(accountId, commands.saveDraft(accountId, buildDraftInput()));
+      await loadManualDrafts();
+    } catch (e) {
+      err = String(e);
+    }
+  }
+
+  async function deleteManualDraft(id: string) {
+    if (!accountId) return;
+    try {
+      await unwrapAcc(accountId, commands.deleteDraft(accountId, id));
+      manualDrafts = manualDrafts.filter((d) => d.id !== id);
+      if (loadedDraftId === id) loadedDraftId = null;
+    } catch (e) {
+      err = String(e);
+    }
+  }
+
+  async function loadDraft(d: Draft) {
+    text = d.text;
+    cw = d.cw ?? "";
+    useCw = d.cw != null;
+    visibility = d.visibility;
+    localOnly = d.localOnly;
+    reactionAcceptance = d.reactionAcceptance;
+    if (d.channelId) {
+      useChannel = true;
+      channelId = d.channelId;
+    } else {
+      useChannel = false;
+      channelId = "";
+    }
+    if (d.poll) {
+      usePoll = true;
+      const padded = [...d.poll.choices];
+      while (padded.length < 2) padded.push("");
+      pollChoices = padded;
+      pollMultiple = d.poll.multiple;
+      if (d.poll.expiresAt != null) {
+        pollExpiryMode = "at";
+        // datetime-local入力/computePollExpiresAtは共にローカル時刻として文字列を扱うため、
+        // toISOString()(UTC)ではなくローカル成分から組み立てる(でないとタイムゾーン分ずれる)。
+        const dt = new Date(d.poll.expiresAt);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        pollExpiresAt = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+      } else {
+        pollExpiryMode = "none";
+        pollExpiresAt = "";
+      }
+    } else {
+      usePoll = false;
+      pollChoices = ["", ""];
+      pollMultiple = false;
+      pollExpiryMode = "none";
+      pollExpiresAt = "";
+    }
+    replyTo = d.replyNote ? snapshotToContextNote(d.replyNote) : undefined;
+    quoteOf = d.quoteNote ? snapshotToContextNote(d.quoteNote) : undefined;
+    attachments = [];
+    if (d.fileIds.length > 0 && accountId) {
+      const acc = accountId;
+      const results = await Promise.allSettled(
+        d.fileIds.map((id) => unwrapAcc(acc, commands.getDriveFile(acc, id))),
+      );
+      attachments = results.flatMap((r) =>
+        r.status === "fulfilled" ? [{ kind: "drive" as const, id: r.value.id, file: r.value }] : [],
+      );
+    }
+    loadedDraftId = d.kind === "manual" ? d.id : null;
+    showDraftMenu = false;
+  }
+
   async function submit() {
     err = null;
     if (!accountId) {
@@ -428,12 +570,7 @@
     }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
     if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
-    let expiresAt: number | null = null;
-    if (pollExpiryMode === "at" && pollExpiresAt) {
-      expiresAt = new Date(pollExpiresAt).getTime();
-    } else if (pollExpiryMode === "after") {
-      expiresAt = Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
-    }
+    const expiresAt = computePollExpiresAt();
 
     busy = true;
     failedAttachmentId = null;
@@ -738,6 +875,15 @@
       <Button type="button" variant="outline" size="sm" class={useCw ? "border-primary text-primary" : ""} onclick={() => (useCw = !useCw)}>CW</Button>
       <Button type="button" variant="outline" size="sm" class={usePoll ? "border-primary text-primary" : ""} onclick={() => (usePoll = !usePoll)}>投票</Button>
       <Button type="button" variant="outline" size="sm" class={useChannel ? "border-primary text-primary" : ""} onclick={() => (useChannel = !useChannel)}>チャンネル</Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
+        title="下書き"
+        bind:ref={draftMenuTrigger}
+        onclick={toggleDraftMenu}
+        disabled={busy || !accountId}
+      ><FileText size={16} class="size-4" /></Button>
       <ReactionAcceptanceSelect bind:value={reactionAcceptance} />
       {#if useChannel}
         {#if channelsLoading}
@@ -806,6 +952,48 @@
         title={accountId ? undefined : "アカウントを選択してください"}
         onclick={chooseDrivePicker}
       >ドライブから選択</button>
+    </div>
+  </div>
+{/if}
+
+{#if showDraftMenu && draftMenuPos}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (showDraftMenu = false)} role="presentation">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="fixed w-[280px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+      style={`left:${draftMenuPos.left}px;top:${draftMenuPos.top}px`}
+      onclick={(e) => e.stopPropagation()}
+      role="menu"
+      tabindex="-1"
+    >
+      <button
+        class="block w-full rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"
+        type="button"
+        onclick={saveCurrentAsDraft}
+      >現在の内容を下書き保存</button>
+      <div class="my-1 border-t border-border"></div>
+      {#if draftsLoading}
+        <div class="px-2.5 py-[7px] text-sm text-muted-foreground">読み込み中…</div>
+      {:else if manualDrafts.length === 0}
+        <div class="px-2.5 py-[7px] text-sm text-muted-foreground">保存済みの下書きはありません</div>
+      {:else}
+        <div class="max-h-[280px] overflow-y-auto">
+          {#each manualDrafts as d (d.id)}
+            <div class="flex items-center gap-1">
+              <button
+                class="min-w-0 flex-1 truncate rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"
+                type="button"
+                title={d.text}
+                onclick={() => loadDraft(d)}
+              >{d.text.trim() || "(本文なし)"}</button>
+              <Button type="button" variant="ghost" size="icon-xs" class="flex-none text-muted-foreground" title="削除" onclick={() => deleteManualDraft(d.id)}><X size={12} /></Button>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
