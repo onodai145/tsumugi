@@ -452,3 +452,56 @@ describe("投稿時刻の自動更新", () => {
     }
   });
 });
+
+describe("本文の折りたたみ", () => {
+  it("301文字では初期状態で「もっと見る」ボタンを表示し、本文コンテナに折りたたみクラスが付く", () => {
+    const note = makeNote({ text: "あ".repeat(301) });
+    const { container, getByTestId } = render(NoteCard, { props: { note } });
+
+    expect(getByTestId("note-text-expand")).toBeTruthy();
+    const textEl = getByTestId("note-text");
+    expect(textEl.classList.contains("note-text-collapsed")).toBe(true);
+    void container;
+  });
+
+  it("300文字ちょうどでは「もっと見る」ボタンを表示しない", () => {
+    const note = makeNote({ text: "あ".repeat(300) });
+    const { queryByTestId, getByTestId } = render(NoteCard, { props: { note } });
+
+    expect(queryByTestId("note-text-expand")).toBeNull();
+    expect(getByTestId("note-text").classList.contains("note-text-collapsed")).toBe(false);
+  });
+
+  it("「もっと見る」をクリックすると全文表示になりボタンが消える", async () => {
+    const note = makeNote({ text: "あ".repeat(301) });
+    const { getByTestId, queryByTestId } = render(NoteCard, { props: { note } });
+
+    await getByTestId("note-text-expand").click();
+
+    expect(queryByTestId("note-text-expand")).toBeNull();
+    expect(getByTestId("note-text").classList.contains("note-text-collapsed")).toBe(false);
+  });
+
+  it("CWを開いた結果の本文が長文の場合も折りたたみが効く", async () => {
+    const note = makeNote({ cw: "注意書き", text: "あ".repeat(301) });
+    const { getByText, getByTestId, queryByTestId } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    expect(queryByTestId("note-text-expand")).toBeNull(); // CWが閉じている間は本文自体が無い
+
+    await getByText("続きを見る").click();
+
+    expect(getByTestId("note-text-expand")).toBeTruthy();
+  });
+
+  it("引用Renoteのネスト表示でも長文の折りたたみが効く", () => {
+    const note = makeNote({
+      text: "見て",
+      renote: makeNote({ id: "n-quoted", text: "い".repeat(301) }),
+    });
+    const { container } = render(NoteCard, { props: { note } });
+
+    expect(container.querySelectorAll('[data-testid="note-text-expand"]').length).toBe(1);
+  });
+});
