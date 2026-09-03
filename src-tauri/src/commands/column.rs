@@ -1098,6 +1098,11 @@ struct FilteredFetch {
 /// キャッシュDB検索(Issue #248)の中核ロジック。SQL射影で粗く絞り込んだ後、
 /// `fetch_and_filter` の cache 経路と同じ二段構成(in-memory フィルタ + ミュート除外)で
 /// 再検証する。AppState を直接取らず必要な値だけを受け取ることで単体テスト可能にしている。
+// `is_server_muted`と`is_word_muted`を1つのクロージャに統合しないのは、各々を単独で
+// 検証するテスト(search_cache_core_excludes_notes_the_closure_marks_server_muted /
+// search_cache_core_excludes_notes_matched_by_word_mute_closure)を独立させたいため。
+// AppState を取らない設計もテスト容易性のためで、引数を減らす方向のリファクタは避ける。
+#[allow(clippy::too_many_arguments)]
 fn search_cache_core(
     cache: &NoteCacheStore,
     filter: &FilterQuery,
