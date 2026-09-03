@@ -50,7 +50,7 @@ class MainActivity : TauriActivity() {
             else -> emptyList()
         }
 
-        val filePaths = uris.mapNotNull { copyToCache(it) }
+        val filePaths = uris.mapIndexedNotNull { index, uri -> copyToCache(uri, index) }
 
         if (text == null && filePaths.isEmpty()) return
         nativeShareReceived(text, filePaths.toTypedArray())
@@ -74,12 +74,14 @@ class MainActivity : TauriActivity() {
         }
     }
 
-    /// `content://` の共有ファイルを `cacheDir/shared-intents/` にコピーし、通常のファイル
-    /// パスとして扱えるようにする。失敗時はこの1件だけ諦めて null を返す。
-    private fun copyToCache(uri: Uri): String? {
+    /// `content://` の共有ファイルを `cacheDir/shared-intents/<index>/` にコピーし、通常の
+    /// ファイルパスとして扱えるようにする。`index` はバッチ内での位置(ACTION_SEND_MULTIPLE で
+    /// 同名ファイルが複数来た場合の上書き事故を防ぐためのサブディレクトリ分離)。
+    /// 失敗時はこの1件だけ諦めて null を返す。
+    private fun copyToCache(uri: Uri, index: Int): String? {
         return try {
             val name = queryDisplayName(uri) ?: "shared-${System.currentTimeMillis()}"
-            val dir = File(cacheDir, "shared-intents").apply { mkdirs() }
+            val dir = File(File(cacheDir, "shared-intents"), index.toString()).apply { mkdirs() }
             val dest = File(dir, name)
             val copied = contentResolver.openInputStream(uri)?.use { input ->
                 dest.outputStream().use { output -> input.copyTo(output) }
