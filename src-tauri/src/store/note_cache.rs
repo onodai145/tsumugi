@@ -474,7 +474,7 @@ fn shrink_to_size(conn: &Connection, budget_bytes: i64) -> Result<i64> {
     Ok(deleted)
 }
 
-/// note + user + 関連テーブルを upsert する。関連は入れ替え（DELETE→INSERT）。
+/// note + user + 関連テーブルを upsert する。関連テーブルはUPSERT+失効行クリーンアップ(Issue #115)。
 fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
     let mut payload_value = serde_json::to_value(n)?;
     stub_user_refs(&mut payload_value);
@@ -533,30 +533,77 @@ fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
         ],
     )?;
 
-    // 関連テーブルは入れ替え
-    for table in ["note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
-        conn.execute(&format!("DELETE FROM {table} WHERE note_id = ?1"), params![n.id])?;
-    }
+    // 関連テーブルはUPSERT(Task 1で追加したUNIQUE制約に基づく)。DELETE+INSERTではなく
+    // ON CONFLICTで書き換えることで、複数プロセスからの同時書き込みでも一時的な重複行・
+    // 空状態が起きないようにする(Phase 2以降の外部DB利用を見据えた変更、Issue #115)。
     for (emoji, count) in &n.reactions {
         conn.execute(
-            "INSERT INTO note_reaction (note_id, emoji_key, count) VALUES (?1, ?2, ?3)",
+            "INSERT INTO note_reaction (note_id, emoji_key, count) VALUES (?1, ?2, ?3)
+             ON CONFLICT(note_id, emoji_key) DO UPDATE SET count = excluded.count",
             params![n.id, emoji, count],
         )?;
     }
     for tag in &n.tags {
-        conn.execute("INSERT INTO note_tag (note_id, tag) VALUES (?1, ?2)", params![n.id, tag])?;
+        conn.execute(
+            "INSERT INTO note_tag (note_id, tag) VALUES (?1, ?2) ON CONFLICT(note_id, tag) DO NOTHING",
+            params![n.id, tag],
+        )?;
     }
     for uid in &n.mentions {
-        conn.execute("INSERT INTO note_mention (note_id, user_id) VALUES (?1, ?2)", params![n.id, uid])?;
+        conn.execute(
+            "INSERT INTO note_mention (note_id, user_id) VALUES (?1, ?2) ON CONFLICT(note_id, user_id) DO NOTHING",
+            params![n.id, uid],
+        )?;
     }
     for e in n.emojis.keys() {
-        conn.execute("INSERT INTO note_emoji (note_id, emoji) VALUES (?1, ?2)", params![n.id, e])?;
+        conn.execute(
+            "INSERT INTO note_emoji (note_id, emoji) VALUES (?1, ?2) ON CONFLICT(note_id, emoji) DO NOTHING",
+            params![n.id, e],
+        )?;
     }
     for f in &n.files {
         conn.execute(
-            "INSERT INTO note_file (note_id, mime_type, mime_category, is_sensitive) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO note_file (note_id, mime_type, mime_category, is_sensitive) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(note_id, mime_type, mime_category, is_sensitive) DO NOTHING",
             params![n.id, f.mime_type, mime_category(&f.mime_type), f.is_sensitive as i64],
         )?;
+    }
+
+    // 旧行(現在のnoteの内容に含まれなくなったreaction/tag/mention/emoji/file)を掃除する。
+    // 例: リアクションが取り消された、タグが編集で消えた、等。json_eachはSQLiteのJSON1拡張
+    // (rusqliteのbundled機能で有効)を使う。
+    conn.execute(
+        "DELETE FROM note_reaction WHERE note_id = ?1 AND emoji_key NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.reactions.keys().collect::<Vec<_>>())?],
+    )?;
+    conn.execute(
+        "DELETE FROM note_tag WHERE note_id = ?1 AND tag NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.tags)?],
+    )?;
+    conn.execute(
+        "DELETE FROM note_mention WHERE note_id = ?1 AND user_id NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.mentions)?],
+    )?;
+    conn.execute(
+        "DELETE FROM note_emoji WHERE note_id = ?1 AND emoji NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.emojis.keys().collect::<Vec<_>>())?],
+    )?;
+    // note_fileはUNIQUEキーが複合(4列)でjson_eachのタプル比較ができないため、行ごとに比較する。
+    let current_file_keys: Vec<String> = n
+        .files
+        .iter()
+        .map(|f| format!("{}\u{0}{}\u{0}{}", f.mime_type, mime_category(&f.mime_type), f.is_sensitive as i64))
+        .collect();
+    let mut stmt = conn.prepare("SELECT rowid, mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = ?1")?;
+    let existing_files: Vec<(i64, String, String, i64)> = stmt
+        .query_map(params![n.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+    for (rowid, mime_type, mime_category_val, is_sensitive) in existing_files {
+        let key = format!("{mime_type}\u{0}{mime_category_val}\u{0}{is_sensitive}");
+        if !current_file_keys.contains(&key) {
+            conn.execute("DELETE FROM note_file WHERE rowid = ?1", params![rowid])?;
+        }
     }
     Ok(())
 }
@@ -1233,5 +1280,45 @@ mod tests {
             .query_row("SELECT mime_category FROM note_file WHERE note_id='n1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(cat, "image");
+    }
+
+    /// Issue #115: 側テーブルをDELETE+INSERTからUPSERTに変更した後も、
+    /// 「今のnoteに無くなった行(取り消されたリアクション等)」は正しく消えること。
+    #[test]
+    fn upsert_note_removes_stale_reaction_after_unreact() {
+        let s = store();
+        let mut n = note("n1", 100);
+        n.reactions = HashMap::from([("👍".into(), 3u32)]);
+        s.cache_note("col1", &n).unwrap();
+
+        // リアクションが取り消された(reactionsが空になった)状態で再受信
+        n.reactions = HashMap::new();
+        n.reaction_count = 0;
+        n.my_reaction = None;
+        s.update_note(&n).unwrap();
+
+        let conn = s.conn.lock().unwrap();
+        let rc: i64 = conn
+            .query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rc, 0, "取り消されたリアクションの行はUPSERT化後も削除されること");
+    }
+
+    /// Issue #115: 同じリアクションを再受信してもcountが正しく更新される(UPSERTのON CONFLICT DO UPDATEが効いていること)。
+    #[test]
+    fn upsert_note_updates_reaction_count_on_upsert() {
+        let s = store();
+        let mut n = note("n1", 100);
+        n.reactions = HashMap::from([("👍".into(), 3u32)]);
+        s.cache_note("col1", &n).unwrap();
+
+        n.reactions = HashMap::from([("👍".into(), 5u32)]);
+        s.update_note(&n).unwrap();
+
+        let conn = s.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count FROM note_reaction WHERE note_id='n1' AND emoji_key='👍'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 5);
     }
 }

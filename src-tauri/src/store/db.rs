@@ -3,7 +3,7 @@
 //! ノートキャッシュは TQL§9 の正規化スキーマ（SQL 射影の前提）＋表示復元用の payload(JSON)。
 
 use crate::error::Result;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 
 /// 設定スキーマ（Account/Column/汎用設定）。将来の移行は `migrate()` で管理する。
@@ -254,6 +254,57 @@ fn migrate_cache(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_cn_column_created \
          ON column_note(column_id, created_at DESC, note_id DESC)",
     )?;
+
+    // Issue #115: 側テーブルへのUNIQUE制約追加(重複排除してからインデックス作成)。
+    // 既存の蓄積データ(note/user/column_note等)は一切触らない。単一プロセス+単一SQLite接続
+    // (Mutexで直列化)前提の現行コードでは重複行はほぼ存在しないはずだが、念のため
+    // インデックス作成前に重複排除する(Issue #115 spec「既存キャッシュDBへのUNIQUE制約追加について」)。
+    add_unique_index_with_dedup(conn, "note_reaction", &["note_id", "emoji_key"], "idx_nr_unique")?;
+    add_unique_index_with_dedup(conn, "note_tag", &["note_id", "tag"], "idx_nt_unique")?;
+    add_unique_index_with_dedup(conn, "note_mention", &["note_id", "user_id"], "idx_nm_unique")?;
+    add_unique_index_with_dedup(conn, "note_emoji", &["note_id", "emoji"], "idx_ne_unique")?;
+    add_unique_index_with_dedup(
+        conn,
+        "note_file",
+        &["note_id", "mime_type", "mime_category", "is_sensitive"],
+        "idx_nf_unique",
+    )?;
+    Ok(())
+}
+
+/// `table`に`(cols...)`のUNIQUEインデックス`index_name`が無ければ、重複行を
+/// (rowidが最小の1行だけ残して)削除してからインデックスを作成する。
+/// 既にインデックスがあれば何もしない(起動のたびに全表走査しないため)。
+fn add_unique_index_with_dedup(
+    conn: &Connection,
+    table: &str,
+    cols: &[&str],
+    index_name: &str,
+) -> Result<()> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name = ?1",
+        params![index_name],
+        |r| r.get(0),
+    )?;
+    if exists > 0 {
+        return Ok(());
+    }
+    // 一部のテストは最小限のスキーマ(note/user/column_noteのみ)しか作らないため、
+    // 側テーブル自体が存在しないケースを許容する(本番の CACHE_SCHEMA では常に存在する)。
+    let table_exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
+        params![table],
+        |r| r.get(0),
+    )?;
+    if table_exists == 0 {
+        return Ok(());
+    }
+    let col_list = cols.join(", ");
+    conn.execute(
+        &format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT MIN(rowid) FROM {table} GROUP BY {col_list})"),
+        [],
+    )?;
+    conn.execute(&format!("CREATE UNIQUE INDEX {index_name} ON {table}({col_list})"), [])?;
     Ok(())
 }
 
@@ -473,6 +524,56 @@ mod tests {
             assert!(column_exists(&conn, "user", col).unwrap(), "missing column: {col}");
         }
         // 冪等: 2回目呼んでもエラーにならない
+        migrate_cache(&conn).unwrap();
+    }
+
+    /// Issue #115: 側テーブルに重複行があっても、UNIQUEインデックス作成前に
+    /// 重複排除してからインデックスを張ること(既存の蓄積データを壊さずに移行できること)。
+    #[test]
+    fn migrate_cache_dedupes_side_tables_before_creating_unique_index() {
+        // open_cache_in_memory() は migrate_cache 込みで、UNIQUE インデックスは
+        // 空テーブルに対して張られてしまい以降の重複INSERTがそこで失敗してしまう
+        // (この関数が検証したい「移行前の重複データ」を作れない)。旧バージョンで
+        // 溜まった重複データが載ったDBがアップグレードされる状況を再現するため、
+        // ここではスキーマだけ適用し、まだ migrate_cache は呼ばない状態から始める。
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CACHE_SCHEMA).unwrap();
+        // 正規のパスでは起きないはずの重複行を素のSQLで作る(移行前の実データを模倣)。
+        conn.execute(
+            "INSERT INTO note (id, created_at, visibility, user_id, payload) VALUES ('n1', 100, 'home', 'u1', '{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO note_reaction (note_id, emoji_key, count) VALUES ('n1', '👍', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO note_reaction (note_id, emoji_key, count) VALUES ('n1', '👍', 1)",
+            [],
+        )
+        .unwrap();
+
+        // 重複データが載った状態で移行を実行する。
+        migrate_cache(&conn).unwrap();
+
+        let idx_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_nr_unique'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx_count, 1);
+
+        // 重複行は1件に集約されていること。
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // 冪等: 再実行してもエラーにならない(UNIQUE違反にならない)。
         migrate_cache(&conn).unwrap();
     }
 }
