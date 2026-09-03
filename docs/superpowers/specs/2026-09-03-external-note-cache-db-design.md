@@ -75,7 +75,16 @@ Phase 1はSQLiteのみを対象とし、sqlxのSQLiteドライバは`?`プレー
 
 ### 既存キャッシュDBへのUNIQUE制約追加について
 
-`CREATE UNIQUE INDEX`は既存データに重複行があると失敗し、起動時マイグレーションの失敗はアプリ起動不能に直結する。キャッシュは「破棄しても再取得で復元できる」設計(`db.rs`)なので、重複除去マイグレーションは行わない。代わりにキャッシュのスキーマバージョンを上げ、旧バージョンのキャッシュDBファイルは(WAL/SHMファイルごと)削除して新スキーマで作り直す方式を取る。
+`CREATE UNIQUE INDEX`は既存データに重複行があると失敗し、起動時マイグレーションの失敗はアプリ起動不能に直結する。一方でキャッシュには蓄積された既存ノートデータ(再取得コストがかかる)が入っており、`note`/`user`/`column_note`/`column_fetch_boundary`を含めて丸ごと作り直すのは損失が大きい。
+
+現行コードは単一プロセス+単一SQLite接続(`Mutex`で直列化)を前提にしており、`upsert_note`のDELETE→INSERTは常に1トランザクション内で完結しているため、**既存ユーザーのキャッシュDBには側テーブル(`note_reaction`等)の重複行はほぼ存在しない**はずである。UNIQUE制約は「今後、外部DBに複数端末が同時書き込みしたときの保険」であり、既存データを壊すものではない。
+
+そのため、`db.rs`の`migrate_cache`に以下のマイグレーションステップを追加する形にする(既存の`migrate_cache`と同じ、列/インデックス追加パターンを踏襲):
+
+1. 各側テーブル(`note_reaction`/`note_tag`/`note_mention`/`note_emoji`/`note_file`)に対し、UNIQUEインデックスがまだ無ければ、SQLiteの暗黙`rowid`を使って重複行を削除する(例: `note_reaction`なら`DELETE FROM note_reaction WHERE rowid NOT IN (SELECT MIN(rowid) FROM note_reaction GROUP BY note_id, emoji_key)`)。実運用では対象行が0件のケースがほとんどなので、コストは無視できる
+2. その後`CREATE UNIQUE INDEX IF NOT EXISTS`で制約を追加する
+
+`note`/`user`/`column_note`/`column_fetch_boundary`はこのマイグレーションで一切削除・作り直しをしない。DBファイル全体の削除・スキーマバージョンによる作り直しは行わない。
 
 ## `delete_matching`のコネクションプール対応
 
