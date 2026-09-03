@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, fireEvent, waitFor } from "@testing-library/svelte";
+import { cleanup, render, fireEvent, waitFor, screen } from "@testing-library/svelte";
 import { app } from "../lib/store.svelte";
 
 // store.svelte.ts が起動時に @tauri-apps/plugin-os の platform() を呼ぶため、
@@ -169,6 +169,37 @@ describe("ComposeBar 下書き", () => {
     await fireEvent.click(getByTestId("compose-submit"));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("delete_draft", { accountId: "acc1", draftId: "d1" });
+    });
+  });
+
+  it("app.composeのtextとfilePathsをコンポーズ欄に反映する(Issue #116)", async () => {
+    setupAccount();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "read_attachment_preview") return Promise.resolve("data:image/png;base64,xx");
+      return Promise.resolve(null);
+    });
+    render(ComposeBar);
+    app.openCompose("acc1", { text: "共有されたテキスト", filePaths: ["/tmp/shared-intents/photo.png"] });
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("共有されたテキスト")).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "read_attachment_preview",
+        expect.objectContaining({ path: "/tmp/shared-intents/photo.png" }),
+      );
+    });
+  });
+
+  it("app.composeのtextは既存の入力があれば上書きしない(Issue #116)", async () => {
+    setupAccount();
+    invokeMock.mockResolvedValue(null);
+    const { container } = render(ComposeBar);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    await fireEvent.input(textarea, { target: { value: "書きかけの本文" } });
+    app.openCompose("acc1", { text: "共有されたテキスト" });
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("書きかけの本文")).toBeTruthy();
     });
   });
 });

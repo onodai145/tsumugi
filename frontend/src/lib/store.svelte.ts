@@ -92,11 +92,15 @@ export interface GroupView {
   activeTabId: string;
 }
 
-/// 投稿フォーム（返信/引用の文脈つき）
+/// 投稿フォーム(返信/引用の文脈、または共有インテント由来の初期値つき)
 export interface ComposeState {
   accountId: string;
   replyTo?: Note;
   quoteOf?: Note;
+  /// 共有インテント等から受け取った初期本文(Issue #116)。既存の入力があれば上書きしない。
+  text?: string;
+  /// 共有インテント等から受け取った添付ファイルのローカルパス(Issue #116)。
+  filePaths?: string[];
 }
 
 export type LogLevel = "info" | "success" | "warn" | "error";
@@ -1640,7 +1644,10 @@ class AppStore {
 
   // ---- Phase 3: 投稿・リアクション ----
 
-  openCompose(accountId: string, opts: { replyTo?: Note; quoteOf?: Note } = {}) {
+  openCompose(
+    accountId: string,
+    opts: { replyTo?: Note; quoteOf?: Note; text?: string; filePaths?: string[] } = {},
+  ) {
     this.compose = { accountId, ...opts };
     // モバイル版UIは投稿欄がモーダル内にしか無いため、シグナルを消費できるよう先に開いておく
     // (PC版は常時表示なので不要)。isMobilePlatform(OS生判定)ではなく実効UIモード

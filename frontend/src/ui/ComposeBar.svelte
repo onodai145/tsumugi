@@ -360,6 +360,14 @@
     if (c.replyTo && !text.trim()) {
       text = `${acctOf(c.replyTo.user)} `;
     }
+    // 共有インテント等からの初期本文(Issue #116)。返信のメンション挿入と同様、
+    // 既に何か入力中ならそちらを優先し上書きしない。
+    if (c.text && !text.trim()) {
+      text = c.text;
+    }
+    for (const p of c.filePaths ?? []) {
+      void addLocalAttachment(p);
+    }
     app.compose = null;
     textarea?.focus();
   });
@@ -493,6 +501,19 @@
     quoteOf = undefined;
   }
 
+  async function addLocalAttachment(path: string) {
+    const name = path.split(/[\\/]/).pop() ?? path;
+    let previewUrl: string | null = null;
+    if (IMAGE_EXTENSIONS.has(extLower(name))) {
+      try {
+        previewUrl = await unwrap(commands.readAttachmentPreview(path));
+      } catch {
+        previewUrl = null;
+      }
+    }
+    attachments = [...attachments, { kind: "local", id: crypto.randomUUID(), path, name, previewUrl }];
+  }
+
   async function pickFiles() {
     err = null;
     // filters は付けない: Misskey のドライブは画像/動画に限らず任意のファイル種別を
@@ -504,16 +525,7 @@
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     for (const p of paths) {
-      const name = p.split(/[\\/]/).pop() ?? p;
-      let previewUrl: string | null = null;
-      if (IMAGE_EXTENSIONS.has(extLower(name))) {
-        try {
-          previewUrl = await unwrap(commands.readAttachmentPreview(p));
-        } catch {
-          previewUrl = null;
-        }
-      }
-      attachments = [...attachments, { kind: "local", id: crypto.randomUUID(), path: p, name, previewUrl }];
+      await addLocalAttachment(p);
     }
   }
 
