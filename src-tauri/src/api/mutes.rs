@@ -98,6 +98,10 @@ pub(crate) fn parse_muted_words(raw: &serde_json::Value) -> Vec<WordMuteRule> {
 /// 1つの文字列要素をパースする。`/pattern/flags` 構文なら正規表現、それ以外は単語1個のANDグループ。
 fn parse_word_element(s: &str) -> Option<WordMuteRule> {
     if let Some((pattern, flags)) = try_parse_regex_syntax(s) {
+        if !is_valid_regex_flags(flags) {
+            log::warn!("invalid muted word regex flags /{pattern}/{flags}: unrecognized flag character");
+            return None;
+        }
         return match regex::RegexBuilder::new(pattern)
             .case_insensitive(flags.contains('i'))
             .build()
@@ -115,6 +119,13 @@ fn parse_word_element(s: &str) -> Option<WordMuteRule> {
     } else {
         Some(WordMuteRule::Words(vec![s.to_string()]))
     }
+}
+
+/// `flags` がJSの正規表現flag文字(d, g, i, m, s, u, v, y)のみで構成されているかを検証する。
+fn is_valid_regex_flags(flags: &str) -> bool {
+    flags
+        .chars()
+        .all(|c| matches!(c, 'd' | 'g' | 'i' | 'm' | 's' | 'u' | 'v' | 'y'))
 }
 
 /// `/pattern/flags` 構文なら `(pattern, flags)` を返す。先頭が `/` で、残りに区切りの `/` が
@@ -140,7 +151,7 @@ mod tests {
         let rules = parse_muted_words(&raw);
         assert_eq!(rules.len(), 1);
         assert!(
-            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == &["spoiler".to_string()])
+            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == ["spoiler".to_string()].as_slice())
         );
     }
 
@@ -150,7 +161,7 @@ mod tests {
         let rules = parse_muted_words(&raw);
         assert_eq!(rules.len(), 1);
         assert!(
-            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == &["foo".to_string(), "bar".to_string()])
+            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == ["foo".to_string(), "bar".to_string()].as_slice())
         );
     }
 
@@ -160,7 +171,7 @@ mod tests {
         let rules = parse_muted_words(&raw);
         assert_eq!(rules.len(), 1);
         assert!(
-            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == &["bar".to_string()])
+            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == ["bar".to_string()].as_slice())
         );
     }
 
@@ -181,7 +192,7 @@ mod tests {
         let rules = parse_muted_words(&raw);
         assert_eq!(rules.len(), 1);
         assert!(
-            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == &["spoiler".to_string()])
+            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == ["spoiler".to_string()].as_slice())
         );
     }
 
@@ -189,5 +200,24 @@ mod tests {
     fn missing_muted_words_field_returns_empty() {
         let raw = json!({});
         assert!(parse_muted_words(&raw).is_empty());
+    }
+
+    #[test]
+    fn regex_syntax_with_unrecognized_flag_characters_is_skipped() {
+        let raw = json!({ "mutedWords": ["/r/anime", "spoiler"] });
+        let rules = parse_muted_words(&raw);
+        // "/r/anime" must NOT become a live regex (flags "anime" contains invalid chars n,e,a);
+        // it must be skipped entirely, not fall back to a literal word either.
+        assert_eq!(rules.len(), 1);
+        assert!(matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == ["spoiler".to_string()].as_slice()));
+    }
+
+    #[test]
+    fn regex_syntax_with_only_valid_flags_still_compiles() {
+        let raw = json!({ "mutedWords": ["/spoiler/gi"] });
+        let rules = parse_muted_words(&raw);
+        assert_eq!(rules.len(), 1);
+        let WordMuteRule::Regex(re) = &rules[0] else { panic!("expected Regex rule") };
+        assert!(re.is_match("BIG SPOILER"));
     }
 }
