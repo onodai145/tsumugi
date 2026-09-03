@@ -416,9 +416,8 @@ class AppStore {
   /// 「木全体を読む→1ノード変更→木全体を保存」という同じ形をしており、2つが並行に
   /// 飛ぶと後発の保存が先発の変更を握り潰すレースになる(Issue #274/#276/#278)。
   /// splitPane/discardEmptyGroup/setPaneAuto/resizePane/endDragGroup/endDragTab/
-  /// addColumnの7つのメソッドは必ずこのキューを経由させることで、互いに対して1本の
-  /// 直列実行チェーンにまとめている(closeTabも同種のpane_layout書き込みを行うが
-  /// 未対応。Issue #280)。
+  /// addColumn/closeTabの8つのメソッドは必ずこのキューを経由させることで、互いに対して
+  /// 1本の直列実行チェーンにまとめている。
   #paneWriteQueue: Promise<unknown> = Promise.resolve();
 
   #queuePaneWrite<T>(fn: () => Promise<T>): Promise<T> {
@@ -1620,8 +1619,10 @@ class AppStore {
   /// タブを閉じる。グループが空になったらグループも消す。空グループが消えた結果
   /// ペイン分割ツリーが畳まれることがあるため(Issue #31)、paneRootも取り直す。
   async closeTab(tabId: string) {
-    await unwrap(commands.closeColumn(tabId));
-    const paneRoot = await unwrap(commands.loadPaneLayout());
+    const paneRoot = await this.#queuePaneWrite(async () => {
+      await unwrap(commands.closeColumn(tabId));
+      return await unwrap(commands.loadPaneLayout());
+    });
     this.#connState.delete(tabId);
     this.#wasReconnecting.delete(tabId);
     for (const g of this.groups) {
