@@ -9,7 +9,7 @@ Issue #115「外部のデータベースを使えるようにする」。本文�
 
 ## スコープ
 
-- **対象**: note cache(`store/note_cache.rs`が扱う`note`/`user`/`note_reaction`/`note_tag`/`note_mention`/`note_emoji`/`note_file`/`column_note`/`column_fetch_boundary`)のみ
+- **対象**: note cache(`store/note_cache.rs`が扱う`note`/`user`/`note_reaction`/`note_tag`/`note_mention`/`note_emoji`/`note_file`/`column_note`/`column_fetch_boundary`)のみ。`store/user_ref.rs`(`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`、いずれも`&rusqlite::Connection`を取り`note_cache.rs`から呼ばれる)も同じ接続を共有するため対象に含む
 - **対象外**: account/column/mute/notify/ui等の設定(`SettingsData`、プレーンJSONファイル)。account tokenはこれまでどおりOS keyringのみで、外部DBには一切保存しない
 - **サポートするバックエンド**: SQLite(既定、現行踏襲)、PostgreSQL、MySQL
 
@@ -46,6 +46,14 @@ enum CachePool {
 
 `NoteCacheBackend`は`async-trait`によるasync traitとして定義する。既存の呼び出し元(`commands/column.rs`, `commands/mute.rs`, `commands/note.rs`, `stream/connection.rs`)はすべて既に`async fn`内から同期呼び出ししているため、各呼び出しに`.await`を追加する変更で足りる。
 
+非同期化の波及範囲は上記4ファイルに留まらない。`store/db.rs`の`open_cache`/`open_cache_in_memory`もsqlx版に置き換わって`async fn`になるため、`lib.rs:234`(起動時の初期化)と`state.rs:136`(テスト用`AppState`構築ヘルパー)を呼び出し元として更新する。また`note_cache.rs`/`user_ref.rs`内の既存`#[test]`(合計約60件)は`#[tokio::test]`に置き換える。これらはTask 1(下記「実装の段階分割」参照)の一部として、対象ファイルを触るタスクにそれぞれ含める(別タスクに切り出さない)。
+
+### filter/sql.rs(TQL `cache`ソース)の扱い
+
+`search_cache`(`note_cache.rs`)は`filter/sql.rs`の`build_where`が返す`SqlWhere { sql: String, params: Vec<SqlParam> }`(`?`プレースホルダのSQL断片)をそのまま自前のSELECT文へ埋め込んでいる。PostgreSQLは`$1`形式の番号付きプレースホルダを要求するため、この生SQL断片は無変更ではPostgres/MySQL化を跨げない。
+
+Phase 1はSQLiteのみを対象とし、sqlxのSQLiteドライバは`?`プレースホルダをそのまま受け付けるため、`search_cache`とその内部で組み立てているSQL文字列・`SqlParam`バインドは**今回は変更しない**(sea-query化の対象外とする)。`filter/sql.rs`の`build_where`をバックエンド非依存な形(sea-queryの`Cond`/`SimpleExpr`を返す、またはバックエンドごとにプレースホルダを採番し直す)へ変更するのは、Postgres対応を行うPhase 2のタスクとして扱う。
+
 ### 依存クレート追加
 
 - `sqlx`(features: `sqlite`, `postgres`, `mysql`, `runtime-tokio`)
@@ -57,8 +65,23 @@ enum CachePool {
 
 - `note`/`user`テーブルはそれぞれ`id`が主キーのため、UPSERTは常に対象IDの1行に対する原子的な書き込みになる。複数端末が同じノートを同時にキャッシュしても、後勝ちで上書きされるだけで重複行や壊れた行は生まれない
 - 一方`note_reaction`/`note_tag`/`note_mention`/`note_emoji`/`note_file`テーブルは主キー・UNIQUE制約を持たず、現行コードは「対象noteの既存行を全DELETE→INSERTし直す」という複数文パターンで書き換えている。単一プロセス+単一SQLite接続(Mutexで直列化)では安全だが、外部DBに複数端末が同時に同じノートを書き込むと、2つのトランザクションのDELETE/INSERTが交互に割り込む余地があり、一時的な重複行や(読み取りタイミングによっては)瞬間的な空状態が起こり得る
-- 対策として、これら側テーブルに`UNIQUE(note_id, ...)`制約(例: `note_reaction`なら`UNIQUE(note_id, emoji_key)`)を追加し、DELETE+INSERTパターンをsea-query経由のUPSERT(`ON CONFLICT` / `ON DUPLICATE KEY UPDATE`相当)に置き換える。この変更はSQLiteバックエンドにも同様に適用し、単一プロセスでも冪等性を高める
+- 対策として、これら側テーブルに以下のUNIQUE制約を追加し、DELETE+INSERTパターンをsea-query経由のUPSERT(`ON CONFLICT` / `ON DUPLICATE KEY UPDATE`相当)に置き換える。この変更はSQLiteバックエンドにも同様に適用し、単一プロセスでも冪等性を高める:
+  - `note_reaction`: `UNIQUE(note_id, emoji_key)`
+  - `note_tag`: `UNIQUE(note_id, tag)`
+  - `note_mention`: `UNIQUE(note_id, user_id)`
+  - `note_emoji`: `UNIQUE(note_id, emoji)`
+  - `note_file`: `UNIQUE(note_id, mime_type, mime_category, is_sensitive)` — `DriveFile`にはid列を持たせておらず、これは自然キーではなく便宜上の重複排除キーである。理論上、同一mime種別・同一sensitiveフラグの添付ファイルが2つ以上あるノートでは行が縮退しうるが、`filter/sql.rs`でのこのテーブルの参照は`EXISTS`/相関サブクエリのみ(`COUNT`は使わない、Reactions/Tags/Mentions/Emojisも同様)であり、表示用の完全なファイル一覧は`note.payload`のJSONが真実の情報源のままなので、フィルタ述語の結果には影響しない
 - このUNIQUE制約追加+UPSERT化は、実装の段階分割の1番目(`NoteCacheBackend` trait抽出 + `SqliteBackend`移植)に含める
+
+### 既存キャッシュDBへのUNIQUE制約追加について
+
+`CREATE UNIQUE INDEX`は既存データに重複行があると失敗し、起動時マイグレーションの失敗はアプリ起動不能に直結する。キャッシュは「破棄しても再取得で復元できる」設計(`db.rs`)なので、重複除去マイグレーションは行わない。代わりにキャッシュのスキーマバージョンを上げ、旧バージョンのキャッシュDBファイルは(WAL/SHMファイルごと)削除して新スキーマで作り直す方式を取る。
+
+## `delete_matching`のコネクションプール対応
+
+現行の`delete_matching`(prune処理)は`CREATE TEMP TABLE prune_ids AS SELECT ...`で一時テーブルを作り、複数の`DELETE ... WHERE note_id IN (SELECT id FROM prune_ids)`文と`DROP TABLE`をまたいで参照している。`sqlx::SqlitePool`（既定で複数コネクション）配下では、これらの文が別々のコネクションに割り当てられ得るため、TEMP TABLEが「無い」扱いになり壊れる。
+
+対策として、TEMP TABLEを使わず、対象ノートIDを一度Rust側の`Vec<String>`として確定させてから、それを`IN (...)`リストとしてsea-queryで組み立てた各DELETE文にバインドする方式に変更する。これによりコネクションをまたいでも安全になり、かつPostgres/MySQLでも同じロジックをそのまま使える(TEMP TABLE構文の方言差を考えずに済む)。
 
 ## 設定・接続情報
 
