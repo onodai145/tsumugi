@@ -231,7 +231,7 @@ pub fn run() {
 
             let cache_conn =
                 db::open_cache(&cache_dir.join("cache.db")).expect("failed to open cache db");
-            let cache = NoteCacheStore::new(cache_conn);
+            let cache = NoteCacheStore::new(store::SqliteBackend::new(cache_conn));
             app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache));
 
             // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の

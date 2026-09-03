@@ -1,5 +1,10 @@
 //! ノートキャッシュの読み書き（TQL§9 の正規化テーブル + 表示復元用 payload）。
 //! 設定(`SettingsStore`)とは別ファイル・別接続で持つ（バックアップ対象を小さな設定DBに絞るため）。
+//!
+//! Issue #115 Phase 1: バックエンドを `NoteCacheBackend` トレイトとして抽出し、
+//! 具体実装(`SqliteBackend`、将来的な `PostgresBackend`/`MySqlBackend`)へ差し替え可能にした。
+//! `rusqlite` は同期APIのため、`SqliteBackend`(`store/sqlite_backend.rs`)は
+//! `tauri::async_runtime::spawn_blocking` で包んで非同期トレイトメソッドとして提供する。
 
 use crate::domain::{Note, Visibility};
 use crate::error::Result;
@@ -7,24 +12,9 @@ use crate::store::user_ref::{
     collect_user_id_refs, collect_users, fetch_users_by_ids, fill_user_from_snapshot,
     has_legacy_full_user, hydrate_user_refs, is_legacy_full_user, stub_user_refs, upsert_user,
 };
-use rusqlite::{params, Connection, OptionalExtension};
-use std::sync::Mutex;
+use rusqlite::{params, Connection};
 
-/// ノートキャッシュ専用のSQLite接続。`SettingsStore`とは別ファイル(cache.db)を持つ。
-/// 破棄しても再取得で復元できるため、設定ほど重要ではない。
-pub struct NoteCacheStore {
-    conn: Mutex<Connection>,
-}
-
-impl NoteCacheStore {
-    pub fn new(conn: Connection) -> Self {
-        Self {
-            conn: Mutex::new(conn),
-        }
-    }
-}
-
-fn now_epoch() -> i64 {
+pub(crate) fn now_epoch() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -48,153 +38,116 @@ fn has_url(text: &str) -> bool {
     text.contains("http://") || text.contains("https://")
 }
 
+#[async_trait::async_trait]
+pub(crate) trait NoteCacheBackend: Send + Sync {
+    async fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()>;
+    async fn cache_note(&self, column_id: &str, note: &Note) -> Result<()>;
+    async fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>>;
+    async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>>;
+    async fn get_note(&self, note_id: &str) -> Result<Option<Note>>;
+    async fn update_note(&self, note: &Note) -> Result<()>;
+    async fn clear_column_notes(&self, column_id: &str) -> Result<()>;
+    async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>>;
+    async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()>;
+    async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()>;
+    async fn clear_all_fetch_boundaries(&self) -> Result<()>;
+    async fn note_count(&self) -> Result<i32>;
+    async fn notes_since(&self, since_epoch_secs: i32) -> Result<i32>;
+    async fn prune(&self, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize>;
+    async fn search_cache(
+        &self,
+        where_sql: &crate::filter::sql::SqlWhere,
+        until_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Note>>;
+}
+
+/// note cacheの公開API。内部の`NoteCacheBackend`実装(`SqliteBackend`、将来的な
+/// `PostgresBackend`/`MySqlBackend`)へ委譲する薄いラッパー。
+pub struct NoteCacheStore {
+    backend: Box<dyn NoteCacheBackend>,
+}
+
 impl NoteCacheStore {
+    pub fn new(backend: impl NoteCacheBackend + 'static) -> Self {
+        Self { backend: Box::new(backend) }
+    }
+
     /// ノート群をキャッシュへ upsert し、カラム所属を記録する（1トランザクション）。
-    pub fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()> {
-        if notes.is_empty() {
-            return Ok(());
-        }
-        let mut guard = self.conn.lock().unwrap();
-        let tx = guard.transaction()?;
-        let now = now_epoch();
-        for n in notes {
-            upsert_note(&tx, n)?;
-            tx.execute(
-                "INSERT OR IGNORE INTO column_note (column_id, note_id, received_at, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![column_id, n.id, now, n.created_at],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+    pub async fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()> {
+        self.backend.cache_notes(column_id, notes).await
     }
 
     /// 1件のノートをキャッシュ（Streaming 受信時に使う）。
-    pub fn cache_note(&self, column_id: &str, note: &Note) -> Result<()> {
-        self.cache_notes(column_id, std::slice::from_ref(note))
+    pub async fn cache_note(&self, column_id: &str, note: &Note) -> Result<()> {
+        self.backend.cache_note(column_id, note).await
     }
 
     /// カラムの直近ノートをキャッシュから取得（新しい順・最大 limit）。
-    pub fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT n.id, n.payload FROM column_note cn
-             JOIN note n ON n.id = cn.note_id
-             WHERE cn.column_id = ?1
-             ORDER BY cn.created_at DESC, cn.note_id DESC
-             LIMIT ?2",
-        )?;
-        let rows: Vec<(String, String)> = stmt
-            .query_map(params![column_id, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
-        resolve_payload_rows(&conn, rows)
+    pub async fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>> {
+        self.backend.load_cached(column_id, limit).await
     }
 
     /// カラムのキャッシュから until_id より古いノートを取得（新しい順、最大 limit 件）。
     /// backfill のキャッシュ優先パス用（load_cached の until_id 版）。
-    pub fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT n.id, n.payload FROM column_note cn
-             JOIN note n ON n.id = cn.note_id
-             WHERE cn.column_id = ?1 AND cn.note_id < ?2
-             ORDER BY cn.note_id DESC
-             LIMIT ?3",
-        )?;
-        let rows: Vec<(String, String)> = stmt
-            .query_map(params![column_id, until_id, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
-        let mut out = resolve_payload_rows(&conn, rows)?;
-        // 絞り込み・LIMITの選抜は境界比較と同じ id 基準で行い、表示順への並べ替えだけを
-        // ここで行う。created_at で選抜すると、連合ノート(idとcreated_atの順序が食い違う)が
-        // 範囲内にあるのに LIMIT の外へ弾かれて静かに欠落する(Issue #228)。
-        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-        Ok(out)
+    pub async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
+        self.backend.load_cached_before(column_id, until_id, limit).await
     }
 
     /// note_id 単体をキャッシュから取得する（column_note を経由しない）。
     /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映する際、
     /// 対象ノートがどのカラムに属すか気にせず読み書きするために使う。
-    pub fn get_note(&self, note_id: &str) -> Result<Option<Note>> {
-        let conn = self.conn.lock().unwrap();
-        let row: Option<(String, String)> = conn
-            .query_row("SELECT id, payload FROM note WHERE id = ?1", params![note_id], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .optional()?;
-        Ok(match row {
-            Some((id, payload)) => resolve_payload_rows(&conn, vec![(id, payload)])?.into_iter().next(),
-            None => None,
-        })
+    pub async fn get_note(&self, note_id: &str) -> Result<Option<Note>> {
+        self.backend.get_note(note_id).await
     }
 
     /// 1件のノートのキャッシュ内容を更新する（column_note には触れない）。
     /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映するために使う。
     /// 対象がまだキャッシュに無ければ何もしない想定の呼び出し元(get_noteでSomeを確認済み)向け。
-    pub fn update_note(&self, note: &Note) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        upsert_note(&conn, note)
+    pub async fn update_note(&self, note: &Note) -> Result<()> {
+        self.backend.update_note(note).await
     }
 
     /// カラム所属レコードを消す（カラム削除時。note 本体は他カラムと共有しうるので残す）。
-    pub fn clear_column_notes(&self, column_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM column_note WHERE column_id = ?1", params![column_id])?;
-        conn.execute("DELETE FROM column_fetch_boundary WHERE column_id = ?1", params![column_id])?;
-        Ok(())
+    pub async fn clear_column_notes(&self, column_id: &str) -> Result<()> {
+        self.backend.clear_column_notes(column_id).await
     }
 
     /// カラムの境界(oldest_fetched_id)を取得。未確定ならNone。
-    pub fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
-        let v: Option<String> = conn
-            .query_row(
-                "SELECT oldest_fetched_id FROM column_fetch_boundary WHERE column_id = ?1",
-                params![column_id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        Ok(v)
+    pub async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
+        self.backend.get_fetch_boundary(column_id).await
     }
 
     /// 境界を new_oldest_id で無条件に新規セット/上書きする(初回REST取得時に使う)。
-    pub fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
-             ON CONFLICT(column_id) DO UPDATE SET oldest_fetched_id = excluded.oldest_fetched_id",
-            params![column_id, new_oldest_id],
-        )?;
-        Ok(())
+    pub async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+        self.backend.set_fetch_boundary(column_id, new_oldest_id).await
     }
 
     /// 境界を new_oldest_id まで延長する(古い方向へのみ、単調性を保証)。
     /// 既存値の方が既に古ければ何もしない。
-    pub fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
-             ON CONFLICT(column_id) DO UPDATE SET
-                oldest_fetched_id = MIN(oldest_fetched_id, excluded.oldest_fetched_id)",
-            params![column_id, new_oldest_id],
-        )?;
-        Ok(())
+    pub async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+        self.backend.extend_fetch_boundary(column_id, new_oldest_id).await
     }
 
     /// 全カラムのbackfill境界を削除する(未確定状態に戻す)。ミュート設定変更時など、
     /// キャッシュされたフィルタ済みノート集合の前提が崩れる操作の後に呼ぶ(Issue #228)。
-    pub fn clear_all_fetch_boundaries(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM column_fetch_boundary", [])?;
-        Ok(())
+    pub async fn clear_all_fetch_boundaries(&self) -> Result<()> {
+        self.backend.clear_all_fetch_boundaries().await
     }
 
     /// キャッシュ済みノートの総数。Backstageのステータス表示用。
     /// specta が i64 の直接エクスポートを禁止するため i32 で返す(ローカルキャッシュ件数が
     /// 21億件を超えることは実運用上ない)。
-    pub fn note_count(&self) -> Result<i32> {
-        let conn = self.conn.lock().unwrap();
-        let count: i32 = conn.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
-        Ok(count)
+    pub async fn note_count(&self) -> Result<i32> {
+        self.backend.note_count().await
+    }
+
+    /// 投稿日時(created_at, epoch秒)が since_epoch_secs 以降のノート件数。
+    /// 流速表示用: DBへのINSERT件数ではなく実際の投稿時刻で数えるため、起動時ギャップ埋めや
+    /// 上スクロールでの過去取得(古いcreated_atのノートをまとめてupsertする)による誤った
+    /// 跳ね上がりが起きない。idx_note_created を使う。
+    pub async fn notes_since(&self, since_epoch_secs: i32) -> Result<i32> {
+        self.backend.notes_since(since_epoch_secs).await
     }
 
     /// キャッシュを間引く（Issue #6: 無制限に溜まり続けないようにする）。3つの上限を順に適用する:
@@ -203,90 +156,19 @@ impl NoteCacheStore {
     /// 3. DBサイズが `max_size_mb` を超えていれば古い順に削除（incremental_vacuumで実サイズへ反映）
     ///
     /// 各上限は `<= 0` で無効（無制限）。戻り値は実際に削除した件数の合計。
-    pub fn prune(&self, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
-        let mut guard = self.conn.lock().unwrap();
-        let mut deleted: i64 = 0;
-        {
-            let tx = guard.transaction()?;
-            if max_age_days > 0 {
-                let cutoff = now_epoch() - max_age_days as i64 * 86_400;
-                deleted += delete_matching(
-                    &tx,
-                    "SELECT id FROM note WHERE created_at < ?1",
-                    params![cutoff],
-                )?;
-            }
-            if keep > 0 {
-                let total: i64 = tx.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
-                let overflow = total - keep as i64;
-                if overflow > 0 {
-                    deleted += delete_matching(
-                        &tx,
-                        "SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?1",
-                        params![overflow],
-                    )?;
-                }
-            }
-            tx.commit()?;
-        }
-        if max_size_mb > 0 {
-            deleted += shrink_to_size(&guard, max_size_mb as i64 * 1024 * 1024)?;
-        }
-        Ok(deleted as usize)
-    }
-
-    /// 投稿日時(created_at, epoch秒)が since_epoch_secs 以降のノート件数。
-    /// 流速表示用: DBへのINSERT件数ではなく実際の投稿時刻で数えるため、起動時ギャップ埋めや
-    /// 上スクロールでの過去取得(古いcreated_atのノートをまとめてupsertする)による誤った
-    /// 跳ね上がりが起きない。idx_note_created を使う。
-    pub fn notes_since(&self, since_epoch_secs: i32) -> Result<i32> {
-        let conn = self.conn.lock().unwrap();
-        let count: i32 = conn.query_row(
-            "SELECT COUNT(*) FROM note WHERE created_at >= ?1",
-            params![since_epoch_secs],
-            |r| r.get(0),
-        )?;
-        Ok(count)
+    pub async fn prune(&self, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
+        self.backend.prune(keep, max_age_days, max_size_mb).await
     }
 
     /// TQL `cache` ソース: ローカルSQLiteキャッシュ全体を where 句で検索する（受信せず検索のみ）。
     /// until_id は作成順の境界（id 自体は sortable なので created_at の代わりに使える）。
-    pub fn search_cache(
+    pub async fn search_cache(
         &self,
         where_sql: &crate::filter::sql::SqlWhere,
         until_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Note>> {
-        use crate::filter::sql::SqlParam;
-
-        let mut sql = String::from(
-            "SELECT n.id, n.payload FROM note n JOIN user u ON u.id = n.user_id WHERE (",
-        );
-        sql.push_str(&where_sql.sql);
-        sql.push(')');
-        if until_id.is_some() {
-            sql.push_str(" AND n.id < ?");
-        }
-        sql.push_str(" ORDER BY n.created_at DESC, n.id DESC LIMIT ?");
-
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(&sql)?;
-        let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        for p in &where_sql.params {
-            binds.push(match p {
-                SqlParam::Text(s) => Box::new(s.clone()),
-                SqlParam::Real(x) => Box::new(*x),
-            });
-        }
-        if let Some(u) = until_id {
-            binds.push(Box::new(u.to_string()));
-        }
-        binds.push(Box::new(limit));
-        let params_ref: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
-        let rows: Vec<(String, String)> = stmt
-            .query_map(params_ref.as_slice(), |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
-        resolve_payload_rows(&conn, rows)
+        self.backend.search_cache(where_sql, until_id, limit).await
     }
 }
 
@@ -295,7 +177,7 @@ impl NoteCacheStore {
 ///   payload をスタブ形式へ書き戻してから復元する(自己修復)。
 /// - user参照(本体+renote分)が user テーブルに見つからない行は、ログ警告してスキップする
 ///   (呼び出し元をエラーにしない。deserialize_note_or_warn と同じポリシー)。
-fn resolve_payload_rows(conn: &Connection, rows: Vec<(String, String)>) -> Result<Vec<Note>> {
+pub(crate) fn resolve_payload_rows(conn: &Connection, rows: Vec<(String, String)>) -> Result<Vec<Note>> {
     let mut values: Vec<(String, serde_json::Value)> = Vec::with_capacity(rows.len());
     for (id, payload) in rows {
         match serde_json::from_str::<serde_json::Value>(&payload) {
@@ -474,8 +356,8 @@ fn shrink_to_size(conn: &Connection, budget_bytes: i64) -> Result<i64> {
     Ok(deleted)
 }
 
-/// note + user + 関連テーブルを upsert する。関連は入れ替え（DELETE→INSERT）。
-fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
+/// note + user + 関連テーブルを upsert する。関連テーブルはUPSERT+失効行クリーンアップ(Issue #115)。
+pub(crate) fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
     let mut payload_value = serde_json::to_value(n)?;
     stub_user_refs(&mut payload_value);
     let payload = serde_json::to_string(&payload_value)?;
@@ -533,44 +415,158 @@ fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
         ],
     )?;
 
-    // 関連テーブルは入れ替え
-    for table in ["note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
-        conn.execute(&format!("DELETE FROM {table} WHERE note_id = ?1"), params![n.id])?;
-    }
+    // 関連テーブルはUPSERT(Task 1で追加したUNIQUE制約に基づく)。DELETE+INSERTではなく
+    // ON CONFLICTで書き換えることで、複数プロセスからの同時書き込みでも一時的な重複行・
+    // 空状態が起きないようにする(Phase 2以降の外部DB利用を見据えた変更、Issue #115)。
     for (emoji, count) in &n.reactions {
         conn.execute(
-            "INSERT INTO note_reaction (note_id, emoji_key, count) VALUES (?1, ?2, ?3)",
+            "INSERT INTO note_reaction (note_id, emoji_key, count) VALUES (?1, ?2, ?3)
+             ON CONFLICT(note_id, emoji_key) DO UPDATE SET count = excluded.count",
             params![n.id, emoji, count],
         )?;
     }
     for tag in &n.tags {
-        conn.execute("INSERT INTO note_tag (note_id, tag) VALUES (?1, ?2)", params![n.id, tag])?;
+        conn.execute(
+            "INSERT INTO note_tag (note_id, tag) VALUES (?1, ?2) ON CONFLICT(note_id, tag) DO NOTHING",
+            params![n.id, tag],
+        )?;
     }
     for uid in &n.mentions {
-        conn.execute("INSERT INTO note_mention (note_id, user_id) VALUES (?1, ?2)", params![n.id, uid])?;
+        conn.execute(
+            "INSERT INTO note_mention (note_id, user_id) VALUES (?1, ?2) ON CONFLICT(note_id, user_id) DO NOTHING",
+            params![n.id, uid],
+        )?;
     }
     for e in n.emojis.keys() {
-        conn.execute("INSERT INTO note_emoji (note_id, emoji) VALUES (?1, ?2)", params![n.id, e])?;
+        conn.execute(
+            "INSERT INTO note_emoji (note_id, emoji) VALUES (?1, ?2) ON CONFLICT(note_id, emoji) DO NOTHING",
+            params![n.id, e],
+        )?;
     }
     for f in &n.files {
         conn.execute(
-            "INSERT INTO note_file (note_id, mime_type, mime_category, is_sensitive) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO note_file (note_id, mime_type, mime_category, is_sensitive) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(note_id, mime_type, mime_category, is_sensitive) DO NOTHING",
             params![n.id, f.mime_type, mime_category(&f.mime_type), f.is_sensitive as i64],
         )?;
     }
+
+    // 旧行(現在のnoteの内容に含まれなくなったreaction/tag/mention/emoji/file)を掃除する。
+    // 例: リアクションが取り消された、タグが編集で消えた、等。json_eachはSQLiteのJSON1拡張
+    // (rusqliteのbundled機能で有効)を使う。
+    conn.execute(
+        "DELETE FROM note_reaction WHERE note_id = ?1 AND emoji_key NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.reactions.keys().collect::<Vec<_>>())?],
+    )?;
+    conn.execute(
+        "DELETE FROM note_tag WHERE note_id = ?1 AND tag NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.tags)?],
+    )?;
+    conn.execute(
+        "DELETE FROM note_mention WHERE note_id = ?1 AND user_id NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.mentions)?],
+    )?;
+    conn.execute(
+        "DELETE FROM note_emoji WHERE note_id = ?1 AND emoji NOT IN (SELECT value FROM json_each(?2))",
+        params![n.id, serde_json::to_string(&n.emojis.keys().collect::<Vec<_>>())?],
+    )?;
+    // note_fileはUNIQUEキーが複合(4列)でjson_eachのタプル比較ができないため、行ごとに比較する。
+    let current_file_keys: Vec<String> = n
+        .files
+        .iter()
+        .map(|f| format!("{}\u{0}{}\u{0}{}", f.mime_type, mime_category(&f.mime_type), f.is_sensitive as i64))
+        .collect();
+    let mut stmt = conn.prepare("SELECT rowid, mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = ?1")?;
+    let existing_files: Vec<(i64, String, String, i64)> = stmt
+        .query_map(params![n.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+    for (rowid, mime_type, mime_category_val, is_sensitive) in existing_files {
+        let key = format!("{mime_type}\u{0}{mime_category_val}\u{0}{is_sensitive}");
+        if !current_file_keys.contains(&key) {
+            conn.execute("DELETE FROM note_file WHERE rowid = ?1", params![rowid])?;
+        }
+    }
     Ok(())
+}
+
+/// `NoteCacheStore::prune` の同期本体。`SqliteBackend::prune` から `spawn_blocking` 内で呼ばれる。
+pub(crate) fn prune_sync(conn: &Connection, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
+    let mut deleted: i64 = 0;
+    {
+        let tx_conn = conn;
+        // note: 呼び出し元は `&Connection`（`MutexGuard<Connection>` を deref した参照）を渡すが、
+        // トランザクションは可変参照が必要なため、ここでは `unchecked_transaction` を使う
+        // （`rusqlite::Connection::unchecked_transaction` は `&self` で取得できる代わりに、
+        // 呼び出し元が同時に別のトランザクションを開始しないことを保証する必要がある。
+        // ここではロックを保持したまま単一のスレッドで呼ぶため安全）。
+        let tx = tx_conn.unchecked_transaction()?;
+        if max_age_days > 0 {
+            let cutoff = now_epoch() - max_age_days as i64 * 86_400;
+            deleted += delete_matching(&tx, "SELECT id FROM note WHERE created_at < ?1", params![cutoff])?;
+        }
+        if keep > 0 {
+            let total: i64 = tx.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
+            let overflow = total - keep as i64;
+            if overflow > 0 {
+                deleted += delete_matching(
+                    &tx,
+                    "SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?1",
+                    params![overflow],
+                )?;
+            }
+        }
+        tx.commit()?;
+    }
+    if max_size_mb > 0 {
+        deleted += shrink_to_size(conn, max_size_mb as i64 * 1024 * 1024)?;
+    }
+    Ok(deleted as usize)
+}
+
+/// `NoteCacheStore::search_cache` の同期本体。`SqliteBackend::search_cache` から
+/// `spawn_blocking` 内で呼ばれる。
+pub(crate) fn search_cache_sync(
+    conn: &Connection,
+    where_sql: &crate::filter::sql::SqlWhere,
+    until_id: Option<&str>,
+    limit: u32,
+) -> Result<Vec<Note>> {
+    use crate::filter::sql::SqlParam;
+
+    let mut sql = String::from("SELECT n.id, n.payload FROM note n JOIN user u ON u.id = n.user_id WHERE (");
+    sql.push_str(&where_sql.sql);
+    sql.push(')');
+    if until_id.is_some() {
+        sql.push_str(" AND n.id < ?");
+    }
+    sql.push_str(" ORDER BY n.created_at DESC, n.id DESC LIMIT ?");
+
+    let mut stmt = conn.prepare(&sql)?;
+    let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    for p in &where_sql.params {
+        binds.push(match p {
+            SqlParam::Text(s) => Box::new(s.clone()),
+            SqlParam::Real(x) => Box::new(*x),
+        });
+    }
+    if let Some(u) = until_id {
+        binds.push(Box::new(u.to_string()));
+    }
+    binds.push(Box::new(limit));
+    let params_ref: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
+    let rows: Vec<(String, String)> = stmt
+        .query_map(params_ref.as_slice(), |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+    resolve_payload_rows(conn, rows)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{DriveFile, User};
-    use crate::store::db::open_cache_in_memory;
     use std::collections::HashMap;
-
-    fn store() -> NoteCacheStore {
-        NoteCacheStore::new(open_cache_in_memory().unwrap())
-    }
 
     fn note(id: &str, created_at: i64) -> Note {
         Note {
@@ -625,29 +621,20 @@ mod tests {
         }
     }
 
-    /// `note.emojis` を配列形式(移行前の旧フォーマット)に差し替えた payload JSON を作る。
-    fn payload_with_array_emojis(n: &Note) -> String {
-        let mut v = serde_json::to_value(n).unwrap();
-        v["emojis"] = serde_json::json!(["old_style_name"]);
-        serde_json::to_string(&v).unwrap()
-    }
-
     #[test]
     fn upsert_note_stores_stubbed_user_in_payload() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
+        upsert_note(&conn, &note("n1", 100)).unwrap();
 
-        let raw_payload: String = {
-            let conn = s.conn.lock().unwrap();
-            conn.query_row("SELECT payload FROM note WHERE id = 'n1'", [], |r| r.get(0)).unwrap()
-        };
+        let raw_payload: String =
+            conn.query_row("SELECT payload FROM note WHERE id = 'n1'", [], |r| r.get(0)).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw_payload).unwrap();
         assert_eq!(v["user"], serde_json::json!({ "id": "u1" }));
     }
 
     #[test]
     fn upsert_note_upserts_both_note_and_renote_authors_into_user_table() {
-        let s = store();
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
         let mut n = note("n1", 100);
         n.renote = Some(Box::new({
             let mut renoted = note("n0", 50);
@@ -669,569 +656,11 @@ mod tests {
             };
             renoted
         }));
-        s.cache_notes("col1", &[n]).unwrap();
+        upsert_note(&conn, &n).unwrap();
 
-        let conn = s.conn.lock().unwrap();
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM user WHERE id IN ('u1','u2')", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 2);
-    }
-
-    #[test]
-    fn cache_roundtrip_preserves_note_and_order() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 150)]).unwrap();
-        let got = s.load_cached("col1", 10).unwrap();
-        // created_at 降順
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
-        // payload 復元が完全（reactions/files/tags）
-        assert_eq!(got[0].reactions.get("👍"), Some(&3));
-        assert_eq!(got[0].files[0].mime_type, "image/png");
-        assert_eq!(got[0].tags, vec!["rust".to_string()]);
-        assert_eq!(got[0].my_reaction.as_deref(), Some("👍"));
-    }
-
-    /// 8dc26912 で `Note.emojis` が `Vec<String>` → `HashMap<String,String>` に変わった
-    /// (Issue #150)。それ以前に保存された配列形式の payload が1件混ざっていても、
-    /// その行だけスキップして残りは正常に読めること（カラム全滅にしない）。
-    #[test]
-    fn load_cached_skips_row_with_legacy_array_emojis_payload() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).unwrap();
-        {
-            let conn = s.conn.lock().unwrap();
-            let legacy_payload = payload_with_array_emojis(&note("n1", 100));
-            conn.execute(
-                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
-                params![legacy_payload],
-            )
-            .unwrap();
-        }
-
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
-    }
-
-    /// load_cached と同様、search_cache も壊れた行1件で全体を空にしない。
-    #[test]
-    fn search_cache_skips_row_with_legacy_array_emojis_payload() {
-        use crate::filter::{parser, sql};
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).unwrap();
-        {
-            let conn = s.conn.lock().unwrap();
-            let legacy_payload = payload_with_array_emojis(&note("n1", 100));
-            conn.execute(
-                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
-                params![legacy_payload],
-            )
-            .unwrap();
-        }
-
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
-        let expr = parser::parse_predicate("has_files").unwrap();
-        let w = sql::build_where(&expr, &ctx).unwrap();
-        let got = s.search_cache(&w, None, 10).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
-    }
-
-    #[test]
-    fn get_note_returns_none_when_not_cached() {
-        let s = store();
-        assert!(s.get_note("missing").unwrap().is_none());
-    }
-
-    /// 旧形式(配列)の emojis payload は「読めないので未キャッシュ扱い」とし、
-    /// Err で呼び出し元(react/unreact/noteUpdated反映)を永続的に沈黙させない(Issue #150)。
-    #[test]
-    fn get_note_returns_none_for_row_with_legacy_array_emojis_payload() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
-        {
-            let conn = s.conn.lock().unwrap();
-            let legacy_payload = payload_with_array_emojis(&note("n1", 100));
-            conn.execute(
-                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
-                params![legacy_payload],
-            )
-            .unwrap();
-        }
-
-        assert!(s.get_note("n1").unwrap().is_none());
-    }
-
-    #[test]
-    fn update_note_persists_without_column_note_and_get_note_reflects_it() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
-
-        let mut n = s.get_note("n1").unwrap().unwrap();
-        n.reactions.insert("😀".into(), 1);
-        n.reaction_count += 1;
-        n.my_reaction = Some("😀".into());
-        s.update_note(&n).unwrap();
-
-        // update_note は column_note に触れないので、既存の所属は変わらない
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].reactions.get("😀"), Some(&1));
-        assert_eq!(got[0].reaction_count, 4); // 元の3 + 1
-        assert_eq!(got[0].my_reaction.as_deref(), Some("😀"));
-
-        // get_note 単体でも同じ内容が読める
-        let single = s.get_note("n1").unwrap().unwrap();
-        assert_eq!(single.reactions.get("😀"), Some(&1));
-    }
-
-    #[test]
-    fn search_cache_applies_predicate_and_until_id_boundary() {
-        use crate::filter::{parser, sql};
-        let s = store();
-        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)]).unwrap();
-
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
-
-        // 述語(has_files)は全件trueなので until_id 境界のみで絞られる
-        let expr = parser::parse_predicate("has_files").unwrap();
-        let w = sql::build_where(&expr, &ctx).unwrap();
-        let got = s.search_cache(&w, Some("a3"), 10).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);
-
-        // 述語が全件falseなら空
-        let expr2 = parser::parse_predicate("cw").unwrap();
-        let w2 = sql::build_where(&expr2, &ctx).unwrap();
-        assert!(s.search_cache(&w2, None, 10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn upsert_replaces_and_relations_not_duplicated() {
-        let s = store();
-        s.cache_note("col1", &note("n1", 100)).unwrap();
-        s.cache_note("col1", &note("n1", 100)).unwrap(); // 再受信
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.len(), 1); // 重複しない
-        // 関連テーブルも重複していない
-        let conn = s.conn.lock().unwrap();
-        let rc: i64 = conn
-            .query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(rc, 1);
-    }
-
-    #[test]
-    fn column_isolation_and_clear() {
-        let s = store();
-        s.cache_note("colA", &note("n1", 100)).unwrap();
-        s.cache_note("colB", &note("n2", 100)).unwrap();
-        assert_eq!(s.load_cached("colA", 10).unwrap().len(), 1);
-        assert_eq!(s.load_cached("colB", 10).unwrap().len(), 1);
-        s.clear_column_notes("colA").unwrap();
-        assert_eq!(s.load_cached("colA", 10).unwrap().len(), 0);
-        assert_eq!(s.load_cached("colB", 10).unwrap().len(), 1); // 他カラムは残る
-    }
-
-    #[test]
-    fn fetch_boundary_roundtrip() {
-        let s = store();
-        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
-
-        s.set_fetch_boundary("col1", "n100").unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n100"));
-    }
-
-    #[test]
-    fn set_fetch_boundary_overwrites_unconditionally() {
-        let s = store();
-        s.set_fetch_boundary("col1", "n100").unwrap();
-        s.set_fetch_boundary("col1", "n999").unwrap(); // より新しい値でも無条件に上書き
-        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n999"));
-    }
-
-    #[test]
-    fn extend_fetch_boundary_only_moves_older() {
-        let s = store();
-        s.set_fetch_boundary("col1", "n500").unwrap();
-
-        // より古い値(n300)への延長は反映される
-        s.extend_fetch_boundary("col1", "n300").unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
-
-        // より新しい値(n800)は無視される(単調性)
-        s.extend_fetch_boundary("col1", "n800").unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
-    }
-
-    #[test]
-    fn extend_fetch_boundary_sets_when_absent() {
-        let s = store();
-        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
-        s.extend_fetch_boundary("col1", "n300").unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n300"));
-    }
-
-    #[test]
-    fn clear_column_notes_also_removes_boundary() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100)]).unwrap();
-        s.set_fetch_boundary("col1", "n1").unwrap();
-
-        s.clear_column_notes("col1").unwrap();
-
-        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
-    }
-
-    #[test]
-    fn load_cached_before_returns_notes_older_than_until_id_desc() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
-
-        let got = s.load_cached_before("col1", "n3", 10).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);
-    }
-
-    #[test]
-    fn load_cached_before_respects_limit_and_column_scope() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
-        s.cache_notes("col2", &[note("m1", 250)]).unwrap();
-
-        let got = s.load_cached_before("col1", "n3", 1).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
-
-        // col2 のノートは混ざらない
-        let got_all = s.load_cached_before("col1", "n3", 10).unwrap();
-        assert!(got_all.iter().all(|n| n.id != "m1"));
-    }
-
-    /// 連合ノートは id(受信順) と created_at(発信元での投稿時刻) の順序が食い違いうる。
-    /// LIMIT の選抜は必ず id 基準で行い、created_at が古いという理由だけで
-    /// 範囲内のノートが脱落しないこと(Issue #228)。
-    #[test]
-    fn load_cached_before_selects_by_id_not_created_at() {
-        let s = store();
-        // id順: n1 < n2 < n3、created_at順: n2(100) < n3(800) < n1(900)
-        s.cache_notes("col1", &[note("n1", 900), note("n2", 100), note("n3", 800)]).unwrap();
-
-        let got = s.load_cached_before("col1", "n9", 2).unwrap();
-        // id の大きい方から2件(n3, n2)が選抜される。created_at で選ぶと n1, n3 になり n2 が欠落する。
-        let ids: Vec<&str> = got.iter().map(|n| n.id.as_str()).collect();
-        assert_eq!(ids, ["n3", "n2"], "id基準で選抜し created_at DESC で並べること");
-    }
-
-    #[test]
-    fn prune_removes_oldest_beyond_keep_and_related_rows() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
-        let deleted = s.prune(2, 0, 0).unwrap();
-        assert_eq!(deleted, 1);
-        assert_eq!(s.note_count().unwrap(), 2);
-        // 最古(n1)が消え、残りは新しい2件
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n2"]);
-        // 関連テーブル・column_note も一緒に消えていること
-        let conn = s.conn.lock().unwrap();
-        let rc: i64 = conn
-            .query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(rc, 0);
-        let cn: i64 = conn
-            .query_row("SELECT COUNT(*) FROM column_note WHERE note_id='n1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(cn, 0);
-    }
-
-    #[test]
-    fn prune_is_noop_when_under_or_unlimited() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).unwrap();
-        assert_eq!(s.prune(10, 0, 0).unwrap(), 0); // 上限未満
-        assert_eq!(s.prune(0, 0, 0).unwrap(), 0); // 全て無制限
-        assert_eq!(s.note_count().unwrap(), 2);
-    }
-
-    #[test]
-    fn prune_removes_notes_older_than_max_age_days() {
-        let s = store();
-        let now = now_epoch();
-        let one_day = 86_400;
-        s.cache_notes(
-            "col1",
-            &[
-                note("old", now - 40 * one_day),
-                note("recent", now - 1 * one_day),
-            ],
-        )
-        .unwrap();
-        let deleted = s.prune(0, 30, 0).unwrap();
-        assert_eq!(deleted, 1);
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["recent"]);
-    }
-
-    #[test]
-    fn prune_shrinks_db_below_max_size_mb() {
-        let s = store();
-        // 十分な件数×サイズを入れて 1MB を確実に超えさせ、上限指定で
-        // 実際に削除・縮小(incremental_vacuum)が働くことを確認する。
-        let notes: Vec<Note> = (0..1000)
-            .map(|i| {
-                let mut n = note(&format!("n{i}"), 100 + i as i64);
-                n.text = Some("x".repeat(2000));
-                n
-            })
-            .collect();
-        s.cache_notes("col1", &notes).unwrap();
-        let before_count = s.note_count().unwrap();
-        let before_size = {
-            let conn = s.conn.lock().unwrap();
-            db_size_bytes(&conn).unwrap()
-        };
-        assert!(before_size > 1024 * 1024, "test setup should exceed 1MB, got {before_size}");
-
-        let deleted = s.prune(0, 0, 1).unwrap();
-        assert!(deleted > 0);
-        assert!(s.note_count().unwrap() < before_count);
-        let after_size = {
-            let conn = s.conn.lock().unwrap();
-            db_size_bytes(&conn).unwrap()
-        };
-        assert!(after_size < before_size);
-    }
-
-    #[test]
-    fn prune_raises_boundary_to_surviving_oldest_note_after_keep_exceeded() {
-        let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).unwrap();
-        s.set_fetch_boundary("col1", "n1").unwrap(); // n1まで(=全件)取得済みと主張
-
-        let deleted = s.prune(2, 0, 0).unwrap(); // 最古のn1が削除される
-        assert_eq!(deleted, 1);
-
-        // n1が消えたので、生存最古のn2まで境界を引き上げる
-        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n2"));
-    }
-
-    /// created_at は古いが id は生存最古より新しいノート(連合ノート)が prune で消えた場合、
-    /// 生存最古ID だけでは境界を引き上げられない。削除されたノートの最大IDまで引き上げること(Issue #228)。
-    #[test]
-    fn prune_raises_boundary_past_deleted_note_with_newer_id() {
-        let s = store();
-        // id順: n1 < n2 < n5、created_at順: n5(100) < n1(200) < n2(300)
-        s.cache_notes("col1", &[note("n5", 100), note("n1", 200), note("n2", 300)]).unwrap();
-        s.set_fetch_boundary("col1", "n1").unwrap();
-
-        let deleted = s.prune(2, 0, 0).unwrap(); // created_at 最古の n5 が削除される
-        assert_eq!(deleted, 1);
-
-        // 生存最古IDは n1 のままなので、削除された n5 まで境界を引き上げる必要がある
-        assert_eq!(s.get_fetch_boundary("col1").unwrap().as_deref(), Some("n5"));
-    }
-
-    #[test]
-    fn clear_all_fetch_boundaries_removes_every_column() {
-        let s = store();
-        s.set_fetch_boundary("col1", "n100").unwrap();
-        s.set_fetch_boundary("col2", "n200").unwrap();
-
-        s.clear_all_fetch_boundaries().unwrap();
-
-        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
-        assert!(s.get_fetch_boundary("col2").unwrap().is_none());
-    }
-
-    #[test]
-    fn prune_clears_boundary_when_column_fully_pruned() {
-        let s = store();
-        let now = now_epoch();
-        let one_day = 86_400;
-        s.cache_notes("col1", &[note("old", now - 40 * one_day)]).unwrap();
-        s.set_fetch_boundary("col1", "old").unwrap();
-
-        let deleted = s.prune(0, 30, 0).unwrap();
-        assert_eq!(deleted, 1);
-
-        // カラムのキャッシュが全滅したので境界は未確定に戻る
-        assert!(s.get_fetch_boundary("col1").unwrap().is_none());
-    }
-
-    #[test]
-    fn prune_leaves_unaffected_columns_boundary_untouched() {
-        let s = store();
-        s.cache_notes("colA", &[note("a1", 50)]).unwrap();
-        s.cache_notes("colB", &[note("b1", 100), note("b2", 200), note("b3", 300)]).unwrap();
-        s.set_fetch_boundary("colA", "a1").unwrap();
-        s.set_fetch_boundary("colB", "b1").unwrap();
-
-        let deleted = s.prune(3, 0, 0).unwrap(); // 4件中keep=3 → 全体最古のa1のみ削除
-        assert_eq!(deleted, 1);
-
-        assert!(s.get_fetch_boundary("colA").unwrap().is_none());
-        assert_eq!(s.get_fetch_boundary("colB").unwrap().as_deref(), Some("b1")); // 変わらない
-    }
-
-    /// 旧形式(userフルオブジェクト埋め込み)の行を素のSQLで作る(upsert_noteを経由しない=
-    /// Issue #263 以前に保存された実データの形を再現する)。
-    fn insert_legacy_row(conn: &Connection, note_id: &str, created_at: i64, user_json: serde_json::Value) {
-        let mut n = note(note_id, created_at);
-        let mut v = serde_json::to_value(&n).unwrap();
-        v["user"] = user_json;
-        let payload = serde_json::to_string(&v).unwrap();
-        n.user.id = v["user"]["id"].as_str().unwrap_or("").to_string();
-        conn.execute(
-            "INSERT INTO note (
-                id, created_at, text, text_length, cw, visibility, local_only, user_id,
-                reply_id, reply_user_id, renote_id, channel_id, via, lang,
-                files_count, has_poll, has_link, is_pinned,
-                reaction_count, renote_count, reply_count, my_reaction,
-                is_renoted_by_me, is_favorited_by_me, payload
-            ) VALUES (?1, ?2, '', 0, NULL, 'home', 0, ?3, NULL, NULL, NULL, NULL, NULL, NULL,
-                0, 0, 0, 0, 0, 0, 0, NULL, 0, 0, ?4)",
-            params![note_id, created_at, n.user.id, payload],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', ?1, 0, ?2)",
-            params![note_id, created_at],
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn load_cached_self_heals_legacy_full_user_payload() {
-        let s = store();
-        {
-            let conn = s.conn.lock().unwrap();
-            insert_legacy_row(
-                &conn,
-                "n_legacy",
-                100,
-                serde_json::json!({
-                    "id": "u_legacy", "username": "carol", "host": "remote.example",
-                    "name": "Carol", "avatarUrl": null, "isBot": false, "isCat": false,
-                    "followersCount": 0, "followingCount": 0, "notesCount": 0,
-                    "emojis": {}, "bio": null, "bannerUrl": null,
-                    "instance": { "name": "Remote", "iconUrl": "https://remote.example/icon.png", "themeColor": "#ff8800" }
-                }),
-            );
-        }
-
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].user.id, "u_legacy");
-        let instance = got[0].user.instance.as_ref().expect("instance should be hydrated");
-        assert_eq!(instance.name.as_deref(), Some("Remote"));
-
-        // payload がスタブ形式へ書き戻されていること
-        let conn = s.conn.lock().unwrap();
-        let raw: String = conn.query_row("SELECT payload FROM note WHERE id = 'n_legacy'", [], |r| r.get(0)).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(v["user"], serde_json::json!({ "id": "u_legacy" }));
-
-        // user テーブルへ抽出されていること
-        let name: String = conn.query_row("SELECT name FROM user WHERE id = 'u_legacy'", [], |r| r.get(0)).unwrap();
-        assert_eq!(name, "Carol");
-    }
-
-    #[test]
-    fn load_cached_self_heals_legacy_renote_author_instance() {
-        let s = store();
-        {
-            let conn = s.conn.lock().unwrap();
-            // 本体(u_main)も renote元(u_renote_author)も旧形式(userフルオブジェクト埋め込み)。
-            // renote元著者にはinstance情報が付いている。
-            let mut n = note("n_with_renote", 200);
-            let mut v = serde_json::to_value(&n).unwrap();
-            v["user"] = serde_json::json!({
-                "id": "u_main", "username": "mainuser", "host": null, "name": "Main User",
-                "avatarUrl": null, "isBot": false, "isCat": false,
-                "followersCount": 0, "followingCount": 0, "notesCount": 0,
-                "emojis": {}, "bio": null, "bannerUrl": null, "instance": null
-            });
-            v["renote"] = serde_json::json!({
-                "id": "n_renoted", "createdAt": 100, "text": "original", "cw": null,
-                "visibility": "public", "localOnly": false,
-                "user": {
-                    "id": "u_renote_author", "username": "renoteauthor", "host": "remote.example",
-                    "name": "Renote Author", "avatarUrl": null, "isBot": false, "isCat": false,
-                    "followersCount": 0, "followingCount": 0, "notesCount": 0,
-                    "emojis": {}, "bio": null, "bannerUrl": null,
-                    "instance": { "name": "Remote", "iconUrl": "https://remote.example/icon.png", "themeColor": "#ff8800" }
-                },
-                "replyId": null, "renoteId": null, "renote": null, "files": [], "poll": null,
-                "tags": [], "mentions": [], "emojis": {}, "channelId": null, "via": null, "lang": null,
-                "reactions": {}, "reactionCount": 0, "renoteCount": 0, "replyCount": 0,
-                "myReaction": null, "isRenotedByMe": false, "isFavoritedByMe": false, "isPinned": false
-            });
-            n.id = "n_with_renote".to_string();
-            let payload = serde_json::to_string(&v).unwrap();
-            conn.execute(
-                "INSERT INTO note (
-                    id, created_at, text, text_length, cw, visibility, local_only, user_id,
-                    reply_id, reply_user_id, renote_id, channel_id, via, lang,
-                    files_count, has_poll, has_link, is_pinned,
-                    reaction_count, renote_count, reply_count, my_reaction,
-                    is_renoted_by_me, is_favorited_by_me, payload
-                ) VALUES ('n_with_renote', 200, '', 0, NULL, 'home', 0, 'u_main', NULL, NULL, 'n_renoted', NULL, NULL, NULL,
-                    0, 0, 0, 0, 0, 0, 0, NULL, 0, 0, ?1)",
-                params![payload],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', 'n_with_renote', 0, 200)",
-                [],
-            )
-            .unwrap();
-        }
-
-        let got = s.load_cached("col1", 10).unwrap();
-        assert_eq!(got.len(), 1);
-        let renote = got[0].renote.as_ref().expect("renote should be present");
-        let instance = renote.user.instance.as_ref().expect("renote author instance should be hydrated");
-        assert_eq!(instance.name.as_deref(), Some("Remote"));
-
-        // 両方(本体+renote分)がuserテーブルへ抽出されていること
-        let conn = s.conn.lock().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM user WHERE id IN ('u_main','u_renote_author')", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 2);
-
-        // payloadが本体+renote分ともスタブへ書き戻されていること
-        let raw: String = conn.query_row("SELECT payload FROM note WHERE id = 'n_with_renote'", [], |r| r.get(0)).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(v["user"], serde_json::json!({ "id": "u_main" }));
-        assert_eq!(v["renote"]["user"], serde_json::json!({ "id": "u_renote_author" }));
-    }
-
-    #[test]
-    fn load_cached_skips_note_when_referenced_user_row_missing() {
-        let s = store();
-        {
-            let conn = s.conn.lock().unwrap();
-            insert_legacy_row(&conn, "n_orphan", 100, serde_json::json!({ "id": "u_orphan" }));
-        }
-
-        let got = s.load_cached("col1", 10).unwrap();
-        assert!(got.is_empty());
-    }
-
-    #[test]
-    fn normalized_columns_populated_for_nql() {
-        let s = store();
-        s.cache_note("col1", &note("n1", 100)).unwrap();
-        let conn = s.conn.lock().unwrap();
-        // has_link / text_length / files_count 等が正規化カラムに入る
-        let (has_link, files_count): (i64, i64) = conn
-            .query_row("SELECT has_link, files_count FROM note WHERE id='n1'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .unwrap();
-        assert_eq!(has_link, 1);
-        assert_eq!(files_count, 1);
-        let cat: String = conn
-            .query_row("SELECT mime_category FROM note_file WHERE note_id='n1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(cat, "image");
     }
 }

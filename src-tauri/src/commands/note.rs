@@ -71,9 +71,9 @@ pub async fn react(
     create_reaction(&client, &note_id, &reaction).await?;
     // キャッシュへ反映しないと、再起動後に load_cached が取得直後の古い payload を返し、
     // ここまでのセッション中に付けたリアクションが消えて見える(Issue #89)。
-    if let Ok(Some(mut note)) = state.cache.get_note(&note_id) {
+    if let Ok(Some(mut note)) = state.cache.get_note(&note_id).await {
         note.apply_my_reaction(&reaction);
-        let _ = state.cache.update_note(&note);
+        let _ = state.cache.update_note(&note).await;
     }
     Ok(())
 }
@@ -88,9 +88,9 @@ pub async fn unreact(
 ) -> Result<()> {
     let client = state.client_for(&account_id)?;
     delete_reaction(&client, &note_id).await?;
-    if let Ok(Some(mut note)) = state.cache.get_note(&note_id) {
+    if let Ok(Some(mut note)) = state.cache.get_note(&note_id).await {
         note.clear_my_reaction();
-        let _ = state.cache.update_note(&note);
+        let _ = state.cache.update_note(&note).await;
     }
     Ok(())
 }

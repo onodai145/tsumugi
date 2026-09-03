@@ -31,7 +31,7 @@ pub async fn set_mute(state: State<'_, AppState>, config: MuteConfig) -> Result<
     *state.mute.lock().unwrap() = config;
     // ミュート解除方向の変更は、除外済み(=キャッシュされていない)ノートを読み直せないため
     // キャッシュ提供パスでは反映できない。境界を捨てて次回backfillをAPI経由に倒す(Issue #228)。
-    let _ = state.cache.clear_all_fetch_boundaries();
+    let _ = state.cache.clear_all_fetch_boundaries().await;
     Ok(())
 }
 
