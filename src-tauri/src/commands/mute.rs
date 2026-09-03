@@ -1,10 +1,12 @@
 //! NG（ミュート）・通知設定の取得・更新。
 
-use crate::api::mutes::fetch_muted_and_blocked;
+use crate::api::mutes::{fetch_muted_and_blocked, fetch_muted_words};
 use crate::domain::{MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::Serialize;
+use specta::Type;
 use tauri::{AppHandle, State};
 #[cfg(target_os = "android")]
 use tauri_plugin_fs::FsExt;
@@ -161,14 +163,31 @@ fn extension_lower(path: &str) -> String {
         .unwrap_or_default()
 }
 
-/// サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。
-/// 起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
+/// `sync_server_mutes` の戻り値。ユーザ/ブロックミュート数とワードミュートのルール数を
+/// 別々に返す(フロントのログ表示用。Issue #11)。
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncMuteResult {
+    pub blocked_users: u32,
+    pub word_rules: u32,
+}
+
+/// サーバ側のミュート/ブロック・ワードミュート(mutedWords)を取得して AppState に反映する。
+/// 起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当。Issue #11）。
 #[tauri::command]
 #[specta::specta]
-pub async fn sync_server_mutes(state: State<'_, AppState>, account_id: String) -> Result<u32> {
+pub async fn sync_server_mutes(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<SyncMuteResult> {
     let client = state.client_for(&account_id)?;
     let ids = fetch_muted_and_blocked(&client).await?;
-    let n = ids.len() as u32;
+    let word_rules = fetch_muted_words(&client).await?;
+    let result = SyncMuteResult {
+        blocked_users: ids.len() as u32,
+        word_rules: word_rules.len() as u32,
+    };
     state.set_server_mutes(&account_id, ids);
-    Ok(n)
+    state.set_server_word_mutes(&account_id, word_rules);
+    Ok(result)
 }
