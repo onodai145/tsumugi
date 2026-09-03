@@ -202,4 +202,47 @@ describe("ComposeBar 下書き", () => {
       expect(screen.getByDisplayValue("書きかけの本文")).toBeTruthy();
     });
   });
+
+  it("共有添付の追加中に自動下書き復元が解決しても添付を消さない(Issue #116)", async () => {
+    setupAccount();
+    let resolveAutoDraft!: (value: unknown) => void;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      if (cmd === "get_auto_draft") {
+        // マウント時の自動復元effectをこの時点では確定させず、共有添付の反映と
+        // 競合させる(Task 4レビューで見つかったレース: Issue #116)。
+        return new Promise((resolve) => {
+          resolveAutoDraft = resolve;
+        });
+      }
+      return Promise.resolve(null);
+    });
+    render(ComposeBar);
+    // テキストを伴わない共有(例: キャプション無しの画像共有)を模す。
+    app.openCompose("acc1", { filePaths: ["/tmp/shared-intents/shared.txt"] });
+    await waitFor(() => {
+      expect(screen.getAllByTitle("削除")).toHaveLength(1);
+    });
+    // 添付の反映が終わった後に、保留中だった自動下書き復元が解決する。
+    // ガードが無ければ loadDraft() が attachments = [] で上書きしてしまう。
+    resolveAutoDraft({
+      id: "d1",
+      accountId: "acc1",
+      kind: "auto",
+      text: "自動保存されていた本文",
+      cw: null,
+      visibility: "public",
+      localOnly: false,
+      reactionAcceptance: "all",
+      channelId: null,
+      poll: null,
+      fileIds: [],
+      replyNote: null,
+      quoteNote: null,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getAllByTitle("削除")).toHaveLength(1);
+  });
 });

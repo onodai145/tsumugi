@@ -443,14 +443,14 @@
   $effect(() => {
     if (app.booting || autoRestoreDone) return;
     autoRestoreDone = true;
-    if (!accountId || text.trim() || replyTo || quoteOf) return;
+    if (!accountId || text.trim() || replyTo || quoteOf || attachments.length > 0) return;
     const acc = accountId;
     unwrapAcc(acc, commands.getAutoDraft(acc))
       .then((d) => {
         if (!d) return;
         // 復元試行中、他の初期化(app.compose消費など)で既に何か入力/文脈が付いていたら
         // 上書きしない
-        if (text.trim() || replyTo || quoteOf) return;
+        if (text.trim() || replyTo || quoteOf || attachments.length > 0) return;
         void loadDraft(d);
       })
       .catch(() => {});
