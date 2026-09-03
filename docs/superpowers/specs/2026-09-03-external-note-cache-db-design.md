@@ -53,6 +53,13 @@ enum CachePool {
 - `async-trait`
 - 既存の`rusqlite`は設定関連の旧移行コード(`db.rs`の`open_settings`、旧SQLite一体型からの一回限り移行)のために残す。note cache側の`rusqlite`利用は今回撤去する
 
+## 複数端末の同時書き込みに関する整合性
+
+- `note`/`user`テーブルはそれぞれ`id`が主キーのため、UPSERTは常に対象IDの1行に対する原子的な書き込みになる。複数端末が同じノートを同時にキャッシュしても、後勝ちで上書きされるだけで重複行や壊れた行は生まれない
+- 一方`note_reaction`/`note_tag`/`note_mention`/`note_emoji`/`note_file`テーブルは主キー・UNIQUE制約を持たず、現行コードは「対象noteの既存行を全DELETE→INSERTし直す」という複数文パターンで書き換えている。単一プロセス+単一SQLite接続(Mutexで直列化)では安全だが、外部DBに複数端末が同時に同じノートを書き込むと、2つのトランザクションのDELETE/INSERTが交互に割り込む余地があり、一時的な重複行や(読み取りタイミングによっては)瞬間的な空状態が起こり得る
+- 対策として、これら側テーブルに`UNIQUE(note_id, ...)`制約(例: `note_reaction`なら`UNIQUE(note_id, emoji_key)`)を追加し、DELETE+INSERTパターンをsea-query経由のUPSERT(`ON CONFLICT` / `ON DUPLICATE KEY UPDATE`相当)に置き換える。この変更はSQLiteバックエンドにも同様に適用し、単一プロセスでも冪等性を高める
+- このUNIQUE制約追加+UPSERT化は、実装の段階分割の1番目(`NoteCacheBackend` trait抽出 + `SqliteBackend`移植)に含める
+
 ## 設定・接続情報
 
 - `SettingsData`(`store/settings.rs`、プレーンJSONファイル)に`cache_backend: CacheBackendConfig`フィールドを追加(`mute`/`notify`と同じ並び)
