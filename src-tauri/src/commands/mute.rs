@@ -181,13 +181,126 @@ pub async fn sync_server_mutes(
     account_id: String,
 ) -> Result<SyncMuteResult> {
     let client = state.client_for(&account_id)?;
-    let ids = fetch_muted_and_blocked(&client).await?;
-    let word_rules = fetch_muted_words(&client).await?;
+    sync_server_mutes_core(&state, &account_id, &client).await
+}
+
+/// `sync_server_mutes` の中核ロジック。`AppState` を `State<'_, _>` ではなく `&AppState` で
+/// 受け取り、`client` も呼び出し側から渡すことで `tauri::State`(テストから構築不可)と
+/// `client_for`(登録済みアカウント+keyringが必要)の両方を経由せずに単体テスト可能にしている
+/// (`commands/column.rs::search_cache_core` と同じ狙い)。
+async fn sync_server_mutes_core(
+    state: &AppState,
+    account_id: &str,
+    client: &crate::api::MisskeyClient,
+) -> Result<SyncMuteResult> {
+    let ids = fetch_muted_and_blocked(client).await?;
+    let word_rules = fetch_muted_words(client).await?;
     let result = SyncMuteResult {
         blocked_users: ids.len() as u32,
         word_rules: word_rules.len() as u32,
     };
-    state.set_server_mutes(&account_id, ids);
-    state.set_server_word_mutes(&account_id, word_rules);
+    state.set_server_mutes(account_id, ids);
+    state.set_server_word_mutes(account_id, word_rules);
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::MisskeyClient;
+    use crate::domain::{Note, User, Visibility};
+    use crate::store::SettingsStore;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn note(text: &str) -> Note {
+        Note {
+            id: "n1".into(),
+            created_at: 0,
+            text: Some(text.into()),
+            cw: None,
+            visibility: Visibility::Public,
+            local_only: false,
+            user: User {
+                id: "u1".into(),
+                username: "alice".into(),
+                host: None,
+                name: None,
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 0,
+                following_count: 0,
+                notes_count: 0,
+                emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
+                instance: None,
+            },
+            reply_id: None,
+            renote_id: None,
+            renote: None,
+            files: vec![],
+            poll: None,
+            tags: vec![],
+            mentions: vec![],
+            emojis: std::collections::HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
+            reactions: std::collections::HashMap::new(),
+            reaction_count: 0,
+            renote_count: 0,
+            reply_count: 0,
+            my_reaction: None,
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
+        }
+    }
+
+    /// `sync_server_mutes_core` の結合テスト(Issue #11)。実HTTP経由(wiremockモック)で
+    /// `mute/list`/`blocking/list`/`i` を叩き、レスポンスが `AppState` まで正しく届いて
+    /// `is_word_muted` が実際に効くことを検証する。`parse_muted_words` 単体の網羅は
+    /// `api::mutes::tests` 側の8ケースに任せ、ここでは「実HTTPレスポンス→state反映」という
+    /// 単体テストでは埋まらない結合部分だけを見る。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_server_mutes_core_populates_state_from_real_http_responses() {
+        let mock = MockServer::start().await;
+        // mute/list・blocking/list は空配列を返す(ページングループを1回で終わらせる)。
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock)
+            .await;
+        // /i は2グループ(AND語群 + 正規表現)を持つ mutedWords を返す。
+        Mock::given(method("POST"))
+            .and(path("/i"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "mutedWords": [["foo", "bar"], "/spoiler/i"]
+            })))
+            .mount(&mock)
+            .await;
+
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let result = sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert_eq!(result.blocked_users, 0);
+        assert_eq!(result.word_rules, 2);
+        // AND群("foo"かつ"bar")が実際に効く
+        assert!(state.is_word_muted("acc1", &note("foo and bar here")));
+        // 正規表現("/spoiler/i")が実際に効く(大小無視)
+        assert!(state.is_word_muted("acc1", &note("BIG SPOILER")));
+        // どちらにも該当しなければミュートされない
+        assert!(!state.is_word_muted("acc1", &note("nothing matches")));
+        // 未同期の別アカウントには影響しない
+        assert!(!state.is_word_muted("other-acc", &note("foo and bar here")));
+    }
 }
