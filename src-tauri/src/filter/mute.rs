@@ -59,6 +59,44 @@ fn normalize_acct(s: &str) -> String {
     }
 }
 
+/// サーバ側ワードミュート(`mutedWords`)の1ルール。`api::mutes::parse_muted_words` が
+/// `/i` の生JSONから構築する(Issue #11)。
+#[derive(Debug, Clone)]
+pub enum WordMuteRule {
+    /// 複数語のAND(1語のみのケースも含む)。大小無視の部分一致。
+    Words(Vec<String>),
+    /// `/pattern/flags` 形式の正規表現ルール。
+    Regex(regex::Regex),
+}
+
+/// text/cw が word-mute ルール群のいずれかに該当するか(OR)。
+pub fn is_word_muted(text: Option<&str>, cw: Option<&str>, rules: &[WordMuteRule]) -> bool {
+    if rules.is_empty() {
+        return false;
+    }
+    let text = text.unwrap_or("");
+    let cw = cw.unwrap_or("");
+    let hay_lower = format!("{text} {cw}").to_lowercase();
+    let hay_raw = format!("{text} {cw}");
+    rules.iter().any(|rule| match rule {
+        WordMuteRule::Words(words) => {
+            !words.is_empty() && words.iter().all(|w| hay_lower.contains(&w.to_lowercase()))
+        }
+        WordMuteRule::Regex(re) => re.is_match(&hay_raw),
+    })
+}
+
+/// note が word-mute ルール群に該当するか(本体 or renote 先のいずれかで true)。
+pub fn is_word_note_muted(note: &Note, rules: &[WordMuteRule]) -> bool {
+    if is_word_muted(note.text.as_deref(), note.cw.as_deref(), rules) {
+        return true;
+    }
+    matches!(
+        &note.renote,
+        Some(r) if is_word_muted(r.text.as_deref(), r.cw.as_deref(), rules)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +208,62 @@ mod tests {
         assert!(is_user_muted(&n.user, &cfg)); // ユーザ一致
         let n2 = note("bad word", "alice", Some("ex.com"));
         assert!(!is_user_muted(&n2.user, &cfg)); // ワード一致でもユーザ判定はしない
+    }
+
+    #[test]
+    fn word_mute_and_group_requires_all_words() {
+        let rules = vec![WordMuteRule::Words(vec!["foo".into(), "bar".into()])];
+        assert!(is_word_muted(Some("foo and bar here"), None, &rules));
+        assert!(!is_word_muted(Some("only foo here"), None, &rules));
+    }
+
+    #[test]
+    fn word_mute_groups_are_ored() {
+        let rules = vec![
+            WordMuteRule::Words(vec!["neverused".into()]),
+            WordMuteRule::Words(vec!["spoiler".into()]),
+        ];
+        assert!(is_word_muted(Some("big spoiler"), None, &rules));
+    }
+
+    #[test]
+    fn word_mute_matches_case_insensitively() {
+        let rules = vec![WordMuteRule::Words(vec!["Spoiler".into()])];
+        assert!(is_word_muted(Some("BIG SPOILER"), None, &rules));
+    }
+
+    #[test]
+    fn word_mute_checks_cw_too() {
+        let rules = vec![WordMuteRule::Words(vec!["ct".into()])];
+        assert!(is_word_muted(None, Some("ct warning"), &rules));
+    }
+
+    #[test]
+    fn word_mute_regex_matches_with_case_insensitive_flag() {
+        let re = regex::RegexBuilder::new("sp.iler")
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+        let rules = vec![WordMuteRule::Regex(re)];
+        assert!(is_word_muted(Some("a SPXiler word"), None, &rules));
+    }
+
+    #[test]
+    fn word_mute_empty_rules_never_matches() {
+        assert!(!is_word_muted(Some("anything"), None, &[]));
+    }
+
+    #[test]
+    fn word_note_mute_checks_renote_target() {
+        let rules = vec![WordMuteRule::Words(vec!["bad".into()])];
+        let mut rn = note("clean", "a", None);
+        rn.renote = Some(Box::new(note("bad content", "b", None)));
+        assert!(is_word_note_muted(&rn, &rules));
+    }
+
+    #[test]
+    fn word_note_mute_false_when_neither_matches() {
+        let rules = vec![WordMuteRule::Words(vec!["bad".into()])];
+        assert!(!is_word_note_muted(&note("clean text", "a", None), &rules));
     }
 }
