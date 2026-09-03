@@ -6,6 +6,14 @@
 
 **Architecture:** `store/db.rs::open_cache`/`open_cache_in_memory`が`rusqlite::Connection`ではなく`sqlx::SqlitePool`(単一プロセス内の直列化を保つため`max_connections(1)`)を返すようにし、`store/user_ref.rs`と`store/note_cache.rs`の全関数を`async fn`化してsqlxのバインドAPIへ載せ替える。呼び出し元4ファイル(`commands/column.rs`, `commands/mute.rs`, `commands/note.rs`, `stream/connection.rs`)は既にasync fn内から呼んでいるため`.await`を追加するだけで済む。トレイト抽出(`NoteCacheBackend`)による`SqliteBackend`/将来の`PostgresBackend`/`MySqlBackend`の切り替えは本Phase最後のタスクで行う。SQL文字列自体・スキーマ・クエリロジックは(下記の意図的な変更点を除き)現状と同一に保つ。
 
+### タスク分割の実行順序制約(重要)
+
+Rustはクレート全体を1コンパイル単位として扱うため、`db::open_cache`や`NoteCacheStore`のような**既存の公開シグネチャをそのまま書き換える**と、まだ移行していない呼び出し元(`lib.rs`/`state.rs`/`note_cache.rs`/`commands/*.rs`等)が即座にコンパイル不能になり、「このタスク単体でテストがgreenになる」というTask Right-Sizingの前提が崩れる。
+
+そのため本計画はタスク1〜3を**並行実装(strangler-fig)方式**で進める: 既存の同期API(rusqlite版)には一切手を触れず、新しい非同期版を別名の関数/別ファイルの新しい型として追加する。新旧が同じファイル内に共存するタスク1・2は関数名に`_pool`/`_async`サフィックスを付け、既存の同名private関数(`column_exists`等)と衝突しないようにする。タスク3はさらに踏み込み、`note_cache.rs`を直接書き換えるのではなく**新規ファイル`store/sqlite_backend.rs`**に新しい`SqliteBackend`型として書く(既存`NoteCacheStore`とは別の型名なので、内部のprivate関数名は衝突を気にせず元の名前をそのまま使ってよい)。
+
+最後のタスク4だけが「一括切替」を行う: `NoteCacheBackend`トレイトを定義し`SqliteBackend`に実装させ、`note_cache.rs`の**旧rusqlite実装を丸ごと削除**して薄い委譲ラッパーに置き換え、`db.rs`/`user_ref.rs`の旧rusqlite関数を削除して`_pool`/`_async`サフィックスを外し、全呼び出し元(4ファイル+`lib.rs`+`state.rs`)を新APIへ更新する。この「一括切替」タスクだけがクレート全体を壊しながら一気に直す形になるが、それ以外のタスク1〜3は常にクレート全体がgreenなまま完了できる。
+
 **Tech Stack:** Rust, `sqlx`(features: `sqlite`, `runtime-tokio`), `async-trait`, `tokio`(既存)。sea-query・PostgreSQL/MySQL対応はPhase 2以降(本計画のスコープ外)。
 
 ## Global Constraints
@@ -19,16 +27,22 @@
 
 ### Task 1: `store/db.rs` — sqlxプール化 + UNIQUE制約マイグレーション
 
+**方針(上記「タスク分割の実行順序制約」参照)**: 既存の`open_cache`/`open_cache_in_memory`/`migrate_cache`/`column_exists`/`enable_incremental_vacuum`(すべてrusqlite版)には**一切手を加えない**。これらは現在`note_cache.rs`(まだrusqliteのまま)や将来的な呼び出し元から使われ続けるため、消したりシグネチャを変えたりすると即座にクレート全体がコンパイル不能になる。代わりに、まったく新しい`_pool`サフィックス付きの関数群を同じファイルに追加する(新旧が同じファイルに共存するが名前が違うので衝突しない)。
+
 **Files:**
-- Modify: `src-tauri/Cargo.toml`
-- Modify: `src-tauri/src/store/db.rs`(全体書き換え)
+- Modify: `src-tauri/Cargo.toml`(依存追加)
+- Modify: `src-tauri/src/store/db.rs`(**追記のみ**。既存の関数は一切変更・削除しない)
+- Modify: `src-tauri/src/error.rs`(`From<sqlx::Error> for Error`を追加。無いと後続タスクの`?`によるsqlxエラー伝播がコンパイルできない)
 
 **Interfaces:**
 - Consumes: なし(このタスクは他モジュールに依存しない)
-- Produces:
-  - `pub async fn open_cache(path: &Path) -> Result<sqlx::SqlitePool>`(旧: `Connection`を返していた)
-  - `pub async fn open_cache_in_memory() -> Result<sqlx::SqlitePool>`(`#[cfg(test)]`のまま)
-  - `open_settings`/`migrate`(account/column設定側)は**このタスクでは変更しない**(rusqliteのまま、`SettingsStore`が今も同期で使うため)
+- Produces(すべて新規追加、既存の同名なし関数と共存):
+  - `pub(crate) async fn open_cache_pool(path: &Path) -> Result<sqlx::SqlitePool>`
+  - `pub(crate) async fn open_cache_pool_in_memory() -> Result<sqlx::SqlitePool>`(`#[cfg(test)]`)
+  - これらが内部で呼ぶprivateヘルパー`migrate_cache_pool`/`column_exists_pool`/`enable_incremental_vacuum_pool`/`add_unique_index_with_dedup`も新規追加(既存の`migrate_cache`/`column_exists`/`enable_incremental_vacuum`とは別名なので衝突しない)
+  - `open_settings`/`migrate`(account/column設定側)、および既存の`open_cache`/`open_cache_in_memory`/`migrate_cache`/`column_exists`/`enable_incremental_vacuum`(rusqlite版)は**このタスクでは一切変更しない**
+  - Task 3が`open_cache_pool`/`open_cache_pool_in_memory`を消費する。Task 4で最終的にrusqlite版を削除し、`_pool`サフィックスを外して`open_cache`/`open_cache_in_memory`にリネームする(このタスクではリネームしない)
+  - このタスク完了時点では`open_cache_pool`等はテストからしか呼ばれないため`dead_code`警告が出る。このリポジトリは`deny(warnings)`を設定していないため`cargo test`は警告があってもPASSする。Task 3で実際に消費されると警告は消える。この警告は本タスクの欠陥ではないので気にしなくてよい
 
 - [ ] **Step 1: 依存クレートを追加する**
 
@@ -86,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn migrate_cache_backfills_created_at_from_note() {
-        let pool = open_cache_in_memory_with_legacy_schema().await;
+        let pool = open_cache_pool_in_memory_with_legacy_schema().await;
         sqlx::query(
             "CREATE TABLE note (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
              CREATE TABLE user (id TEXT PRIMARY KEY, username TEXT NOT NULL);
@@ -107,7 +121,7 @@ mod tests {
             .await
             .unwrap();
 
-        migrate_cache(&pool).await.unwrap();
+        migrate_cache_pool(&pool).await.unwrap();
 
         let created_at: i64 = sqlx::query_scalar(
             "SELECT created_at FROM column_note WHERE column_id='c1' AND note_id='n1'",
@@ -118,7 +132,7 @@ mod tests {
         assert_eq!(created_at, 12345);
 
         // 冪等: 再実行してもエラーにならず値は変わらない
-        migrate_cache(&pool).await.unwrap();
+        migrate_cache_pool(&pool).await.unwrap();
         let created_at2: i64 = sqlx::query_scalar(
             "SELECT created_at FROM column_note WHERE column_id='c1' AND note_id='n1'",
         )
@@ -139,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn open_cache_applies_pragma_tuning() {
         let path = std::env::temp_dir().join(format!("tsumugi_test_{}.db", uuid::Uuid::new_v4()));
-        let pool = open_cache(&path).await.unwrap();
+        let pool = open_cache_pool(&path).await.unwrap();
 
         let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous").fetch_one(&pool).await.unwrap();
         assert_eq!(synchronous, 1); // NORMAL
@@ -161,7 +175,7 @@ mod tests {
 
     #[tokio::test]
     async fn migrate_cache_adds_user_normalization_columns() {
-        let pool = open_cache_in_memory_with_legacy_schema().await;
+        let pool = open_cache_pool_in_memory_with_legacy_schema().await;
         sqlx::query(
             "CREATE TABLE user (
                 id TEXT PRIMARY KEY, username TEXT NOT NULL, host TEXT, name TEXT,
@@ -180,22 +194,22 @@ mod tests {
         .await
         .unwrap();
 
-        migrate_cache(&pool).await.unwrap();
+        migrate_cache_pool(&pool).await.unwrap();
 
         for col in [
             "avatar_url", "bio", "banner_url", "emojis",
             "instance_name", "instance_icon_url", "instance_theme_color",
         ] {
-            assert!(column_exists(&pool, "user", col).await.unwrap(), "missing column: {col}");
+            assert!(column_exists_pool(&pool, "user", col).await.unwrap(), "missing column: {col}");
         }
-        migrate_cache(&pool).await.unwrap();
+        migrate_cache_pool(&pool).await.unwrap();
     }
 
     /// Issue #115: 側テーブルに重複行があっても、UNIQUEインデックス作成前に
     /// 重複排除してからインデックスを張ること(既存の蓄積データを壊さずに移行できること)。
     #[tokio::test]
     async fn migrate_cache_dedupes_side_tables_before_creating_unique_index() {
-        let pool = open_cache_in_memory().await.unwrap();
+        let pool = open_cache_pool_in_memory().await.unwrap();
         // 正規のパスでは起きないはずの重複行を素のSQLで作る(移行前の実データを模倣)。
         sqlx::query(
             "INSERT INTO note (id, created_at, visibility, user_id, payload) VALUES ('n1', 100, 'home', 'u1', '{}')",
@@ -212,7 +226,7 @@ mod tests {
             .await
             .unwrap();
 
-        // open_cache_in_memory は migrate_cache 込みなので、この時点で既にインデックスは張られているはず。
+        // open_cache_pool_in_memory は migrate_cache_pool 込みなので、この時点で既にインデックスは張られているはず。
         let idx_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_nr_unique'",
         )
@@ -229,12 +243,12 @@ mod tests {
         assert_eq!(count, 1);
 
         // 冪等: 再実行してもエラーにならない(UNIQUE違反にならない)。
-        migrate_cache(&pool).await.unwrap();
+        migrate_cache_pool(&pool).await.unwrap();
     }
 
-    /// テスト専用: `migrate_cache`が期待する`note`/`column_note`テーブルより前段階の
+    /// テスト専用: `migrate_cache_pool`が期待する`note`/`column_note`テーブルより前段階の
     /// (=CACHE_SCHEMA適用前の)状態を作るためのヘルパー。CACHE_SCHEMAには依存しない空プール。
-    async fn open_cache_in_memory_with_legacy_schema() -> sqlx::SqlitePool {
+    async fn open_cache_pool_in_memory_with_legacy_schema() -> sqlx::SqlitePool {
         use sqlx::sqlite::SqliteConnectOptions;
         use std::str::FromStr;
         sqlx::sqlite::SqlitePoolOptions::new()
@@ -252,13 +266,13 @@ mod tests {
 cd src-tauri && cargo test --lib store::db
 ```
 
-Expected: コンパイルエラー(`open_cache`/`migrate_cache`/`column_exists`が`sqlx::SqlitePool`を受け取らないため)。
+Expected: コンパイルエラー(`open_cache_pool`/`migrate_cache_pool`/`column_exists_pool`/`open_cache_pool_in_memory`がまだ存在しないため)。
 
 - [ ] **Step 4: `db.rs`本体を書き換える**
 
-`CACHE_SCHEMA`定数の末尾(`column_fetch_boundary`の`CREATE TABLE`の後)に、以下のUNIQUEインデックス作成文を**追加しない**こと(新規DBでも`migrate_cache`側の`add_unique_index_with_dedup`を毎回通す設計にして、新規/既存で分岐を持たないようにする)。`CACHE_SCHEMA`定数のテキスト自体は変更しない。
+`CACHE_SCHEMA`定数の末尾(`column_fetch_boundary`の`CREATE TABLE`の後)に、以下のUNIQUEインデックス作成文を**追加しない**こと(新規DBでも`migrate_cache_pool`側の`add_unique_index_with_dedup`を毎回通す設計にして、新規/既存で分岐を持たないようにする)。`CACHE_SCHEMA`定数のテキスト自体は変更しない。
 
-`open_settings`/`migrate`/`column_exists`(既存のrusqlite版、account/column設定用)はそのまま残す。以下を同じファイルに追記・置き換える形で実装する:
+`open_settings`/`migrate`/既存の`column_exists`(rusqlite版、account/column設定用およびcache設定の旧migrate_cacheが使う)はそのまま残す。以下を同じファイルに**追記のみ**で実装する(既存関数は書き換えない):
 
 ```rust
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -269,7 +283,7 @@ use std::str::FromStr;
 /// `max_connections(1)`: 旧`rusqlite`+`Mutex<Connection>`と同じ「プロセス内で常に単一接続に
 /// 直列化する」挙動をPhase 1では維持する(挙動不変が目標のため、複数コネクションによる
 /// 並行アクセスは今回スコープ外)。
-pub async fn open_cache(path: &Path) -> Result<SqlitePool> {
+pub(crate) async fn open_cache_pool(path: &Path) -> Result<SqlitePool> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))?
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
@@ -280,12 +294,12 @@ pub async fn open_cache(path: &Path) -> Result<SqlitePool> {
         .pragma("mmap_size", "67108864");
     let pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await?;
     sqlx::query(CACHE_SCHEMA).execute(&pool).await?;
-    migrate_cache(&pool).await?;
-    enable_incremental_vacuum(&pool).await?;
+    migrate_cache_pool(&pool).await?;
+    enable_incremental_vacuum_pool(&pool).await?;
     Ok(pool)
 }
 
-async fn enable_incremental_vacuum(pool: &SqlitePool) -> Result<()> {
+async fn enable_incremental_vacuum_pool(pool: &SqlitePool) -> Result<()> {
     let mode: i64 = sqlx::query_scalar("PRAGMA auto_vacuum").fetch_one(pool).await?;
     const INCREMENTAL: i64 = 2;
     if mode != INCREMENTAL {
@@ -295,8 +309,8 @@ async fn enable_incremental_vacuum(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-async fn migrate_cache(pool: &SqlitePool) -> Result<()> {
-    if !column_exists(pool, "column_note", "created_at").await? {
+async fn migrate_cache_pool(pool: &SqlitePool) -> Result<()> {
+    if !column_exists_pool(pool, "column_note", "created_at").await? {
         sqlx::query("ALTER TABLE column_note ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
             .execute(pool)
             .await?;
@@ -309,7 +323,7 @@ async fn migrate_cache(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await?;
     }
-    if !column_exists(pool, "user", "instance_name").await? {
+    if !column_exists_pool(pool, "user", "instance_name").await? {
         sqlx::query(
             "ALTER TABLE user ADD COLUMN avatar_url TEXT;
              ALTER TABLE user ADD COLUMN bio TEXT;
@@ -374,7 +388,7 @@ async fn add_unique_index_with_dedup(
     Ok(())
 }
 
-async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> Result<bool> {
+async fn column_exists_pool(pool: &SqlitePool, table: &str, column: &str) -> Result<bool> {
     let rows = sqlx::query(&format!("PRAGMA table_info({table})")).fetch_all(pool).await?;
     for row in rows {
         let name: String = row.try_get("name")?;
@@ -385,21 +399,24 @@ async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> Result<b
     Ok(false)
 }
 
-/// インメモリキャッシュDB（テスト用）。
+/// インメモリキャッシュDB（テスト用）。新しいsqlx版。既存の`open_cache_in_memory`(rusqlite版)とは
+/// 別名なので共存できる。
 #[cfg(test)]
-pub async fn open_cache_in_memory() -> Result<SqlitePool> {
+pub(crate) async fn open_cache_pool_in_memory() -> Result<SqlitePool> {
     let opts = SqliteConnectOptions::from_str("sqlite::memory:")?;
     let pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await?;
     sqlx::query(CACHE_SCHEMA).execute(&pool).await?;
-    migrate_cache(&pool).await?;
-    enable_incremental_vacuum(&pool).await?;
+    migrate_cache_pool(&pool).await?;
+    enable_incremental_vacuum_pool(&pool).await?;
     Ok(pool)
 }
 ```
 
-旧`column_exists`(rusqlite版、`migrate`が使う)は名前が衝突するため、こちらの新しいsqlx版は`column_exists`という同名にせず、rusqlite版と共存できるよう関数シグネチャの型(`&SqlitePool` vs `&rusqlite::Connection`)で区別する。Rustはシグネチャによるオーバーロードをサポートしないため、**rusqlite版の`column_exists`をそのまま残しつつ、sqlx版は同一モジュール内に共存できない**。sqlx版を`column_exists_cache`のような別名にするか、rusqlite版を`column_exists_settings`にリネームする。リネームは呼び出し元(`migrate`関数内)も合わせて更新すること。本計画では sqlx 版を追加する側なので **sqlx版を`column_exists`のまま、rusqlite版(既存)を`column_exists_settings`にリネーム**する方針とする。
+- [ ] **Step 5: `error.rs`に`sqlx::Error`からの変換を追加する**
 
-- [ ] **Step 5: テストを実行して通過を確認する**
+`src-tauri/src/error.rs`を開き、既存の`From<rusqlite::Error> for Error`(あるいは同等のvariant定義)と同じパターンで`sqlx::Error`用のvariantと`From`実装を追加する。既存の`Error` enumの定義パターンをそのまま踏襲すること(実装前に`error.rs`を読んで既存のvariant定義スタイルを確認する)。この変換が無いと、Step 4で書いたコード中の`?`によるsqlxエラーの伝播がコンパイルできない。
+
+- [ ] **Step 6: テストを実行して通過を確認する**
 
 ```bash
 cd src-tauri && cargo test --lib store::db
@@ -407,33 +424,39 @@ cd src-tauri && cargo test --lib store::db
 
 Expected: PASS(7件)
 
-- [ ] **Step 6: コミット**
+- [ ] **Step 7: コミット**
 
 ```bash
-git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/store/db.rs
-git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テーブルにUNIQUE制約を追加"
+git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/store/db.rs src-tauri/src/error.rs
+git commit -m "note cache用にsqlxベースの接続関数を追加し側テーブルUNIQUE制約マイグレーションを実装"
 ```
 
 ---
 
 ### Task 2: `store/user_ref.rs` — sqlx非同期化
 
+**方針(計画冒頭「タスク分割の実行順序制約」参照)**: 既存の`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`(rusqlite版)は`note_cache.rs`(まだrusqliteのまま)から呼ばれ続けているため、**一切変更しない**。代わりに`_async`サフィックス付きの新しい関数を追加する(既存の同名関数とは別名なので同じファイルに共存できる)。既存の`#[cfg(test)] mod tests`内の既存テストもそのまま残す(削除・変更しない)。
+
 **Files:**
-- Modify: `src-tauri/src/store/user_ref.rs`(全体書き換え)
+- Modify: `src-tauri/src/store/user_ref.rs`(**追記のみ**。既存の関数・既存テストは変更しない)
 
 **Interfaces:**
-- Consumes: `sqlx::SqliteConnection`(Task 1の`open_cache`/`open_cache_in_memory`が返す`SqlitePool`から`pool.acquire()`または`pool.begin()`で得る)
-- Produces(すべて`pub(crate) async fn`、Task 3から呼ばれる):
-  - `upsert_user(conn: &mut sqlx::SqliteConnection, user: &User) -> Result<()>`
-  - `fill_user_from_snapshot(conn: &mut sqlx::SqliteConnection, user: &User) -> Result<()>`
-  - `fetch_users_by_ids(conn: &mut sqlx::SqliteConnection, ids: &[String]) -> Result<HashMap<String, User>>`
-  - `collect_users`/`stub_user_refs`/`is_legacy_full_user`/`has_legacy_full_user`/`collect_user_id_refs`/`hydrate_user_refs` は純粋なJSON操作でDB接続を取らないため**変更不要**(シグネチャそのまま)
+- Consumes: `sqlx::SqliteConnection`(Task 1の`open_cache_pool`/`open_cache_pool_in_memory`が返す`SqlitePool`から`pool.acquire()`または`pool.begin()`で得る)
+- Produces(すべて新規追加、`pub(crate) async fn`、Task 3から呼ばれる):
+  - `upsert_user_async(conn: &mut sqlx::SqliteConnection, user: &User) -> Result<()>`
+  - `fill_user_from_snapshot_async(conn: &mut sqlx::SqliteConnection, user: &User) -> Result<()>`
+  - `fetch_users_by_ids_async(conn: &mut sqlx::SqliteConnection, ids: &[String]) -> Result<HashMap<String, User>>`
+  - `collect_users`/`stub_user_refs`/`is_legacy_full_user`/`has_legacy_full_user`/`collect_user_id_refs`/`hydrate_user_refs`(既存、DB接続を取らない純粋なJSON操作)は変更不要で、新旧どちらの関数からも共有して呼べる
+  - 既存の`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`(rusqlite版)は**このタスクでは一切変更しない**。Task 4で最終的に削除し、`_async`サフィックスを外して現在の名前にリネームする
 
-- [ ] **Step 1: 既存テストを`#[tokio::test]`+ sqlxの型に書き換える(TDD)**
+- [ ] **Step 1: 新しいテストを追加する(TDD)。既存テストには触れない**
 
-`user_ref.rs`の`#[cfg(test)] mod tests`内で`rusqlite::Connection`を使っている箇所(`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`を呼ぶテスト)を以下のように書き換える。対象は`upsert_user_preserves_bio_when_later_write_has_none`, `upsert_user_overwrites_always_present_fields`, `upsert_user_preserves_instance_when_later_fetch_fails`, `fill_user_from_snapshot_does_not_clobber_fresher_live_data`, `fetch_users_by_ids_returns_stored_instance_info`, `fetch_users_by_ids_returns_empty_map_for_empty_input`, および`row`ヘルパー。それ以外(`collect_users_*`, `stub_user_refs_*`, `is_legacy_full_user_*`, `has_legacy_full_user_*`, `collect_user_id_refs_*`, `hydrate_user_refs_*`)はDBを使わないため変更不要。
+既存の`#[cfg(test)] mod tests`は一切変更しない(削除・書き換え禁止)。その代わり、**既存の`mod tests`の内側**(末尾)に新しい`mod async_tests { use super::*; ... }`(この`super`は`mod tests`を指すので、`mod tests`内で定義されている`user_lite`/`bare_note`等のヘルパーをそのまま使える)を追加し、その中に`upsert_user_async`/`fill_user_from_snapshot_async`/`fetch_users_by_ids_async`を検証するテストを書く。既存`mod tests`直下のテストと同名の関数(`upsert_user_preserves_bio_when_later_write_has_none`等)を使いたいので、内側の別モジュール(`mod async_tests`)に分けることで名前衝突を避ける。以下のテストコードはこの新しい`mod async_tests`の中身として追加する:
 
 ```rust
+mod async_tests {
+    use super::*;
+
     async fn row(pool: &sqlx::SqlitePool, id: &str) -> (Option<String>, Option<String>, Option<String>) {
         use sqlx::Row;
         let r = sqlx::query("SELECT bio, banner_url, instance_name FROM user WHERE id = ?1")
@@ -446,14 +469,14 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
 
     #[tokio::test]
     async fn upsert_user_preserves_bio_when_later_write_has_none() {
-        let pool = crate::store::db::open_cache_in_memory().await.unwrap();
+        let pool = crate::store::db::open_cache_pool_in_memory().await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
         let mut full = user_lite("u1", "Alice");
         full.bio = Some("hello".into());
-        upsert_user(&mut conn, &full).await.unwrap();
+        upsert_user_async(&mut conn, &full).await.unwrap();
 
         let lite = user_lite("u1", "Alice (updated)");
-        upsert_user(&mut conn, &lite).await.unwrap();
+        upsert_user_async(&mut conn, &lite).await.unwrap();
 
         let (bio, _, _) = row(&pool, "u1").await;
         assert_eq!(bio, Some("hello".to_string()));
@@ -461,10 +484,10 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
 
     #[tokio::test]
     async fn upsert_user_overwrites_always_present_fields() {
-        let pool = crate::store::db::open_cache_in_memory().await.unwrap();
+        let pool = crate::store::db::open_cache_pool_in_memory().await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
-        upsert_user(&mut conn, &user_lite("u1", "Alice")).await.unwrap();
-        upsert_user(&mut conn, &user_lite("u1", "Alice2")).await.unwrap();
+        upsert_user_async(&mut conn, &user_lite("u1", "Alice")).await.unwrap();
+        upsert_user_async(&mut conn, &user_lite("u1", "Alice2")).await.unwrap();
 
         let name: String = sqlx::query_scalar("SELECT name FROM user WHERE id = 'u1'")
             .fetch_one(&pool)
@@ -475,7 +498,7 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
 
     #[tokio::test]
     async fn upsert_user_preserves_instance_when_later_fetch_fails() {
-        let pool = crate::store::db::open_cache_in_memory().await.unwrap();
+        let pool = crate::store::db::open_cache_pool_in_memory().await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
         let mut with_instance = user_lite("u1", "Alice");
         with_instance.instance = Some(InstanceInfo {
@@ -483,11 +506,11 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
             icon_url: Some("https://remote.example/icon.png".into()),
             theme_color: Some("#ff8800".into()),
         });
-        upsert_user(&mut conn, &with_instance).await.unwrap();
+        upsert_user_async(&mut conn, &with_instance).await.unwrap();
 
         let mut failed_fetch = user_lite("u1", "Alice");
         failed_fetch.instance = None;
-        upsert_user(&mut conn, &failed_fetch).await.unwrap();
+        upsert_user_async(&mut conn, &failed_fetch).await.unwrap();
 
         let (_, _, instance_name) = row(&pool, "u1").await;
         assert_eq!(instance_name, Some("Remote".to_string()));
@@ -495,15 +518,15 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
 
     #[tokio::test]
     async fn fill_user_from_snapshot_does_not_clobber_fresher_live_data() {
-        let pool = crate::store::db::open_cache_in_memory().await.unwrap();
+        let pool = crate::store::db::open_cache_pool_in_memory().await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
         let mut fresh = user_lite("u1", "Alice (new name)");
         fresh.emojis = HashMap::from([("wave".to_string(), "https://example.com/wave.png".to_string())]);
-        upsert_user(&mut conn, &fresh).await.unwrap();
+        upsert_user_async(&mut conn, &fresh).await.unwrap();
 
         let mut stale_snapshot = user_lite("u1", "Alice (old name)");
         stale_snapshot.emojis = HashMap::new();
-        fill_user_from_snapshot(&mut conn, &stale_snapshot).await.unwrap();
+        fill_user_from_snapshot_async(&mut conn, &stale_snapshot).await.unwrap();
 
         let name: String = sqlx::query_scalar("SELECT name FROM user WHERE id = 'u1'")
             .fetch_one(&pool)
@@ -519,7 +542,7 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
 
     #[tokio::test]
     async fn fetch_users_by_ids_returns_stored_instance_info() {
-        let pool = crate::store::db::open_cache_in_memory().await.unwrap();
+        let pool = crate::store::db::open_cache_pool_in_memory().await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
         let mut with_instance = user_lite("u1", "Alice");
         with_instance.instance = Some(InstanceInfo {
@@ -527,11 +550,11 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
             icon_url: Some("https://remote.example/icon.png".into()),
             theme_color: Some("#ff8800".into()),
         });
-        upsert_user(&mut conn, &with_instance).await.unwrap();
-        upsert_user(&mut conn, &user_lite("u2", "Bob")).await.unwrap();
+        upsert_user_async(&mut conn, &with_instance).await.unwrap();
+        upsert_user_async(&mut conn, &user_lite("u2", "Bob")).await.unwrap();
 
         let ids = vec!["u1".to_string(), "u2".to_string(), "u3".to_string()];
-        let users = fetch_users_by_ids(&mut conn, &ids).await.unwrap();
+        let users = fetch_users_by_ids_async(&mut conn, &ids).await.unwrap();
 
         assert_eq!(users.len(), 2);
         let instance = users["u1"].instance.as_ref().unwrap();
@@ -541,12 +564,15 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
 
     #[tokio::test]
     async fn fetch_users_by_ids_returns_empty_map_for_empty_input() {
-        let pool = crate::store::db::open_cache_in_memory().await.unwrap();
+        let pool = crate::store::db::open_cache_pool_in_memory().await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
-        let users = fetch_users_by_ids(&mut conn, &[]).await.unwrap();
+        let users = fetch_users_by_ids_async(&mut conn, &[]).await.unwrap();
         assert!(users.is_empty());
     }
+} // mod async_tests
 ```
+
+この`mod async_tests { ... }`ブロックを、既存`mod tests`の`}`(モジュール末尾)の直前に挿入する。既存のテスト・ヘルパーの後ろに追加すればよい。
 
 - [ ] **Step 2: テストを実行して失敗を確認する**
 
@@ -554,14 +580,16 @@ git commit -m "note cacheのDB接続をrusqliteからsqlxへ移行し側テー�
 cd src-tauri && cargo test --lib store::user_ref
 ```
 
-Expected: コンパイルエラー(本体側がまだ`rusqlite::Connection`を取るため)。
+Expected: コンパイルエラー(`upsert_user_async`/`fill_user_from_snapshot_async`/`fetch_users_by_ids_async`がまだ存在しないため)。
 
-- [ ] **Step 3: `upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`を書き換える**
+- [ ] **Step 3: `upsert_user_async`/`fill_user_from_snapshot_async`/`fetch_users_by_ids_async`を追加する(既存の同期版はそのまま残す)**
+
+ファイル先頭の`use`に`use sqlx::{Row, SqliteConnection};`を追加する(既存の`use rusqlite::{params, Connection};`はそのまま残す)。以下の3関数は既存の`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`の**下に追記**する(置き換えない):
 
 ```rust
 use sqlx::{Row, SqliteConnection};
 
-pub(crate) async fn upsert_user(conn: &mut SqliteConnection, user: &User) -> Result<()> {
+pub(crate) async fn upsert_user_async(conn: &mut SqliteConnection, user: &User) -> Result<()> {
     let emojis_json = serde_json::to_string(&user.emojis)?;
     let (instance_name, instance_icon_url, instance_theme_color) = match &user.instance {
         Some(i) => (i.name.clone(), i.icon_url.clone(), i.theme_color.clone()),
@@ -611,7 +639,7 @@ pub(crate) async fn upsert_user(conn: &mut SqliteConnection, user: &User) -> Res
     Ok(())
 }
 
-pub(crate) async fn fill_user_from_snapshot(conn: &mut SqliteConnection, user: &User) -> Result<()> {
+pub(crate) async fn fill_user_from_snapshot_async(conn: &mut SqliteConnection, user: &User) -> Result<()> {
     let emojis_json = serde_json::to_string(&user.emojis)?;
     let (instance_name, instance_icon_url, instance_theme_color) = match &user.instance {
         Some(i) => (i.name.clone(), i.icon_url.clone(), i.theme_color.clone()),
@@ -661,7 +689,7 @@ pub(crate) async fn fill_user_from_snapshot(conn: &mut SqliteConnection, user: &
     Ok(())
 }
 
-pub(crate) async fn fetch_users_by_ids(
+pub(crate) async fn fetch_users_by_ids_async(
     conn: &mut SqliteConnection,
     ids: &[String],
 ) -> Result<HashMap<String, User>> {
@@ -725,51 +753,92 @@ pub(crate) async fn fetch_users_by_ids(
 cd src-tauri && cargo test --lib store::user_ref
 ```
 
-Expected: PASS(全17テスト: DB操作6件が新規async化、非DB系11件は無変更のままPASS)
+Expected: PASS(既存の17テスト全件そのままPASS + 新規`mod async_tests`内6テストPASS = 23件)。`upsert_user_async`等はまだ何からも呼ばれないため`dead_code`警告が出るが、Task 1と同様この時点では問題ない(Task 3で解消される)。
 
 - [ ] **Step 5: コミット**
 
 ```bash
 git add src-tauri/src/store/user_ref.rs
-git commit -m "user_refのDB操作をsqlx非同期に移行"
+git commit -m "user_ref: sqlx非同期版のupsert_user_async等を追加"
 ```
 
 ---
 
-### Task 3: `store/note_cache.rs` — sqlx非同期化(本体)
+### Task 3: `store/sqlite_backend.rs`(新規) — sqlx版`SqliteBackend`
+
+**方針(計画冒頭「タスク分割の実行順序制約」参照)**: 既存の`note_cache.rs`(`NoteCacheStore`、rusqlite版)は**一切変更しない**。まだ`lib.rs`/`state.rs`/`commands/column.rs`/`commands/mute.rs`/`commands/note.rs`/`stream/connection.rs`から同期的に呼ばれ続けているため、これを直接書き換えるとクレート全体が壊れる。代わりに、まったく新しいファイル`store/sqlite_backend.rs`に、新しい型`SqliteBackend`として非同期版を一から書く。ファイルが別なので、`upsert_note`/`resolve_payload_rows`/`delete_matching`のような内部private関数名は`note_cache.rs`側と同じ名前をそのまま使ってよい(衝突しない)。このタスクの成果物はまだ何からも(本番コードからは)呼ばれない、独立してテストされるだけの新規モジュールである。
 
 **Files:**
-- Modify: `src-tauri/src/store/note_cache.rs`(全体書き換え)
+- Create: `src-tauri/src/store/sqlite_backend.rs`(新規。以下の内容をまるごと書く)
+- Modify: `src-tauri/src/store/mod.rs`(`mod sqlite_backend;`を追加して新ファイルをモジュールツリーに登録する。`pub(crate) use sqlite_backend::SqliteBackend;`もあわせて追加し、Task 4から`crate::store::SqliteBackend`として参照できるようにする)
+- 既存の`src-tauri/src/store/note_cache.rs`・`src-tauri/src/store/user_ref.rs`は**このタスクでは一切変更しない**
 
 **Interfaces:**
 - Consumes:
-  - `crate::store::db::{open_cache, open_cache_in_memory}() -> Result<sqlx::SqlitePool>`(Task 1)
-  - `crate::store::user_ref::{upsert_user, fill_user_from_snapshot, fetch_users_by_ids}`(すべて`async fn(&mut SqliteConnection, ...)`、Task 2)
-- Produces: `NoteCacheStore`の全メソッドが`async fn`になる(シグネチャの引数・戻り値の型自体は現状と同じ、`self`の借用も`&self`のまま。呼び出し元は`.await`を追加するだけでよい)。このタスクではまだ`NoteCacheStore`自身が`sqlx::SqlitePool`を直接保持する(トレイト抽出はTask 4)
+  - `crate::store::db::{open_cache_pool, open_cache_pool_in_memory}() -> Result<sqlx::SqlitePool>`(Task 1)
+  - `crate::store::user_ref::{upsert_user_async, fill_user_from_snapshot_async, fetch_users_by_ids_async}`(すべて`async fn(&mut SqliteConnection, ...)`、Task 2)。それ以外の`collect_users`/`stub_user_refs`/`has_legacy_full_user`/`is_legacy_full_user`/`collect_user_id_refs`/`hydrate_user_refs`は既存のまま(DB接続を取らないため新旧共通)
+- Produces: `pub(crate) struct SqliteBackend`の全メソッドが`async fn`(Task 4で`NoteCacheBackend`トレイトを実装させ、既存`NoteCacheStore`(rusqlite版)を置き換える)
 
-このタスクは対象範囲が広いため、以下のサブステップ群に分けて進める。**各サブステップの完了時点でファイル全体が再びコンパイルできる必要はない**(このタスク全体で1回`cargo test`が通ればよい)ため、実装時は一気に書き換えてから最後にテストを流す形でよい。ただしTDDの原則に沿い、テストは先に書き換えて「何を実装すべきか」を確定させてから本体を書く。
+このタスクは対象範囲が広いため、以下のサブステップ群に分けて進める。**各サブステップの完了時点でファイル全体が再びコンパイルできる必要はない**(このタスク全体で1回`cargo test`が通ればよい)ため、実装時は一気に書き上げてから最後にテストを流す形でよい。ただしTDDの原則に沿い、テストは先に書いて「何を実装すべきか」を確定させてから本体を書く。
 
-- [ ] **Step 1: `NoteCacheStore`の型定義とコンストラクタを書き換える**
+- [ ] **Step 1: `store/sqlite_backend.rs`を新規作成し、`SqliteBackend`の型定義とコンストラクタを書く**
+
+`src-tauri/src/store/mod.rs`に`mod sqlite_backend;`と`pub(crate) use sqlite_backend::SqliteBackend;`を追加した上で、新規ファイル`src-tauri/src/store/sqlite_backend.rs`を以下の内容で作成する:
 
 ```rust
+//! note cacheのsqlx版バックエンド(Issue #115 Phase 1)。`store/note_cache.rs`の
+//! `NoteCacheStore`(rusqlite版)と同じロジックをsqlx/async化したもの。
+//! Task 4で`NoteCacheBackend`トレイトを実装させ、`note_cache.rs`側の旧実装を置き換える。
+
 use crate::domain::{Note, Visibility};
 use crate::error::Result;
 use crate::store::user_ref::{
-    collect_user_id_refs, collect_users, fetch_users_by_ids, fill_user_from_snapshot,
-    has_legacy_full_user, hydrate_user_refs, is_legacy_full_user, stub_user_refs, upsert_user,
+    collect_user_id_refs, collect_users, fetch_users_by_ids_async, fill_user_from_snapshot_async,
+    has_legacy_full_user, hydrate_user_refs, is_legacy_full_user, stub_user_refs, upsert_user_async,
 };
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
-pub struct NoteCacheStore {
+pub(crate) struct SqliteBackend {
     pool: SqlitePool,
 }
 
-impl NoteCacheStore {
-    pub fn new(pool: SqlitePool) -> Self {
+impl SqliteBackend {
+    pub(crate) fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+
+    #[cfg(test)]
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+}
+
+fn now_epoch() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn visibility_str(v: Visibility) -> &'static str {
+    match v {
+        Visibility::Public => "public",
+        Visibility::Home => "home",
+        Visibility::Followers => "followers",
+        Visibility::Specified => "specified",
+    }
+}
+
+fn mime_category(mime: &str) -> &str {
+    mime.split('/').next().unwrap_or("other")
+}
+
+fn has_url(text: &str) -> bool {
+    text.contains("http://") || text.contains("https://")
 }
 ```
+
+(`now_epoch`/`visibility_str`/`mime_category`/`has_url`は`note_cache.rs`にある既存のprivateヘルパーと同一実装。別ファイルなので複製してよい)
 
 - [ ] **Step 2: `upsert_note`と関連テーブルUPSERT化(DELETE→INSERTからの置き換え)を書く**
 
@@ -785,7 +854,7 @@ async fn upsert_note(conn: &mut SqliteConnection, n: &Note) -> Result<()> {
     let has_link = n.text.as_deref().map(has_url).unwrap_or(false) as i64;
 
     for user in collect_users(n) {
-        upsert_user(conn, user).await?;
+        upsert_user_async(conn, user).await?;
     }
 
     sqlx::query(
@@ -943,7 +1012,7 @@ async fn upsert_note(conn: &mut SqliteConnection, n: &Note) -> Result<()> {
 - [ ] **Step 3: 読み取り系(`load_cached`/`load_cached_before`/`get_note`/`update_note`/`resolve_payload_rows`/自己修復)を書く**
 
 ```rust
-impl NoteCacheStore {
+impl SqliteBackend {
     pub async fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()> {
         if notes.is_empty() {
             return Ok(());
@@ -1044,7 +1113,7 @@ async fn resolve_payload_rows(pool: &SqlitePool, rows: Vec<(String, String)>) ->
     }
     ids.sort();
     ids.dedup();
-    let users = fetch_users_by_ids(&mut conn, &ids).await?;
+    let users = fetch_users_by_ids_async(&mut conn, &ids).await?;
 
     let mut out = Vec::with_capacity(values.len());
     for (id, mut v) in values {
@@ -1082,7 +1151,7 @@ fn self_heal_node<'a>(
         if let Some(user_value) = node.get("user").cloned() {
             if is_legacy_full_user(&user_value) {
                 if let Ok(user) = serde_json::from_value::<crate::domain::User>(user_value.clone()) {
-                    fill_user_from_snapshot(conn, &user).await?;
+                    fill_user_from_snapshot_async(conn, &user).await?;
                     if let Some(id) = user_value.get("id").cloned() {
                         node["user"] = serde_json::json!({ "id": id });
                         changed = true;
@@ -1103,7 +1172,7 @@ fn self_heal_node<'a>(
 - [ ] **Step 4: 境界CRUD・カウント系を書く**
 
 ```rust
-impl NoteCacheStore {
+impl SqliteBackend {
     pub async fn clear_column_notes(&self, column_id: &str) -> Result<()> {
         sqlx::query("DELETE FROM column_note WHERE column_id = ?1").bind(column_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM column_fetch_boundary WHERE column_id = ?1").bind(column_id).execute(&self.pool).await?;
@@ -1168,7 +1237,7 @@ impl NoteCacheStore {
 - [ ] **Step 5: `prune`/`delete_matching`/`shrink_to_size`/`db_size_bytes`を書く(TEMP TABLE撤去)**
 
 ```rust
-impl NoteCacheStore {
+impl SqliteBackend {
     pub async fn prune(&self, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
         let mut deleted: i64 = 0;
         {
@@ -1321,7 +1390,7 @@ async fn shrink_to_size(pool: &SqlitePool, budget_bytes: i64) -> Result<i64> {
 - [ ] **Step 6: `search_cache`を書く(設計書どおり、生SQL・`?`プレースホルダのまま変更しない)**
 
 ```rust
-impl NoteCacheStore {
+impl SqliteBackend {
     pub async fn search_cache(
         &self,
         where_sql: &crate::filter::sql::SqlWhere,
@@ -1357,13 +1426,14 @@ impl NoteCacheStore {
 }
 ```
 
-- [ ] **Step 7: `#[cfg(test)] mod tests`を`#[tokio::test]`化する**
+- [ ] **Step 7: `store/sqlite_backend.rs`に`#[cfg(test)] mod tests`を書く**
 
-既存の全テスト(約30件)を以下の変換ルールで書き換える:
-- `fn store() -> NoteCacheStore` → `async fn store() -> NoteCacheStore { NoteCacheStore::new(open_cache_in_memory().await.unwrap()) }`
+`src-tauri/src/store/note_cache.rs`の既存`#[cfg(test)] mod tests`(約30件)を**参照テンプレート**として読み、同じ検証内容を`sqlite_backend.rs`側の新しい`#[cfg(test)] mod tests`として書く(`note_cache.rs`自体は変更しない。あくまで「何をテストすべきか」の参照)。変換ルール:
+- `fn store() -> NoteCacheStore` だった箇所は `async fn store() -> SqliteBackend { SqliteBackend::new(open_cache_pool_in_memory().await.unwrap()) }` にする
 - 各`#[test] fn test_name() { let s = store(); ... }` → `#[tokio::test] async fn test_name() { let s = store().await; ... s.cache_notes(...).await.unwrap() ... }`(メソッド呼び出しすべてに`.await`を追加)
-- テスト内で`s.conn.lock().unwrap()`を使って直接SQLを検証している箇所(例: `upsert_note_stores_stubbed_user_in_payload`, `upsert_replaces_and_relations_not_duplicated`, `normalized_columns_populated_for_nql`など)は、`s.pool`をpublicにはせず、`sqlx::query_scalar("...").bind(...).fetch_one(&s.pool).await.unwrap()`のように直接プールへ問い合わせる形に書き換える。そのため`NoteCacheStore`にテスト専用の`#[cfg(test)] pub(crate) fn pool(&self) -> &SqlitePool { &self.pool }`アクセサを追加してよい
-- `insert_legacy_row`(旧形式行を素のSQLで作るテストヘルパー)も`async fn`化し、`sqlx::query(...).execute(&s.pool()).await.unwrap()`に置き換える
+- 元のテストが`s.conn.lock().unwrap()`で直接SQLを検証していた箇所(例: `upsert_note_stores_stubbed_user_in_payload`, `upsert_replaces_and_relations_not_duplicated`, `normalized_columns_populated_for_nql`など)は、Step 1で用意した`s.pool()`アクセサ経由で`sqlx::query_scalar("...").bind(...).fetch_one(s.pool()).await.unwrap()`のように直接プールへ問い合わせる形にする
+- `insert_legacy_row`(旧形式行を素のSQLで作るテストヘルパー)も`async fn`化し、`sqlx::query(...).execute(s.pool()).await.unwrap()`に置き換える
+- `note(...)`/`payload_with_array_emojis(...)`等、DBに触れない純粋なテストヘルパー(`Note`構造体を組み立てるだけの関数)は元のコードをそのままコピーしてよい
 
 代表例(`upsert_note_stores_stubbed_user_in_payload`):
 
@@ -1387,16 +1457,16 @@ impl NoteCacheStore {
 - [ ] **Step 8: テストを実行して通過を確認する**
 
 ```bash
-cd src-tauri && cargo test --lib store::note_cache
+cd src-tauri && cargo test --lib store::sqlite_backend
 ```
 
-Expected: PASS(全テスト。追加で`upsert_replaces_and_relations_not_duplicated`が「DELETE→INSERT」ではなく「UPSERT」に変わったことを検証する意味も持つようになる)
+Expected: PASS(既存`note_cache.rs`と同数のテストが`sqlite_backend.rs`側に揃ってPASSする。追加で`upsert_replaces_and_relations_not_duplicated`相当のテストが「DELETE→INSERT」ではなく「UPSERT」に変わったことを検証する意味も持つようになる)。`cd src-tauri && cargo test`(クレート全体)も実行し、既存`note_cache.rs`側のテストが無変更のままPASSし続けていることを確認する。`SqliteBackend`はまだ本番コードから使われないため`dead_code`警告が出るが、Task 1/2と同様この時点では問題ない(Task 4で解消される)。
 
 - [ ] **Step 9: コミット**
 
 ```bash
-git add src-tauri/src/store/note_cache.rs
-git commit -m "note_cacheをsqlx非同期に移行し側テーブルをUPSERT化・pruneをTEMP TABLE無しに変更"
+git add src-tauri/src/store/mod.rs src-tauri/src/store/sqlite_backend.rs
+git commit -m "note cache用にsqlx版SqliteBackendを新規実装"
 ```
 
 ---
@@ -1404,7 +1474,10 @@ git commit -m "note_cacheをsqlx非同期に移行し側テーブルをUPSERT化
 ### Task 4: `NoteCacheBackend`トレイト抽出 + 呼び出し元の`.await`追加
 
 **Files:**
-- Modify: `src-tauri/src/store/note_cache.rs`(トレイト抽出)
+- Modify: `src-tauri/src/store/note_cache.rs`(旧実装を削除しトレイト定義+薄い委譲ラッパーに置き換え)
+- Modify: `src-tauri/src/store/db.rs`(旧rusqlite版cache関数を削除、`_pool`サフィックスを外す)
+- Modify: `src-tauri/src/store/user_ref.rs`(旧rusqlite版関数を削除、`_async`サフィックスを外す)
+- Modify: `src-tauri/src/store/sqlite_backend.rs`(トレイト実装への変更、db.rs/user_ref.rsのリネームに追随)
 - Modify: `src-tauri/src/store/mod.rs`
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/state.rs`
@@ -1414,17 +1487,19 @@ git commit -m "note_cacheをsqlx非同期に移行し側テーブルをUPSERT化
 - Modify: `src-tauri/src/stream/connection.rs`
 - Modify: `src-tauri/src/commands/draft.rs`(テストの`AppState::new_for_test`呼び出しに`.await`を追加)
 
+**方針**: このタスクだけが「一括切替」を行う。Task 1〜3で並行に追加してきた`_pool`/`_async`サフィックス付き関数・`SqliteBackend`型を本採用し、旧rusqlite実装(`note_cache.rs`の`NoteCacheStore`本体、`user_ref.rs`の`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`、`db.rs`の`open_cache`/`open_cache_in_memory`/`migrate_cache`/`column_exists`/`enable_incremental_vacuum`)を削除し、全呼び出し元を新APIに切り替える。このタスクの実装中はクレート全体が一時的にコンパイル不能になってよい(このタスクの最後に`cargo test`がgreenになればよい)。
+
 **Interfaces:**
-- Consumes: Task 3で完成した`NoteCacheStore`の全async メソッド
+- Consumes: Task 3で完成した`SqliteBackend`(`store/sqlite_backend.rs`)の全async メソッド
 - Produces:
-  - `pub(crate) trait NoteCacheBackend: Send + Sync`(Task 3の`NoteCacheStore`が持っていた全publicメソッドと同じシグネチャをasync traitメソッドとして持つ)
-  - `pub(crate) struct SqliteBackend`(Task 3の`NoteCacheStore`の中身をリネームしたもの。`impl NoteCacheBackend for SqliteBackend`)
-  - `pub struct NoteCacheStore { backend: Box<dyn NoteCacheBackend> }`(薄い委譲ラッパー)
+  - `pub(crate) trait NoteCacheBackend: Send + Sync`(`SqliteBackend`が持つ全メソッドと同じシグネチャをasync traitメソッドとして持つ)
+  - `impl NoteCacheBackend for SqliteBackend`(`store/sqlite_backend.rs`に追記)
+  - `pub struct NoteCacheStore { backend: Box<dyn NoteCacheBackend> }`(`note_cache.rs`を全面書き換えした、薄い委譲ラッパー)
   - `AppState::new_for_test`が`pub(crate) async fn`になる
 
-- [ ] **Step 1: トレイトを定義し、`SqliteBackend`へリネームする**
+- [ ] **Step 1: `note_cache.rs`の旧rusqlite実装を削除し、トレイト定義+薄い委譲ラッパーに置き換える**
 
-`note_cache.rs`の先頭に`async-trait`を使ったトレイト定義を追加し、Task 3で書いた`impl NoteCacheStore { ... }`ブロックの型名を`SqliteBackend`にリネーム、各メソッド定義に`#[async_trait::async_trait] impl NoteCacheBackend for SqliteBackend { ... }`を被せる:
+`src-tauri/src/store/note_cache.rs`の中身(既存の`NoteCacheStore`構造体・`impl`ブロック・private関数群・`#[cfg(test)] mod tests`)を**全て削除**し、以下に置き換える。まず`NoteCacheBackend`トレイトを定義する:
 
 ```rust
 #[async_trait::async_trait]
@@ -1450,33 +1525,11 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
         limit: u32,
     ) -> Result<Vec<Note>>;
 }
-
-pub(crate) struct SqliteBackend {
-    pool: SqlitePool,
-}
-
-impl SqliteBackend {
-    pub(crate) fn new(pool: SqlitePool) -> Self {
-        Self { pool }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pool(&self) -> &SqlitePool {
-        &self.pool
-    }
-}
-
-#[async_trait::async_trait]
-impl NoteCacheBackend for SqliteBackend {
-    async fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()> {
-        // Task 3で書いた本体をそのまま移す
-        ...
-    }
-    // 以下、Task 3の各メソッドをそのまま移す(cache_note含む)
-}
 ```
 
-`NoteCacheStore`を薄い委譲ラッパーへ書き換える:
+このトレイト定義は`note_cache.rs`に置く。次に`src-tauri/src/store/sqlite_backend.rs`(Task 3で作成済み)を編集し、既存の`impl SqliteBackend { pub(crate) async fn cache_notes(...) { ... } ... }`のうち、トレイトのメソッド一覧と一致するもの(`cache_notes`/`cache_note`/`load_cached`/`load_cached_before`/`get_note`/`update_note`/`clear_column_notes`/`get_fetch_boundary`/`set_fetch_boundary`/`extend_fetch_boundary`/`clear_all_fetch_boundaries`/`note_count`/`notes_since`/`prune`/`search_cache`)を、中身は変更せず`#[async_trait::async_trait] impl NoteCacheBackend for SqliteBackend { ... }`ブロックの中へ**移動**する(コピーではなく移動。同じ関数を2箇所に残さない)。`new`/`pool`(テスト専用アクセサ)はトレイトに含まれないので、`impl SqliteBackend { ... }`(inherent impl)にそのまま残す。`sqlite_backend.rs`の先頭に`use crate::store::note_cache::NoteCacheBackend;`を追加する。
+
+`note_cache.rs`側では、削除した旧実装の代わりに`NoteCacheStore`を薄い委譲ラッパーへ書き換える:
 
 ```rust
 pub struct NoteCacheStore {
@@ -1541,17 +1594,36 @@ impl NoteCacheStore {
 }
 ```
 
-`#[cfg(test)] mod tests`内の`store()`ヘルパーは`NoteCacheStore::new(SqliteBackend::new(open_cache_in_memory().await.unwrap()))`に、`s.pool()`は`s.backend`の型を`SqliteBackend`と分かっている前提でテストからは使えなくなるため、`NoteCacheStore`にも`#[cfg(test)] pub(crate) fn sqlite_pool(&self) -> &SqlitePool`のようなdowncast用アクセサを用意するか、あるいはテストは`SqliteBackend`を直接使う(`NoteCacheStore`でラップしない)ように書き換える。後者の方が単純なので、`note_cache.rs`内の`#[cfg(test)] mod tests`は`SqliteBackend`を直接テスト対象にする(`NoteCacheStore`の委譲は別途、後述のcall-site統合テストで十分カバーされる)。
+`note_cache.rs`のこの薄い委譲ラッパー自体には`#[cfg(test)] mod tests`を新設しなくてよい。実質的なロジックのテストはTask 3で`sqlite_backend.rs`側にすでに書いてあり(`SqliteBackend`を直接テスト対象にしている)、`NoteCacheStore`は単純な委譲のみなので、後述のcall-site経由の統合テスト(既存の`commands/column.rs`等のテスト)で間接的にカバーされる。
 
-- [ ] **Step 2: `store/mod.rs`のエクスポートを確認・更新する**
+- [ ] **Step 2: `db.rs`/`user_ref.rs`の旧rusqlite実装を削除し、`_pool`/`_async`サフィックスを外す**
+
+Task 1〜3で並行実装してきた新旧APIを、ここで最終形にたたむ:
+
+`src-tauri/src/store/db.rs`:
+- 旧`open_cache`/`open_cache_in_memory`/`migrate_cache`/`column_exists`/`enable_incremental_vacuum`(rusqlite版、cache DB用)を削除する。ただし`column_exists`は`migrate`(settings用)からも呼ばれている共有関数なので、**settings側から見て必要な実装は残す**。具体的には、旧`column_exists`のうち「cache DB用の`migrate_cache`からの呼び出し」だけが不要になるので、関数自体(`migrate`からの呼び出しは残る)は削除しないこと。削除してよいのは旧`open_cache`/`open_cache_in_memory`/`migrate_cache`/`enable_incremental_vacuum`(rusqlite版、cache DB専用)のみ
+- 新しい`open_cache_pool`/`open_cache_pool_in_memory`/`migrate_cache_pool`/`enable_incremental_vacuum_pool`から`_pool`サフィックスを外し、それぞれ`open_cache`/`open_cache_in_memory`/`migrate_cache`/`enable_incremental_vacuum`にリネームする(旧rusqlite版を削除済みなので衝突しない)。**`column_exists_pool`だけは`_pool`サフィックスを外さずそのまま残す**。既存のrusqlite版`column_exists`(settings用`migrate`が使う、削除しない)と同名になってしまうため、衝突を避けるためにsqlx版はこの名前のまま据え置く
+- 可視性を`pub(crate)`から元の`pub`に戻す(`open_cache`/`open_cache_in_memory`は元々`pub`だったため)
+
+`src-tauri/src/store/user_ref.rs`:
+- 旧`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`(rusqlite版)と、それらを検証していた既存`#[cfg(test)] mod tests`直下のテスト(DBを使う6件: `upsert_user_preserves_bio_when_later_write_has_none`等)を削除する
+- 新しい`upsert_user_async`/`fill_user_from_snapshot_async`/`fetch_users_by_ids_async`から`_async`サフィックスを外し、`upsert_user`/`fill_user_from_snapshot`/`fetch_users_by_ids`にリネームする
+- `mod async_tests { ... }`は削除し、その中身を(旧テストを消した後の)`mod tests`直下に平らに展開する(もはや名前が衝突しないため、ネストしたモジュールに分ける必要がない)
+
+`src-tauri/src/store/sqlite_backend.rs`(Task 3で作成):
+- `use crate::store::db::{open_cache_pool, open_cache_pool_in_memory};` → `use crate::store::db::{open_cache, open_cache_in_memory};`に、`use crate::store::user_ref::{upsert_user_async, ...}` → `use crate::store::user_ref::{upsert_user, ...}`に、本文中の呼び出し箇所もあわせてリネームする
+
+この時点で`cd src-tauri && cargo test --lib store::db && cargo test --lib store::user_ref && cargo test --lib store::sqlite_backend`を実行し、3モジュールとも green であることを確認する(まだ`note_cache.rs`・呼び出し元4ファイルは更新していないので、クレート全体の`cargo test`はこの時点でまだ失敗してよい)。
+
+- [ ] **Step 3: `store/mod.rs`のエクスポートを確認・更新する**
 
 ```bash
 grep -n "NoteCacheStore\|SqliteBackend\|NoteCacheBackend" src-tauri/src/store/mod.rs
 ```
 
-`pub use note_cache::NoteCacheStore;`のみ公開されていることを確認する(`SqliteBackend`/`NoteCacheBackend`は`pub(crate)`のままで外部非公開)。
+`pub use note_cache::NoteCacheStore;`が公開されていることを確認しつつ、`mod sqlite_backend;`(Task 3で追加済み)の可視性を`pub(crate) use sqlite_backend::SqliteBackend;`に更新する(それまでは`SqliteBackend`はテスト以外から参照されなかったため、通常のprivate `mod`のままだった可能性がある)。`NoteCacheBackend`は`pub(crate)`のままで外部非公開。
 
-- [ ] **Step 3: `lib.rs`の初期化コードを更新する**
+- [ ] **Step 4: `lib.rs`の初期化コードを更新する**
 
 `src-tauri/src/lib.rs:233-235`付近:
 
@@ -1571,9 +1643,9 @@ let cache = NoteCacheStore::new(store::SqliteBackend::new(cache_pool));
 app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache));
 ```
 
-このブロックは`tauri::Builder::setup`のクロージャ内(同期コンテキスト)にあるため、`tauri::async_runtime::block_on`でasync呼び出しをブロッキング実行する(Tauriのsetupフックが提供する標準パターン)。`store::SqliteBackend`を`lib.rs`から参照できるよう、`store/mod.rs`で`pub(crate) use note_cache::SqliteBackend;`を追加する。
+このブロックは`tauri::Builder::setup`のクロージャ内(同期コンテキスト)にあるため、`tauri::async_runtime::block_on`でasync呼び出しをブロッキング実行する(Tauriのsetupフックが提供する標準パターン)。`store::SqliteBackend`を`lib.rs`から参照できるのは、Step 3で`store/mod.rs`に追加した`pub(crate) use sqlite_backend::SqliteBackend;`のおかげ。
 
-- [ ] **Step 4: `state.rs`の`new_for_test`を`async fn`にする**
+- [ ] **Step 5: `state.rs`の`new_for_test`を`async fn`にする**
 
 ```rust
     #[cfg(test)]
@@ -1590,7 +1662,7 @@ app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache));
     }
 ```
 
-- [ ] **Step 5: `AppState::new_for_test`呼び出し元に`.await`を追加する**
+- [ ] **Step 6: `AppState::new_for_test`呼び出し元に`.await`を追加する**
 
 ```bash
 grep -rn "AppState::new_for_test" src-tauri/src
@@ -1600,7 +1672,7 @@ grep -rn "AppState::new_for_test" src-tauri/src
 1. 呼び出し箇所を含む`#[test] fn`が`#[tokio::test] async fn`になっていることを確認し、なっていなければ変更する
 2. `AppState::new_for_test(settings)` → `AppState::new_for_test(settings).await`に変更する
 
-- [ ] **Step 6: `commands/column.rs`のcall siteを更新する**
+- [ ] **Step 7: `commands/column.rs`のcall siteを更新する**
 
 `grep -n "state\.cache\." src-tauri/src/commands/column.rs`の各行に`.await`を追加する(対象行: 243, 290, 321, 365, 372, 401, 434, 447, 510, 755, 758, 970, 994, 1208)。これらは既にすべて`async fn`内にあるため、`?`演算子を使っている箇所は`.await?`に、`.ok()`/`let _ =`パターンは`.await`のみ追加する。
 
@@ -1618,19 +1690,19 @@ grep -rn "AppState::new_for_test" src-tauri/src
 
 呼び出し元のテスト関数も`#[tokio::test] async fn`化し、`cache_with(...)`呼び出しに`.await`を追加する。
 
-- [ ] **Step 7: `commands/mute.rs`のcall siteを更新する**
+- [ ] **Step 8: `commands/mute.rs`のcall siteを更新する**
 
 34行目: `let _ = state.cache.clear_all_fetch_boundaries();` → `let _ = state.cache.clear_all_fetch_boundaries().await;`
 
-- [ ] **Step 8: `commands/note.rs`のcall siteを更新する**
+- [ ] **Step 9: `commands/note.rs`のcall siteを更新する**
 
 74, 76, 91, 93行目の`state.cache.get_note(...)`/`state.cache.update_note(...)`に`.await`を追加する。`if let Ok(Some(mut note)) = state.cache.get_note(&note_id) {`のような`if let`パターンは`if let Ok(Some(mut note)) = state.cache.get_note(&note_id).await {`になる。
 
-- [ ] **Step 9: `stream/connection.rs`のcall siteを更新する**
+- [ ] **Step 10: `stream/connection.rs`のcall siteを更新する**
 
 762, 923, 931行目(プロダクションコード)に`.await`を追加する。1204, 1207, 1212, 1222行目(テストコード)は該当テスト関数を`#[tokio::test] async fn`化した上で`.await`を追加する。
 
-- [ ] **Step 10: 全体テストを実行する**
+- [ ] **Step 11: 全体テストを実行する**
 
 ```bash
 cd src-tauri && cargo test
@@ -1638,7 +1710,7 @@ cd src-tauri && cargo test
 
 Expected: PASS(全テスト)。コンパイルエラーが出た場合は、上記のcall site一覧に漏れがないか`grep -rn "\.cache\.\w" src-tauri/src`で再確認する。
 
-- [ ] **Step 11: `cargo tauri dev`で実機動作を確認する**
+- [ ] **Step 12: `cargo tauri dev`で実機動作を確認する**
 
 リポジトリルートから`cargo tauri dev`を起動し、以下を手動確認する:
 - カラムを開いてノートが表示される(`load_cached`/REST取得後の`cache_notes`)
@@ -1647,7 +1719,7 @@ Expected: PASS(全テスト)。コンパイルエラーが出た場合は、上�
 - Backstage(設定画面)のキャッシュ件数表示が正しく出る(`note_count`)
 - 検証後は自分で起動したdevサーバを終了する
 
-- [ ] **Step 12: コミット**
+- [ ] **Step 13: コミット**
 
 ```bash
 git add -A
@@ -1660,5 +1732,5 @@ git commit -m "NoteCacheBackendトレイトを抽出しSqliteBackendへ切り出
 
 - `cd src-tauri && cargo test`が全件green
 - `cd frontend && pnpm check`が影響を受けないこと(フロントエンドは今回のスコープ外、コマンドのRust側シグネチャ・TS bindingsは変わらないはず)を確認する
-- `cargo tauri dev`での手動確認(Task 4 Step 11)が完了している
+- `cargo tauri dev`での手動確認(Task 4 Step 12)が完了している
 - Phase 2(PostgreSQL対応・sea-query導入・設定UI)は別計画として、本Phase完了後にあらためて`writing-plans`で作成する
