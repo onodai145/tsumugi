@@ -35,6 +35,16 @@ export const commands = {
 	 *  level は "error" | "warn" | "info" | "debug"（未知の値は info 扱い）。
 	 */
 	logFrontendEvent: (level: string, message: string) => __TAURI_INVOKE<void>("log_frontend_event", { level, message }),
+	/**
+	 *  他アプリの共有シート(Android の ACTION_SEND/ACTION_SEND_MULTIPLE)から受け取った
+	 *  テキスト/添付ファイルパスを取り出す。フロントは起動時と `visibilitychange` のたびに
+	 *  これを呼びポーリングする(Issue #116)。無ければ `None`。一度取り出すと消費され、
+	 *  同じ内容が2回返ることはない。非Androidでは常に `None`。
+	 */
+	getPendingShare: () => __TAURI_INVOKE<{
+	text: string | null,
+	filePaths: string[],
+} | null>("get_pending_share"),
 	/**  MiAuth を開始し、認可URLと session_id を返す。 */
 	startMiauth: (host: string) => typedError<MiAuthSession, Error>(__TAURI_INVOKE("start_miauth", { host })),
 	/**  ブラウザでの認可完了後に呼ぶ。token を keyring に保存し、Account を返す。 */
@@ -770,6 +780,16 @@ export type ReactionUser = {
 	user: User,
 	/**  Misskey形式キー（Unicode生 or :name@host:） */
 	reaction: string,
+};
+
+/**
+ *  他アプリの共有シート(Android の ACTION_SEND/ACTION_SEND_MULTIPLE)から受け取った内容
+ *  (Issue #116)。`text` はテキスト共有時のみ、`file_paths` は画像/動画共有時のみ埋まる
+ *  (アプリの一時キャッシュディレクトリへコピー済みの絶対パス)。
+ */
+export type ShareReceived = {
+	text: string | null,
+	filePaths: string[],
 };
 
 /**  id + 表示名の軽量参照（アンテナ/チャンネル等のソース選択用）。 */

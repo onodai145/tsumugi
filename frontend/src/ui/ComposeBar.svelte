@@ -360,6 +360,14 @@
     if (c.replyTo && !text.trim()) {
       text = `${acctOf(c.replyTo.user)} `;
     }
+    // 共有インテント等からの初期本文(Issue #116)。返信のメンション挿入と同様、
+    // 既に何か入力中ならそちらを優先し上書きしない。
+    if (c.text && !text.trim()) {
+      text = c.text;
+    }
+    for (const p of c.filePaths ?? []) {
+      void addLocalAttachment(p);
+    }
     app.compose = null;
     textarea?.focus();
   });
@@ -435,14 +443,14 @@
   $effect(() => {
     if (app.booting || autoRestoreDone) return;
     autoRestoreDone = true;
-    if (!accountId || text.trim() || replyTo || quoteOf) return;
+    if (!accountId || text.trim() || replyTo || quoteOf || attachments.length > 0) return;
     const acc = accountId;
     unwrapAcc(acc, commands.getAutoDraft(acc))
       .then((d) => {
         if (!d) return;
         // 復元試行中、他の初期化(app.compose消費など)で既に何か入力/文脈が付いていたら
         // 上書きしない
-        if (text.trim() || replyTo || quoteOf) return;
+        if (text.trim() || replyTo || quoteOf || attachments.length > 0) return;
         void loadDraft(d);
       })
       .catch(() => {});
@@ -493,6 +501,19 @@
     quoteOf = undefined;
   }
 
+  async function addLocalAttachment(path: string) {
+    const name = path.split(/[\\/]/).pop() ?? path;
+    let previewUrl: string | null = null;
+    if (IMAGE_EXTENSIONS.has(extLower(name))) {
+      try {
+        previewUrl = await unwrap(commands.readAttachmentPreview(path));
+      } catch {
+        previewUrl = null;
+      }
+    }
+    attachments = [...attachments, { kind: "local", id: crypto.randomUUID(), path, name, previewUrl }];
+  }
+
   async function pickFiles() {
     err = null;
     // filters は付けない: Misskey のドライブは画像/動画に限らず任意のファイル種別を
@@ -504,16 +525,7 @@
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     for (const p of paths) {
-      const name = p.split(/[\\/]/).pop() ?? p;
-      let previewUrl: string | null = null;
-      if (IMAGE_EXTENSIONS.has(extLower(name))) {
-        try {
-          previewUrl = await unwrap(commands.readAttachmentPreview(p));
-        } catch {
-          previewUrl = null;
-        }
-      }
-      attachments = [...attachments, { kind: "local", id: crypto.randomUUID(), path: p, name, previewUrl }];
+      await addLocalAttachment(p);
     }
   }
 
@@ -622,15 +634,24 @@
     }
     replyTo = d.replyNote ? snapshotToContextNote(d.replyNote) : undefined;
     quoteOf = d.quoteNote ? snapshotToContextNote(d.quoteNote) : undefined;
+    // ここから下書きのファイル読み込みでawaitを挟むため、その間に共有インテント等で
+    // 新たに追加された添付(loadDraft開始時点ではまだ無かったもの)を、下書き側の
+    // 添付一覧で丸ごと上書きしないよう、開始前のスナップショットと突き合わせて残す
+    // (Issue #116 最終レビュー指摘: warm-startの共有添付がloadDraftに消される競合)。
+    const attachmentsBeforeLoad = attachments;
     attachments = [];
     if (d.fileIds.length > 0 && accountId) {
       const acc = accountId;
       const results = await Promise.allSettled(
         d.fileIds.map((id) => unwrapAcc(acc, commands.getDriveFile(acc, id))),
       );
-      attachments = results.flatMap((r) =>
+      const fromDraft = results.flatMap((r) =>
         r.status === "fulfilled" ? [{ kind: "drive" as const, id: r.value.id, file: r.value }] : [],
       );
+      const addedDuringLoad = attachments.filter(
+        (a) => !attachmentsBeforeLoad.some((b) => b.id === a.id),
+      );
+      attachments = [...fromDraft, ...addedDuringLoad];
     }
     loadedDraftId = d.kind === "manual" ? d.id : null;
     showDraftMenu = false;

@@ -18,6 +18,7 @@
   import { buildKeymap, eventToChord } from "./lib/keymap";
   import { Pencil } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
+  import { setupPendingShareListener } from "./lib/pendingShare";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
@@ -114,7 +115,11 @@
   onMount(() => {
     app.boot();
     window.addEventListener("keydown", onGlobalKey);
-    return () => window.removeEventListener("keydown", onGlobalKey);
+    const stopPendingShareListener = setupPendingShareListener();
+    return () => {
+      window.removeEventListener("keydown", onGlobalKey);
+      stopPendingShareListener();
+    };
   });
 </script>
 
