@@ -64,7 +64,7 @@ Misskeyの `mutedWords: (string | string[])[]` の各要素を以下のルール
 
 | ファイル | 箇所 |
 |---|---|
-| `commands/column.rs` (~424行) | キャッシュ再検証(初期ロード) |
+| `commands/column.rs` (~424行) | `fetch_backfill`(上スクロールによる過去ノート補完) |
 | `commands/column.rs` (~899行) | `fill_gap`(再接続ギャップ埋め) |
 | `commands/column.rs` (~1122行) | `search_cache_core`(検索モーダル。`is_server_muted: impl Fn(&Note) -> bool` と同様に `is_word_muted: impl Fn(&Note) -> bool` をクロージャ引数として追加) |
 | `commands/column.rs` (~1209行) | `fetch_and_filter_multi`(REST初期/過去ページ取得) |
@@ -85,3 +85,4 @@ Misskeyの `mutedWords: (string | string[])[]` の各要素を以下のルール
 - `hardMutedWords` / `mutedInstances` は未対応(サーバー側で既に配信が絞られている前提)。将来的にIssueが立てば別スペックとして扱う。
 - 正規表現の `g`/`m` などのflagはマッチ判定に反映しない(`i` のみ対応)。
 - ワードミュートは通知には適用しない(ローカルNGワードと挙動を揃える)。
+- `resume_column`(初期ロード時のキャッシュ読み込み)はミュート設定を再検証しない — ローカルNGワード・サーバ側ユーザー/ブロックミュートと共通の既存動作で、このブランチが新規に導入したものではない。起動後に新しいノートを受信する経路(ストリーミング/バックフィル)から順次キャッシュが入れ替わるため実害は限定的だが、起動直後に古いキャッシュ内容が一瞬表示される可能性がある。将来別Issueとして対応を検討。
