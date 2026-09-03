@@ -636,7 +636,9 @@ async fn connect_and_run(
                             sub_index,
                             captures,
                             reaction_event_dedup,
-                        ) {
+                        )
+                        .await
+                        {
                             apply_capture_add(&mut write, captures, &note_id, &column_id).await;
                         }
                     }
@@ -719,7 +721,7 @@ enum HandleResult {
 /// - channel notification: 同様にカラム特定して ColumnNotification を emit。
 ///   reaction 通知は埋め込みノートを使って noteUpdated 相当の反映も行う(Issue #101)。
 /// - noteUpdated: そのノートを表示中の全カラムへ ColumnNoteUpdated を emit。
-fn handle_text(
+async fn handle_text(
     app: &AppHandle,
     account_id: &str,
     text: &str,
@@ -759,7 +761,7 @@ fn handle_text(
                 if state.is_word_muted(account_id, &normalized) {
                     return HandleResult::None;
                 }
-                let _ = state.cache.cache_note(&column_id, &normalized);
+                let _ = state.cache.cache_note(&column_id, &normalized).await;
             }
             let _ = ColumnNote {
                 column_id: column_id.clone(),
@@ -820,7 +822,7 @@ fn handle_text(
                         }
                         if let Some(state) = app.try_state::<AppState>() {
                             if !is_own_actor(&state, &account_id, actor_id.as_deref()) {
-                                apply_note_update_to_cache(&state, &note_id, &update);
+                                apply_note_update_to_cache(&state, &note_id, &update).await;
                             }
                         }
                     }
@@ -856,7 +858,7 @@ fn handle_text(
                 // ここで再度適用すると二重カウントになるため、他ユーザーの更新の時だけ反映する。
                 if let Some(state) = app.try_state::<AppState>() {
                     if !is_own_actor(&state, account_id, actor_id.as_deref()) {
-                        apply_note_update_to_cache(&state, &note_id, &update);
+                        apply_note_update_to_cache(&state, &note_id, &update).await;
                     }
                 }
             }
@@ -916,11 +918,11 @@ fn is_own_actor(state: &AppState, account_id: &str, actor_id: Option<&str>) -> b
 
 /// 他ユーザーの reacted/unreacted をキャッシュへ反映する（無ければ何もしない）。
 /// pollVoted/deleted はキャッシュ整合性への影響が小さいため対象外(Issue #89はリアクションのみ報告)。
-fn apply_note_update_to_cache(state: &AppState, note_id: &str, update: &NoteUpdate) {
+async fn apply_note_update_to_cache(state: &AppState, note_id: &str, update: &NoteUpdate) {
     let (NoteUpdate::Reacted { reaction } | NoteUpdate::Unreacted { reaction }) = update else {
         return;
     };
-    let Ok(Some(mut note)) = state.cache.get_note(note_id) else {
+    let Ok(Some(mut note)) = state.cache.get_note(note_id).await else {
         return;
     };
     match update {
@@ -928,7 +930,7 @@ fn apply_note_update_to_cache(state: &AppState, note_id: &str, update: &NoteUpda
         NoteUpdate::Unreacted { .. } => note.record_others_unreaction(reaction),
         _ => unreachable!(),
     }
-    let _ = state.cache.update_note(&note);
+    let _ = state.cache.update_note(&note).await;
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
@@ -1198,27 +1200,27 @@ mod tests {
         assert!(!is_own_actor(&state, "acc2", Some("u-self")));
     }
 
-    #[test]
-    fn apply_note_update_to_cache_increments_and_decrements_others_reaction() {
+    #[tokio::test]
+    async fn apply_note_update_to_cache_increments_and_decrements_others_reaction() {
         let state = state_with_account("acc1", "u-self");
-        state.cache.cache_note("col1", &minimal_note("n1")).unwrap();
+        state.cache.cache_note("col1", &minimal_note("n1")).await.unwrap();
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() });
-        let n = state.cache.get_note("n1").unwrap().unwrap();
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }).await;
+        let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.reactions.get("👍"), Some(&1));
         assert_eq!(n.reaction_count, 1);
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() });
-        let n = state.cache.get_note("n1").unwrap().unwrap();
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() }).await;
+        let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.reactions.get("👍"), None);
         assert_eq!(n.reaction_count, 0);
     }
 
-    #[test]
-    fn apply_note_update_to_cache_is_noop_when_note_not_cached() {
+    #[tokio::test]
+    async fn apply_note_update_to_cache_is_noop_when_note_not_cached() {
         let state = state_with_account("acc1", "u-self");
         // n1 は未キャッシュ。panicせず何もしないこと。
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() });
-        assert!(state.cache.get_note("n1").unwrap().is_none());
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }).await;
+        assert!(state.cache.get_note("n1").await.unwrap().is_none());
     }
 }

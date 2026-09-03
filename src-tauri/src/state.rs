@@ -133,7 +133,9 @@ impl AppState {
     /// `sound` は実デバイスを開くスレッドを立てない `SoundPlayer::new_for_test` を使う
     /// (ヘッドレス CI でのテストごとのデバイスプローブ/ALSA ノイズを避けるため)。
     pub(crate) fn new_for_test(settings: SettingsStore) -> Self {
-        let cache = NoteCacheStore::new(crate::store::db::open_cache_in_memory().unwrap());
+        let cache = NoteCacheStore::new(crate::store::SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        ));
         Self::new_with_sound(
             Box::new(crate::session::MemoryStore::default()),
             settings,

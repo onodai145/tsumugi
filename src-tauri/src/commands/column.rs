@@ -240,7 +240,7 @@ pub async fn update_column(
 
     // 既存ストリームを閉じ、旧フィルタで貯めたキャッシュを捨てる
     state.connections.close(&column_id);
-    state.cache.clear_column_notes(&column_id)?;
+    state.cache.clear_column_notes(&column_id).await?;
 
     let group = state
         .settings
@@ -287,7 +287,7 @@ pub async fn resume_column(
     let notes = if is_notif {
         vec![]
     } else {
-        let cached = state.cache.load_cached(&column.id, INITIAL_LIMIT)?;
+        let cached = state.cache.load_cached(&column.id, INITIAL_LIMIT).await?;
         if cached.is_empty() { vec![] } else { cached }
     };
 
@@ -318,7 +318,7 @@ pub async fn resume_column(
                 if gap_result.notes.is_empty() {
                     return;
                 }
-                let _ = state.cache.cache_notes(&column_id, &gap_result.notes);
+                let _ = state.cache.cache_notes(&column_id, &gap_result.notes).await;
                 let _ = crate::events::ColumnGapFill {
                     column_id,
                     notes: gap_result.notes,
@@ -362,14 +362,14 @@ pub async fn list_columns(state: State<'_, AppState>) -> Result<Vec<Column>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn note_count(state: State<'_, AppState>) -> Result<i32> {
-    state.cache.note_count()
+    state.cache.note_count().await
 }
 
 /// 投稿日時(epoch秒)が since_epoch_secs 以降のノート件数。Backstageの流速表示用。
 #[tauri::command]
 #[specta::specta]
 pub async fn notes_since(state: State<'_, AppState>, since_epoch_secs: i32) -> Result<i32> {
-    state.cache.notes_since(since_epoch_secs)
+    state.cache.notes_since(since_epoch_secs).await
 }
 
 /// 設定（表示→ノートキャッシュの上限）に従ってキャッシュから古いノートを削除する（Issue #6）。
@@ -380,7 +380,8 @@ pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
     let ui = state.settings.load_ui()?;
     Ok(state
         .cache
-        .prune(ui.note_cache_limit, ui.note_cache_max_age_days, ui.note_cache_max_size_mb)?
+        .prune(ui.note_cache_limit, ui.note_cache_max_age_days, ui.note_cache_max_size_mb)
+        .await?
         as i32)
 }
 
@@ -398,7 +399,7 @@ pub async fn fetch_backfill(
 
     let cache_eligible = resolved.kinds.len() == 1 && !resolved.use_cache;
     let boundary = if cache_eligible {
-        state.cache.get_fetch_boundary(&column.id).ok().flatten()
+        state.cache.get_fetch_boundary(&column.id).await.ok().flatten()
     } else {
         None
     };
@@ -407,6 +408,7 @@ pub async fn fetch_backfill(
             Some(b) if until_id.as_str() > b.as_str() => state
                 .cache
                 .load_cached_before(&column.id, &until_id, INITIAL_LIMIT)
+                .await
                 .unwrap_or_default(),
             _ => vec![],
         };
@@ -431,7 +433,7 @@ pub async fn fetch_backfill(
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    state.cache.cache_notes(&column.id, &fetch.notes)?;
+    state.cache.cache_notes(&column.id, &fetch.notes).await?;
     if cache_eligible {
         if let Some(oldest) = &fetch.raw_oldest_id {
             // 既存の境界と連続している(=until_idが境界以上)場合のみ延長する。
@@ -444,7 +446,7 @@ pub async fn fetch_backfill(
                 None => false,
             };
             if contiguous {
-                let _ = state.cache.extend_fetch_boundary(&column.id, oldest);
+                let _ = state.cache.extend_fetch_boundary(&column.id, oldest).await;
             }
         }
     }
@@ -507,7 +509,7 @@ pub async fn move_tab(
 pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Result<()> {
     state.connections.close(&column_id);
     state.settings.delete_column(&column_id)?;
-    state.cache.clear_column_notes(&column_id)?;
+    state.cache.clear_column_notes(&column_id).await?;
     state.settings.delete_empty_groups()?;
     Ok(())
 }
@@ -752,10 +754,10 @@ async fn open_stream_and_fetch(
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    state.cache.cache_notes(&column.id, &fetch.notes)?;
+    state.cache.cache_notes(&column.id, &fetch.notes).await?;
     if resolved.kinds.len() == 1 && !resolved.use_cache {
         if let Some(oldest) = &fetch.raw_oldest_id {
-            let _ = state.cache.set_fetch_boundary(&column.id, oldest);
+            let _ = state.cache.set_fetch_boundary(&column.id, oldest).await;
         }
     }
     open_streams_only(app, state, column, &resolved, host, token);
@@ -967,7 +969,7 @@ pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
     else {
         return;
     };
-    let Ok(cached) = state.cache.load_cached(&column.id, 1) else {
+    let Ok(cached) = state.cache.load_cached(&column.id, 1).await else {
         return;
     };
     let Some(newest) = cached.first() else {
@@ -991,7 +993,7 @@ pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
     if gap_result.notes.is_empty() {
         return;
     }
-    let _ = state.cache.cache_notes(&column.id, &gap_result.notes);
+    let _ = state.cache.cache_notes(&column.id, &gap_result.notes).await;
     let _ = crate::events::ColumnGapFill {
         column_id: column.id.clone(),
         notes: gap_result.notes,
@@ -1103,7 +1105,7 @@ struct FilteredFetch {
 // search_cache_core_excludes_notes_matched_by_word_mute_closure)を独立させたいため。
 // AppState を取らない設計もテスト容易性のためで、引数を減らす方向のリファクタは避ける。
 #[allow(clippy::too_many_arguments)]
-fn search_cache_core(
+async fn search_cache_core(
     cache: &NoteCacheStore,
     filter: &FilterQuery,
     eval_ctx: &EvalContext,
@@ -1122,7 +1124,7 @@ fn search_cache_core(
         CompiledFilter::Tql(expr) => sql::build_where(expr, &sql_ctx).map_err(Error::Invalid)?,
         _ => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
     };
-    let raw = cache.search_cache(&where_sql, until_id, limit)?;
+    let raw = cache.search_cache(&where_sql, until_id, limit).await?;
     let mut filtered: Vec<Note> = raw
         .into_iter()
         .filter(|n| {
@@ -1160,6 +1162,7 @@ pub async fn search_cache_notes(
         |n| server_muted_note(&state, &account_id, n),
         |n| state.is_word_muted(&account_id, n),
     )
+    .await
 }
 
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
@@ -1205,7 +1208,7 @@ async fn fetch_and_filter_multi(
             Some(e) => sql::build_where(e, &sql_ctx).map_err(Error::Invalid)?,
             None => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
         };
-        if let Ok(cached) = state.cache.search_cache(&where_sql, until_id, INITIAL_LIMIT) {
+        if let Ok(cached) = state.cache.search_cache(&where_sql, until_id, INITIAL_LIMIT).await {
             all.extend(cached);
         }
     }
@@ -1307,21 +1310,23 @@ mod tests {
         }
     }
 
-    fn cache_with(notes: &[Note]) -> NoteCacheStore {
-        let store = NoteCacheStore::new(crate::store::db::open_cache_in_memory().unwrap());
-        store.cache_notes("col1", notes).unwrap();
+    async fn cache_with(notes: &[Note]) -> NoteCacheStore {
+        let store = NoteCacheStore::new(crate::store::SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        ));
+        store.cache_notes("col1", notes).await.unwrap();
         store
     }
 
-    #[test]
-    fn search_cache_core_filters_by_tql_predicate_and_orders_desc() {
+    #[tokio::test]
+    async fn search_cache_core_filters_by_tql_predicate_and_orders_desc() {
         let mut n1 = note("n1", 100);
         n1.text = Some("hello needle".into());
         let mut n2 = note("n2", 200);
         n2.text = Some("hello world".into());
         let mut n3 = note("n3", 300);
         n3.text = Some("needle again".into());
-        let cache = cache_with(&[n1, n2, n3]);
+        let cache = cache_with(&[n1, n2, n3]).await;
 
         let filter = FilterQuery::Tql("text -> \"needle\"".into());
         let got = search_cache_core(
@@ -1334,14 +1339,15 @@ mod tests {
             |_| false,
             |_| false,
         )
+        .await
         .unwrap();
 
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n1"]);
     }
 
-    #[test]
-    fn search_cache_core_with_empty_predicate_returns_all_desc_order() {
-        let cache = cache_with(&[note("n1", 100), note("n2", 300), note("n3", 200)]);
+    #[tokio::test]
+    async fn search_cache_core_with_empty_predicate_returns_all_desc_order() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 300), note("n3", 200)]).await;
 
         let filter = FilterQuery::Tql(String::new());
         let got = search_cache_core(
@@ -1354,29 +1360,31 @@ mod tests {
             |_| false,
             |_| false,
         )
+        .await
         .unwrap();
 
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
     }
 
-    #[test]
-    fn search_cache_core_excludes_locally_muted_notes() {
+    #[tokio::test]
+    async fn search_cache_core_excludes_locally_muted_notes() {
         let mut n1 = note("n1", 100);
         n1.text = Some("spoiler content".into());
-        let cache = cache_with(&[n1, note("n2", 200)]);
+        let cache = cache_with(&[n1, note("n2", 200)]).await;
 
         let filter = FilterQuery::Tql(String::new());
         let mute = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
         let got =
             search_cache_core(&cache, &filter, &EvalContext::default(), &mute, None, 10, |_| false, |_| false)
+                .await
                 .unwrap();
 
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
     }
 
-    #[test]
-    fn search_cache_core_excludes_notes_the_closure_marks_server_muted() {
-        let cache = cache_with(&[note("n1", 100), note("n2", 200)]);
+    #[tokio::test]
+    async fn search_cache_core_excludes_notes_the_closure_marks_server_muted() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 200)]).await;
 
         let filter = FilterQuery::Tql(String::new());
         let got = search_cache_core(
@@ -1389,14 +1397,15 @@ mod tests {
             |n| n.id == "n2",
             |_| false,
         )
+        .await
         .unwrap();
 
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
     }
 
-    #[test]
-    fn search_cache_core_excludes_notes_matched_by_word_mute_closure() {
-        let cache = cache_with(&[note("n1", 100), note("n2", 200)]);
+    #[tokio::test]
+    async fn search_cache_core_excludes_notes_matched_by_word_mute_closure() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 200)]).await;
 
         let filter = FilterQuery::Tql(String::new());
         let got = search_cache_core(
@@ -1409,14 +1418,15 @@ mod tests {
             |_| false,
             |n| n.id == "n2",
         )
+        .await
         .unwrap();
 
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
     }
 
-    #[test]
-    fn search_cache_core_respects_until_id_boundary() {
-        let cache = cache_with(&[note("n1", 100), note("n2", 200), note("n3", 300)]);
+    #[tokio::test]
+    async fn search_cache_core_respects_until_id_boundary() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 200), note("n3", 300)]).await;
 
         let filter = FilterQuery::Tql(String::new());
         let got = search_cache_core(
@@ -1429,6 +1439,7 @@ mod tests {
             |_| false,
             |_| false,
         )
+        .await
         .unwrap();
 
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);

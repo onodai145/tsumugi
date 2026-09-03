@@ -78,6 +78,7 @@ png = "0.18"
 tauri-plugin-fs = "2"
 infer = "0.22.0"
 rodio = "0.22"
+async-trait = "0.1.92"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # 多重起動防止(Issue #53)。ノートキャッシュを SQLite に保存しており、複数プロセスが

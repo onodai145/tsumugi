@@ -6,8 +6,10 @@ pub mod db;
 pub mod draft;
 pub mod note_cache;
 pub mod settings;
+mod sqlite_backend;
 pub mod user_ref;
 
 pub use draft::DraftStore;
 pub use note_cache::NoteCacheStore;
 pub use settings::SettingsStore;
+pub(crate) use sqlite_backend::SqliteBackend;
