@@ -634,15 +634,24 @@
     }
     replyTo = d.replyNote ? snapshotToContextNote(d.replyNote) : undefined;
     quoteOf = d.quoteNote ? snapshotToContextNote(d.quoteNote) : undefined;
+    // ここから下書きのファイル読み込みでawaitを挟むため、その間に共有インテント等で
+    // 新たに追加された添付(loadDraft開始時点ではまだ無かったもの)を、下書き側の
+    // 添付一覧で丸ごと上書きしないよう、開始前のスナップショットと突き合わせて残す
+    // (Issue #116 最終レビュー指摘: warm-startの共有添付がloadDraftに消される競合)。
+    const attachmentsBeforeLoad = attachments;
     attachments = [];
     if (d.fileIds.length > 0 && accountId) {
       const acc = accountId;
       const results = await Promise.allSettled(
         d.fileIds.map((id) => unwrapAcc(acc, commands.getDriveFile(acc, id))),
       );
-      attachments = results.flatMap((r) =>
+      const fromDraft = results.flatMap((r) =>
         r.status === "fulfilled" ? [{ kind: "drive" as const, id: r.value.id, file: r.value }] : [],
       );
+      const addedDuringLoad = attachments.filter(
+        (a) => !attachmentsBeforeLoad.some((b) => b.id === a.id),
+      );
+      attachments = [...fromDraft, ...addedDuringLoad];
     }
     loadedDraftId = d.kind === "manual" ? d.id : null;
     showDraftMenu = false;

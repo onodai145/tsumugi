@@ -245,4 +245,66 @@ describe("ComposeBar 下書き", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.getAllByTitle("削除")).toHaveLength(1);
   });
+
+  it("下書きのfileIds読み込み中に届いた共有添付をloadDraftが上書きしない(Issue #116 最終レビュー)", async () => {
+    setupAccount();
+    let resolveGetDriveFile!: (value: unknown) => void;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      if (cmd === "get_auto_draft") {
+        return Promise.resolve({
+          id: "d1",
+          accountId: "acc1",
+          kind: "auto",
+          text: "",
+          cw: null,
+          visibility: "public",
+          localOnly: false,
+          reactionAcceptance: "all",
+          channelId: null,
+          poll: null,
+          fileIds: ["f1"],
+          replyNote: null,
+          quoteNote: null,
+          createdAt: 0,
+          updatedAt: 0,
+        });
+      }
+      if (cmd === "get_drive_file") {
+        // loadDraft()内のfileIds読み込みをここで足止めし、共有添付の追加(add_local_attachment
+        // 相当のread_attachment_preview)と競合させる。
+        return new Promise((resolve) => {
+          resolveGetDriveFile = resolve;
+        });
+      }
+      if (cmd === "read_attachment_preview") return Promise.resolve(null);
+      return Promise.resolve(null);
+    });
+    render(ComposeBar);
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "get_drive_file",
+        expect.objectContaining({ fileId: "f1" }),
+      );
+    });
+    // fileIds読み込みが宙ぶらりんの間に共有(キャプション無し画像)が届く。
+    app.openCompose("acc1", { filePaths: ["/tmp/shared-intents/photo.png"] });
+    await waitFor(() => {
+      expect(screen.getAllByTitle("削除")).toHaveLength(1);
+    });
+    // 保留中だったget_drive_fileが解決し、loadDraft()が添付一覧を確定させる。
+    // ガードが無ければここで attachments = [下書きのファイルのみ] に上書きされ、
+    // 共有添付が消える。
+    resolveGetDriveFile({
+      id: "f1",
+      mimeType: "image/png",
+      isSensitive: false,
+      url: "https://example.com/f1.png",
+      thumbnailUrl: null,
+      name: "f1.png",
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTitle("削除")).toHaveLength(2);
+    });
+  });
 });
