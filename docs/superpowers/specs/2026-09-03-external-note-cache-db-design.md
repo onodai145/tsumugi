@@ -35,12 +35,14 @@ enum CachePool {
 
 ### DBアクセス手段: sqlx + sea-query
 
-- **接続・実行**: `sqlx`(features: `sqlite`, `postgres`, `mysql`, `runtime-tokio`)。3バックエンドを実行時に切り替える必要があり、コンパイル時ジェネリクスで縛られるDieselは不採用
+- **接続・実行**: `sqlx`(features: `sqlite`、Phase 2/3で`postgres`/`mysql`を追加、`runtime-tokio`)。3バックエンドを実行時に切り替える必要があり、コンパイル時ジェネリクスで縛られるDieselは不採用
 - **SQL組み立て**: `sea-query`(+ `sea-query-binder`でsqlxと接続)。`INSERT ... ON CONFLICT` / `INSERT IGNORE`のようなUPSERT方言、プレースホルダ記法(`?` vs `$1`)、`LIMIT`等の差異を吸収し、クエリ構築コードを1箇所に保つ
 - **フルORM(sea-orm)は不採用**: `note`本体+側テーブル(`note_reaction`等)をJOINしてJSON payloadに詰め直す現状の手書き行マッピングとEntity/ActiveRecordモデルの相性が悪く、移行コストが最大になるため
 - 行→`Note`構造体へのマッピング(JOIN結果の集約、`note_reaction`等側テーブルの集約)は現状の手書きスタイルを維持する
 - テーブルDDLも`sea-query`の`Table::create()`ビルダで記述し、3バックエンド分のCREATE TABLE文を一本化する
 - サイズ見積り・eviction(現行`PRAGMA page_count`依存)はsea-queryで表現できないため、バックエンドごとの`match`分岐で個別実装する(Postgres: `pg_total_relation_size`、MySQL: `information_schema.TABLES`の`data_length`、SQLite: 現行の`PRAGMA`踏襲)
+
+**導入順序**: sea-query自体の導入はPhase 1では行わず、Postgres対応を行うPhase 2にまとめる。Phase 1(SQLiteのみ、挙動不変が目標)では、現行の生SQL文字列(`?`プレースホルダ)をそのままsqlxのバインドAPI(`sqlx::query`/`query_as`)に載せ替えるだけに留める。理由: sea-queryの`ON CONFLICT`+`COALESCE`式・JOIN・サブクエリ等のAPI呼び出しを、Postgres/MySQLでの動作検証なしに正確に書き切るのはミスの温床になりやすく、かつ「どうせPhase 2で本格的に書き直す」ものを精度の低い状態で先に書くのは二度手間なため。テーブルDDLのsea-query化・`filter/sql.rs`のバックエンド非依存化も同様にPhase 2へまとめる。
 
 ### 非同期化
 
