@@ -33,41 +33,42 @@ enum CachePool {
 
 起動時、および設定変更時に`SettingsData.cache_backend`を読み、対応するプールへ接続する。
 
-### DBアクセス手段: sqlx + sea-query
+### DBアクセス手段: Phase 1はrusqlite継続 + spawn_blocking、sqlx/sea-queryはPhase 2から
 
-- **接続・実行**: `sqlx`(features: `sqlite`、Phase 2/3で`postgres`/`mysql`を追加、`runtime-tokio`)。3バックエンドを実行時に切り替える必要があり、コンパイル時ジェネリクスで縛られるDieselは不採用
-- **SQL組み立て**: `sea-query`(+ `sea-query-binder`でsqlxと接続)。`INSERT ... ON CONFLICT` / `INSERT IGNORE`のようなUPSERT方言、プレースホルダ記法(`?` vs `$1`)、`LIMIT`等の差異を吸収し、クエリ構築コードを1箇所に保つ
-- **フルORM(sea-orm)は不採用**: `note`本体+側テーブル(`note_reaction`等)をJOINしてJSON payloadに詰め直す現状の手書き行マッピングとEntity/ActiveRecordモデルの相性が悪く、移行コストが最大になるため
-- 行→`Note`構造体へのマッピング(JOIN結果の集約、`note_reaction`等側テーブルの集約)は現状の手書きスタイルを維持する
-- テーブルDDLも`sea-query`の`Table::create()`ビルダで記述し、3バックエンド分のCREATE TABLE文を一本化する
-- サイズ見積り・eviction(現行`PRAGMA page_count`依存)はsea-queryで表現できないため、バックエンドごとの`match`分岐で個別実装する(Postgres: `pg_total_relation_size`、MySQL: `information_schema.TABLES`の`data_length`、SQLite: 現行の`PRAGMA`踏襲)
+**方針転換(重要)**: 当初`sqlx`をPhase 1から導入する設計だったが、実装検証の結果、`rusqlite`(bundled機能、`libsqlite3-sys ^0.38.1`)と`sqlx`のSQLiteドライバ(`sqlx-sqlite`、`libsqlite3-sys >=0.30.1, <0.38.0`)は要求するネイティブライブラリバージョン範囲が重ならず、**同一Cargo依存グラフに共存できない**ことが判明した(`links = "sqlite3"`をどちらも宣言するため、Cargoのlinksルールにより1つのバイナリに2つの`libsqlite3-sys`を含められない。`cargo add sqlx --no-default-features --features sqlite,runtime-tokio`で実際に確認済み。最新の`sqlx 0.9.0`でも`libsqlite3-sys <0.38.0`までしか対応しておらず、`rust-version`を引き上げても解消しない)。
 
-**導入順序**: sea-query自体の導入はPhase 1では行わず、Postgres対応を行うPhase 2にまとめる。Phase 1(SQLiteのみ、挙動不変が目標)では、現行の生SQL文字列(`?`プレースホルダ)をそのままsqlxのバインドAPI(`sqlx::query`/`query_as`)に載せ替えるだけに留める。理由: sea-queryの`ON CONFLICT`+`COALESCE`式・JOIN・サブクエリ等のAPI呼び出しを、Postgres/MySQLでの動作検証なしに正確に書き切るのはミスの温床になりやすく、かつ「どうせPhase 2で本格的に書き直す」ものを精度の低い状態で先に書くのは二度手間なため。テーブルDDLのsea-query化・`filter/sql.rs`のバックエンド非依存化も同様にPhase 2へまとめる。
+account/column設定側(`store/settings.rs`ほか)は今後も`rusqlite`を使い続ける前提のため、note cache側だけ別バージョンのSQLiteドライバに切り替えることはできない。したがって:
 
-### 非同期化
+- **Phase 1**: `sqlx`を導入せず、既存の`rusqlite::Connection`(`Arc<Mutex<Connection>>`)をそのまま使う。トレイト(`NoteCacheBackend`)のメソッドを`async fn`にする手段は、`tauri::async_runtime::spawn_blocking`(このコードベースで既に`commands/note.rs`・`commands/mute.rs`が使っている確立されたパターン)で同期のrusqlite呼び出しをブロッキングタスクへ包む方式にする。SQL文字列・クエリロジック自体は現状のものをそのまま`spawn_blocking`クロージャの中へ移すだけで、書き換えない
+- **Phase 2(PostgreSQL対応)**: ここで初めて`sqlx`(features: `postgres`, `runtime-tokio`)を導入する。`sqlx`のPostgresドライバ(`sqlx-postgres`)は`libsqlite3-sys`に依存しないため、`rusqlite`との共存問題は起きない。SQL組み立てに`sea-query`(+`sea-query-binder`)を使う方針も維持する
+- **Phase 3(MySQL対応)**: 同様に`sqlx`の`mysql`featureを追加(これも`libsqlite3-sys`非依存)
+
+行→`Note`構造体へのマッピング(JOIN結果の集約、`note_reaction`等側テーブルの集約)は現状の手書きスタイルを維持する。フルORM(sea-orm)を不採用とする理由(JOIN+JSON payload組み立てとEntityモデルの相性の悪さ)はPhase 2以降も変わらない。
+
+### 非同期化(Phase 1: spawn_blocking方式)
 
 `NoteCacheBackend`は`async-trait`によるasync traitとして定義する。既存の呼び出し元(`commands/column.rs`, `commands/mute.rs`, `commands/note.rs`, `stream/connection.rs`)はすべて既に`async fn`内から同期呼び出ししているため、各呼び出しに`.await`を追加する変更で足りる。
 
-非同期化の波及範囲は上記4ファイルに留まらない。`store/db.rs`の`open_cache`/`open_cache_in_memory`もsqlx版に置き換わって`async fn`になるため、`lib.rs:234`(起動時の初期化)と`state.rs:136`(テスト用`AppState`構築ヘルパー)を呼び出し元として更新する。また`note_cache.rs`/`user_ref.rs`内の既存`#[test]`(合計約60件)は`#[tokio::test]`に置き換える。これらはTask 1(下記「実装の段階分割」参照)の一部として、対象ファイルを触るタスクにそれぞれ含める(別タスクに切り出さない)。
+各トレイトメソッドの実装は、既存のrusqliteロジックをそのまま`tauri::async_runtime::spawn_blocking(move || { ... })`のクロージャに移す。クロージャは`'static`である必要があるため、借用引数(`&str`/`&[Note]`/`&SqlWhere`等)は呼び出し前に所有値へ変換する(`to_string()`/`to_vec()`/`clone()`)。`std::sync::Mutex`のロックガードはクロージャ内で完結する(`.await`をまたがない)ため、そのまま使ってよい。`spawn_blocking`は`JoinError`を返しうるため、`commands/note.rs::read_clipboard_image`と同じパターンで`.await.map_err(...)？？`のように`crate::error::Error`へマッピングする。
+
+`store/db.rs`の`open_cache`/`open_cache_in_memory`はrusqliteのまま(シグネチャ変更なし)。`lib.rs`/`state.rs`の初期化コードも変更不要(`AppState::new_for_test`は同期のまま)。`note_cache.rs`/`user_ref.rs`内の既存`#[test]`もrusqlite・同期のまま変更不要(トレイト抽出後の新しい`SqliteBackend`に新規で書くテストだけが`#[tokio::test]`になる)。
 
 ### filter/sql.rs(TQL `cache`ソース)の扱い
 
-`search_cache`(`note_cache.rs`)は`filter/sql.rs`の`build_where`が返す`SqlWhere { sql: String, params: Vec<SqlParam> }`(`?`プレースホルダのSQL断片)をそのまま自前のSELECT文へ埋め込んでいる。PostgreSQLは`$1`形式の番号付きプレースホルダを要求するため、この生SQL断片は無変更ではPostgres/MySQL化を跨げない。
+`search_cache`(`note_cache.rs`)は`filter/sql.rs`の`build_where`が返す`SqlWhere { sql: String, params: Vec<SqlParam> }`(`?`プレースホルダのSQL断片)をそのまま自前のSELECT文へ埋め込んでいる。Phase 1はrusqliteを使い続けるため、この生SQL文字列・バインド方式は一切変更しない(`?`プレースホルダはrusqliteネイティブの記法のまま)。`SqlWhere`はDeriveされた`Clone`を持たないため、`spawn_blocking`クロージャへ渡す際は`SqlWhere { sql: where_sql.sql.clone(), params: where_sql.params.clone() }`のようにフィールドごとに複製する(`SqlParam`は`Clone`実装済み)。
 
-Phase 1はSQLiteのみを対象とし、sqlxのSQLiteドライバは`?`プレースホルダをそのまま受け付けるため、`search_cache`とその内部で組み立てているSQL文字列・`SqlParam`バインドは**今回は変更しない**(sea-query化の対象外とする)。`filter/sql.rs`の`build_where`をバックエンド非依存な形(sea-queryの`Cond`/`SimpleExpr`を返す、またはバックエンドごとにプレースホルダを採番し直す)へ変更するのは、Postgres対応を行うPhase 2のタスクとして扱う。
+PostgreSQL対応で`$1`形式の番号付きプレースホルダへの対応が必要になる時点(Phase 2)で、`filter/sql.rs`の`build_where`をバックエンド非依存な形へ変更する。
 
-### 依存クレート追加
+### 依存クレート追加(Phase 1)
 
-- `sqlx`(features: `sqlite`, `postgres`, `mysql`, `runtime-tokio`)
-- `sea-query`, `sea-query-binder`
-- `async-trait`
-- 既存の`rusqlite`は設定関連の旧移行コード(`db.rs`の`open_settings`、旧SQLite一体型からの一回限り移行)のために残す。note cache側の`rusqlite`利用は今回撤去する
+- `async-trait`のみ。`sqlx`/`sea-query`は追加しない(Phase 2から)
+- 既存の`rusqlite`はnote cache側・設定側とも引き続き使用する(変更なし)
 
 ## 複数端末の同時書き込みに関する整合性
 
 - `note`/`user`テーブルはそれぞれ`id`が主キーのため、UPSERTは常に対象IDの1行に対する原子的な書き込みになる。複数端末が同じノートを同時にキャッシュしても、後勝ちで上書きされるだけで重複行や壊れた行は生まれない
 - 一方`note_reaction`/`note_tag`/`note_mention`/`note_emoji`/`note_file`テーブルは主キー・UNIQUE制約を持たず、現行コードは「対象noteの既存行を全DELETE→INSERTし直す」という複数文パターンで書き換えている。単一プロセス+単一SQLite接続(Mutexで直列化)では安全だが、外部DBに複数端末が同時に同じノートを書き込むと、2つのトランザクションのDELETE/INSERTが交互に割り込む余地があり、一時的な重複行や(読み取りタイミングによっては)瞬間的な空状態が起こり得る
-- 対策として、これら側テーブルに以下のUNIQUE制約を追加し、DELETE+INSERTパターンをsea-query経由のUPSERT(`ON CONFLICT` / `ON DUPLICATE KEY UPDATE`相当)に置き換える。この変更はSQLiteバックエンドにも同様に適用し、単一プロセスでも冪等性を高める:
+- 対策として、これら側テーブルに以下のUNIQUE制約を追加し、DELETE+INSERTパターンをUPSERT(SQLiteの`ON CONFLICT DO UPDATE` / `DO NOTHING`)に置き換える。Phase 1時点では単一プロセス+`Mutex<Connection>`直列化のままなので実害は無いが、単一文で完結させておくことで冪等性を高め、Phase 2(外部DB・複数端末同時書き込み)でも同じテーブル設計を使い回せるようにする:
   - `note_reaction`: `UNIQUE(note_id, emoji_key)`
   - `note_tag`: `UNIQUE(note_id, tag)`
   - `note_mention`: `UNIQUE(note_id, user_id)`
@@ -88,11 +89,11 @@ Phase 1はSQLiteのみを対象とし、sqlxのSQLiteドライバは`?`プレー
 
 `note`/`user`/`column_note`/`column_fetch_boundary`はこのマイグレーションで一切削除・作り直しをしない。DBファイル全体の削除・スキーマバージョンによる作り直しは行わない。
 
-## `delete_matching`のコネクションプール対応
+## `delete_matching`について(Phase 1では変更不要)
 
-現行の`delete_matching`(prune処理)は`CREATE TEMP TABLE prune_ids AS SELECT ...`で一時テーブルを作り、複数の`DELETE ... WHERE note_id IN (SELECT id FROM prune_ids)`文と`DROP TABLE`をまたいで参照している。`sqlx::SqlitePool`（既定で複数コネクション）配下では、これらの文が別々のコネクションに割り当てられ得るため、TEMP TABLEが「無い」扱いになり壊れる。
+現行の`delete_matching`(prune処理)は`CREATE TEMP TABLE prune_ids AS SELECT ...`で一時テーブルを作り、複数の`DELETE ... WHERE note_id IN (SELECT id FROM prune_ids)`文と`DROP TABLE`をまたいで参照している。これは同一コネクション内で完結する一時テーブルなので、Phase 1(単一`rusqlite::Connection`を`Arc<Mutex<_>>`で共有)では問題なく動作し、**変更しない**。
 
-対策として、TEMP TABLEを使わず、対象ノートIDを一度Rust側の`Vec<String>`として確定させてから、それを`IN (...)`リストとしてsea-queryで組み立てた各DELETE文にバインドする方式に変更する。これによりコネクションをまたいでも安全になり、かつPostgres/MySQLでも同じロジックをそのまま使える(TEMP TABLE構文の方言差を考えずに済む)。
+この方式が問題になるのはPhase 2で`sqlx`の接続プール(既定で複数コネクション)を使うようになったときで、文が別々のコネクションに割り当てられうるためTEMP TABLEが「無い」扱いになりうる。Phase 2でPostgres対応する際に、対象ノートIDをRust側の`Vec<String>`として先に確定させ`IN (...)`リストとしてバインドする方式へ書き換える(TEMP TABLE構文の方言差も同時に解消できる)。
 
 ## 設定・接続情報
 
@@ -114,11 +115,11 @@ Phase 1はSQLiteのみを対象とし、sqlxのSQLiteドライバは`?`プレー
 
 ## テスト
 
-- 現行の`note_cache.rs`内テスト群を`NoteCacheBackend` trait経由の呼び出しに書き換え、`SqliteBackend`で従来どおり実行する(単体テスト)
-- Postgres/MySQLは`testcontainers`等でDocker上に一時インスタンスを立てる統合テストを追加する。既存の実Misskey接続テスト(`#[ignore]`)と同様、CI常時実行はしない方針で揃える
+- 現行の`note_cache.rs`内テスト群と同じ検証内容を、トレイト抽出後の`SqliteBackend`(新規ファイル)向けに書く。Phase 1はrusqliteのままなので既存テストの大半はほぼそのまま踏襲でき、`SqliteBackend`の非同期メソッドを呼ぶ新しいテストだけ`#[tokio::test]`にする
+- Postgres/MySQLは`testcontainers`等でDocker上に一時インスタンスを立てる統合テストを追加する(Phase 2/3)。既存の実Misskey接続テスト(`#[ignore]`)と同様、CI常時実行はしない方針で揃える
 
 ## 実装の段階分割(1設計・複数PR)
 
-1. `NoteCacheBackend` trait抽出 + `SqliteBackend`への挙動そのまま移植(sqlx化・非同期化のみ、外部から見た挙動は不変)
-2. `PostgresBackend`追加 + 設定UI
+1. `NoteCacheBackend` trait抽出 + `SqliteBackend`への挙動そのまま移植(rusqlite継続、`spawn_blocking`による非同期化のみ、外部から見た挙動は不変)
+2. `sqlx`+`sea-query`導入 + `PostgresBackend`追加 + 設定UI
 3. `MySqlBackend`追加
