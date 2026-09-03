@@ -1041,11 +1041,16 @@ class AppStore {
     await this.#syncServerMutes(account.id);
   }
 
-  /// サーバ側ミュート/ブロックを同期（失敗しても致命的でないのでログのみ）。
+  /// サーバ側ミュート/ブロック・ワードミュート(mutedWords)を同期（失敗しても致命的でないのでログのみ）。
   async #syncServerMutes(accountId: string) {
     try {
-      const n = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
-      if (n > 0) this.#log("info", `サーバのミュート/ブロックを同期: ${n}件`);
+      const result = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
+      if (result.blockedUsers > 0 || result.wordRules > 0) {
+        this.#log(
+          "info",
+          `サーバのミュート/ブロックを同期: ユーザ${result.blockedUsers}件・ワード${result.wordRules}件`,
+        );
+      }
     } catch (e) {
       if (e instanceof ForbiddenError) {
         this.#log("warn", "サーバミュート同期: 権限不足。再認証してください", e.accountId);

@@ -423,6 +423,7 @@ pub async fn fetch_backfill(
             resolved.filter.matches(n, &ctx)
                 && !crate::filter::mute::is_muted(n, &mute)
                 && !server_muted_note(&state, &column.account_id, n)
+                && !state.is_word_muted(&column.account_id, n)
         });
         if let Some(notes) = cache_backfill_page(boundary.as_deref(), &until_id, cached, INITIAL_LIMIT) {
             return Ok(notes);
@@ -898,6 +899,7 @@ async fn fill_gap(
                 if resolved.filter.matches(&n, &ctx)
                     && !crate::filter::mute::is_muted(&n, &mute)
                     && !server_muted_note(state, account_id, &n)
+                    && !state.is_word_muted(account_id, &n)
                 {
                     collected.push(n);
                 }
@@ -1096,6 +1098,11 @@ struct FilteredFetch {
 /// キャッシュDB検索(Issue #248)の中核ロジック。SQL射影で粗く絞り込んだ後、
 /// `fetch_and_filter` の cache 経路と同じ二段構成(in-memory フィルタ + ミュート除外)で
 /// 再検証する。AppState を直接取らず必要な値だけを受け取ることで単体テスト可能にしている。
+// `is_server_muted`と`is_word_muted`を1つのクロージャに統合しないのは、各々を単独で
+// 検証するテスト(search_cache_core_excludes_notes_the_closure_marks_server_muted /
+// search_cache_core_excludes_notes_matched_by_word_mute_closure)を独立させたいため。
+// AppState を取らない設計もテスト容易性のためで、引数を減らす方向のリファクタは避ける。
+#[allow(clippy::too_many_arguments)]
 fn search_cache_core(
     cache: &NoteCacheStore,
     filter: &FilterQuery,
@@ -1104,6 +1111,7 @@ fn search_cache_core(
     until_id: Option<&str>,
     limit: u32,
     is_server_muted: impl Fn(&Note) -> bool,
+    is_word_muted: impl Fn(&Note) -> bool,
 ) -> Result<Vec<Note>> {
     let compiled = CompiledFilter::compile(filter).map_err(Error::Invalid)?;
     let sql_ctx = sql::SqlCtx {
@@ -1121,6 +1129,7 @@ fn search_cache_core(
             compiled.matches(n, eval_ctx)
                 && !crate::filter::mute::is_muted(n, mute)
                 && !is_server_muted(n)
+                && !is_word_muted(n)
         })
         .collect();
     filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
@@ -1149,6 +1158,7 @@ pub async fn search_cache_notes(
         until_id.as_deref(),
         limit,
         |n| server_muted_note(&state, &account_id, n),
+        |n| state.is_word_muted(&account_id, n),
     )
 }
 
@@ -1208,6 +1218,7 @@ async fn fetch_and_filter_multi(
             resolved.filter.matches(n, &ctx)
                 && !crate::filter::mute::is_muted(n, &mute)
                 && !server_muted_note(state, account_id, n)
+                && !state.is_word_muted(account_id, n)
         })
         .collect();
 
@@ -1321,6 +1332,7 @@ mod tests {
             None,
             10,
             |_| false,
+            |_| false,
         )
         .unwrap();
 
@@ -1340,6 +1352,7 @@ mod tests {
             None,
             10,
             |_| false,
+            |_| false,
         )
         .unwrap();
 
@@ -1354,8 +1367,9 @@ mod tests {
 
         let filter = FilterQuery::Tql(String::new());
         let mute = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
-        let got = search_cache_core(&cache, &filter, &EvalContext::default(), &mute, None, 10, |_| false)
-            .unwrap();
+        let got =
+            search_cache_core(&cache, &filter, &EvalContext::default(), &mute, None, 10, |_| false, |_| false)
+                .unwrap();
 
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
     }
@@ -1372,6 +1386,27 @@ mod tests {
             &MuteConfig::default(),
             None,
             10,
+            |n| n.id == "n2",
+            |_| false,
+        )
+        .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+    }
+
+    #[test]
+    fn search_cache_core_excludes_notes_matched_by_word_mute_closure() {
+        let cache = cache_with(&[note("n1", 100), note("n2", 200)]);
+
+        let filter = FilterQuery::Tql(String::new());
+        let got = search_cache_core(
+            &cache,
+            &filter,
+            &EvalContext::default(),
+            &MuteConfig::default(),
+            None,
+            10,
+            |_| false,
             |n| n.id == "n2",
         )
         .unwrap();
@@ -1391,6 +1426,7 @@ mod tests {
             &MuteConfig::default(),
             Some("n3"),
             10,
+            |_| false,
             |_| false,
         )
         .unwrap();

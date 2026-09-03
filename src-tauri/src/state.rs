@@ -1,6 +1,7 @@
 //! Tauri が管理するアプリ状態（command から `State<AppState>` で参照）。
 
-use crate::domain::{EmojiDef, MuteConfig};
+use crate::domain::{EmojiDef, MuteConfig, Note};
+use crate::filter::mute::WordMuteRule;
 use crate::session::{AccountManager, SecretStore};
 use crate::sound::SoundPlayer;
 use crate::store::{DraftStore, NoteCacheStore, SettingsStore};
@@ -33,6 +34,9 @@ pub struct AppState {
     /// account_id -> サーバ側でミュート/ブロックしているユーザの userId 集合。
     /// 起動時/アカウント追加時に同期し、受信ノート・通知の抑制に使う（Krile MuteBlockManager 相当）。
     pub server_mutes: Mutex<HashMap<String, HashSet<String>>>,
+    /// account_id -> サーバ側ワードミュート(mutedWords)のルール一覧。
+    /// server_mutes と同じタイミングで同期し、ノート本文/CWの追加フィルタに使う(Issue #11)。
+    pub server_word_mutes: Mutex<HashMap<String, Vec<WordMuteRule>>>,
     pub settings: SettingsStore,
     pub drafts: DraftStore,
     pub cache: NoteCacheStore,
@@ -81,6 +85,7 @@ impl AppState {
             emoji_cache: Mutex::new(HashMap::new()),
             mute: Mutex::new(mute),
             server_mutes: Mutex::new(HashMap::new()),
+            server_word_mutes: Mutex::new(HashMap::new()),
             settings,
             drafts,
             cache,
@@ -104,6 +109,23 @@ impl AppState {
             .lock()
             .unwrap()
             .insert(account_id.to_string(), ids);
+    }
+
+    /// account の note が サーバ側ワードミュート(mutedWords)に該当するか。
+    pub fn is_word_muted(&self, account_id: &str, note: &Note) -> bool {
+        self.server_word_mutes
+            .lock()
+            .unwrap()
+            .get(account_id)
+            .is_some_and(|rules| crate::filter::mute::is_word_note_muted(note, rules))
+    }
+
+    /// account のサーバ側ワードミュートルールを差し替える。
+    pub fn set_server_word_mutes(&self, account_id: &str, rules: Vec<WordMuteRule>) {
+        self.server_word_mutes
+            .lock()
+            .unwrap()
+            .insert(account_id.to_string(), rules);
     }
 
     #[cfg(test)]
@@ -191,5 +213,61 @@ mod tests {
         let mgr = state.accounts.lock().unwrap();
         assert_eq!(mgr.list().len(), 1);
         assert_eq!(mgr.active_id(), Some("acc1")); // 先頭が active
+    }
+
+    #[test]
+    fn is_word_muted_false_before_sync_and_true_after() {
+        use crate::domain::{User, Visibility};
+        use crate::filter::mute::WordMuteRule;
+
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let note = crate::domain::Note {
+            id: "n1".into(),
+            created_at: 0,
+            text: Some("spoiler here".into()),
+            cw: None,
+            visibility: Visibility::Public,
+            local_only: false,
+            user: User {
+                id: "u1".into(),
+                username: "alice".into(),
+                host: None,
+                name: None,
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 0,
+                following_count: 0,
+                notes_count: 0,
+                emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
+                instance: None,
+            },
+            reply_id: None,
+            renote_id: None,
+            renote: None,
+            files: vec![],
+            poll: None,
+            tags: vec![],
+            mentions: vec![],
+            emojis: std::collections::HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
+            reactions: std::collections::HashMap::new(),
+            reaction_count: 0,
+            renote_count: 0,
+            reply_count: 0,
+            my_reaction: None,
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
+        };
+
+        assert!(!state.is_word_muted("acc1", &note)); // 未同期なら常に false
+        state.set_server_word_mutes("acc1", vec![WordMuteRule::Words(vec!["spoiler".into()])]);
+        assert!(state.is_word_muted("acc1", &note));
+        assert!(!state.is_word_muted("other-acc", &note)); // 別アカウントには影響しない
     }
 }

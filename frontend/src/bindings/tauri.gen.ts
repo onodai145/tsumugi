@@ -286,10 +286,10 @@ export const commands = {
 	 */
 	playNotifySound: (choice: string) => typedError<null, Error>(__TAURI_INVOKE("play_notify_sound", { choice })),
 	/**
-	 *  サーバ側のミュート/ブロックを取得して AppState に反映する。返り値は対象ユーザ数。
-	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当）。
+	 *  サーバ側のミュート/ブロック・ワードミュート(mutedWords)を取得して AppState に反映する。
+	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当。Issue #11）。
 	 */
-	syncServerMutes: (accountId: string) => typedError<number, Error>(__TAURI_INVOKE("sync_server_mutes", { accountId })),
+	syncServerMutes: (accountId: string) => typedError<SyncMuteResult, Error>(__TAURI_INVOKE("sync_server_mutes", { accountId })),
 	/**  自分のクリップ一覧を取得。 */
 	listClips: (accountId: string) => typedError<Clip[], Error>(__TAURI_INVOKE("list_clips", { accountId })),
 	/**  クリップを新規作成する。 */
@@ -799,6 +799,15 @@ export type SourceItem = {
 };
 
 export type SplitDirection = "row" | "column";
+
+/**
+ *  `sync_server_mutes` の戻り値。ユーザ/ブロックミュート数とワードミュートのルール数を
+ *  別々に返す(フロントのログ表示用。Issue #11)。
+ */
+export type SyncMuteResult = {
+	blockedUsers: number,
+	wordRules: number,
+};
 
 /**  テーマ1個分の配色（app.css の CSS変数11個に対応）。 */
 export type ThemeColors = {
