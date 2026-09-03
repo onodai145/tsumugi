@@ -36,8 +36,8 @@ mod android {
                 continue;
             };
             let jstr = JString::from(obj);
-            if let Ok(s) = env.get_string(&jstr) {
-                paths.push(s.into());
+            if let Some(s) = env.get_string(&jstr).ok().map(|s| s.into()) {
+                paths.push(s);
             }
         }
 
