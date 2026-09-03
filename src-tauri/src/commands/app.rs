@@ -1,5 +1,6 @@
 //! アプリ情報系コマンド。
 
+use crate::domain::ShareReceived;
 use crate::error::Result;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
@@ -111,6 +112,16 @@ fn is_newer(latest: &str, current: &str) -> bool {
     parts(latest) > parts(current)
 }
 
+/// 他アプリの共有シート(Android の ACTION_SEND/ACTION_SEND_MULTIPLE)から受け取った
+/// テキスト/添付ファイルパスを取り出す。フロントは起動時と `visibilitychange` のたびに
+/// これを呼びポーリングする(Issue #116)。無ければ `None`。一度取り出すと消費され、
+/// 同じ内容が2回返ることはない。非Androidでは常に `None`。
+#[tauri::command]
+#[specta::specta]
+pub fn get_pending_share() -> Option<ShareReceived> {
+    crate::mobile_intent::take_pending_share()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +133,10 @@ mod tests {
         assert!(!is_newer("0.3.3", "0.3.3"));
         assert!(is_newer("1.0.0", "0.9.9"));
         assert!(!is_newer("0.9.9", "1.0.0"));
+    }
+
+    #[test]
+    fn get_pending_share_is_none_by_default() {
+        assert_eq!(get_pending_share(), None);
     }
 }

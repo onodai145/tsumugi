@@ -5735,6 +5735,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "infer 0.22.0",
+ "jni",
  "keyring-core",
  "log",
  "png 0.18.1",

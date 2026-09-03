@@ -6,6 +6,7 @@ mod domain;
 mod error;
 mod events;
 mod filter;
+mod mobile_intent;
 mod session;
 mod sound;
 mod state;
@@ -27,6 +28,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::check_latest_release,
             commands::app::open_devtools,
             commands::app::log_frontend_event,
+            commands::app::get_pending_share,
             commands::account::start_miauth,
             commands::account::complete_miauth,
             commands::account::list_accounts,
