@@ -756,6 +756,9 @@ fn handle_text(
                 if is_server_muted_note(&state, account_id, &normalized) {
                     return HandleResult::None;
                 }
+                if state.is_word_muted(account_id, &normalized) {
+                    return HandleResult::None;
+                }
                 let _ = state.cache.cache_note(&column_id, &normalized);
             }
             let _ = ColumnNote {

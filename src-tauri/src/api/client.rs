@@ -37,6 +37,24 @@ impl MisskeyClient {
         }
     }
 
+    /// テスト専用: `api_base` を素通しで指定する(`host` のスキーム自動付与を経由しない)。
+    /// wiremock 等のモックHTTPサーバ(`http://127.0.0.1:PORT`)にリクエストを向けるために使う。
+    /// `new()` の「host はスキーム無し」という契約や `host()` が返す値(WebSocket URL構築に
+    /// 使われる)には影響しない。
+    #[cfg(test)]
+    pub(crate) fn new_with_api_base(
+        http: reqwest::Client,
+        api_base: impl Into<String>,
+        token: Option<String>,
+    ) -> Self {
+        Self {
+            host: String::new(),
+            api_base: api_base.into(),
+            http,
+            token,
+        }
+    }
+
     #[allow(dead_code)] // Phase 2: Streaming 接続で host を参照
     pub fn host(&self) -> &str {
         &self.host
