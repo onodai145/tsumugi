@@ -414,8 +414,9 @@ class AppStore {
   /// paneRoot(ペイン分割ツリー)を読み書きするコマンド(splitPane/discardEmptyGroup/
   /// setPaneAuto/resizePane/movePane)はどれもRust側で「木全体を読む→1ノード変更→
   /// 木全体を保存」という同じ形をしており、2つが並行に飛ぶと後発の保存が先発の変更を
-  /// 握り潰すレースになる(Issue #274/#276)。呼び出し元の場所を問わず必ずこのキュー
-  /// を経由させることで、アプリ全体でこの種の書き込みを1本の直列実行チェーンにまとめる。
+  /// 握り潰すレースになる(Issue #274/#276)。この5つのメソッドは必ずこのキューを
+  /// 経由させることで、互いに対して1本の直列実行チェーンにまとめている(endDragTab/
+  /// addColumnも同種のpane_layout書き込みを行うが未対応。Issue #278)。
   #paneWriteQueue: Promise<unknown> = Promise.resolve();
 
   #queuePaneWrite<T>(fn: () => Promise<T>): Promise<T> {
