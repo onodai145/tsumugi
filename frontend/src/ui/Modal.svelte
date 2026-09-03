@@ -25,7 +25,7 @@
 </script>
 
 <div
-  class="fixed inset-0 z-[1000] grid items-start justify-items-center bg-black/45 pt-[max(8vh,env(safe-area-inset-top))]"
+  class="fixed inset-0 z-[1000] grid items-start justify-items-center overflow-y-auto bg-black/45 pt-[max(8vh,env(safe-area-inset-top))] pb-[max(8vh,env(safe-area-inset-bottom))]"
   use:portal
   onclick={onclose}
   onkeydown={(e) => e.key === "Escape" && onclose()}
