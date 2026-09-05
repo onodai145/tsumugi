@@ -59,14 +59,24 @@ impl MySqlBackend {
 async fn execute_index(pool: &sqlx::MySqlPool, index_sql: &str) -> Result<()> {
     match pool.execute(index_sql).await {
         Ok(_) => Ok(()),
-        Err(e) => {
-            let err_msg = e.to_string();
-            if err_msg.contains("1061") || err_msg.contains("Duplicate") {
-                Ok(())
-            } else {
-                Err(e.into())
-            }
+        // MySQL error 1061: Duplicate key name — CREATE INDEXにはネイティブの
+        // IF NOT EXISTSが無いため、2回目以降のensure_schema()呼び出しで既存の
+        // インデックスに対して発生する。無害なので握りつぶす。
+        //
+        // `DatabaseError::code()`はSQLSTATE("42000"のような汎用カテゴリ)を返すため、
+        // MySQL固有の数値エラーコード(1061)はここでは判定できない。
+        // `MySqlDatabaseError::number()`にダウンキャストして正確な数値コードで判定する。
+        // (メッセージ文字列の"Duplicate"部分一致では1062 Duplicate entry(実際の
+        // UNIQUE制約違反)まで誤って握りつぶしてしまうため、それは避ける)
+        Err(sqlx::Error::Database(db_err))
+            if db_err
+                .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+                .map(|e| e.number())
+                == Some(1061) =>
+        {
+            Ok(())
         }
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -355,5 +365,55 @@ mod tests {
         let backend = MySqlBackend::connect(&params).await.unwrap();
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM note").fetch_one(backend.pool()).await.unwrap();
         assert_eq!(count, 0);
+    }
+
+    /// `execute_index()`が握りつぶすのはMySQLエラー1061(Duplicate key name)のみで
+    /// あることを確認する。存在しないテーブルに対するCREATE INDEXはエラー1146
+    /// (table doesn't exist)になり、1061ではないため`Err`として伝播しなければならない。
+    #[tokio::test]
+    #[ignore]
+    async fn execute_index_propagates_non_1061_errors() {
+        let container = Mysql::default().start().await.unwrap();
+        let port = container.get_host_port_ipv4(3306).await.unwrap();
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .connect(&format!("mysql://root@127.0.0.1:{port}/test"))
+            .await
+            .unwrap();
+
+        let result = execute_index(
+            &pool,
+            "CREATE INDEX idx_bogus ON nonexistent_table (col)",
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "存在しないテーブルへのCREATE INDEX(エラー1146)は握りつぶされず伝播するべき"
+        );
+    }
+
+    /// レビュー指摘の本丸: 文字列部分一致での判定だとMySQLエラー1062
+    /// (Duplicate entry — 実際のUNIQUE制約違反によるデータ整合性エラー)まで
+    /// "Duplicate"にマッチして握りつぶしてしまう。1061(Duplicate key name)専用の
+    /// エラーコード判定に直したことで、1062は握りつぶされず伝播することを確認する。
+    #[tokio::test]
+    #[ignore]
+    async fn execute_index_does_not_swallow_unique_constraint_violation() {
+        let container = Mysql::default().start().await.unwrap();
+        let port = container.get_host_port_ipv4(3306).await.unwrap();
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .connect(&format!("mysql://root@127.0.0.1:{port}/test"))
+            .await
+            .unwrap();
+
+        pool.execute("CREATE TABLE dup_test (v INT)").await.unwrap();
+        pool.execute("INSERT INTO dup_test VALUES (1), (1)").await.unwrap();
+
+        let result = execute_index(&pool, "CREATE UNIQUE INDEX idx_dup ON dup_test (v)").await;
+
+        assert!(
+            result.is_err(),
+            "重複データに対するCREATE UNIQUE INDEX(エラー1062)は握りつぶされず伝播するべき"
+        );
     }
 }
