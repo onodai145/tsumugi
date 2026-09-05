@@ -34,7 +34,13 @@ impl PostgresBackend {
             .username(&params.user)
             .password(&params.password)
             .ssl_mode(PgSslMode::Prefer);
-        let pool = PgPoolOptions::new().max_connections(5).connect_with(opts).await?;
+        // 起動パス(`lib.rs::run()`内の`block_on`)からも呼ばれるため、sqlxの既定30秒だと
+        // 到達不能/誤設定ホストでアプリの起動が最大30秒ブロックされうる。5秒に短縮する。
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .connect_with(opts)
+            .await?;
         ensure_schema(&pool).await?;
         Ok(Self { pool })
     }
@@ -65,15 +71,19 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteTable::Via).text())
         .col(ColumnDef::new(NoteTable::Lang).text())
         .col(ColumnDef::new(NoteTable::FilesCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::HasPoll).boolean().not_null().default(false))
-        .col(ColumnDef::new(NoteTable::HasLink).boolean().not_null().default(false))
-        .col(ColumnDef::new(NoteTable::IsPinned).boolean().not_null().default(false))
+        // has_poll/has_link/is_pinned/is_renoted_by_me/is_favorited_by_meはSQLite版と同じ
+        // 0/1のINTEGER規約に揃える(BOOLEANにすると`filter/sql.rs::bool_field`が発行する
+        // `= 1`比較がPostgresでは`operator does not exist: boolean = integer`になるため。
+        // `filter/sql.rs`自体は変更しない方針なのでDDL側をSQLiteの規約に合わせる)。
+        .col(ColumnDef::new(NoteTable::HasPoll).small_integer().not_null().default(0))
+        .col(ColumnDef::new(NoteTable::HasLink).small_integer().not_null().default(0))
+        .col(ColumnDef::new(NoteTable::IsPinned).small_integer().not_null().default(0))
         .col(ColumnDef::new(NoteTable::ReactionCount).big_integer().not_null().default(0))
         .col(ColumnDef::new(NoteTable::RenoteCount).big_integer().not_null().default(0))
         .col(ColumnDef::new(NoteTable::ReplyCount).big_integer().not_null().default(0))
         .col(ColumnDef::new(NoteTable::MyReaction).text())
-        .col(ColumnDef::new(NoteTable::IsRenotedByMe).boolean().not_null().default(false))
-        .col(ColumnDef::new(NoteTable::IsFavoritedByMe).boolean().not_null().default(false))
+        .col(ColumnDef::new(NoteTable::IsRenotedByMe).small_integer().not_null().default(0))
+        .col(ColumnDef::new(NoteTable::IsFavoritedByMe).small_integer().not_null().default(0))
         .col(ColumnDef::new(NoteTable::Payload).text().not_null())
         .build(PostgresQueryBuilder);
     pool.execute(note.as_str()).await?;
@@ -102,8 +112,9 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::Host).text())
         .col(ColumnDef::new(UserTable::Name).text())
         .col(ColumnDef::new(UserTable::AvatarUrl).text())
-        .col(ColumnDef::new(UserTable::IsBot).boolean().not_null().default(false))
-        .col(ColumnDef::new(UserTable::IsCat).boolean().not_null().default(false))
+        // is_bot/is_catも同じ理由(`bool_field`の`= 1`比較)でSMALLINTにする。
+        .col(ColumnDef::new(UserTable::IsBot).small_integer().not_null().default(0))
+        .col(ColumnDef::new(UserTable::IsCat).small_integer().not_null().default(0))
         .col(ColumnDef::new(UserTable::FollowersCount).big_integer().not_null().default(0))
         .col(ColumnDef::new(UserTable::FollowingCount).big_integer().not_null().default(0))
         .col(ColumnDef::new(UserTable::NotesCount).big_integer().not_null().default(0))
@@ -155,7 +166,8 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteFileTable::NoteId).text())
         .col(ColumnDef::new(NoteFileTable::MimeType).text())
         .col(ColumnDef::new(NoteFileTable::MimeCategory).text())
-        .col(ColumnDef::new(NoteFileTable::IsSensitive).boolean())
+        // is_sensitiveも同じ理由(`bool_field`の`f.is_sensitive=1`比較)でSMALLINTにする。
+        .col(ColumnDef::new(NoteFileTable::IsSensitive).small_integer())
         .build(PostgresQueryBuilder);
     pool.execute(note_file.as_str()).await?;
 
@@ -491,15 +503,15 @@ async fn upsert_note_tx(tx: &mut sqlx::PgTransaction<'_>, n: &Note) -> Result<()
     .bind(&n.via)
     .bind(&n.lang)
     .bind(n.files.len() as i64)
-    .bind(n.poll.is_some())
-    .bind(has_link)
-    .bind(n.is_pinned)
+    .bind(n.poll.is_some() as i16)
+    .bind(has_link as i16)
+    .bind(n.is_pinned as i16)
     .bind(n.reaction_count as i64)
     .bind(n.renote_count as i64)
     .bind(n.reply_count as i64)
     .bind(&n.my_reaction)
-    .bind(n.is_renoted_by_me)
-    .bind(n.is_favorited_by_me)
+    .bind(n.is_renoted_by_me as i16)
+    .bind(n.is_favorited_by_me as i16)
     .bind(&payload)
     .execute(&mut **tx)
     .await?;
@@ -550,7 +562,7 @@ async fn upsert_note_tx(tx: &mut sqlx::PgTransaction<'_>, n: &Note) -> Result<()
         .bind(&n.id)
         .bind(&f.mime_type)
         .bind(mime_category(&f.mime_type))
-        .bind(f.is_sensitive)
+        .bind(f.is_sensitive as i16)
         .execute(&mut **tx)
         .await?;
     }
@@ -585,14 +597,15 @@ async fn upsert_note_tx(tx: &mut sqlx::PgTransaction<'_>, n: &Note) -> Result<()
         .iter()
         .map(|f| (f.mime_type.clone(), mime_category(&f.mime_type).to_string(), f.is_sensitive))
         .collect();
-    let existing_files: Vec<(String, String, bool)> = sqlx::query_as(
+    let existing_files: Vec<(String, String, i16)> = sqlx::query_as(
         "SELECT mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = $1",
     )
     .bind(&n.id)
     .fetch_all(&mut **tx)
     .await?;
     for (mime_type, mime_category_val, is_sensitive) in existing_files {
-        let key = (mime_type.clone(), mime_category_val.clone(), is_sensitive);
+        let is_sensitive_bool = is_sensitive != 0;
+        let key = (mime_type.clone(), mime_category_val.clone(), is_sensitive_bool);
         if !current_file_keys.contains(&key) {
             sqlx::query(
                 "DELETE FROM note_file WHERE note_id = $1 AND mime_type = $2 AND mime_category = $3 AND is_sensitive = $4",
@@ -735,6 +748,10 @@ impl NoteCacheBackend for PostgresBackend {
     }
 
     async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
+        // `note_id < $2`はPostgresのデフォルトのテキスト照合順序(collation)がSQLiteの
+        // バイナリバイト比較と一致していることに依存している。MisskeyのID(base36/aidx系、
+        // 小文字英数字)では両者は現状一致するため今日的には問題ないが、ID体系が将来
+        // 変わった場合は要再検証。
         let rows: Vec<(String, String)> = sqlx::query_as(
             "SELECT n.id, n.payload FROM column_note cn
              JOIN note n ON n.id = cn.note_id
@@ -794,6 +811,8 @@ impl NoteCacheBackend for PostgresBackend {
     }
 
     async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+        // LEAST(...)による大小比較も、load_cached_beforeと同様Postgresのデフォルトテキスト
+        // 照合順序がSQLiteのバイナリバイト比較と一致することに依存している。
         sqlx::query(
             "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES ($1,$2)
              ON CONFLICT (column_id) DO UPDATE SET
@@ -848,6 +867,8 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
 
     let affected_columns: Vec<(String,)> =
         sqlx::query_as("SELECT DISTINCT column_id FROM column_note WHERE note_id = ANY($1)").bind(ids).fetch_all(&mut **tx).await?;
+    // MIN/MAX(note_id)による大小比較も、上のload_cached_beforeと同様Postgresのデフォルト
+    // テキスト照合順序がSQLiteのバイナリバイト比較と一致することに依存している。
     let max_deleted_rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT column_id, MAX(note_id) FROM column_note WHERE note_id = ANY($1) GROUP BY column_id",
     )
@@ -1112,6 +1133,60 @@ mod tests {
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
         assert_eq!(got.len(), 1);
+    }
+
+    /// Fix 1 (最終レビュー対応): `has_poll`/`is_bot`のようなbool系TQL述語がPostgresでも
+    /// エラーにならず正しくフィルタされることを確認する回帰テスト。改修前は`bool_field`が
+    /// 発行する`n.has_poll = 1`/`u.is_bot = 1`がBOOLEAN列に対して
+    /// `operator does not exist: boolean = integer`で失敗していた。
+    #[tokio::test]
+    #[ignore]
+    async fn search_cache_applies_boolean_predicates_without_type_error() {
+        use crate::domain::{Poll, PollChoice};
+        use crate::filter::{parser, sql};
+        let s = backend().await;
+
+        let mut with_poll = note("p1", 300);
+        with_poll.poll = Some(Poll {
+            choices: vec![
+                PollChoice { text: "a".into(), votes: 0, is_voted: false },
+                PollChoice { text: "b".into(), votes: 0, is_voted: false },
+            ],
+            multiple: false,
+            expires_at: None,
+        });
+        let mut without_poll = note("p2", 200);
+        without_poll.poll = None;
+        s.cache_notes("col1", &[with_poll, without_poll]).await.unwrap();
+
+        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+
+        // has_poll = 1 相当
+        let expr = parser::parse_predicate("has_poll").unwrap();
+        let w = sql::build_where(&expr, &ctx).unwrap();
+        let got = s.search_cache(&w, None, 10).await.unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p1"]);
+
+        // pinned = 1 相当
+        let mut pinned = note("p3", 100);
+        pinned.is_pinned = true;
+        s.cache_note("col1", &pinned).await.unwrap();
+        let expr = parser::parse_predicate("pinned").unwrap();
+        let w = sql::build_where(&expr, &ctx).unwrap();
+        let got = s.search_cache(&w, None, 10).await.unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p3"]);
+
+        // bot = 1 相当(u.is_bot)。他のテストノートと同じuser id("u1")を使うと、
+        // usersテーブルの同一行を共有しているため`is_bot`の上書きが全ノートに波及して
+        // しまう(userはnote単位ではなくid単位でupsertされる)。別ユーザーIDを使う。
+        let mut bot_note = note("p4", 50);
+        bot_note.user.id = "u_bot".into();
+        bot_note.user.is_bot = true;
+        s.cache_note("col1", &bot_note).await.unwrap();
+        let expr = parser::parse_predicate("bot").unwrap();
+        let w = sql::build_where(&expr, &ctx).unwrap();
+        let got = s.search_cache(&w, None, 10).await.unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p4"]);
     }
 
     #[tokio::test]

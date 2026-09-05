@@ -40,8 +40,8 @@ pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> 
     .bind(&user.host)
     .bind(&user.name)
     .bind(&user.avatar_url)
-    .bind(user.is_bot)
-    .bind(user.is_cat)
+    .bind(user.is_bot as i16)
+    .bind(user.is_cat as i16)
     .bind(user.followers_count as i64)
     .bind(user.following_count as i64)
     .bind(user.notes_count as i64)
@@ -92,8 +92,8 @@ pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) ->
     .bind(&user.host)
     .bind(&user.name)
     .bind(&user.avatar_url)
-    .bind(user.is_bot)
-    .bind(user.is_cat)
+    .bind(user.is_bot as i16)
+    .bind(user.is_cat as i16)
     .bind(user.followers_count as i64)
     .bind(user.following_count as i64)
     .bind(user.notes_count as i64)
@@ -113,7 +113,7 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> R
     if ids.is_empty() {
         return Ok(out);
     }
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, Option<String>, bool, bool, i64, i64, i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, Option<String>, i16, i16, i64, i64, i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(
         "SELECT id, username, host, name, avatar_url, is_bot, is_cat,
                 followers_count, following_count, notes_count, emojis,
                 bio, banner_url, instance_name, instance_icon_url, instance_theme_color
@@ -138,8 +138,8 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> R
                 host,
                 name,
                 avatar_url,
-                is_bot,
-                is_cat,
+                is_bot: is_bot != 0,
+                is_cat: is_cat != 0,
                 followers_count: followers_count as u32,
                 following_count: following_count as u32,
                 notes_count: notes_count as u32,
