@@ -192,6 +192,14 @@ Phase 2と同様、実装計画作成前に依存関係を独立した検証用c
 
 **実DB(Docker上のMySQL 8.0)で動作確認済み**: `BOOLEAN`列に対して`WHERE has_poll = 1`(素のSQL)・`sqlx::query_as("...WHERE has_poll = ?").bind(1i32)`(sqlxバインド)のいずれも型エラーなく正しく絞り込めることを確認した。`text REGEXP ?`もsqlxバインドで正しくマッチした。したがって**`to_postgres_sql`に相当する変換関数は実装しない**——`SqlWhere.sql`(`?`プレースホルダ、` REGEXP `)を無変換のままMySQLへ渡す。`filter/sql.rs`・`build_where`は一切変更しない(Postgresと同じ制約)。
 
+**UPSERT構文・配列バインドはPostgresと異なる(要翻訳、実DB確認済み)**: `PostgresBackend`が使っている`ON CONFLICT (col) DO UPDATE SET x = excluded.x`/`ON CONFLICT DO NOTHING`/`= ANY($N)`はいずれもPostgres固有構文で、MySQLでは使えない。以下のMySQL方言に置き換える必要があり、実際にDocker上のMySQL 8.0で動作確認済み:
+
+- `ON CONFLICT (col) DO UPDATE SET x = excluded.x` → `ON DUPLICATE KEY UPDATE x = VALUES(x)`(対象列のUNIQUE制約は同じ)
+- `ON CONFLICT (...) DO NOTHING` → `INSERT IGNORE INTO ...`、または複合主キーで無害な自己代入更新(`ON DUPLICATE KEY UPDATE col = col`)
+- `WHERE col = ANY($N)`(Postgresの配列バインド、`sqlx`が`Vec<T>`を1つの`$N`にバインドできる)→ **MySQLの`sqlx`ドライバは配列バインドをサポートしない**。`IN (?, ?, ..., ?)`をRust側で要素数分のプレースホルダとして動的に組み立て、要素ごとに`.bind()`する(`sqlx::query(&sql)`をループで`.bind()`し直す)。`delete_matching_ids`の`id = ANY($1)`、`upsert_note_tx`の側テーブル掃除(`emoji_key = ANY($2)`等)はすべてこの形に書き換える
+
+`LEAST(...)`(`extend_fetch_boundary`)はMySQLも同名関数をサポートするため変更不要。ID順序比較(`note_id < ?`、`MIN`/`MAX(note_id)`)がMySQLのデフォルト照合順序(`utf8mb4_0900_ai_ci`等、大文字小文字を区別しない)でもSQLiteのバイナリバイト比較と実用上一致するかは、MisskeyのID(base36/aidx系、常に小文字)であれば大文字小文字非区別は影響しないはずだが、Postgres同様「今日的には問題ないが将来ID体系が変わった場合は要再検証」という位置づけのコメントをコードに残す。
+
 ### アーキテクチャ
 
 Postgresと同型: `store/mysql_backend.rs`(`MySqlBackend { pool: sqlx::MySqlPool }`、`sea-query`の`Table::create()`/`Index::create()`によるDDL、`NoteCacheBackend`トレイトの全15メソッドを手書きSQL+`sqlx::query()`で実装)+ `store/mysql_user_ref.rs`(`store/postgres_user_ref.rs`と同型、`user_ref.rs`の純粋関数を再利用)。
