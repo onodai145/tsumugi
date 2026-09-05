@@ -793,6 +793,32 @@ mod tests {
         assert_eq!(store.load_cache_backend().unwrap(), cfg);
     }
 
+    /// `new_in_memory`(`Backing::Memory`)の`save`は実際にはディスクへ書かないため、上の
+    /// テストだけでは serde の実際のシリアライズ/デシリアライズ(内部タグ付きenum)を通らない。
+    /// ここではファイルへ実際に書き出し、再読み込みでPostgres設定が復元されることを検証する
+    /// (実運用での再起動シナリオの回帰テスト)。
+    #[test]
+    fn cache_backend_postgres_config_persists_across_restart_via_json_file() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-cache-backend-test-{}.json", uuid::Uuid::new_v4()));
+        let cfg = CacheBackendConfig::Postgres {
+            host: "db.example".into(), port: 5432, database: "tsumugi".into(), user: "app".into(),
+        };
+        {
+            let s = SettingsStore::new(path.clone()).unwrap();
+            s.save_cache_backend(&cfg).unwrap();
+        }
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"postgres\""));
+        assert!(raw.contains("\"db.example\""));
+
+        let reloaded = SettingsStore::new(path.clone()).unwrap();
+        assert_eq!(reloaded.load_cache_backend().unwrap(), cfg);
+
+        std::fs::remove_file(&path).ok();
+    }
+
     #[test]
     fn group_auto_roundtrips_and_set_group_auto_updates() {
         let s = store();
