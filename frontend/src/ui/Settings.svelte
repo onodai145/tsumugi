@@ -7,12 +7,13 @@
   import BackgroundSection from "./settings/BackgroundSection.svelte";
   import ReactionSection from "./settings/ReactionSection.svelte";
   import DataSection from "./settings/DataSection.svelte";
+  import CacheBackendSettings from "./settings/CacheBackendSettings.svelte";
   import AccountsSection from "./settings/AccountsSection.svelte";
   import KeysSection from "./settings/KeysSection.svelte";
   import AboutSection from "./settings/AboutSection.svelte";
   import Modal from "./Modal.svelte";
 
-  type Section = "accounts" | "layout" | "appearance" | "background" | "reaction" | "data" | "notify" | "mute" | "keys" | "about";
+  type Section = "accounts" | "layout" | "appearance" | "background" | "reaction" | "data" | "cacheBackend" | "notify" | "mute" | "keys" | "about";
 
   let {
     onclose,
@@ -33,6 +34,7 @@
     { id: "background", label: "背景" },
     { id: "reaction", label: "リアクション" },
     { id: "data", label: "データ" },
+    { id: "cacheBackend", label: "キャッシュバックエンド" },
     { id: "notify", label: "通知" },
     { id: "mute", label: "NG（ミュート）" },
     { id: "keys", label: "キー操作" },
@@ -76,6 +78,8 @@
           <ReactionSection />
         {:else if active === "data"}
           <DataSection />
+        {:else if active === "cacheBackend"}
+          <CacheBackendSettings />
         {:else if active === "notify"}
           <NotifySection />
         {:else if active === "mute"}
