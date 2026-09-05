@@ -4695,16 +4695,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-query-binder"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608"
-dependencies = [
- "sea-query",
- "sqlx",
-]
-
-[[package]]
 name = "sea-query-derive"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6629,7 +6619,6 @@ dependencies = [
  "rodio",
  "rusqlite",
  "sea-query",
- "sea-query-binder",
  "serde",
  "serde_json",
  "specta",

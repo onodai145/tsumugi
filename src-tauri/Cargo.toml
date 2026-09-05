@@ -81,7 +81,6 @@ rodio = "0.22"
 async-trait = "0.1.92"
 sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-postgres", "derive"] }
-sea-query-binder = { version = "0.7.0", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # 多重起動防止(Issue #53)。ノートキャッシュを SQLite に保存しており、複数プロセスが

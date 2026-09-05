@@ -69,6 +69,10 @@ pub struct NoteCacheStore {
 }
 
 impl NoteCacheStore {
+    /// テスト専用コンストラクタ(SQLiteバックエンドを直接渡す用途)。本番コードは
+    /// 常に`new_from_arc`(起動時に設定に応じてSqlite/Postgresを事前に選んだ
+    /// `Arc<dyn NoteCacheBackend>`を渡す)経由でのみ構築する。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(backend: impl NoteCacheBackend + 'static) -> Self {
         Self { backend: std::sync::Mutex::new(std::sync::Arc::new(backend)) }
     }
