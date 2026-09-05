@@ -88,6 +88,45 @@ impl SecretStore for KeyringStore {
     }
 }
 
+/// cache backend(Postgres接続)のパスワード保存用サービス名。account トークン(`SERVICE`)とは
+/// 別の固定文字列にして、同じユーザー名(こちらは常に単一の固定キー)が衝突しないようにする。
+const CACHE_BACKEND_SERVICE: &str = "com.onodai.tsumugi-cache-backend";
+/// cache backendは(現状)アカウント単位ではなくアプリ全体で1つの接続情報を持つため、
+/// エントリのユーザー名部分は固定文字列にする。
+const CACHE_BACKEND_ENTRY_USER: &str = "postgres";
+
+fn cache_backend_entry() -> Result<keyring_core::Entry> {
+    ensure_default_store()?;
+    keyring_core::Entry::new(CACHE_BACKEND_SERVICE, CACHE_BACKEND_ENTRY_USER)
+        .map_err(|e| Error::Secret(e.to_string()))
+}
+
+/// cache backend(Postgres)のパスワードをOS keyringへ保存する(Issue #115 Phase 2)。
+pub(crate) fn save_cache_backend_password(password: &str) -> Result<()> {
+    cache_backend_entry()?
+        .set_password(password)
+        .map_err(|e| Error::Secret(e.to_string()))
+}
+
+/// cache backend(Postgres)のパスワードをOS keyringから読み出す(Issue #115 Phase 2)。
+/// 未保存なら`Ok(None)`。
+pub(crate) fn load_cache_backend_password() -> Result<Option<String>> {
+    match cache_backend_entry()?.get_password() {
+        Ok(t) => Ok(Some(t)),
+        Err(keyring_core::Error::NoEntry) => Ok(None),
+        Err(e) => Err(Error::Secret(e.to_string())),
+    }
+}
+
+/// cache backend(Postgres)のパスワードをOS keyringから削除する(Issue #115 Phase 2)。
+/// 未保存でもエラーにしない。
+pub(crate) fn delete_cache_backend_password() -> Result<()> {
+    match cache_backend_entry()?.delete_credential() {
+        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+        Err(e) => Err(Error::Secret(e.to_string())),
+    }
+}
+
 /// テスト・ヘッドレス環境用のインメモリ実装。
 #[derive(Default)]
 #[allow(dead_code)]
@@ -146,5 +185,18 @@ mod real_keyring_tests {
         assert_eq!(s.get(&id).unwrap().as_deref(), Some("tok-123"));
         s.delete(&id).unwrap();
         assert!(s.get(&id).unwrap().is_none());
+    }
+
+    /// cache backendパスワードの実 OS シークレットストアへの疎通テスト。CI 等ヘッドレス環境
+    /// では実行できないため #[ignore]（keyring_store_roundtrip_real_os_backend と同じ方針）。
+    #[test]
+    #[ignore]
+    fn cache_backend_password_roundtrip_real_os_backend() {
+        delete_cache_backend_password().unwrap();
+        assert!(load_cache_backend_password().unwrap().is_none());
+        save_cache_backend_password("pg-pass-123").unwrap();
+        assert_eq!(load_cache_backend_password().unwrap().as_deref(), Some("pg-pass-123"));
+        delete_cache_backend_password().unwrap();
+        assert!(load_cache_backend_password().unwrap().is_none());
     }
 }
