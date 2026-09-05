@@ -166,3 +166,12 @@ Phase 1の教訓(設計時点でのsqlx/rusqlite共存確認漏れが3回の計�
    3. `NoteCacheStore`の`Mutex<Arc<dyn NoteCacheBackend>>`化 + `swap_backend` + `SettingsData.cache_backend`(`CacheBackendConfig`) + keyringへのパスワード保存 + 切替用コマンド + 接続失敗時のSQLiteフォールバック配線。既存の共有状態(`state.rs`)に触れる唯一のタスク
    4. フロントエンド設定UI + `tauri-specta`バインディング再生成
 3. `MySqlBackend`追加(Phase 3)
+
+### Phase 2 実装時の決定
+
+タスクレビュー中の人間判断により、以下2点が設計書執筆時点から確定した(実装は`store/postgres_backend.rs`に反映済み、詳細はコード内コメント参照):
+
+- **TLSモード**: `PostgresBackend::connect`は`PgSslMode::Prefer`(sqlxの既定と同じ)を明示的に指定する。`Require`/`VerifyFull`は使わない。このアプリはユーザーが自由に設定した任意のPostgresインスタンスへ接続するものであり、TLS未設定のLAN/ホームラボ環境への接続も正当な利用として想定されるため、TLSを強制すると接続できなくなるケースが出てしまう。
+- **`max_size_mb`のPostgres無効化**: `prune`のバイト単位サイズ上限(`max_size_mb`、フロントエンドの「データ」設定で入力する)は、SQLite版が`PRAGMA page_count`等でDBファイルサイズを見て実装しているのに対し、Postgres版では同等の軽量な実装手段がなく未対応とした。設定されていても`log::warn!`を出すのみで実際の削除には影響しない。`keep`(保持件数上限)・`max_age_days`(保持日数上限)はPostgres版でも引き続き有効な保持ポリシーである。
+
+なお、`to_postgres_sql`による` REGEXP `→` ~ `の変換は、Rustの`regex`クレートとPostgresのPOSIX正規表現とで構文・意味論が完全には一致しない(例: 一部のUnicodeプロパティ構文や先読み系の対応差)既知の方言ギャップがある。現状のテストスイートはこの差を突く高度なパターンまではカバーしていない。
