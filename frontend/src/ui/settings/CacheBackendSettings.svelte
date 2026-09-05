@@ -88,6 +88,11 @@
         <input class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground" type="password" bind:value={password} />
       </label>
     </div>
+    <p class="mt-2 mb-0 text-xs text-muted-foreground">
+      「データ」設定の「ノートキャッシュのサイズ上限(MB)」は、このPostgreSQLバックエンドには
+      適用されません(バイト単位でのサイズ管理は未対応です)。保持件数上限・保持日数上限は
+      引き続き有効です。
+    </p>
   {/if}
 {/if}
 
