@@ -70,6 +70,12 @@ impl From<rusqlite::Error> for Error {
     }
 }
 
+impl From<sqlx::Error> for Error {
+    fn from(e: sqlx::Error) -> Self {
+        Error::Db(format!("postgres error: {e}"))
+    }
+}
+
 /// 設定ファイル(JSON)の読み書き失敗。DBエラーと同種のローカル永続化失敗として扱う。
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {

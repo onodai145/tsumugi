@@ -3,7 +3,9 @@
 //! （書き込み頻度は低いため、SQLiteのようなインクリメンタル更新は不要）。
 //! 書き込みは一時ファイル→rename で行い、途中でクラッシュしても壊れないようにする。
 
-use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
+use crate::domain::{
+    Account, CacheBackendConfig, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs,
+};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -25,6 +27,8 @@ struct SettingsData {
     ui: UiPrefs,
     #[serde(default)]
     pane_layout: Option<PaneNode>,
+    #[serde(default)]
+    cache_backend: CacheBackendConfig,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -218,6 +222,18 @@ impl SettingsStore {
     pub fn save_mute(&self, cfg: &MuteConfig) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
         guard.mute = cfg.clone();
+        self.save(&guard)
+    }
+
+    // ---- note cacheバックエンド設定(Issue #115 Phase 2) ----
+
+    pub fn load_cache_backend(&self) -> Result<CacheBackendConfig> {
+        Ok(self.data.lock().unwrap().cache_backend.clone())
+    }
+
+    pub fn save_cache_backend(&self, cfg: &CacheBackendConfig) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        guard.cache_backend = cfg.clone();
         self.save(&guard)
     }
 
@@ -490,7 +506,16 @@ pub fn migrate_from_legacy_sqlite(
 
     let store = SettingsStore {
         backing: Backing::File(json_path.to_path_buf()),
-        data: Mutex::new(SettingsData { accounts, groups, columns, mute, notify, ui, pane_layout: None }),
+        data: Mutex::new(SettingsData {
+            accounts,
+            groups,
+            columns,
+            mute,
+            notify,
+            ui,
+            pane_layout: None,
+            cache_backend: CacheBackendConfig::default(),
+        }),
     };
     store.save(&store.data.lock().unwrap())?;
     Ok(store)
@@ -754,6 +779,44 @@ mod tests {
         assert_eq!(children.len(), 2);
         let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
         assert_eq!(group_id, "g1"); // g3が畳まれ、g1が直接の子に戻っている
+    }
+
+    #[test]
+    fn cache_backend_defaults_to_sqlite_and_roundtrips_postgres() {
+        let store = SettingsStore::new_in_memory();
+        assert_eq!(store.load_cache_backend().unwrap(), CacheBackendConfig::Sqlite);
+
+        let cfg = CacheBackendConfig::Postgres {
+            host: "db.example".into(), port: 5432, database: "tsumugi".into(), user: "app".into(),
+        };
+        store.save_cache_backend(&cfg).unwrap();
+        assert_eq!(store.load_cache_backend().unwrap(), cfg);
+    }
+
+    /// `new_in_memory`(`Backing::Memory`)の`save`は実際にはディスクへ書かないため、上の
+    /// テストだけでは serde の実際のシリアライズ/デシリアライズ(内部タグ付きenum)を通らない。
+    /// ここではファイルへ実際に書き出し、再読み込みでPostgres設定が復元されることを検証する
+    /// (実運用での再起動シナリオの回帰テスト)。
+    #[test]
+    fn cache_backend_postgres_config_persists_across_restart_via_json_file() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-cache-backend-test-{}.json", uuid::Uuid::new_v4()));
+        let cfg = CacheBackendConfig::Postgres {
+            host: "db.example".into(), port: 5432, database: "tsumugi".into(), user: "app".into(),
+        };
+        {
+            let s = SettingsStore::new(path.clone()).unwrap();
+            s.save_cache_backend(&cfg).unwrap();
+        }
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"postgres\""));
+        assert!(raw.contains("\"db.example\""));
+
+        let reloaded = SettingsStore::new(path.clone()).unwrap();
+        assert_eq!(reloaded.load_cache_backend().unwrap(), cfg);
+
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

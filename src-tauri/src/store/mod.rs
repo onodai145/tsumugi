@@ -7,6 +7,8 @@ pub mod draft;
 pub mod note_cache;
 pub mod settings;
 mod sqlite_backend;
+pub(crate) mod postgres_backend;
+pub(crate) mod postgres_user_ref;
 pub mod user_ref;
 
 pub use draft::DraftStore;

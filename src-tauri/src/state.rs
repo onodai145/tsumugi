@@ -40,6 +40,9 @@ pub struct AppState {
     pub settings: SettingsStore,
     pub drafts: DraftStore,
     pub cache: NoteCacheStore,
+    /// ノートキャッシュDB(`cache.db`)を置くディレクトリ。`set_cache_backend`がSqliteへ
+    /// 切り替える際に`cache_dir.join("cache.db")`を再度開くために保持する(Issue #115 Phase 2)。
+    pub cache_dir: std::path::PathBuf,
     /// 再接続ギャップ埋め(Issue #147)が実行中の column_id 集合。フラッピング再接続で同一
     /// カラムに対する多重実行を防ぐためのガード（commands/column.rs 側で挿入/削除する）。
     pub gap_fill_in_flight: Mutex<HashSet<String>>,
@@ -54,8 +57,9 @@ impl AppState {
         settings: SettingsStore,
         drafts: DraftStore,
         cache: NoteCacheStore,
+        cache_dir: std::path::PathBuf,
     ) -> Self {
-        Self::new_with_sound(secrets, settings, drafts, cache, SoundPlayer::spawn())
+        Self::new_with_sound(secrets, settings, drafts, cache, cache_dir, SoundPlayer::spawn())
     }
 
     /// `sound` フィールドの構築方法を差し替え可能にした内部コンストラクタ。
@@ -66,6 +70,7 @@ impl AppState {
         settings: SettingsStore,
         drafts: DraftStore,
         cache: NoteCacheStore,
+        cache_dir: std::path::PathBuf,
         sound: SoundPlayer,
     ) -> Self {
         let accounts = settings.load_accounts().unwrap_or_else(|e| {
@@ -89,6 +94,7 @@ impl AppState {
             settings,
             drafts,
             cache,
+            cache_dir,
             gap_fill_in_flight: Mutex::new(HashSet::new()),
             sound,
         }
@@ -141,6 +147,7 @@ impl AppState {
             settings,
             DraftStore::new_in_memory(),
             cache,
+            std::env::temp_dir(),
             SoundPlayer::new_for_test(),
         )
     }

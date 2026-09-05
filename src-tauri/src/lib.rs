@@ -117,6 +117,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::user::get_user_notes,
             commands::user::get_user_followers,
             commands::user::get_user_following,
+            commands::cache_backend::get_cache_backend,
+            commands::cache_backend::set_cache_backend,
         ])
         .events(collect_events![
             events::ColumnNote,
@@ -231,8 +233,40 @@ pub fn run() {
 
             let cache_conn =
                 db::open_cache(&cache_dir.join("cache.db")).expect("failed to open cache db");
-            let cache = NoteCacheStore::new(store::SqliteBackend::new(cache_conn));
-            app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache));
+            let configured_backend = settings.load_cache_backend().unwrap_or_default();
+            let cache_backend: std::sync::Arc<dyn store::note_cache::NoteCacheBackend> = match configured_backend {
+                domain::CacheBackendConfig::Sqlite => {
+                    std::sync::Arc::new(store::SqliteBackend::new(cache_conn))
+                }
+                domain::CacheBackendConfig::Postgres { host, port, database, user } => {
+                    match session::load_cache_backend_password() {
+                        Ok(Some(password)) => {
+                            let params = store::postgres_backend::PostgresConnectParams {
+                                host, port, database, user, password,
+                            };
+                            match tauri::async_runtime::block_on(store::postgres_backend::PostgresBackend::connect(&params)) {
+                                Ok(backend) => std::sync::Arc::new(backend),
+                                Err(e) => {
+                                    log::error!(
+                                        "failed to connect to configured Postgres cache backend at startup, \
+                                         falling back to SQLite cache: {e}"
+                                    );
+                                    std::sync::Arc::new(store::SqliteBackend::new(cache_conn))
+                                }
+                            }
+                        }
+                        _ => {
+                            log::error!(
+                                "Postgres cache backend configured but no password found in keyring, \
+                                 falling back to SQLite cache"
+                            );
+                            std::sync::Arc::new(store::SqliteBackend::new(cache_conn))
+                        }
+                    }
+                }
+            };
+            let cache = NoteCacheStore::new_from_arc(cache_backend);
+            app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache, cache_dir.clone()));
 
             // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の
             // 未確定文字列インライン表示)を無効化しているため、明示的に再度有効化する。

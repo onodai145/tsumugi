@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod app;
+pub mod cache_backend;
 pub mod clip;
 pub mod column;
 pub mod draft;
