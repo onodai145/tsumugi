@@ -65,81 +65,98 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
 /// note cacheの公開API。内部の`NoteCacheBackend`実装(`SqliteBackend`、将来的な
 /// `PostgresBackend`/`MySqlBackend`)へ委譲する薄いラッパー。
 pub struct NoteCacheStore {
-    backend: Box<dyn NoteCacheBackend>,
+    backend: std::sync::Mutex<std::sync::Arc<dyn NoteCacheBackend>>,
 }
 
 impl NoteCacheStore {
     pub fn new(backend: impl NoteCacheBackend + 'static) -> Self {
-        Self { backend: Box::new(backend) }
+        Self { backend: std::sync::Mutex::new(std::sync::Arc::new(backend)) }
+    }
+
+    /// 既に`Arc`化済みのバックエンドから構築する(起動時、設定に応じてSqlite/Postgresの
+    /// いずれかを事前に選んで`Arc<dyn NoteCacheBackend>`にした後、それをそのまま渡す用途)。
+    pub fn new_from_arc(backend: std::sync::Arc<dyn NoteCacheBackend>) -> Self {
+        Self { backend: std::sync::Mutex::new(backend) }
+    }
+
+    /// バックエンドを即時差し替える。ロックは一瞬だけ保持し(`.await`をまたがない)、
+    /// 差し替え中に進行中の呼び出しは古いバックエンド(cloneされた`Arc`)のまま
+    /// 完走する(設計書「バックエンド抽象化」節参照)。
+    pub fn swap_backend(&self, new_backend: std::sync::Arc<dyn NoteCacheBackend>) {
+        *self.backend.lock().unwrap() = new_backend;
+    }
+
+    fn backend(&self) -> std::sync::Arc<dyn NoteCacheBackend> {
+        std::sync::Arc::clone(&self.backend.lock().unwrap())
     }
 
     /// ノート群をキャッシュへ upsert し、カラム所属を記録する（1トランザクション）。
     pub async fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()> {
-        self.backend.cache_notes(column_id, notes).await
+        self.backend().cache_notes(column_id, notes).await
     }
 
     /// 1件のノートをキャッシュ（Streaming 受信時に使う）。
     pub async fn cache_note(&self, column_id: &str, note: &Note) -> Result<()> {
-        self.backend.cache_note(column_id, note).await
+        self.backend().cache_note(column_id, note).await
     }
 
     /// カラムの直近ノートをキャッシュから取得（新しい順・最大 limit）。
     pub async fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>> {
-        self.backend.load_cached(column_id, limit).await
+        self.backend().load_cached(column_id, limit).await
     }
 
     /// カラムのキャッシュから until_id より古いノートを取得（新しい順、最大 limit 件）。
     /// backfill のキャッシュ優先パス用（load_cached の until_id 版）。
     pub async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
-        self.backend.load_cached_before(column_id, until_id, limit).await
+        self.backend().load_cached_before(column_id, until_id, limit).await
     }
 
     /// note_id 単体をキャッシュから取得する（column_note を経由しない）。
     /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映する際、
     /// 対象ノートがどのカラムに属すか気にせず読み書きするために使う。
     pub async fn get_note(&self, note_id: &str) -> Result<Option<Note>> {
-        self.backend.get_note(note_id).await
+        self.backend().get_note(note_id).await
     }
 
     /// 1件のノートのキャッシュ内容を更新する（column_note には触れない）。
     /// 自分のリアクション操作やstreamingのnoteUpdatedをキャッシュへ反映するために使う。
     /// 対象がまだキャッシュに無ければ何もしない想定の呼び出し元(get_noteでSomeを確認済み)向け。
     pub async fn update_note(&self, note: &Note) -> Result<()> {
-        self.backend.update_note(note).await
+        self.backend().update_note(note).await
     }
 
     /// カラム所属レコードを消す（カラム削除時。note 本体は他カラムと共有しうるので残す）。
     pub async fn clear_column_notes(&self, column_id: &str) -> Result<()> {
-        self.backend.clear_column_notes(column_id).await
+        self.backend().clear_column_notes(column_id).await
     }
 
     /// カラムの境界(oldest_fetched_id)を取得。未確定ならNone。
     pub async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
-        self.backend.get_fetch_boundary(column_id).await
+        self.backend().get_fetch_boundary(column_id).await
     }
 
     /// 境界を new_oldest_id で無条件に新規セット/上書きする(初回REST取得時に使う)。
     pub async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        self.backend.set_fetch_boundary(column_id, new_oldest_id).await
+        self.backend().set_fetch_boundary(column_id, new_oldest_id).await
     }
 
     /// 境界を new_oldest_id まで延長する(古い方向へのみ、単調性を保証)。
     /// 既存値の方が既に古ければ何もしない。
     pub async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        self.backend.extend_fetch_boundary(column_id, new_oldest_id).await
+        self.backend().extend_fetch_boundary(column_id, new_oldest_id).await
     }
 
     /// 全カラムのbackfill境界を削除する(未確定状態に戻す)。ミュート設定変更時など、
     /// キャッシュされたフィルタ済みノート集合の前提が崩れる操作の後に呼ぶ(Issue #228)。
     pub async fn clear_all_fetch_boundaries(&self) -> Result<()> {
-        self.backend.clear_all_fetch_boundaries().await
+        self.backend().clear_all_fetch_boundaries().await
     }
 
     /// キャッシュ済みノートの総数。Backstageのステータス表示用。
     /// specta が i64 の直接エクスポートを禁止するため i32 で返す(ローカルキャッシュ件数が
     /// 21億件を超えることは実運用上ない)。
     pub async fn note_count(&self) -> Result<i32> {
-        self.backend.note_count().await
+        self.backend().note_count().await
     }
 
     /// 投稿日時(created_at, epoch秒)が since_epoch_secs 以降のノート件数。
@@ -147,7 +164,7 @@ impl NoteCacheStore {
     /// 上スクロールでの過去取得(古いcreated_atのノートをまとめてupsertする)による誤った
     /// 跳ね上がりが起きない。idx_note_created を使う。
     pub async fn notes_since(&self, since_epoch_secs: i32) -> Result<i32> {
-        self.backend.notes_since(since_epoch_secs).await
+        self.backend().notes_since(since_epoch_secs).await
     }
 
     /// キャッシュを間引く（Issue #6: 無制限に溜まり続けないようにする）。3つの上限を順に適用する:
@@ -157,7 +174,7 @@ impl NoteCacheStore {
     ///
     /// 各上限は `<= 0` で無効（無制限）。戻り値は実際に削除した件数の合計。
     pub async fn prune(&self, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
-        self.backend.prune(keep, max_age_days, max_size_mb).await
+        self.backend().prune(keep, max_age_days, max_size_mb).await
     }
 
     /// TQL `cache` ソース: ローカルSQLiteキャッシュ全体を where 句で検索する（受信せず検索のみ）。
@@ -168,7 +185,7 @@ impl NoteCacheStore {
         until_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Note>> {
-        self.backend.search_cache(where_sql, until_id, limit).await
+        self.backend().search_cache(where_sql, until_id, limit).await
     }
 }
 
@@ -630,6 +647,24 @@ mod tests {
             conn.query_row("SELECT payload FROM note WHERE id = 'n1'", [], |r| r.get(0)).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw_payload).unwrap();
         assert_eq!(v["user"], serde_json::json!({ "id": "u1" }));
+    }
+
+    #[tokio::test]
+    async fn swap_backend_switches_active_backend_for_subsequent_calls() {
+        let backend_a = crate::store::sqlite_backend::SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        );
+        let store = NoteCacheStore::new(backend_a);
+        store.cache_note("col1", &note("n1", 100)).await.unwrap();
+        assert_eq!(store.load_cached("col1", 10).await.unwrap().len(), 1);
+
+        let backend_b = crate::store::sqlite_backend::SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        );
+        store.swap_backend(std::sync::Arc::new(backend_b));
+
+        // 切替後は新しい(空の)バックエンドを見ている
+        assert_eq!(store.load_cached("col1", 10).await.unwrap().len(), 0);
     }
 
     #[test]
