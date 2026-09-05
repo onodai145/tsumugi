@@ -44,7 +44,11 @@ pub async fn set_cache_backend(
     };
 
     // ここまで来て初めて実際に差し替える(接続確認済みのバックエンドのみをswapする)。
-    state.cache.swap_backend(new_backend);
+    // 設定の永続化を先に行い、それが成功して初めてswap_backend(infallible)を呼ぶ。
+    // 逆順にすると、swap成功直後にsave_cache_backendが失敗した場合に「プロセスは新
+    // バックエンドで動いているが、永続化された設定は旧バックエンドのまま」という
+    // 不整合window(再起動すると旧バックエンドに戻ってしまう)が生じるため。
     state.settings.save_cache_backend(&config).map_err(|e| e.to_string())?;
+    state.cache.swap_backend(new_backend);
     Ok(())
 }
