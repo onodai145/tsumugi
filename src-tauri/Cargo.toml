@@ -79,6 +79,9 @@ tauri-plugin-fs = "2"
 infer = "0.22.0"
 rodio = "0.22"
 async-trait = "0.1.92"
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls"] }
+sea-query = { version = "0.32.7", default-features = false, features = ["backend-postgres", "derive"] }
+sea-query-binder = { version = "0.7.0", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # 多重起動防止(Issue #53)。ノートキャッシュを SQLite に保存しており、複数プロセスが
@@ -108,5 +111,6 @@ jni = "0.21"
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
 
 [dev-dependencies]
+testcontainers-modules = { version = "0.15.0", features = ["postgres"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 wiremock = "0.6"
