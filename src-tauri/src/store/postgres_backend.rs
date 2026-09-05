@@ -430,22 +430,31 @@ fn has_url(text: &str) -> bool {
     text.contains("http://") || text.contains("https://")
 }
 
-/// `note`行 + 側テーブル(reaction/tag/mention/emoji/file)をUPSERTする。
-/// `store/note_cache.rs::upsert_note`(SQLite版)と等価。1トランザクション内で実行する。
-async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
-    let mut payload_value = serde_json::to_value(n)?;
-    crate::store::user_ref::stub_user_refs(&mut payload_value);
-    let payload = serde_json::to_string(&payload_value)?;
-    let text_length = n.text.as_deref().map(|t| t.chars().count()).unwrap_or(0) as i64;
-    let has_link = n.text.as_deref().map(has_url).unwrap_or(false);
-
+/// noteが参照するuserをすべてupsertする。プールの別コネクションを都度取得して
+/// 即座に返却するため、呼び出し元がトランザクションを保持している間に呼んでは
+/// ならない — コネクションプールのサイズが小さい場合、トランザクション用の
+/// コネクションを保持したまま追加のコネクションを要求するとデッドロック
+/// (もしくはacquireタイムアウト)を招く。必ずトランザクション開始前に呼ぶこと。
+async fn upsert_note_users(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
     // note行より先にuserをupsertする(SQLite版と同じ理由: user行が無いnote行が
     // 永久に読めなくなる事態を避ける)。
     for user in crate::store::user_ref::collect_users(n) {
         crate::store::postgres_user_ref::upsert_user(pool, user).await?;
     }
+    Ok(())
+}
 
-    let mut tx = pool.begin().await?;
+/// `note`行 + 側テーブル(reaction/tag/mention/emoji/file)をUPSERTする。
+/// `store/note_cache.rs::upsert_note`(SQLite版)と等価。呼び出し元が開始した
+/// トランザクション`tx`の中で実行する(コミットは呼び出し元の責務)。
+/// user upsertはこの関数に含まれない — 呼び出し元が`upsert_note_users`を
+/// トランザクション開始前に済ませておくこと(`upsert_note_users`のdocコメント参照)。
+async fn upsert_note_tx(tx: &mut sqlx::PgTransaction<'_>, n: &Note) -> Result<()> {
+    let mut payload_value = serde_json::to_value(n)?;
+    crate::store::user_ref::stub_user_refs(&mut payload_value);
+    let payload = serde_json::to_string(&payload_value)?;
+    let text_length = n.text.as_deref().map(|t| t.chars().count()).unwrap_or(0) as i64;
+    let has_link = n.text.as_deref().map(has_url).unwrap_or(false);
 
     sqlx::query(
         "INSERT INTO note (
@@ -492,7 +501,7 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
     .bind(n.is_renoted_by_me)
     .bind(n.is_favorited_by_me)
     .bind(&payload)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
     for (emoji, count) in &n.reactions {
@@ -503,7 +512,7 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
         .bind(&n.id)
         .bind(emoji)
         .bind(*count as i64)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
     for tag in &n.tags {
@@ -512,7 +521,7 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
         )
         .bind(&n.id)
         .bind(tag)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
     for uid in &n.mentions {
@@ -521,7 +530,7 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
         )
         .bind(&n.id)
         .bind(uid)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
     for e in n.emojis.keys() {
@@ -530,7 +539,7 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
         )
         .bind(&n.id)
         .bind(e)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
     for f in &n.files {
@@ -542,7 +551,7 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
         .bind(&f.mime_type)
         .bind(mime_category(&f.mime_type))
         .bind(f.is_sensitive)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
 
@@ -551,23 +560,23 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
     sqlx::query("DELETE FROM note_reaction WHERE note_id = $1 AND NOT (emoji_key = ANY($2))")
         .bind(&n.id)
         .bind(&reaction_keys)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     sqlx::query("DELETE FROM note_tag WHERE note_id = $1 AND NOT (tag = ANY($2))")
         .bind(&n.id)
         .bind(&n.tags)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     sqlx::query("DELETE FROM note_mention WHERE note_id = $1 AND NOT (user_id = ANY($2))")
         .bind(&n.id)
         .bind(&n.mentions)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     let emoji_keys: Vec<&String> = n.emojis.keys().collect();
     sqlx::query("DELETE FROM note_emoji WHERE note_id = $1 AND NOT (emoji = ANY($2))")
         .bind(&n.id)
         .bind(&emoji_keys)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     // note_fileは複合キーで`= ANY`が使えないため、SQLite版(rowidベース)と同様に
     // 既存行を取得してRust側で差分判定し、現存しないキーの組だけ個別にDELETEする。
@@ -580,7 +589,7 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
         "SELECT mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = $1",
     )
     .bind(&n.id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await?;
     for (mime_type, mime_category_val, is_sensitive) in existing_files {
         let key = (mime_type.clone(), mime_category_val.clone(), is_sensitive);
@@ -592,11 +601,21 @@ async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
             .bind(&mime_type)
             .bind(&mime_category_val)
             .bind(is_sensitive)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
         }
     }
 
+    Ok(())
+}
+
+/// 単発呼び出し用の薄いラッパー(既存の呼び出し箇所、例: `update_note`向け)。
+/// user upsert(トランザクション外)→1トランザクションを開始し`upsert_note_tx`を
+/// 呼んでコミットする、の順で行う。
+async fn upsert_note(pool: &sqlx::PgPool, n: &Note) -> Result<()> {
+    upsert_note_users(pool, n).await?;
+    let mut tx = pool.begin().await?;
+    upsert_note_tx(&mut tx, n).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -672,8 +691,15 @@ impl NoteCacheBackend for PostgresBackend {
             return Ok(());
         }
         let now = crate::store::note_cache::now_epoch();
+        // userのupsertはすべてトランザクション開始前に行う(`upsert_note_users`のdoc
+        // コメント参照 — トランザクション保持中にプールから別コネクションを取得すると
+        // プールが小さい場合にデッドロック/acquireタイムアウトを招くため)。
         for n in notes {
-            upsert_note(&self.pool, n).await?;
+            upsert_note_users(&self.pool, n).await?;
+        }
+        let mut tx = self.pool.begin().await?;
+        for n in notes {
+            upsert_note_tx(&mut tx, n).await?;
             sqlx::query(
                 "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ($1,$2,$3,$4)
                  ON CONFLICT DO NOTHING",
@@ -682,9 +708,10 @@ impl NoteCacheBackend for PostgresBackend {
             .bind(&n.id)
             .bind(now)
             .bind(n.created_at)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -881,28 +908,10 @@ async fn prune_impl(pool: &sqlx::PgPool, keep: i32, max_age_days: i32, max_size_
     tx.commit().await?;
 
     if max_size_mb > 0 {
-        // Postgresは対象DB全体のサイズ(`pg_database_size`)しか手軽に取れず、SQLiteのように
-        // 単一ファイルの物理サイズやincremental vacuumで縮小、という概念がない(通常のテーブルは
-        // 他のDBオブジェクトと同じデータベースに同居しうる。同一データベースを他用途と共有しない
-        // 運用を前提とする)。ここでは「サイズが予算を超えている間、最古のノートを一定数ずつ追加削除する」
-        // 素朴なループにする(SQLiteの`shrink_to_size`と挙動を完全一致させることは狙わない)。
-        let budget_bytes = max_size_mb as i64 * 1024 * 1024;
-        loop {
-            let (size,): (i64,) = sqlx::query_as("SELECT pg_database_size(current_database())").fetch_one(pool).await?;
-            if size <= budget_bytes {
-                break;
-            }
-            let ids: Vec<(String,)> =
-                sqlx::query_as("SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT 100").fetch_all(pool).await?;
-            if ids.is_empty() {
-                break;
-            }
-            let ids: Vec<String> = ids.into_iter().map(|(id,)| id).collect();
-            let mut tx = pool.begin().await?;
-            let n = delete_matching_ids(&mut tx, &ids).await?;
-            tx.commit().await?;
-            deleted += n;
-        }
+        log::warn!(
+            "max_size_mb is configured but has no effect on the Postgres cache backend \
+             (byte-budget pruning is not supported here); use keep/max_age_days instead"
+        );
     }
     Ok(deleted as usize)
 }
