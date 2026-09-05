@@ -165,7 +165,7 @@ Phase 1の教訓(設計時点でのsqlx/rusqlite共存確認漏れが3回の計�
    2. `impl NoteCacheBackend for PostgresBackend`(15メソッド、sea-queryで組み立て)。`filter/sql.rs`のプレースホルダ/`REGEXP`変換(`to_postgres_sql`)もここに含める。新規ファイルのみで完結し、まだどこからも構築されない
    3. `NoteCacheStore`の`Mutex<Arc<dyn NoteCacheBackend>>`化 + `swap_backend` + `SettingsData.cache_backend`(`CacheBackendConfig`) + keyringへのパスワード保存 + 切替用コマンド + 接続失敗時のSQLiteフォールバック配線。既存の共有状態(`state.rs`)に触れる唯一のタスク
    4. フロントエンド設定UI + `tauri-specta`バインディング再生成
-3. `MySqlBackend`追加(Phase 3)
+3. `MySqlBackend`追加(Phase 3、下記「Phase 3設計」参照)
 
 ### Phase 2 実装時の決定
 
@@ -175,3 +175,44 @@ Phase 1の教訓(設計時点でのsqlx/rusqlite共存確認漏れが3回の計�
 - **`max_size_mb`のPostgres無効化**: `prune`のバイト単位サイズ上限(`max_size_mb`、フロントエンドの「データ」設定で入力する)は、SQLite版が`PRAGMA page_count`等でDBファイルサイズを見て実装しているのに対し、Postgres版では同等の軽量な実装手段がなく未対応とした。設定されていても`log::warn!`を出すのみで実際の削除には影響しない。`keep`(保持件数上限)・`max_age_days`(保持日数上限)はPostgres版でも引き続き有効な保持ポリシーである。
 
 なお、`to_postgres_sql`による` REGEXP `→` ~ `の変換は、Rustの`regex`クレートとPostgresのPOSIX正規表現とで構文・意味論が完全には一致しない(例: 一部のUnicodeプロパティ構文や先読み系の対応差)既知の方言ギャップがある。現状のテストスイートはこの差を突く高度なパターンまではカバーしていない。
+
+## Phase 3設計: MySqlBackend
+
+Phase 2完了後の続き。動機はPostgresと同じ(複数端末共有・大規模運用)で、特定のMySQL/MariaDB運用予定があるわけではなく、「Postgresが使えるならMySQLも使えるようにしておきたい」という一貫性目的での対応。
+
+### 事前検証(スパイクで確定)
+
+Phase 2と同様、実装計画作成前に依存関係を独立した検証用crateで確認した:
+
+- `sqlx = { version = "0.8.6", default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls"] }` + `sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "derive"] }`は、既存の`rusqlite`と同一Cargo依存グラフに共存できることを`cargo check`で実証済み(`libsqlite3-sys`競合なし)。
+- **`sqlx`の`chrono`/`json`featureはPostgres同様NG**。`cargo check`で同じ`sqlx-sqlite`経由の`libsqlite3-sys`競合が再現することを確認済み。Postgresと同じ規約(タイムスタンプは`BIGINT`、JSON payloadは`TEXT`+`serde_json`手動変換)を踏襲する。
+- **プレースホルダ変換が不要**: `sea-query`の`MysqlQueryBuilder`で組み立てたクエリは`?`プレースホルダを使う(SQLiteと同じ記法)。`filter/sql.rs::build_where`が返す`SqlWhere.sql`(`?`プレースホルダ)はPostgresのような`$N`への振り直しが不要で、そのままMySQLへバインドできる見込み(実装時にsqlxの`MySqlArguments`で実際のバインドを確認すること)。
+- **BOOLEAN列の型不一致が起きない見込み**: MySQLの`BOOLEAN`/`BOOL`型は`TINYINT(1)`のエイリアスであり、整数リテラルとの比較(`col = 1`)がそのまま通る。Phase 2で踏んだ「Postgresのネイティブ`BOOLEAN`型とTQLの`= 1`比較が型不一致でエラーになる」問題(Critical、最終レビューで発覚)はMySQLでは再現しない想定。DDLは`sea_query::ColumnDef::boolean()`をそのまま使ってよい。ただし実装時に実MySQLで検証すること(Postgresでも「たぶん大丈夫」ではなく実DBでの確認が必要だった教訓を踏まえる)。
+- `REGEXP`はMySQLもネイティブの中置演算子として`col REGEXP pattern`をサポートしており、SQLiteと同じキーワードが使える。ただし正規表現エンジン自体(MySQL 8.0以降はICU正規表現)はRustの`regex`クレートと完全には一致しないため、Postgresと同様の既知の方言ギャップとして扱う。
+
+以上により、`to_postgres_sql`に相当する変換関数は**不要、または恒等関数に近い**見込みである。実装時に`SqlWhere.sql`を無変換でMySQLへ渡せるか実DBで確認し、もし何らかの差異が見つかった場合のみ`to_mysql_sql`を追加する(想定される差異が無ければ関数自体を作らない)。
+
+### アーキテクチャ
+
+Postgresと同型: `store/mysql_backend.rs`(`MySqlBackend { pool: sqlx::MySqlPool }`、`sea-query`の`Table::create()`/`Index::create()`によるDDL、`NoteCacheBackend`トレイトの全15メソッドを手書きSQL+`sqlx::query()`で実装)+ `store/mysql_user_ref.rs`(`store/postgres_user_ref.rs`と同型、`user_ref.rs`の純粋関数を再利用)。
+
+### TLS
+
+`sqlx::mysql::MySqlSslMode::Preferred`を明示的に指定する。Postgresの`PgSslMode::Prefer`採用理由と同じ(任意のユーザー設定MySQL/MariaDBインスタンス、TLS未設定のLAN/ホームラボ環境への接続を正当な利用として想定するため、`Required`は強制しない)。
+
+### 設定・UI
+
+`domain::CacheBackendConfig`(Phase 2で追加済み)に`MySql { host, port, database, user }` variantを追加する(既存の`Sqlite`/`Postgres`と同じ形、パスワードは含まずkeyring経由)。`CacheBackendSettings.svelte`に3つ目の選択肢(ラジオボタン)を追加する。`max_size_mb`はPostgres同様、MySQLでもバイト単位のDBサイズ上限を軽量に取得する標準的な手段がなければ同じくno-op+警告ログとする(実装時に`INFORMATION_SCHEMA.TABLES`等での概算取得が現実的か確認し、可能なら実装してもよい)。
+
+### テスト
+
+`testcontainers-modules`の`mysql`featureで実MySQLに対する統合テスト(`#[ignore]`、既存のPostgres/実Misskey接続テストと同じ方針でCI常時実行はしない)。
+
+### 実装の段階分割
+
+Phase 2の4タスク構成を踏襲するが、Task 3(切替インフラ)・Task 4(フロントエンド)は既存の`CacheBackendConfig`/`CacheBackendSettings.svelte`への追加になるため、Phase 2より小さくなる見込み:
+
+1. 依存クレート追加(上記バージョン・feature構成)+ `MySqlBackend`のDDLのみ(接続確立・`Table::create()`によるテーブル作成)。`testcontainers`による統合テスト(`#[ignore]`)。`NoteCacheBackend`トレイトはまだ実装しない
+2. `impl NoteCacheBackend for MySqlBackend`(15メソッド)。`SqlWhere.sql`をMySQLへそのまま渡せるか実DBで確認し、必要なら変換関数を追加。新規ファイルのみで完結
+3. `CacheBackendConfig::MySql` variant追加 + `set_cache_backend`/起動時フォールバックへのMySQL分岐追加(Postgresと同じ2種類の接続失敗挙動を踏襲)。Phase 2で構築済みの`Mutex<Arc<dyn NoteCacheBackend>>`/`swap_backend`基盤には変更不要
+4. フロントエンド設定UIへの選択肢追加 + `tauri-specta`バインディング再生成
