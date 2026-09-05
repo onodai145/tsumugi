@@ -21,15 +21,24 @@ Issue #115「外部のデータベースを使えるようにする」。本文�
 
 ### バックエンド抽象化
 
-Phase 1で確定した実装: `store/note_cache.rs`の`NoteCacheStore`は`NoteCacheBackend`トレイトオブジェクトへ委譲する薄いラッパー。Phase 2では、設定画面からの切り替えで再起動なしに即時再接続できるよう、内部を`RwLock`で保持する:
+Phase 1で確定した実装: `store/note_cache.rs`の`NoteCacheStore`は`NoteCacheBackend`トレイトオブジェクトへ委譲する薄いラッパー。Phase 2では、設定画面からの切り替えで再起動なしに即時再接続できるよう、内部を`Arc<dyn NoteCacheBackend>`の`Mutex`で保持する:
 
 ```rust
 pub struct NoteCacheStore {
-    backend: RwLock<Box<dyn NoteCacheBackend>>,
+    backend: std::sync::Mutex<Arc<dyn NoteCacheBackend>>,
 }
 ```
 
-既存の委譲メソッド(`cache_notes`/`load_cached`/...)は内部で`self.backend.read().await`してから委譲するだけなので、**呼び出し元(`state.cache.method(...)`)は一切変更不要**。バックエンド切替は新規メソッド`NoteCacheStore::swap_backend(&self, new_backend: impl NoteCacheBackend + 'static) -> Result<()>`が`write().await`して差し替える。起動時、および設定変更時に`SettingsData.cache_backend`を読み、対応する`NoteCacheBackend`実装(`SqliteBackend`/`PostgresBackend`/将来の`MySqlBackend`)を構築して渡す。
+**方針転換(重要・スパイクで検証済み)**: 当初`tokio::sync::RwLock<Box<dyn NoteCacheBackend>>`案を検討したが、`self.backend.read().await`で取ったガードをバックエンド呼び出しの`.await`をまたいで保持する形になり、`AppState`(および全`State<'_, AppState>`コマンド)のfutureに`Send`境界の要求が波及するリスクがあった。代わりに、各委譲メソッドは`std::sync::Mutex`を**一瞬だけ**ロックして`Arc`をcloneし、ロックを即座に手放してから`.await`する:
+
+```rust
+pub async fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()> {
+    let backend = { self.backend.lock().unwrap().clone() };
+    backend.cache_notes(column_id, notes).await
+}
+```
+
+ガードが`.await`をまたぐことがないため`Send`境界の問題が原理的に発生しない(スパイクで`assert_send`により実証済み)。バックエンド切替は新規メソッド`NoteCacheStore::swap_backend(&self, new_backend: Arc<dyn NoteCacheBackend>)`が同じく一瞬だけロックして`*guard = new_backend`で差し替える(async化不要)。**呼び出し元(`state.cache.method(...)`)は一切変更不要**。起動時、および設定変更時に`SettingsData.cache_backend`を読み、対応する`NoteCacheBackend`実装(`SqliteBackend`/`PostgresBackend`/将来の`MySqlBackend`)を`Arc::new(...)`で構築して渡す。
 
 ### DBアクセス手段: Phase 1はrusqlite継続 + spawn_blocking、sqlx/sea-queryはPhase 2から
 
@@ -57,7 +66,12 @@ account/column設定側(`store/settings.rs`ほか)は今後も`rusqlite`を使�
 
 `search_cache`(`note_cache.rs`)は`filter/sql.rs`の`build_where`が返す`SqlWhere { sql: String, params: Vec<SqlParam> }`(`?`プレースホルダのSQL断片)をそのまま自前のSELECT文へ埋め込んでいる。Phase 1はrusqliteを使い続けるため、この生SQL文字列・バインド方式は一切変更しない(`?`プレースホルダはrusqliteネイティブの記法のまま)。`SqlWhere`はDeriveされた`Clone`を持たないため、`spawn_blocking`クロージャへ渡す際は`SqlWhere { sql: where_sql.sql.clone(), params: where_sql.params.clone() }`のようにフィールドごとに複製する(`SqlParam`は`Clone`実装済み)。
 
-PostgreSQL対応で`$1`形式の番号付きプレースホルダへの対応が必要になる時点(Phase 2)で、`filter/sql.rs`の`build_where`をバックエンド非依存な形へ変更する。
+**方針転換(Phase 2着手時に確定)**: 当初「`build_where`自体をバックエンド非依存な形(sea-queryの`Cond`など)へ書き換える」案を想定していたが、`build_where`が生成するSQLは元々`?`プレースホルダと`REGEXP`演算子以外はPostgreSQLでもそのまま解釈できる標準的なSQL(`JOIN`前提のテーブルエイリアス`n`/`u`、`LIKE`、`IN`、`EXISTS`相関サブクエリ等)であるため、`build_where`自体は一切変更せず、**`PostgresBackend::search_cache`側で受け取った`SqlWhere.sql`に対する後処理(テキスト変換)としてダイアレクト差を吸収する**方針に変更した:
+
+1. `?`プレースホルダを出現順に`$1`, `$2`, ... へ振り直す(`SqlWhere.sql`内に`?`はすべてプレースホルダとしてのみ現れ、文字列リテラル中に`?`が直接埋め込まれることはない――値は常に`SqlParam`としてバインドされる――ため、単純な出現順置換で安全)
+2. `" REGEXP "`を`" ~ "`(PostgreSQLのPOSIX正規表現一致演算子)へ文字列置換する。SQLiteの`REGEXP`はRust側で`create_scalar_function`により`regex`クレートで実装されたカスタム関数であるのに対し、PostgreSQLの`~`はPOSIX正規表現エンジンであるため、`(?i)`等のRust正規表現特有のインライン修飾子を含むクエリでは挙動が完全には一致しない。これは既知の制限としてドキュメント化し、v1では許容する(既存の`filter/sql.rs`のコメントにも「v1では非対応」の注記が既にある方針を踏襲)
+
+`build_where`自体・`filter/sql.rs`のテストは無変更。この変換は`PostgresBackend`内に閉じた実装(新規関数、例: `fn to_postgres_sql(where_sql: &SqlWhere) -> (String, Vec<SqlParam>)`)として追加し、`SqliteBackend`・`filter/eval.rs`には一切影響しない。
 
 ### 依存クレート追加(Phase 1)
 
@@ -127,8 +141,28 @@ Phase 1完了後の続き。以下のヒアリングで確定した内容:
 - **統合テスト**: `testcontainers`でDocker上に一時PostgreSQLインスタンスを立てて検証する。既存の実Misskey接続テスト(`#[ignore]`)と同様、CI常時実行はしない
 - **DDL**: `PostgresBackend`用のテーブルDDLもsea-queryの`Table::create()`で書く。SQLite版とは別定義になる(型の対応: `TEXT`→`TEXT`、`INTEGER`(64bit用途)→`BIGINT`、`INTEGER`(真偽値用途)→`BOOLEAN`等、実装時に列ごとに精査する)
 
+### 依存クレートの検証済みバージョン・feature構成(Phase 2、事前スパイクで確定)
+
+Phase 1の教訓(設計時点でのsqlx/rusqlite共存確認漏れが3回の計画作り直しを招いた)を踏まえ、Phase 2着手前に実際に`cargo add`+`cargo check`で以下を検証済み:
+
+- `sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls"] }`
+- `sea-query = { version = "0.32.7", default-features = false, features = ["backend-postgres", "derive"] }` — **1.0.2ではなく0.32.7を使う**(後述)
+- `sea-query-binder = { version = "0.7.0", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }`
+
+この3クレートの組み合わせは、既存の`rusqlite = { version = "0.40.1", features = ["bundled"] }`と同一Cargo依存グラフに共存できることを`cargo check`で実証済み(`libsqlite3-sys`の`links`競合は起きない)。
+
+**重要な制約1: `sea-query`は1.0系ではなく0.32系を使う**。`sea-query-binder 0.7.0`(現時点の安定最新)は`sea-query = "^0.32.0"`にピンされており、`sea-query 1.0.2`とは同一バイナリ内で共存できない(Cargoが同一クレートの2バージョンを許すため一見resolveできるように見えるが、`sea-query-binder`が要求する`0.32.7`と自分で指定した`1.0.2`が別物として扱われ、`WithQuery`等の型が食い違い実質使い物にならない)。`sea-query-binder@0.8.0-rc.7`(sea-query 1.xに対応したプレリリース版)も試したが、`cargo check`時点で`sea_query::QueryBuilder`が`Sized`境界を満たせず23件のコンパイルエラーで失敗した(プレリリースゆえの未成熟)。したがって**Phase 2は`sea-query 0.32.x` + `sea-query-binder 0.7.0`の組み合わせで実装する**。sea-queryのAPIはメジャーバージョン間で細部が異なるため、実装時は0.32系のドキュメント(docs.rs/sea-query/0.32.7)を参照すること。
+
+**重要な制約2: `sqlx`の`chrono`/`json`featureを有効にしない**。`sqlx`の`chrono`または`json`featureを(直接でも`sea-query-binder`の`with-chrono`/`with-json`経由でも)有効にすると、`default-features = false`かつ`sqlite`featureを一切要求していないにもかかわらず、`sqlx-sqlite`パッケージ自体が依存グラフに必要とされ、`rusqlite`の`libsqlite3-sys`と`links`競合を起こしてビルド不能になることを実証済み(`sqlx`側のfeature定義`chrono = [..., "sqlx-sqlite?/chrono"]`のweak feature参照が、少なくとも0.8.6の時点でこの分離を完全には保証しない模様)。影響は限定的: 既存の`SqliteBackend`(rusqlite)も元々`chrono`/`json`のrusqlite機能を使わず、`created_at`は`i64`(unixミリ秒)、JSON payloadは`serde_json::to_string`/`from_str`による手動変換のTEXT列として扱っている(`store/sqlite_backend.rs`で確認済み)。**`PostgresBackend`もこれと同じ規約に揃える**: タイムスタンプ列は`BIGINT`(i64のunixミリ秒)、JSON payload列は`TEXT`(アプリ側で`serde_json`により手動シリアライズ/デシリアライズ)とし、`sqlx`/`sea-query-binder`の`chrono`/`json`機能には一切依存しない。
+
+**動作確認済み**: 上記のfeature構成で、`sea-query`によるクエリ組み立て→`sea_query_binder::SqlxBinder::build_sqlx(PostgresQueryBuilder)`→`$1`形式プレースホルダ+`SqlxValues`が実際に得られることを、独立した検証用crateで実行確認済み(`SELECT "id", "text" FROM "note" WHERE "id" = $1` / `SqlxValues(Values([String(Some("abc"))]))`)。
+
 ### 実装の段階分割(1設計・複数PR)
 
 1. `NoteCacheBackend` trait抽出 + `SqliteBackend`への挙動そのまま移植(rusqlite継続、`spawn_blocking`による非同期化のみ、外部から見た挙動は不変)【Phase 1・完了】
-2. Phase 2: `sqlx`+`sea-query`導入 + `PostgresBackend`のDB層一式(接続・DDL・CRUD) + `NoteCacheStore`の`RwLock`化 + 設定UI(フロントエンド) + `swap_backend`の配線 + 接続失敗時フォールバックを1つのPRでまとめて実装する(ヒアリングで確認済み: DB層と設定UIを分けず一括で作る方針)
+2. Phase 2は1つのPRとしてまとめる方針(ヒアリングで確認済み: DB層と設定UIを分けず一括で作る)だが、実装計画上のタスクは以下のように分割する(前半2つは新規ファイルのみで完結し既存コードに触れないため、Phase 1のような「全体コンパイル特性による手戻り」は起きない):
+   1. 依存クレート追加(上記バージョン・feature構成)+ `PostgresBackend`のDDLのみ(接続確立・`Table::create()`によるテーブル作成)。`testcontainers`による統合テスト(`#[ignore]`)。`NoteCacheBackend`トレイトはまだ実装しない
+   2. `impl NoteCacheBackend for PostgresBackend`(15メソッド、sea-queryで組み立て)。`filter/sql.rs`のプレースホルダ/`REGEXP`変換(`to_postgres_sql`)もここに含める。新規ファイルのみで完結し、まだどこからも構築されない
+   3. `NoteCacheStore`の`Mutex<Arc<dyn NoteCacheBackend>>`化 + `swap_backend` + `SettingsData.cache_backend`(`CacheBackendConfig`) + keyringへのパスワード保存 + 切替用コマンド + 接続失敗時のSQLiteフォールバック配線。既存の共有状態(`state.rs`)に触れる唯一のタスク
+   4. フロントエンド設定UI + `tauri-specta`バインディング再生成
 3. `MySqlBackend`追加(Phase 3)
