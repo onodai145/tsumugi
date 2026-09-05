@@ -6,6 +6,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod account;
+mod cache_backend;
 mod clip;
 mod column;
 mod list;
@@ -21,6 +22,7 @@ mod url_preview;
 mod user;
 
 pub use account::Account;
+pub use cache_backend::CacheBackendConfig;
 pub use clip::Clip;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::{SourceItem, UserList};
