@@ -119,7 +119,10 @@ pub(crate) fn load_cache_backend_password() -> Result<Option<String>> {
 }
 
 /// cache backend(Postgres)のパスワードをOS keyringから削除する(Issue #115 Phase 2)。
-/// 未保存でもエラーにしない。
+/// 未保存でもエラーにしない。現状どのコマンドからも呼ばれていないが(SettingsStore側は
+/// Sqliteへ切り替えてもパスワードのkeyring削除まではしない設計)、keyring読み書きの
+/// 一貫した3操作セットとして用意しておく。
+#[allow(dead_code)]
 pub(crate) fn delete_cache_backend_password() -> Result<()> {
     match cache_backend_entry()?.delete_credential() {
         Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),

@@ -311,6 +311,8 @@ export const commands = {
 	getUserFollowers: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_followers", { accountId, userId, untilId })),
 	/**  フォロー中一覧（ページング）。 */
 	getUserFollowing: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_following", { accountId, userId, untilId })),
+	getCacheBackend: () => typedError<CacheBackendConfig, string>(__TAURI_INVOKE("get_cache_backend")),
+	setCacheBackend: (config: CacheBackendConfig, password: string | null) => typedError<null, string>(__TAURI_INVOKE("set_cache_backend", { config, password })),
 };
 
 /** Events */
@@ -345,6 +347,12 @@ export type Account = {
 	 */
 	instance?: InstanceInfo | null,
 };
+
+/**
+ *  note cacheのバックエンド選択(Issue #115 Phase 2)。パスワードはここに含まず、
+ *  OS keyringへ別途保存する(`session`モジュール参照)。
+ */
+export type CacheBackendConfig = { type: "sqlite" } | { type: "postgres"; host: string; port: number; database: string; user: string };
 
 /**
  *  Misskey のクリップ（名前付きノート集合）。今回のスコープでは一覧表示と
