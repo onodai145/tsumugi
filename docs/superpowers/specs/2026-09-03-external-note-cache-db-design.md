@@ -21,17 +21,15 @@ Issue #115「外部のデータベースを使えるようにする」。本文�
 
 ### バックエンド抽象化
 
-`store/note_cache.rs`の`NoteCacheStore`は薄いラッパーとして残し、内部の接続を実行時選択可能なプールで持つ。
+Phase 1で確定した実装: `store/note_cache.rs`の`NoteCacheStore`は`NoteCacheBackend`トレイトオブジェクトへ委譲する薄いラッパー。Phase 2では、設定画面からの切り替えで再起動なしに即時再接続できるよう、内部を`RwLock`で保持する:
 
 ```rust
-enum CachePool {
-    Sqlite(sqlx::SqlitePool),
-    Postgres(sqlx::PgPool),
-    MySql(sqlx::MySqlPool),
+pub struct NoteCacheStore {
+    backend: RwLock<Box<dyn NoteCacheBackend>>,
 }
 ```
 
-起動時、および設定変更時に`SettingsData.cache_backend`を読み、対応するプールへ接続する。
+既存の委譲メソッド(`cache_notes`/`load_cached`/...)は内部で`self.backend.read().await`してから委譲するだけなので、**呼び出し元(`state.cache.method(...)`)は一切変更不要**。バックエンド切替は新規メソッド`NoteCacheStore::swap_backend(&self, new_backend: impl NoteCacheBackend + 'static) -> Result<()>`が`write().await`して差し替える。起動時、および設定変更時に`SettingsData.cache_backend`を読み、対応する`NoteCacheBackend`実装(`SqliteBackend`/`PostgresBackend`/将来の`MySqlBackend`)を構築して渡す。
 
 ### DBアクセス手段: Phase 1はrusqlite継続 + spawn_blocking、sqlx/sea-queryはPhase 2から
 
@@ -44,6 +42,8 @@ account/column設定側(`store/settings.rs`ほか)は今後も`rusqlite`を使�
 - **Phase 3(MySQL対応)**: 同様に`sqlx`の`mysql`featureを追加(これも`libsqlite3-sys`非依存)
 
 行→`Note`構造体へのマッピング(JOIN結果の集約、`note_reaction`等側テーブルの集約)は現状の手書きスタイルを維持する。フルORM(sea-orm)を不採用とする理由(JOIN+JSON payload組み立てとEntityモデルの相性の悪さ)はPhase 2以降も変わらない。
+
+**sea-query採用理由の再確認(Phase 2着手時)**: 当初sea-query導入の主目的は「SQLite/Postgres/MySQL 3バックエンドでクエリ構築コードを1箇所にまとめる」ことだったが、Phase 1で`SqliteBackend`が`rusqlite`ベースの独立実装になった(`PostgresBackend`とは接続型もクエリ文字列も一切共有しない)ため、この目的は部分的にしか成立しなくなった。それでもPhase 2でsea-queryを採用するのは、Phase 3で追加する`MySqlBackend`と`PostgresBackend`の2つではクエリ構築コードを共有できる見込みがあるため(SQLiteだけが仲間外れになる形)。`SqliteBackend`は今後もsea-queryを使わず、rusqliteの手書きSQLのまま維持する。
 
 ### 非同期化(Phase 1: spawn_blocking方式)
 
@@ -118,8 +118,17 @@ PostgreSQL対応で`$1`形式の番号付きプレースホルダへの対応が
 - 現行の`note_cache.rs`内テスト群と同じ検証内容を、トレイト抽出後の`SqliteBackend`(新規ファイル)向けに書く。Phase 1はrusqliteのままなので既存テストの大半はほぼそのまま踏襲でき、`SqliteBackend`の非同期メソッドを呼ぶ新しいテストだけ`#[tokio::test]`にする
 - Postgres/MySQLは`testcontainers`等でDocker上に一時インスタンスを立てる統合テストを追加する(Phase 2/3)。既存の実Misskey接続テスト(`#[ignore]`)と同様、CI常時実行はしない方針で揃える
 
-## 実装の段階分割(1設計・複数PR)
+## Phase 2設計: PostgresBackend + 設定UI
 
-1. `NoteCacheBackend` trait抽出 + `SqliteBackend`への挙動そのまま移植(rusqlite継続、`spawn_blocking`による非同期化のみ、外部から見た挙動は不変)
-2. `sqlx`+`sea-query`導入 + `PostgresBackend`追加 + 設定UI
-3. `MySqlBackend`追加
+Phase 1完了後の続き。以下のヒアリングで確定した内容:
+
+- **バックエンド切替の挙動**: 設定画面で切り替えた瞬間に即時再接続する(アプリ再起動は不要)。上記「バックエンド抽象化」の`NoteCacheStore::swap_backend`で実現する
+- **接続失敗時**: Phase 1の設計(エラー表示+SQLiteへ自動フォールバック)をそのまま踏襲する
+- **統合テスト**: `testcontainers`でDocker上に一時PostgreSQLインスタンスを立てて検証する。既存の実Misskey接続テスト(`#[ignore]`)と同様、CI常時実行はしない
+- **DDL**: `PostgresBackend`用のテーブルDDLもsea-queryの`Table::create()`で書く。SQLite版とは別定義になる(型の対応: `TEXT`→`TEXT`、`INTEGER`(64bit用途)→`BIGINT`、`INTEGER`(真偽値用途)→`BOOLEAN`等、実装時に列ごとに精査する)
+
+### 実装の段階分割(1設計・複数PR)
+
+1. `NoteCacheBackend` trait抽出 + `SqliteBackend`への挙動そのまま移植(rusqlite継続、`spawn_blocking`による非同期化のみ、外部から見た挙動は不変)【Phase 1・完了】
+2. Phase 2: `sqlx`+`sea-query`導入 + `PostgresBackend`のDB層一式(接続・DDL・CRUD) + `NoteCacheStore`の`RwLock`化 + 設定UI(フロントエンド) + `swap_backend`の配線 + 接続失敗時フォールバックを1つのPRでまとめて実装する(ヒアリングで確認済み: DB層と設定UIを分けず一括で作る方針)
+3. `MySqlBackend`追加(Phase 3)
