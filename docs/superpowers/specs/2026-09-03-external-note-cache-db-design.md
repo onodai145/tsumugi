@@ -187,10 +187,10 @@ Phase 2と同様、実装計画作成前に依存関係を独立した検証用c
 - `sqlx = { version = "0.8.6", default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls"] }` + `sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "derive"] }`は、既存の`rusqlite`と同一Cargo依存グラフに共存できることを`cargo check`で実証済み(`libsqlite3-sys`競合なし)。
 - **`sqlx`の`chrono`/`json`featureはPostgres同様NG**。`cargo check`で同じ`sqlx-sqlite`経由の`libsqlite3-sys`競合が再現することを確認済み。Postgresと同じ規約(タイムスタンプは`BIGINT`、JSON payloadは`TEXT`+`serde_json`手動変換)を踏襲する。
 - **プレースホルダ変換が不要**: `sea-query`の`MysqlQueryBuilder`で組み立てたクエリは`?`プレースホルダを使う(SQLiteと同じ記法)。`filter/sql.rs::build_where`が返す`SqlWhere.sql`(`?`プレースホルダ)はPostgresのような`$N`への振り直しが不要で、そのままMySQLへバインドできる見込み(実装時にsqlxの`MySqlArguments`で実際のバインドを確認すること)。
-- **BOOLEAN列の型不一致が起きない見込み**: MySQLの`BOOLEAN`/`BOOL`型は`TINYINT(1)`のエイリアスであり、整数リテラルとの比較(`col = 1`)がそのまま通る。Phase 2で踏んだ「Postgresのネイティブ`BOOLEAN`型とTQLの`= 1`比較が型不一致でエラーになる」問題(Critical、最終レビューで発覚)はMySQLでは再現しない想定。DDLは`sea_query::ColumnDef::boolean()`をそのまま使ってよい。ただし実装時に実MySQLで検証すること(Postgresでも「たぶん大丈夫」ではなく実DBでの確認が必要だった教訓を踏まえる)。
+- **BOOLEAN列の型不一致は実DBで再現しないことを確認済み**: MySQLの`BOOLEAN`/`BOOL`型は`TINYINT(1)`のエイリアスであり、整数リテラルとの比較(`col = 1`)がそのまま通る。Phase 2で踏んだ「Postgresのネイティブ`BOOLEAN`型とTQLの`= 1`比較が型不一致でエラーになる」問題(Critical、最終レビューで発覚)は、Docker上のMySQL 8.0で`WHERE has_poll = 1`を実行して再現しないことを実証済み(詳細は下記)。DDLは`sea_query::ColumnDef::boolean()`をそのまま使ってよい。
 - `REGEXP`はMySQLもネイティブの中置演算子として`col REGEXP pattern`をサポートしており、SQLiteと同じキーワードが使える。ただし正規表現エンジン自体(MySQL 8.0以降はICU正規表現)はRustの`regex`クレートと完全には一致しないため、Postgresと同様の既知の方言ギャップとして扱う。
 
-以上により、`to_postgres_sql`に相当する変換関数は**不要、または恒等関数に近い**見込みである。実装時に`SqlWhere.sql`を無変換でMySQLへ渡せるか実DBで確認し、もし何らかの差異が見つかった場合のみ`to_mysql_sql`を追加する(想定される差異が無ければ関数自体を作らない)。
+**実DB(Docker上のMySQL 8.0)で動作確認済み**: `BOOLEAN`列に対して`WHERE has_poll = 1`(素のSQL)・`sqlx::query_as("...WHERE has_poll = ?").bind(1i32)`(sqlxバインド)のいずれも型エラーなく正しく絞り込めることを確認した。`text REGEXP ?`もsqlxバインドで正しくマッチした。したがって**`to_postgres_sql`に相当する変換関数は実装しない**——`SqlWhere.sql`(`?`プレースホルダ、` REGEXP `)を無変換のままMySQLへ渡す。`filter/sql.rs`・`build_where`は一切変更しない(Postgresと同じ制約)。
 
 ### アーキテクチャ
 
@@ -213,6 +213,6 @@ Postgresと同型: `store/mysql_backend.rs`(`MySqlBackend { pool: sqlx::MySqlPoo
 Phase 2の4タスク構成を踏襲するが、Task 3(切替インフラ)・Task 4(フロントエンド)は既存の`CacheBackendConfig`/`CacheBackendSettings.svelte`への追加になるため、Phase 2より小さくなる見込み:
 
 1. 依存クレート追加(上記バージョン・feature構成)+ `MySqlBackend`のDDLのみ(接続確立・`Table::create()`によるテーブル作成)。`testcontainers`による統合テスト(`#[ignore]`)。`NoteCacheBackend`トレイトはまだ実装しない
-2. `impl NoteCacheBackend for MySqlBackend`(15メソッド)。`SqlWhere.sql`をMySQLへそのまま渡せるか実DBで確認し、必要なら変換関数を追加。新規ファイルのみで完結
+2. `impl NoteCacheBackend for MySqlBackend`(15メソッド)。`search_cache`は`SqlWhere.sql`を無変換のままバインドする(変換関数は実装しない、実DB確認済み)。新規ファイルのみで完結
 3. `CacheBackendConfig::MySql` variant追加 + `set_cache_backend`/起動時フォールバックへのMySQL分岐追加(Postgresと同じ2種類の接続失敗挙動を踏襲)。Phase 2で構築済みの`Mutex<Arc<dyn NoteCacheBackend>>`/`swap_backend`基盤には変更不要
 4. フロントエンド設定UIへの選択肢追加 + `tauri-specta`バインディング再生成
