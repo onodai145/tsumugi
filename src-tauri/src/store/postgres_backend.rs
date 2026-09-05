@@ -4,8 +4,8 @@
 //! 手書きSQL文字列 + `$N`プレースホルダのバインド方式で書く(設計書「Global Constraints」参照)。
 
 use crate::error::Result;
-use sea_query::{ColumnDef, PostgresQueryBuilder, Table};
-use sqlx::postgres::{PgPoolOptions, PgConnectOptions};
+use sea_query::{ColumnDef, Index, IndexOrder, PostgresQueryBuilder, Table};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 use sqlx::Executor;
 
 pub(crate) struct PostgresConnectParams {
@@ -21,13 +21,19 @@ pub(crate) struct PostgresBackend {
 }
 
 impl PostgresBackend {
+    /// Postgresへ接続する。TLSモードは`PgSslMode::Prefer`(sqlxのデフォルトと同じ)を
+    /// 明示的に指定している — 既定値に暗黙に頼るのではなく、選択を監査可能にするため。
+    /// `Require`/`VerifyFull`は使わない: このアプリはユーザーが自由に設定した任意の
+    /// Postgresインスタンス(TLS未設定のLAN/ホームラボ環境を含む)へ接続するため、TLSを
+    /// 強制すると正当な構成が接続できなくなる。
     pub(crate) async fn connect(params: &PostgresConnectParams) -> Result<Self> {
         let opts = PgConnectOptions::new()
             .host(&params.host)
             .port(params.port)
             .database(&params.database)
             .username(&params.user)
-            .password(&params.password);
+            .password(&params.password)
+            .ssl_mode(PgSslMode::Prefer);
         let pool = PgPoolOptions::new().max_connections(5).connect_with(opts).await?;
         ensure_schema(&pool).await?;
         Ok(Self { pool })
@@ -71,8 +77,22 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteTable::Payload).text().not_null())
         .build(PostgresQueryBuilder);
     pool.execute(note.as_str()).await?;
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_note_created ON note(created_at)").await?;
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_note_user ON note(user_id)").await?;
+
+    let idx_note_created = Index::create()
+        .if_not_exists()
+        .name("idx_note_created")
+        .table(NoteTable::Table)
+        .col(NoteTable::CreatedAt)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_note_created.as_str()).await?;
+
+    let idx_note_user = Index::create()
+        .if_not_exists()
+        .name("idx_note_user")
+        .table(NoteTable::Table)
+        .col(NoteTable::UserId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_note_user.as_str()).await?;
 
     let user = Table::create()
         .table(UserTable::Table)
@@ -96,56 +116,181 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .build(PostgresQueryBuilder);
     pool.execute(user.as_str()).await?;
 
-    for (table, cols) in [
-        ("note_reaction", "note_id TEXT, emoji_key TEXT, count BIGINT"),
-        ("note_tag", "note_id TEXT, tag TEXT"),
-        ("note_mention", "note_id TEXT, user_id TEXT"),
-        ("note_emoji", "note_id TEXT, emoji TEXT"),
-        ("note_file", "note_id TEXT, mime_type TEXT, mime_category TEXT, is_sensitive BOOLEAN"),
-    ] {
-        pool.execute(format!("CREATE TABLE IF NOT EXISTS {table} ({cols})").as_str()).await?;
-    }
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_nr_note ON note_reaction(note_id)").await?;
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_nt_note ON note_tag(note_id)").await?;
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_nm_note ON note_mention(note_id)").await?;
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_ne_note ON note_emoji(note_id)").await?;
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_nf_note ON note_file(note_id)").await?;
-    pool.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_nr_unique ON note_reaction(note_id, emoji_key)",
-    )
-    .await?;
-    pool.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_nt_unique ON note_tag(note_id, tag)").await?;
-    pool.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_nm_unique ON note_mention(note_id, user_id)")
-        .await?;
-    pool.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_ne_unique ON note_emoji(note_id, emoji)").await?;
-    pool.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_nf_unique ON note_file(note_id, mime_type, mime_category, is_sensitive)",
-    )
-    .await?;
+    let note_reaction = Table::create()
+        .table(NoteReactionTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(NoteReactionTable::NoteId).text())
+        .col(ColumnDef::new(NoteReactionTable::EmojiKey).text())
+        .col(ColumnDef::new(NoteReactionTable::Count).big_integer())
+        .build(PostgresQueryBuilder);
+    pool.execute(note_reaction.as_str()).await?;
 
-    pool.execute(
-        "CREATE TABLE IF NOT EXISTS column_note (
-            column_id TEXT NOT NULL,
-            note_id TEXT NOT NULL,
-            received_at BIGINT NOT NULL,
-            created_at BIGINT NOT NULL DEFAULT 0,
-            PRIMARY KEY (column_id, note_id)
-        )",
-    )
-    .await?;
-    pool.execute("CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id)").await?;
-    pool.execute(
-        "CREATE INDEX IF NOT EXISTS idx_cn_column_created ON column_note(column_id, created_at DESC, note_id DESC)",
-    )
-    .await?;
+    let note_tag = Table::create()
+        .table(NoteTagTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(NoteTagTable::NoteId).text())
+        .col(ColumnDef::new(NoteTagTable::Tag).text())
+        .build(PostgresQueryBuilder);
+    pool.execute(note_tag.as_str()).await?;
 
-    pool.execute(
-        "CREATE TABLE IF NOT EXISTS column_fetch_boundary (
-            column_id TEXT PRIMARY KEY,
-            oldest_fetched_id TEXT NOT NULL
-        )",
-    )
-    .await?;
+    let note_mention = Table::create()
+        .table(NoteMentionTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(NoteMentionTable::NoteId).text())
+        .col(ColumnDef::new(NoteMentionTable::UserId).text())
+        .build(PostgresQueryBuilder);
+    pool.execute(note_mention.as_str()).await?;
+
+    let note_emoji = Table::create()
+        .table(NoteEmojiTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(NoteEmojiTable::NoteId).text())
+        .col(ColumnDef::new(NoteEmojiTable::Emoji).text())
+        .build(PostgresQueryBuilder);
+    pool.execute(note_emoji.as_str()).await?;
+
+    let note_file = Table::create()
+        .table(NoteFileTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(NoteFileTable::NoteId).text())
+        .col(ColumnDef::new(NoteFileTable::MimeType).text())
+        .col(ColumnDef::new(NoteFileTable::MimeCategory).text())
+        .col(ColumnDef::new(NoteFileTable::IsSensitive).boolean())
+        .build(PostgresQueryBuilder);
+    pool.execute(note_file.as_str()).await?;
+
+    let idx_nr_note = Index::create()
+        .if_not_exists()
+        .name("idx_nr_note")
+        .table(NoteReactionTable::Table)
+        .col(NoteReactionTable::NoteId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nr_note.as_str()).await?;
+
+    let idx_nt_note = Index::create()
+        .if_not_exists()
+        .name("idx_nt_note")
+        .table(NoteTagTable::Table)
+        .col(NoteTagTable::NoteId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nt_note.as_str()).await?;
+
+    let idx_nm_note = Index::create()
+        .if_not_exists()
+        .name("idx_nm_note")
+        .table(NoteMentionTable::Table)
+        .col(NoteMentionTable::NoteId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nm_note.as_str()).await?;
+
+    let idx_ne_note = Index::create()
+        .if_not_exists()
+        .name("idx_ne_note")
+        .table(NoteEmojiTable::Table)
+        .col(NoteEmojiTable::NoteId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_ne_note.as_str()).await?;
+
+    let idx_nf_note = Index::create()
+        .if_not_exists()
+        .name("idx_nf_note")
+        .table(NoteFileTable::Table)
+        .col(NoteFileTable::NoteId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nf_note.as_str()).await?;
+
+    let idx_nr_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nr_unique")
+        .table(NoteReactionTable::Table)
+        .col(NoteReactionTable::NoteId)
+        .col(NoteReactionTable::EmojiKey)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nr_unique.as_str()).await?;
+
+    let idx_nt_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nt_unique")
+        .table(NoteTagTable::Table)
+        .col(NoteTagTable::NoteId)
+        .col(NoteTagTable::Tag)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nt_unique.as_str()).await?;
+
+    let idx_nm_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nm_unique")
+        .table(NoteMentionTable::Table)
+        .col(NoteMentionTable::NoteId)
+        .col(NoteMentionTable::UserId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nm_unique.as_str()).await?;
+
+    let idx_ne_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_ne_unique")
+        .table(NoteEmojiTable::Table)
+        .col(NoteEmojiTable::NoteId)
+        .col(NoteEmojiTable::Emoji)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_ne_unique.as_str()).await?;
+
+    let idx_nf_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nf_unique")
+        .table(NoteFileTable::Table)
+        .col(NoteFileTable::NoteId)
+        .col(NoteFileTable::MimeType)
+        .col(NoteFileTable::MimeCategory)
+        .col(NoteFileTable::IsSensitive)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_nf_unique.as_str()).await?;
+
+    let column_note = Table::create()
+        .table(ColumnNoteTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(ColumnNoteTable::ColumnId).text().not_null())
+        .col(ColumnDef::new(ColumnNoteTable::NoteId).text().not_null())
+        .col(ColumnDef::new(ColumnNoteTable::ReceivedAt).big_integer().not_null())
+        .col(ColumnDef::new(ColumnNoteTable::CreatedAt).big_integer().not_null().default(0))
+        .primary_key(
+            Index::create()
+                .col(ColumnNoteTable::ColumnId)
+                .col(ColumnNoteTable::NoteId),
+        )
+        .build(PostgresQueryBuilder);
+    pool.execute(column_note.as_str()).await?;
+
+    let idx_cn_column = Index::create()
+        .if_not_exists()
+        .name("idx_cn_column")
+        .table(ColumnNoteTable::Table)
+        .col(ColumnNoteTable::ColumnId)
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_cn_column.as_str()).await?;
+
+    let idx_cn_column_created = Index::create()
+        .if_not_exists()
+        .name("idx_cn_column_created")
+        .table(ColumnNoteTable::Table)
+        .col(ColumnNoteTable::ColumnId)
+        .col((ColumnNoteTable::CreatedAt, IndexOrder::Desc))
+        .col((ColumnNoteTable::NoteId, IndexOrder::Desc))
+        .build(PostgresQueryBuilder);
+    pool.execute(idx_cn_column_created.as_str()).await?;
+
+    let column_fetch_boundary = Table::create()
+        .table(ColumnFetchBoundaryTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(ColumnFetchBoundaryTable::ColumnId).text().primary_key())
+        .col(ColumnDef::new(ColumnFetchBoundaryTable::OldestFetchedId).text().not_null())
+        .build(PostgresQueryBuilder);
+    pool.execute(column_fetch_boundary.as_str()).await?;
 
     Ok(())
 }
@@ -201,6 +346,67 @@ enum UserTable {
     InstanceName,
     InstanceIconUrl,
     InstanceThemeColor,
+}
+
+#[derive(sea_query::Iden)]
+enum NoteReactionTable {
+    #[iden = "note_reaction"]
+    Table,
+    NoteId,
+    EmojiKey,
+    Count,
+}
+
+#[derive(sea_query::Iden)]
+enum NoteTagTable {
+    #[iden = "note_tag"]
+    Table,
+    NoteId,
+    Tag,
+}
+
+#[derive(sea_query::Iden)]
+enum NoteMentionTable {
+    #[iden = "note_mention"]
+    Table,
+    NoteId,
+    UserId,
+}
+
+#[derive(sea_query::Iden)]
+enum NoteEmojiTable {
+    #[iden = "note_emoji"]
+    Table,
+    NoteId,
+    Emoji,
+}
+
+#[derive(sea_query::Iden)]
+enum NoteFileTable {
+    #[iden = "note_file"]
+    Table,
+    NoteId,
+    MimeType,
+    MimeCategory,
+    IsSensitive,
+}
+
+#[derive(sea_query::Iden)]
+enum ColumnNoteTable {
+    #[iden = "column_note"]
+    Table,
+    ColumnId,
+    NoteId,
+    ReceivedAt,
+    CreatedAt,
+}
+
+#[derive(sea_query::Iden)]
+enum ColumnFetchBoundaryTable {
+    #[iden = "column_fetch_boundary"]
+    Table,
+    ColumnId,
+    OldestFetchedId,
 }
 
 #[cfg(test)]
