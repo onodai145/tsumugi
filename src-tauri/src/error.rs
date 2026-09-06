@@ -72,7 +72,7 @@ impl From<rusqlite::Error> for Error {
 
 impl From<sqlx::Error> for Error {
     fn from(e: sqlx::Error) -> Self {
-        Error::Db(format!("postgres error: {e}"))
+        Error::Db(format!("database error: {e}"))
     }
 }
 

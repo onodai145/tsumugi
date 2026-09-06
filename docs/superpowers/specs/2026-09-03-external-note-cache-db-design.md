@@ -200,6 +200,8 @@ Phase 2と同様、実装計画作成前に依存関係を独立した検証用c
 
 `LEAST(...)`(`extend_fetch_boundary`)はMySQLも同名関数をサポートするため変更不要。ID順序比較(`note_id < ?`、`MIN`/`MAX(note_id)`)がMySQLのデフォルト照合順序(`utf8mb4_0900_ai_ci`等、大文字小文字を区別しない)でもSQLiteのバイナリバイト比較と実用上一致するかは、MisskeyのID(base36/aidx系、常に小文字)であれば大文字小文字非区別は影響しないはずだが、Postgres同様「今日的には問題ないが将来ID体系が変わった場合は要再検証」という位置づけのコメントをコードに残す。
 
+この大文字小文字を区別しないデフォルト照合順序(MySQL 8の`utf8mb4_0900_ai_ci`、MariaDB 11の`utf8mb4_uca1400_ai_ci`)は、ID順序比較だけでなくTQLのテキスト述語(`text = "..."`、`~=`/`match`の`REGEXP`演算子、`startswith`/`endswith`/`contains`が使う`LIKE`)にも及ぶ。SQLiteの`=`やPostgresの`~`は大文字小文字を区別するのに対し、MySQL/MariaDBバックエンドではこれらのテキスト述語が大文字小文字を区別しない、というバックエンド間の挙動差がある。これは妥当な(むしろユーザーが期待しうる)挙動差でありバグではないため、コードは変更しない — SQLite自身の`LIKE`もASCII範囲では既に大文字小文字を区別しない。
+
 ### アーキテクチャ
 
 Postgresと同型: `store/mysql_backend.rs`(`MySqlBackend { pool: sqlx::MySqlPool }`、`sea-query`の`Table::create()`/`Index::create()`によるDDL、`NoteCacheBackend`トレイトの全15メソッドを手書きSQL+`sqlx::query()`で実装)+ `store/mysql_user_ref.rs`(`store/postgres_user_ref.rs`と同型、`user_ref.rs`の純粋関数を再利用)。
