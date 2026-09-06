@@ -41,6 +41,21 @@ pub async fn set_cache_backend(
             crate::session::save_cache_backend_password(&password).map_err(|e| e.to_string())?;
             std::sync::Arc::new(backend)
         }
+        CacheBackendConfig::MySql { host, port, database, user } => {
+            let password = password.ok_or("password is required for MySQL backend")?;
+            let params = crate::store::mysql_backend::MySqlConnectParams {
+                host: host.clone(),
+                port: *port,
+                database: database.clone(),
+                user: user.clone(),
+                password: password.clone(),
+            };
+            let backend = crate::store::mysql_backend::MySqlBackend::connect(&params)
+                .await
+                .map_err(|e| format!("failed to connect to MySQL: {e}"))?;
+            crate::session::save_cache_backend_password(&password).map_err(|e| e.to_string())?;
+            std::sync::Arc::new(backend)
+        }
     };
 
     // ここまで来て初めて実際に差し替える(接続確認済みのバックエンドのみをswapする)。

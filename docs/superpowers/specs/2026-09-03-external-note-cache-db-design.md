@@ -165,7 +165,7 @@ Phase 1の教訓(設計時点でのsqlx/rusqlite共存確認漏れが3回の計�
    2. `impl NoteCacheBackend for PostgresBackend`(15メソッド、sea-queryで組み立て)。`filter/sql.rs`のプレースホルダ/`REGEXP`変換(`to_postgres_sql`)もここに含める。新規ファイルのみで完結し、まだどこからも構築されない
    3. `NoteCacheStore`の`Mutex<Arc<dyn NoteCacheBackend>>`化 + `swap_backend` + `SettingsData.cache_backend`(`CacheBackendConfig`) + keyringへのパスワード保存 + 切替用コマンド + 接続失敗時のSQLiteフォールバック配線。既存の共有状態(`state.rs`)に触れる唯一のタスク
    4. フロントエンド設定UI + `tauri-specta`バインディング再生成
-3. `MySqlBackend`追加(Phase 3)
+3. `MySqlBackend`追加(Phase 3、下記「Phase 3設計」参照)
 
 ### Phase 2 実装時の決定
 
@@ -175,3 +175,54 @@ Phase 1の教訓(設計時点でのsqlx/rusqlite共存確認漏れが3回の計�
 - **`max_size_mb`のPostgres無効化**: `prune`のバイト単位サイズ上限(`max_size_mb`、フロントエンドの「データ」設定で入力する)は、SQLite版が`PRAGMA page_count`等でDBファイルサイズを見て実装しているのに対し、Postgres版では同等の軽量な実装手段がなく未対応とした。設定されていても`log::warn!`を出すのみで実際の削除には影響しない。`keep`(保持件数上限)・`max_age_days`(保持日数上限)はPostgres版でも引き続き有効な保持ポリシーである。
 
 なお、`to_postgres_sql`による` REGEXP `→` ~ `の変換は、Rustの`regex`クレートとPostgresのPOSIX正規表現とで構文・意味論が完全には一致しない(例: 一部のUnicodeプロパティ構文や先読み系の対応差)既知の方言ギャップがある。現状のテストスイートはこの差を突く高度なパターンまではカバーしていない。
+
+## Phase 3設計: MySqlBackend
+
+Phase 2完了後の続き。動機はPostgresと同じ(複数端末共有・大規模運用)で、特定のMySQL/MariaDB運用予定があるわけではなく、「Postgresが使えるならMySQLも使えるようにしておきたい」という一貫性目的での対応。
+
+### 事前検証(スパイクで確定)
+
+Phase 2と同様、実装計画作成前に依存関係を独立した検証用crateで確認した:
+
+- `sqlx = { version = "0.8.6", default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls"] }` + `sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "derive"] }`は、既存の`rusqlite`と同一Cargo依存グラフに共存できることを`cargo check`で実証済み(`libsqlite3-sys`競合なし)。
+- **`sqlx`の`chrono`/`json`featureはPostgres同様NG**。`cargo check`で同じ`sqlx-sqlite`経由の`libsqlite3-sys`競合が再現することを確認済み。Postgresと同じ規約(タイムスタンプは`BIGINT`、JSON payloadは`TEXT`+`serde_json`手動変換)を踏襲する。
+- **プレースホルダ変換が不要**: `sea-query`の`MysqlQueryBuilder`で組み立てたクエリは`?`プレースホルダを使う(SQLiteと同じ記法)。`filter/sql.rs::build_where`が返す`SqlWhere.sql`(`?`プレースホルダ)はPostgresのような`$N`への振り直しが不要で、そのままMySQLへバインドできる見込み(実装時にsqlxの`MySqlArguments`で実際のバインドを確認すること)。
+- **BOOLEAN列の型不一致は実DBで再現しないことを確認済み**: MySQLの`BOOLEAN`/`BOOL`型は`TINYINT(1)`のエイリアスであり、整数リテラルとの比較(`col = 1`)がそのまま通る。Phase 2で踏んだ「Postgresのネイティブ`BOOLEAN`型とTQLの`= 1`比較が型不一致でエラーになる」問題(Critical、最終レビューで発覚)は、Docker上のMySQL 8.0で`WHERE has_poll = 1`を実行して再現しないことを実証済み(詳細は下記)。DDLは`sea_query::ColumnDef::boolean()`をそのまま使ってよい。
+- `REGEXP`はMySQLもネイティブの中置演算子として`col REGEXP pattern`をサポートしており、SQLiteと同じキーワードが使える。ただし正規表現エンジン自体(MySQL 8.0以降はICU正規表現)はRustの`regex`クレートと完全には一致しないため、Postgresと同様の既知の方言ギャップとして扱う。
+
+**実DB(Docker上のMySQL 8.0)で動作確認済み**: `BOOLEAN`列に対して`WHERE has_poll = 1`(素のSQL)・`sqlx::query_as("...WHERE has_poll = ?").bind(1i32)`(sqlxバインド)のいずれも型エラーなく正しく絞り込めることを確認した。`text REGEXP ?`もsqlxバインドで正しくマッチした。したがって**`to_postgres_sql`に相当する変換関数は実装しない**——`SqlWhere.sql`(`?`プレースホルダ、` REGEXP `)を無変換のままMySQLへ渡す。`filter/sql.rs`・`build_where`は一切変更しない(Postgresと同じ制約)。
+
+**UPSERT構文・配列バインドはPostgresと異なる(要翻訳、実DB確認済み)**: `PostgresBackend`が使っている`ON CONFLICT (col) DO UPDATE SET x = excluded.x`/`ON CONFLICT DO NOTHING`/`= ANY($N)`はいずれもPostgres固有構文で、MySQLでは使えない。以下のMySQL方言に置き換える必要があり、実際にDocker上のMySQL 8.0で動作確認済み:
+
+- `ON CONFLICT (col) DO UPDATE SET x = excluded.x` → `ON DUPLICATE KEY UPDATE x = VALUES(x)`(対象列のUNIQUE制約は同じ)
+- `ON CONFLICT (...) DO NOTHING` → `INSERT IGNORE INTO ...`、または複合主キーで無害な自己代入更新(`ON DUPLICATE KEY UPDATE col = col`)
+- `WHERE col = ANY($N)`(Postgresの配列バインド、`sqlx`が`Vec<T>`を1つの`$N`にバインドできる)→ **MySQLの`sqlx`ドライバは配列バインドをサポートしない**。`IN (?, ?, ..., ?)`をRust側で要素数分のプレースホルダとして動的に組み立て、要素ごとに`.bind()`する(`sqlx::query(&sql)`をループで`.bind()`し直す)。`delete_matching_ids`の`id = ANY($1)`、`upsert_note_tx`の側テーブル掃除(`emoji_key = ANY($2)`等)はすべてこの形に書き換える
+
+`LEAST(...)`(`extend_fetch_boundary`)はMySQLも同名関数をサポートするため変更不要。ID順序比較(`note_id < ?`、`MIN`/`MAX(note_id)`)がMySQLのデフォルト照合順序(`utf8mb4_0900_ai_ci`等、大文字小文字を区別しない)でもSQLiteのバイナリバイト比較と実用上一致するかは、MisskeyのID(base36/aidx系、常に小文字)であれば大文字小文字非区別は影響しないはずだが、Postgres同様「今日的には問題ないが将来ID体系が変わった場合は要再検証」という位置づけのコメントをコードに残す。
+
+この大文字小文字を区別しないデフォルト照合順序(MySQL 8の`utf8mb4_0900_ai_ci`、MariaDB 11の`utf8mb4_uca1400_ai_ci`)は、ID順序比較だけでなくTQLのテキスト述語(`text = "..."`、`~=`/`match`の`REGEXP`演算子、`startswith`/`endswith`/`contains`が使う`LIKE`)にも及ぶ。SQLiteの`=`やPostgresの`~`は大文字小文字を区別するのに対し、MySQL/MariaDBバックエンドではこれらのテキスト述語が大文字小文字を区別しない、というバックエンド間の挙動差がある。これは妥当な(むしろユーザーが期待しうる)挙動差でありバグではないため、コードは変更しない — SQLite自身の`LIKE`もASCII範囲では既に大文字小文字を区別しない。
+
+### アーキテクチャ
+
+Postgresと同型: `store/mysql_backend.rs`(`MySqlBackend { pool: sqlx::MySqlPool }`、`sea-query`の`Table::create()`/`Index::create()`によるDDL、`NoteCacheBackend`トレイトの全15メソッドを手書きSQL+`sqlx::query()`で実装)+ `store/mysql_user_ref.rs`(`store/postgres_user_ref.rs`と同型、`user_ref.rs`の純粋関数を再利用)。
+
+### TLS
+
+`sqlx::mysql::MySqlSslMode::Preferred`を明示的に指定する。Postgresの`PgSslMode::Prefer`採用理由と同じ(任意のユーザー設定MySQL/MariaDBインスタンス、TLS未設定のLAN/ホームラボ環境への接続を正当な利用として想定するため、`Required`は強制しない)。
+
+### 設定・UI
+
+`domain::CacheBackendConfig`(Phase 2で追加済み)に`MySql { host, port, database, user }` variantを追加する(既存の`Sqlite`/`Postgres`と同じ形、パスワードは含まずkeyring経由)。`CacheBackendSettings.svelte`に3つ目の選択肢(ラジオボタン)を追加する。`max_size_mb`はPostgres同様、MySQLでもバイト単位のDBサイズ上限を軽量に取得する標準的な手段がなければ同じくno-op+警告ログとする(実装時に`INFORMATION_SCHEMA.TABLES`等での概算取得が現実的か確認し、可能なら実装してもよい)。
+
+### テスト
+
+`testcontainers-modules`の`mysql`featureで実MySQLに対する統合テスト(`#[ignore]`、既存のPostgres/実Misskey接続テストと同じ方針でCI常時実行はしない)。
+
+### 実装の段階分割
+
+Phase 2の4タスク構成を踏襲するが、Task 3(切替インフラ)・Task 4(フロントエンド)は既存の`CacheBackendConfig`/`CacheBackendSettings.svelte`への追加になるため、Phase 2より小さくなる見込み:
+
+1. 依存クレート追加(上記バージョン・feature構成)+ `MySqlBackend`のDDLのみ(接続確立・`Table::create()`によるテーブル作成)。`testcontainers`による統合テスト(`#[ignore]`)。`NoteCacheBackend`トレイトはまだ実装しない
+2. `impl NoteCacheBackend for MySqlBackend`(15メソッド)。`search_cache`は`SqlWhere.sql`を無変換のままバインドする(変換関数は実装しない、実DB確認済み)。新規ファイルのみで完結
+3. `CacheBackendConfig::MySql` variant追加 + `set_cache_backend`/起動時フォールバックへのMySQL分岐追加(Postgresと同じ2種類の接続失敗挙動を踏襲)。Phase 2で構築済みの`Mutex<Arc<dyn NoteCacheBackend>>`/`swap_backend`基盤には変更不要
+4. フロントエンド設定UIへの選択肢追加 + `tauri-specta`バインディング再生成

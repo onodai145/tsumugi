@@ -264,6 +264,32 @@ pub fn run() {
                         }
                     }
                 }
+                domain::CacheBackendConfig::MySql { host, port, database, user } => {
+                    match session::load_cache_backend_password() {
+                        Ok(Some(password)) => {
+                            let params = store::mysql_backend::MySqlConnectParams {
+                                host, port, database, user, password,
+                            };
+                            match tauri::async_runtime::block_on(store::mysql_backend::MySqlBackend::connect(&params)) {
+                                Ok(backend) => std::sync::Arc::new(backend),
+                                Err(e) => {
+                                    log::error!(
+                                        "failed to connect to configured MySQL cache backend at startup, \
+                                         falling back to SQLite cache: {e}"
+                                    );
+                                    std::sync::Arc::new(store::SqliteBackend::new(cache_conn))
+                                }
+                            }
+                        }
+                        _ => {
+                            log::error!(
+                                "MySQL cache backend configured but no password found in keyring, \
+                                 falling back to SQLite cache"
+                            );
+                            std::sync::Arc::new(store::SqliteBackend::new(cache_conn))
+                        }
+                    }
+                }
             };
             let cache = NoteCacheStore::new_from_arc(cache_backend);
             app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache, cache_dir.clone()));
