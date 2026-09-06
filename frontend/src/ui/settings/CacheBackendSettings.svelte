@@ -14,12 +14,21 @@
   let err = $state<string | null>(null);
   let saved = $state(false);
 
+  const DEFAULT_PORTS = { postgres: 5432, mySql: 3306 } as const;
+  // ポート番号の既定値をモードに合わせて切り替える(PostgreSQL: 5432, MySQL: 3306)。
+  // ユーザーが既に値を入力済みの場合に上書きしないよう、既定値のいずれかと一致している
+  // 場合だけ切り替える(手入力した値を消さないため)。
+  function onModeChange(next: CacheBackendConfig["type"]) {
+    if (next === "sqlite") return;
+    if (port === 5432 || port === 3306) port = DEFAULT_PORTS[next];
+  }
+
   $effect(() => {
     void commands.getCacheBackend().then((r) => {
       loading = false;
       if (r.status !== "ok") return;
       mode = r.data.type;
-      if (r.data.type === "postgres") {
+      if (r.data.type === "postgres" || r.data.type === "mySql") {
         host = r.data.host;
         port = r.data.port;
         database = r.data.database;
@@ -33,9 +42,15 @@
     saved = false;
     busy = true;
     try {
-      const config: CacheBackendConfig =
-        mode === "sqlite" ? { type: "sqlite" } : { type: "postgres", host, port, database, user };
-      const r = await commands.setCacheBackend(config, mode === "postgres" ? password : null);
+      let config: CacheBackendConfig;
+      if (mode === "sqlite") {
+        config = { type: "sqlite" };
+      } else if (mode === "postgres") {
+        config = { type: "postgres", host, port, database, user };
+      } else {
+        config = { type: "mySql", host, port, database, user };
+      }
+      const r = await commands.setCacheBackend(config, mode === "sqlite" ? null : password);
       if (r.status !== "ok") {
         err = r.error;
         return;
@@ -57,15 +72,19 @@
 
 {#if !loading}
   <label class="mb-2 flex items-center gap-2 text-sm">
-    <input type="radio" bind:group={mode} value="sqlite" />
+    <input type="radio" bind:group={mode} value="sqlite" onchange={() => onModeChange("sqlite")} />
     SQLite(ローカル、既定)
   </label>
   <label class="mb-2 flex items-center gap-2 text-sm">
-    <input type="radio" bind:group={mode} value="postgres" />
+    <input type="radio" bind:group={mode} value="postgres" onchange={() => onModeChange("postgres")} />
     PostgreSQL
   </label>
+  <label class="mb-2 flex items-center gap-2 text-sm">
+    <input type="radio" bind:group={mode} value="mySql" onchange={() => onModeChange("mySql")} />
+    MySQL / MariaDB
+  </label>
 
-  {#if mode === "postgres"}
+  {#if mode === "postgres" || mode === "mySql"}
     <div class="mt-2 flex flex-col gap-2.5">
       <label class="flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">ホスト</span>
@@ -89,7 +108,7 @@
       </label>
     </div>
     <p class="mt-2 mb-0 text-xs text-muted-foreground">
-      「データ」設定の「ノートキャッシュのサイズ上限(MB)」は、このPostgreSQLバックエンドには
+      「データ」設定の「ノートキャッシュのサイズ上限(MB)」は、この{mode === "postgres" ? "PostgreSQL" : "MySQL/MariaDB"}バックエンドには
       適用されません(バイト単位でのサイズ管理は未対応です)。保持件数上限・保持日数上限は
       引き続き有効です。
     </p>
