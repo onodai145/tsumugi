@@ -349,10 +349,10 @@ export type Account = {
 };
 
 /**
- *  note cacheのバックエンド選択(Issue #115 Phase 2)。パスワードはここに含まず、
- *  OS keyringへ別途保存する(`session`モジュール参照)。
+ *  note cacheのバックエンド選択(Issue #115 Phase 2/3)。パスワードはここに含まず、
+ *  OS keyringへ別途保存する(`session`モジュール参照。Postgres/MySQLで単一スロットを共用)。
  */
-export type CacheBackendConfig = { type: "sqlite" } | { type: "postgres"; host: string; port: number; database: string; user: string };
+export type CacheBackendConfig = { type: "sqlite" } | { type: "postgres"; host: string; port: number; database: string; user: string } | { type: "mySql"; host: string; port: number; database: string; user: string };
 
 /**
  *  Misskey のクリップ（名前付きノート集合）。今回のスコープでは一覧表示と
