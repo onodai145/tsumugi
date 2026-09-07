@@ -882,8 +882,12 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
     }
 
     for (column_id,) in &affected_columns {
-        let survivor: Option<(String,)> =
-            sqlx::query_as("SELECT MIN(note_id) FROM column_note WHERE column_id = $1").bind(column_id).fetch_optional(&mut **tx).await?;
+        let survivor: Option<(String,)> = sqlx::query_as(
+            "SELECT note_id FROM column_note WHERE column_id = $1 ORDER BY note_id ASC LIMIT 1",
+        )
+        .bind(column_id)
+        .fetch_optional(&mut **tx)
+        .await?;
         match survivor.map(|(s,)| s) {
             Some(oldest) => {
                 let candidate = match max_deleted_by_column.get(column_id) {
@@ -1107,6 +1111,24 @@ mod tests {
         assert_eq!(s.note_count().await.unwrap(), 2);
         let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'").fetch_one(s.pool()).await.unwrap();
         assert_eq!(rc, 0);
+    }
+
+    /// Issue #289回帰テスト: あるカラムに属する全ノートが1回のprune/削除操作で
+    /// 削除された場合(生存ノート0件)、`SELECT MIN(note_id) ...`がNULLを含む1行を
+    /// 返し非`Option<String>`列へのデコードに失敗していた。修正後は行自体が
+    /// 返らなくなり、`column_fetch_boundary`の該当行も削除されることを確認する。
+    #[tokio::test]
+    #[ignore]
+    async fn prune_removes_boundary_row_when_column_fully_emptied() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.set_fetch_boundary("col1", "n1").await.unwrap();
+
+        let deleted = s.prune(0, 1, 0).await.unwrap();
+
+        assert_eq!(deleted, 2);
+        assert_eq!(s.note_count().await.unwrap(), 0);
+        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
     }
 
     #[tokio::test]
