@@ -79,6 +79,12 @@ pub async fn react(
 }
 
 /// リアクション解除。
+///
+/// サーバが `NOT_REACTED` を返した場合（Mastodon等ActivityPub連合先のノートではリアクション付与が
+/// サーバ側で失敗/変換され、ローカルの楽観的状態とズレたまま残ることがある。Issue #182）も成功扱いにする。
+/// `notes/reactions/delete` は削除対象の絵文字を問わないため、「無い」と言われた時点で望む終状態
+/// （リアクション無し）そのもの。ここでキャッシュの `my_reaction` を確実にクリアしないと、
+/// 次回起動時に `load_cached` が古い値を出し直し同じ症状がぶり返す。
 #[tauri::command]
 #[specta::specta]
 pub async fn unreact(
@@ -87,8 +93,18 @@ pub async fn unreact(
     note_id: String,
 ) -> Result<()> {
     let client = state.client_for(&account_id)?;
-    delete_reaction(&client, &note_id).await?;
-    if let Ok(Some(mut note)) = state.cache.get_note(&note_id).await {
+    unreact_core(&state, &note_id, &client).await
+}
+
+/// `unreact` の中核ロジック。`tauri::State`(テストから構築不可)を経由せず単体テスト可能にする
+/// (`commands/mute.rs::sync_server_mutes_core` と同じ狙い)。
+async fn unreact_core(state: &AppState, note_id: &str, client: &crate::api::MisskeyClient) -> Result<()> {
+    match delete_reaction(client, note_id).await {
+        Ok(()) => {}
+        Err(Error::Api(detail)) if detail.contains("NOT_REACTED") => {}
+        Err(e) => return Err(e),
+    }
+    if let Ok(Some(mut note)) = state.cache.get_note(note_id).await {
         note.clear_my_reaction();
         let _ = state.cache.update_note(&note).await;
     }
@@ -443,6 +459,119 @@ pub async fn fetch_url_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_note(id: &str, my_reaction: Option<&str>) -> Note {
+        use crate::domain::{User, Visibility};
+        Note {
+            id: id.into(),
+            created_at: 0,
+            text: Some("hi".into()),
+            cw: None,
+            visibility: Visibility::Public,
+            local_only: false,
+            user: User {
+                id: "u1".into(),
+                username: "alice".into(),
+                host: None,
+                name: None,
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 0,
+                following_count: 0,
+                notes_count: 0,
+                emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
+                instance: None,
+            },
+            reply_id: None,
+            renote_id: None,
+            renote: None,
+            files: vec![],
+            poll: None,
+            tags: vec![],
+            mentions: vec![],
+            emojis: std::collections::HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
+            reactions: my_reaction
+                .map(|r| std::collections::HashMap::from([(r.to_string(), 1)]))
+                .unwrap_or_default(),
+            reaction_count: my_reaction.is_some() as u32,
+            renote_count: 0,
+            reply_count: 0,
+            my_reaction: my_reaction.map(|r| r.to_string()),
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
+        }
+    }
+
+    /// Issue #182: サーバが NOT_REACTED を返しても unreact は成功として扱い、
+    /// キャッシュの my_reaction を確実にクリアする(再起動後に古い値がぶり返さないため)。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unreact_core_treats_not_reacted_as_success_and_clears_cache() {
+        use crate::api::MisskeyClient;
+        use crate::store::SettingsStore;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/reactions/delete"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": { "code": "NOT_REACTED", "message": "You are not reacting to that note." }
+            })))
+            .mount(&mock)
+            .await;
+
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state
+            .cache
+            .update_note(&test_note("n1", Some("👍")))
+            .await
+            .unwrap();
+
+        unreact_core(&state, "n1", &client).await.unwrap();
+
+        let cached = state.cache.get_note("n1").await.unwrap().unwrap();
+        assert_eq!(cached.my_reaction, None);
+    }
+
+    /// NOT_REACTED以外のAPIエラーはそのまま伝播し、キャッシュも変更しない。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unreact_core_propagates_other_errors_without_touching_cache() {
+        use crate::api::MisskeyClient;
+        use crate::store::SettingsStore;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/reactions/delete"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": { "code": "SOMETHING_ELSE", "message": "unexpected." }
+            })))
+            .mount(&mock)
+            .await;
+
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state
+            .cache
+            .update_note(&test_note("n1", Some("👍")))
+            .await
+            .unwrap();
+
+        let err = unreact_core(&state, "n1", &client).await.unwrap_err();
+        assert!(matches!(err, Error::Api(_)));
+
+        let cached = state.cache.get_note("n1").await.unwrap().unwrap();
+        assert_eq!(cached.my_reaction.as_deref(), Some("👍"));
+    }
 
     #[test]
     fn guess_attachment_image_mime_maps_known_extensions() {

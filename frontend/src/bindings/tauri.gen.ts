@@ -172,7 +172,15 @@ export const commands = {
 	deleteNoteCmd: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("delete_note_cmd", { accountId, noteId })),
 	/**  リアクション付与（カスタム絵文字は `:name:` / `:name@host:`、Unicode は生文字）。 */
 	react: (accountId: string, noteId: string, reaction: string) => typedError<null, Error>(__TAURI_INVOKE("react", { accountId, noteId, reaction })),
-	/**  リアクション解除。 */
+	/**
+	 *  リアクション解除。
+	 * 
+	 *  サーバが `NOT_REACTED` を返した場合（Mastodon等ActivityPub連合先のノートではリアクション付与が
+	 *  サーバ側で失敗/変換され、ローカルの楽観的状態とズレたまま残ることがある。Issue #182）も成功扱いにする。
+	 *  `notes/reactions/delete` は削除対象の絵文字を問わないため、「無い」と言われた時点で望む終状態
+	 *  （リアクション無し）そのもの。ここでキャッシュの `my_reaction` を確実にクリアしないと、
+	 *  次回起動時に `load_cached` が古い値を出し直し同じ症状がぶり返す。
+	 */
 	unreact: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unreact", { accountId, noteId })),
 	/**  リアクション付与ユーザー一覧取得（絵文字ごと、最大100件）。 */
 	getNoteReactions: (accountId: string, noteId: string, reactionType: string | null) => typedError<ReactionUser[], Error>(__TAURI_INVOKE("get_note_reactions", { accountId, noteId, reactionType })),
