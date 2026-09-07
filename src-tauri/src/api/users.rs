@@ -135,6 +135,7 @@ mod tests {
             emojis: Default::default(),
             bio: None,
             banner_url: None,
+            avatar_blurhash: None,
             instance: None,
         }
     }

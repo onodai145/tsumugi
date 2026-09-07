@@ -147,7 +147,7 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::MySqlPool, ids: &[String]) -
                 followers_count: followers_count as u32,
                 following_count: following_count as u32,
                 notes_count: notes_count as u32,
-                emojis, bio, banner_url, instance,
+                emojis, bio, banner_url, avatar_blurhash: None, instance,
             },
         );
     }
@@ -177,7 +177,7 @@ mod tests {
             id: id.into(), username: "alice".into(), host: None, name: Some("Alice".into()),
             avatar_url: None, is_bot: false, is_cat: false,
             followers_count: 5, following_count: 3, notes_count: 42,
-            emojis: HashMap::new(), bio: None, banner_url: None, instance: None,
+            emojis: HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
         }
     }
 

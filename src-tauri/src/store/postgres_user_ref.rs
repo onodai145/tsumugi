@@ -146,6 +146,7 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> R
                 emojis,
                 bio,
                 banner_url,
+                avatar_blurhash: None,
                 instance,
             },
         );
@@ -188,6 +189,7 @@ mod tests {
             emojis: HashMap::new(),
             bio: None,
             banner_url: None,
+            avatar_blurhash: None,
             instance: None,
         }
     }

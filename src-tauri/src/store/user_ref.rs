@@ -237,6 +237,7 @@ pub(crate) fn fetch_users_by_ids(conn: &Connection, ids: &[String]) -> Result<Ha
             emojis: serde_json::from_str(&emojis_json).unwrap_or_default(),
             bio: r.get(11)?,
             banner_url: r.get(12)?,
+            avatar_blurhash: None,
             instance,
         })
     })?;
@@ -270,6 +271,7 @@ mod tests {
             emojis: HashMap::new(),
             bio: None,
             banner_url: None,
+            avatar_blurhash: None,
             instance: None,
         }
     }

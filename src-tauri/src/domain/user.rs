@@ -67,6 +67,10 @@ pub struct User {
     /// このフィールドを付与しない）。追加前に保存されたキャッシュ済みJSONとの後方互換のため default。
     #[serde(default)]
     pub instance: Option<InstanceInfo>,
+    /// アバター画像のBlurHash文字列。猫耳の色抽出に使う(フロント側 `extractAvgColorFromBlurhash`)。
+    /// 追加前に保存されたキャッシュ済みJSONとの後方互換のため default。
+    #[serde(default)]
+    pub avatar_blurhash: Option<String>,
 }
 
 impl User {
@@ -126,5 +130,17 @@ mod tests {
         let u: User = serde_json::from_str(json).unwrap();
         assert_eq!(u.bio, None);
         assert_eq!(u.banner_url, None);
+    }
+
+    /// avatarBlurhash フィールド追加前に保存されたキャッシュ済みJSONを読み込めること。
+    #[test]
+    fn deserializes_without_avatar_blurhash_for_backward_compat() {
+        let json = r#"{
+            "id":"u1","username":"alice","host":null,"name":"Alice",
+            "avatarUrl":null,"isBot":false,"isCat":false,
+            "followersCount":0,"followingCount":0,"notesCount":0
+        }"#;
+        let u: User = serde_json::from_str(json).unwrap();
+        assert_eq!(u.avatar_blurhash, None);
     }
 }
