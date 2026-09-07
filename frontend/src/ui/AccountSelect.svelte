@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Account } from "../bindings/tauri.gen";
   import { Button } from "$lib/components/ui/button";
+  import Avatar from "./Avatar.svelte";
 
   // showLabel: トリガーにハンドル文字列も出すか（既定はアイコンのみ）。
   // showHost: ハンドルを出す場合に @host まで含めるか。
@@ -68,13 +69,13 @@
 >
   {#if selected}
     {#if selected.avatarUrl}
-      <img
-        src={selected.avatarUrl}
-        alt=""
-        class={large
-          ? "size-9 flex-none rounded-lg object-cover"
-          : "size-[22px] flex-none rounded-md object-cover"}
-      />
+      <Avatar
+        isCat={selected.isCat}
+        avatarBlurhash={selected.avatarBlurhash}
+        class={large ? "size-9 flex-none" : "size-[22px] flex-none"}
+      >
+        <img src={selected.avatarUrl} alt="" class={large ? "h-full w-full rounded-lg object-cover" : "h-full w-full rounded-md object-cover"} />
+      </Avatar>
     {:else}
       <!-- text-[0.7rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。
            22px四方の小アバター・チェブロンなど収まりの厳しい箇所のため例外的に即値を維持。 -->
@@ -120,7 +121,9 @@
           onclick={() => choose(a.id)}
         >
           {#if a.avatarUrl}
-            <img src={a.avatarUrl} alt="" class="size-7 flex-none rounded-[var(--avatar-radius,20%)] object-cover" />
+            <Avatar isCat={a.isCat} avatarBlurhash={a.avatarBlurhash} class="size-7 flex-none">
+              <img src={a.avatarUrl} alt="" class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover" />
+            </Avatar>
           {:else}
             <span
               class="grid size-7 flex-none place-items-center rounded-[var(--avatar-radius,20%)] bg-accent text-[0.7rem] font-bold text-muted-foreground"
