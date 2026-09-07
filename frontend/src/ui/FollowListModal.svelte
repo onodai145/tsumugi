@@ -6,6 +6,7 @@
   import { proxiedEmojiMap } from "../lib/emoji";
   import { openProfile } from "../lib/profileModal.svelte";
   import Modal from "./Modal.svelte";
+  import Avatar from "./Avatar.svelte";
   import Mfm from "../render/Mfm.svelte";
   import { Button } from "$lib/components/ui/button";
 
@@ -101,11 +102,13 @@
           class="list-row flex w-full items-center gap-2.5 px-4 py-[9px] text-left text-foreground"
           onclick={() => openProfile({ userId: entry.user.id }, accountId)}
         >
-          {#if entry.user.avatarUrl}
-            <img class="h-10 w-10 flex-none rounded-[var(--avatar-radius,20%)] object-cover" src={entry.user.avatarUrl} alt="" />
-          {:else}
-            <div class="avatar-ph h-10 w-10 flex-none rounded-[var(--avatar-radius,20%)]"></div>
-          {/if}
+          <Avatar isCat={entry.user.isCat} avatarBlurhash={entry.user.avatarBlurhash} class="h-10 w-10 flex-none">
+            {#if entry.user.avatarUrl}
+              <img class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover" src={entry.user.avatarUrl} alt="" />
+            {:else}
+              <div class="avatar-ph h-full w-full rounded-[var(--avatar-radius,20%)]"></div>
+            {/if}
+          </Avatar>
           <span class="flex min-w-0 flex-col gap-0.5">
             <span class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold"
               ><Mfm
