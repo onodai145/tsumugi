@@ -5,6 +5,7 @@
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import { reactionEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { fetchReactionUsers } from "../lib/reactionUsersCache";
+  import Avatar from "./Avatar.svelte";
 
   let {
     accountId,
@@ -73,11 +74,13 @@
       <ul class="m-0 list-none p-0">
         {#each users as u (u.id)}
           <li class="flex items-center gap-1.5 px-1.5 py-[3px] text-sm">
-            {#if u.avatarUrl}
-              <img class="h-5 w-5 flex-shrink-0 rounded-[var(--avatar-radius,20%)] object-cover" src={u.avatarUrl} alt="" loading="lazy" />
-            {:else}
-              <div class="h-5 w-5 flex-shrink-0 rounded-[var(--avatar-radius,20%)] bg-border"></div>
-            {/if}
+            <Avatar isCat={u.isCat} avatarBlurhash={u.avatarBlurhash} class="h-5 w-5 flex-shrink-0">
+              {#if u.avatarUrl}
+                <img class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover" src={u.avatarUrl} alt="" loading="lazy" />
+              {:else}
+                <div class="h-full w-full rounded-[var(--avatar-radius,20%)] bg-border"></div>
+              {/if}
+            </Avatar>
             <span class="flex min-w-0 flex-1 flex-col">
               <span class="overflow-hidden text-ellipsis whitespace-nowrap text-foreground"><Mfm
                 text={displayName(u)}
