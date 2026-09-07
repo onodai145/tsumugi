@@ -320,7 +320,7 @@
   <div class="flex gap-[7px]">
     {#if inner.user.avatarUrl}
       <img
-        class="h-[34px] w-[34px] flex-none rounded-md object-cover"
+        class="h-[34px] w-[34px] flex-none rounded-[var(--avatar-radius,20%)] object-cover"
         data-testid="note-avatar"
         src={inner.user.avatarUrl}
         alt=""
@@ -332,7 +332,7 @@
       <!-- role="button"だがButtonプリミティブ非経由のため、キーボードフォーカス時の視認性を
            Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
       <div
-        class="avatar h-[34px] w-[34px] flex-none rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        class="avatar h-[34px] w-[34px] flex-none rounded-[var(--avatar-radius,20%)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         data-testid="note-avatar"
         onclick={() => openProfile({ userId: inner.user.id }, accountId)}
         role="button"

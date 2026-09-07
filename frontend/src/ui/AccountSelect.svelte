@@ -120,10 +120,10 @@
           onclick={() => choose(a.id)}
         >
           {#if a.avatarUrl}
-            <img src={a.avatarUrl} alt="" class="size-7 flex-none rounded-md object-cover" />
+            <img src={a.avatarUrl} alt="" class="size-7 flex-none rounded-[var(--avatar-radius,20%)] object-cover" />
           {:else}
             <span
-              class="grid size-7 flex-none place-items-center rounded-md bg-accent text-[0.7rem] font-bold text-muted-foreground"
+              class="grid size-7 flex-none place-items-center rounded-[var(--avatar-radius,20%)] bg-accent text-[0.7rem] font-bold text-muted-foreground"
               >{(a.displayName || a.username).charAt(0)}</span
             >
           {/if}

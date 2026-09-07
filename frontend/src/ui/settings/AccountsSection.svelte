@@ -44,9 +44,9 @@
     {#each app.accounts as a (a.id)}
       <li class="flex items-center gap-2.5 rounded-lg border border-border bg-muted p-2">
         {#if a.avatarUrl}
-          <img class="h-[34px] w-[34px] flex-none rounded-lg object-cover" src={a.avatarUrl} alt="" />
+          <img class="h-[34px] w-[34px] flex-none rounded-[var(--avatar-radius,20%)] object-cover" src={a.avatarUrl} alt="" />
         {:else}
-          <div class="grid h-[34px] w-[34px] flex-none place-items-center rounded-lg bg-accent font-bold text-muted-foreground">{(a.displayName || a.username).charAt(0)}</div>
+          <div class="grid h-[34px] w-[34px] flex-none place-items-center rounded-[var(--avatar-radius,20%)] bg-accent font-bold text-muted-foreground">{(a.displayName || a.username).charAt(0)}</div>
         {/if}
         <div class="min-w-0 flex-1">
           <!-- text-[0.68rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。極小バッジのため例外的に即値を維持。 -->

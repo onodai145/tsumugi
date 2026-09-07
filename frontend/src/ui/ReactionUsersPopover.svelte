@@ -74,9 +74,9 @@
         {#each users as u (u.id)}
           <li class="flex items-center gap-1.5 px-1.5 py-[3px] text-sm">
             {#if u.avatarUrl}
-              <img class="h-5 w-5 flex-shrink-0 rounded-md object-cover" src={u.avatarUrl} alt="" loading="lazy" />
+              <img class="h-5 w-5 flex-shrink-0 rounded-[var(--avatar-radius,20%)] object-cover" src={u.avatarUrl} alt="" loading="lazy" />
             {:else}
-              <div class="h-5 w-5 flex-shrink-0 rounded-md bg-border"></div>
+              <div class="h-5 w-5 flex-shrink-0 rounded-[var(--avatar-radius,20%)] bg-border"></div>
             {/if}
             <span class="flex min-w-0 flex-1 flex-col">
               <span class="overflow-hidden text-ellipsis whitespace-nowrap text-foreground"><Mfm
