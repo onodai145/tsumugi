@@ -141,7 +141,7 @@
     onkeydown={(e) => e.key === "Enter" && openProfile({ username: p.username, host: p.host ?? null })}
     style="cursor: pointer"
   >{#if mentionAvatarUrl}<img
-      class="mfm-mention-avatar mr-1 inline-block h-4 w-4 rounded-md object-cover align-middle"
+      class="mfm-mention-avatar mr-1 inline-block h-4 w-4 rounded-[var(--avatar-radius,20%)] object-cover align-middle"
       src={mentionAvatarUrl}
       alt=""
       loading="lazy"
