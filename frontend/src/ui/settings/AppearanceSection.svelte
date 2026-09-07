@@ -17,6 +17,7 @@
   let urlPreviewEnabled = $state(app.ui.urlPreviewEnabled ?? true);
   let summalyProxyUrl = $state(app.ui.summalyProxyUrl ?? "");
   let instanceTicker = $state(app.ui.instanceTicker ?? "remote");
+  let avatarRadius = $state(app.ui.avatarRadius ?? 20);
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -225,6 +226,7 @@
         urlPreviewEnabled,
         summalyProxyUrl: summalyProxyUrl.trim(),
         instanceTicker,
+        avatarRadius,
       });
       saved = true;
     } catch (e) {
@@ -270,6 +272,22 @@
     「常に表示」はローカルユーザー（自分と同じインスタンス）の投稿にも表示します。
   </p>
 </div>
+
+<label class="mb-2.5 flex flex-col gap-1 text-sm">
+  <span class="text-muted-foreground">アイコンの丸み({avatarRadius}%)</span>
+  <input class="w-full max-w-[320px] accent-primary" type="range" min="0" max="100" step="5" bind:value={avatarRadius} />
+</label>
+<p class="mb-2 mt-0 flex items-center gap-2 text-xs text-muted-foreground">
+  プレビュー:
+  <span
+    class="inline-block h-8 w-8 flex-none bg-accent"
+    style={`border-radius:${avatarRadius}%`}
+  ></span>
+</p>
+<p class="mb-4 mt-0 text-xs text-muted-foreground">
+  ノート・アカウント切替・プロフィール等、アプリ内すべてのアイコンに反映されます。
+  0%が直角、100%が真円です。
+</p>
 
 {#snippet swatchStrip(colors: ThemeColors)}
   <span class="flex h-[30px] w-full flex-none">
