@@ -31,6 +31,12 @@
   /* Misskey本家 MkAvatar.vue の .cat > .ears 相当を移植。%ベースなので
      avatar-frame のサイズ(呼び出し側の class で決まる)に自動追従する。 */
   .ears {
+    /* Tailwindのpreflightがグローバルに box-sizing: border-box を敷いているため、
+       border-box のままだと width/height:100% + padding:50% でpaddingがボックス内に
+       食い込み、content areaが0になって子要素(.ear-left/.ear-right)の% サイズ指定が
+       すべて0pxに潰れる(本家Misskeyはこのトリックを content-box 前提で書いている)。
+       明示的に content-box へ戻して耳を表示させる。 */
+    box-sizing: content-box;
     contain: strict;
     position: absolute;
     top: -50%;
