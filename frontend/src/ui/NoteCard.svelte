@@ -10,6 +10,7 @@
   import NoteMenu from "./NoteMenu.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
+  import Avatar from "./Avatar.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { readableTextColor, isValidHexColor } from "../lib/color";
@@ -318,28 +319,30 @@
   {/if}
 
   <div class="flex gap-[7px]">
-    {#if inner.user.avatarUrl}
-      <img
-        class="h-[34px] w-[34px] flex-none rounded-[var(--avatar-radius,20%)] object-cover"
-        data-testid="note-avatar"
-        src={inner.user.avatarUrl}
-        alt=""
-        loading="lazy"
-        onclick={() => openProfile({ userId: inner.user.id }, accountId)}
-        style="cursor: pointer"
-      />
-    {:else}
-      <!-- role="button"だがButtonプリミティブ非経由のため、キーボードフォーカス時の視認性を
-           Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
-      <div
-        class="avatar h-[34px] w-[34px] flex-none rounded-[var(--avatar-radius,20%)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        data-testid="note-avatar"
-        onclick={() => openProfile({ userId: inner.user.id }, accountId)}
-        role="button"
-        tabindex="0"
-        onkeydown={(e) => e.key === "Enter" && openProfile({ userId: inner.user.id }, accountId)}
-      ></div>
-    {/if}
+    <Avatar isCat={inner.user.isCat} avatarBlurhash={inner.user.avatarBlurhash} class="h-[34px] w-[34px] flex-none">
+      {#if inner.user.avatarUrl}
+        <img
+          class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover"
+          data-testid="note-avatar"
+          src={inner.user.avatarUrl}
+          alt=""
+          loading="lazy"
+          onclick={() => openProfile({ userId: inner.user.id }, accountId)}
+          style="cursor: pointer"
+        />
+      {:else}
+        <!-- role="button"だがButtonプリミティブ非経由のため、キーボードフォーカス時の視認性を
+             Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
+        <div
+          class="avatar h-full w-full rounded-[var(--avatar-radius,20%)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          data-testid="note-avatar"
+          onclick={() => openProfile({ userId: inner.user.id }, accountId)}
+          role="button"
+          tabindex="0"
+          onkeydown={(e) => e.key === "Enter" && openProfile({ userId: inner.user.id }, accountId)}
+        ></div>
+      {/if}
+    </Avatar>
     <div class="min-w-0 flex-1">
       <header class="flex flex-wrap items-baseline gap-[5px]">
         <span

@@ -513,3 +513,17 @@ describe("本文の折りたたみ", () => {
     expect(container.querySelectorAll('[data-testid="note-text-expand"]').length).toBe(1);
   });
 });
+
+describe("猫耳アバター", () => {
+  it("投稿者がisCatのとき猫耳(.ears)を描画する", () => {
+    const note = makeNote({ user: makeUser({ isCat: true }) });
+    const { container } = render(NoteCard, { props: { note, accountId: "a1", instanceHost: "misskey.io" } });
+    expect(container.querySelector(".ears")).not.toBeNull();
+  });
+
+  it("投稿者がisCatでないとき猫耳(.ears)を描画しない", () => {
+    const note = makeNote({ user: makeUser({ isCat: false }) });
+    const { container } = render(NoteCard, { props: { note, accountId: "a1", instanceHost: "misskey.io" } });
+    expect(container.querySelector(".ears")).toBeNull();
+  });
+});
