@@ -476,15 +476,19 @@ git commit -m "feat: SQLiteユーザーキャッシュにavatarBlurhash列を追
 
 ---
 
-### Task 5: Postgresキャッシュバックエンドに `avatar_blurhash` 列を追加する
+### Task 5: Postgres/MySQLキャッシュバックエンドに `avatar_blurhash` 列を追加する
+
+> **注記(Task 1実行後に判明):** `src-tauri/src/store/mod.rs`にはPostgresに加えてMySQLバックエンド(`mysql_backend.rs`・`mysql_user_ref.rs`、`postgres_backend.rs`/`postgres_user_ref.rs`と全く同じ構造の並行実装)も存在する。当初の設計時に見落としており、本タスクはPostgresとMySQLの両方を対象にする(Step 1-10がPostgres、Step 11-19がMySQL)。Task 1のコミットで`mysql_backend.rs`/`mysql_user_ref.rs`のテスト用`User {}`リテラルには既に`avatar_blurhash: None,`が追加済み(コンパイルを通すための機械的な追加)なので、本タスクはDDL・upsert・fetchのロジック配線のみを行う。
 
 **Files:**
 - Modify: `src-tauri/src/store/postgres_backend.rs`(`ensure_schema`関数、`UserTable` enum)
 - Modify: `src-tauri/src/store/postgres_user_ref.rs`
+- Modify: `src-tauri/src/store/mysql_backend.rs`(`ensure_schema`関数、`UserTable` enum)
+- Modify: `src-tauri/src/store/mysql_user_ref.rs`
 
 **Interfaces:**
 - Consumes: `User.avatar_blurhash`(Task 1)
-- Produces: Postgresキャッシュに保存された`User`を`fetch_users_by_ids`で読み戻したとき`avatar_blurhash`が復元される
+- Produces: Postgres/MySQLキャッシュに保存された`User`を`fetch_users_by_ids`で読み戻したとき`avatar_blurhash`が復元される
 
 - [ ] **Step 1: `UserTable` enumに列を追加**
 
@@ -565,12 +569,97 @@ Expected: PASS(Postgresが使えない環境ではスキップして構わない
 Run: `cd src-tauri && cargo test --lib`
 Expected: PASS(全件)
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 10: Postgres分をCommit**
 
 ```bash
 cd /home/onodai145/repos/github.com/onodai145/tsumugi
 git add src-tauri/src/store/postgres_backend.rs src-tauri/src/store/postgres_user_ref.rs
 git commit -m "feat: PostgresユーザーキャッシュにavatarBlurhash列を追加(Issue #41)"
+```
+
+- [ ] **Step 11: MySQL `UserTable` enumに列を追加**
+
+`src-tauri/src/store/mysql_backend.rs`の`enum UserTable`(282-288行目付近)、`InstanceThemeColor,`の直後に追加:
+
+```rust
+    AvatarBlurhash,
+```
+
+- [ ] **Step 12: MySQLの`ensure_schema`のDDLに列を追加**
+
+同ファイルの`ensure_schema`関数内、`user`テーブル定義(150-169行目付近)の`.col(ColumnDef::new(UserTable::InstanceThemeColor).text())`の直後に追加:
+
+```rust
+        .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
+```
+
+- [ ] **Step 13: MySQLの既存テーブル向け明示的マイグレーションを追加**
+
+Postgres同様`sea_query`の`Table::create().if_not_exists()`は既存テーブルへの列追加を行わないため、`ensure_schema`関数の`pool.execute(user.as_str()).await?;`の直後に追加(MySQL 8.0.29+はPostgres同様`ADD COLUMN IF NOT EXISTS`をサポートする):
+
+```rust
+    // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
+    // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
+    // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(冪等)。
+    pool.execute("ALTER TABLE `user` ADD COLUMN IF NOT EXISTS avatar_blurhash TEXT").await?;
+```
+
+- [ ] **Step 14: `mysql_user_ref.rs`の`upsert_user`・`fill_user_from_snapshot`・`fetch_users_by_ids`を更新**
+
+`src-tauri/src/store/mysql_user_ref.rs`を、Step 4でPostgres版に加えた変更と同じ内容でMySQL構文(`?`プレースホルダ、`ON DUPLICATE KEY UPDATE ... = VALUES(...)`)に合わせて更新する:
+
+- `upsert_user`: INSERT列リストに`avatar_blurhash`を追加、`VALUES`のプレースホルダを1つ増やす、`ON DUPLICATE KEY UPDATE`に`avatar_blurhash = COALESCE(VALUES(avatar_blurhash), avatar_blurhash)`を追加、末尾の`.bind(&user.avatar_blurhash)`を追加。
+- `fill_user_from_snapshot`: 同様に列追加(ファイル内のPostgres版と対になる自己修復パス専用関数。無ければ`postgres_user_ref.rs`の`fill_user_from_snapshot`と同じ「既存値が無い場合のみ埋める」規約で実装されている箇所を探して合わせる)。
+- `fetch_users_by_ids`: `SELECT`列リストとタプル型引数リストに`avatar_blurhash`(`Option<String>`)を追加し、`User { ... }`リテラルに`avatar_blurhash`を追加。
+
+- [ ] **Step 15: MySQLのテストヘルパーを更新**
+
+`mysql_user_ref.rs`の`#[cfg(test)]`内、ユーザー生成用テストヘルパー(`postgres_user_ref.rs`の`fn user(id: &str) -> User`に相当するもの)の`instance: None,`の直後に追加(既に存在すれば変更不要):
+
+```rust
+            avatar_blurhash: None,
+```
+
+- [ ] **Step 16: `#[ignore]`のラウンドトリップテストを追加**
+
+`mysql_user_ref.rs`の`mod tests`、既存のupsert roundtripテストの直後に追加:
+
+```rust
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_user_roundtrips_avatar_blurhash() {
+        let pool = pool().await;
+        let mut u = user("u1");
+        u.avatar_blurhash = Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into());
+        upsert_user(&pool, &u).await.unwrap();
+
+        let got = fetch_users_by_ids(&pool, &["u1".to_string()]).await.unwrap();
+        assert_eq!(
+            got.get("u1").unwrap().avatar_blurhash.as_deref(),
+            Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+        );
+    }
+```
+
+- [ ] **Step 17: コンパイルを確認**
+
+Run: `cd src-tauri && cargo test --lib --no-run`
+Expected: 成功(コンパイルエラー無し)
+
+- [ ] **Step 18: MySQLが使える場合のみ、無視テストも実行して確認**
+
+Run: `cd src-tauri && cargo test --lib store::mysql_user_ref:: -- --ignored`
+Expected: PASS(MySQLが使えない環境ではスキップして構わない)
+
+- [ ] **Step 19: 通常のテストスイートを実行してMySQL分をCommit**
+
+Run: `cd src-tauri && cargo test --lib`
+Expected: PASS(全件)
+
+```bash
+cd /home/onodai145/repos/github.com/onodai145/tsumugi
+git add src-tauri/src/store/mysql_backend.rs src-tauri/src/store/mysql_user_ref.rs
+git commit -m "feat: MySQLユーザーキャッシュにavatarBlurhash列を追加(Issue #41)"
 ```
 
 ---
