@@ -166,8 +166,13 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::InstanceName).text())
         .col(ColumnDef::new(UserTable::InstanceIconUrl).text())
         .col(ColumnDef::new(UserTable::InstanceThemeColor).text())
+        .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
         .build(MysqlQueryBuilder);
     pool.execute(user.as_str()).await?;
+    // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
+    // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
+    // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(冪等)。
+    pool.execute("ALTER TABLE `user` ADD COLUMN IF NOT EXISTS avatar_blurhash TEXT").await?;
 
     let note_reaction = Table::create()
         .table(NoteReactionTable::Table)
@@ -283,7 +288,7 @@ enum UserTable {
     #[iden = "user"]
     Table, Id, Username, Host, Name, AvatarUrl, IsBot, IsCat, FollowersCount,
     FollowingCount, NotesCount, Emojis, Bio, BannerUrl, InstanceName,
-    InstanceIconUrl, InstanceThemeColor,
+    InstanceIconUrl, InstanceThemeColor, AvatarBlurhash,
 }
 
 #[derive(sea_query::Iden)]
