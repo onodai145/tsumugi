@@ -76,6 +76,7 @@ function profileResponse(overrides: Record<string, unknown> = {}) {
       host: null,
       name: "Alice",
       avatarUrl: null,
+      avatarBlurhash: null,
       isBot: false,
       isCat: false,
       followersCount: 3,
@@ -200,5 +201,17 @@ describe("ProfileModal", () => {
     await fireEvent.scroll(notesEl);
     await fireEvent.scroll(notesEl);
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("プロフィールのuser.isCatがtrueのとき猫耳(.ears)を描画する", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_user_profile") return Promise.resolve(profileResponse({ user: { ...profileResponse().user, isCat: true } }));
+      if (cmd === "get_user_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    render(ProfileModal, {
+      props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(document.querySelector(".ears")).not.toBeNull());
   });
 });

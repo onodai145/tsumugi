@@ -8,6 +8,7 @@
   import Mfm from "../render/Mfm.svelte";
   import NoteCard from "./NoteCard.svelte";
   import FollowListModal from "./FollowListModal.svelte";
+  import Avatar from "./Avatar.svelte";
   import { Button } from "$lib/components/ui/button";
 
   let { target, accountId, onclose }: { target: ProfileTarget; accountId: string; onclose: () => void } =
@@ -147,11 +148,17 @@
       <img class="block aspect-[3/1] w-[calc(100%+32px)] -mx-4 rounded-md object-cover" src={profile.user.bannerUrl} alt="" />
     {/if}
     <div class={profile.user.bannerUrl ? "flex items-end gap-2.5 -mt-[22px] pl-1" : "mt-2 flex items-end gap-2.5"}>
-      {#if profile.user.avatarUrl}
-        <img class="h-14 w-14 flex-none rounded-[var(--avatar-radius,20%)] border-2 border-background object-cover" src={profile.user.avatarUrl} alt="" />
-      {:else}
-        <div class="avatar-ph h-14 w-14 flex-none rounded-[var(--avatar-radius,20%)] border-2 border-background"></div>
-      {/if}
+      <Avatar
+        isCat={profile.user.isCat}
+        avatarBlurhash={profile.user.avatarBlurhash}
+        class="h-14 w-14 flex-none"
+      >
+        {#if profile.user.avatarUrl}
+          <img class="h-full w-full rounded-[var(--avatar-radius,20%)] border-2 border-background object-cover" src={profile.user.avatarUrl} alt="" />
+        {:else}
+          <div class="avatar-ph h-full w-full rounded-[var(--avatar-radius,20%)] border-2 border-background"></div>
+        {/if}
+      </Avatar>
       <div class="flex min-w-0 flex-1 flex-col gap-px">
         <span class="text-sm font-semibold"
           ><Mfm text={displayName(profile.user)} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} simple
