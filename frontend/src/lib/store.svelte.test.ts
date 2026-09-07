@@ -665,3 +665,35 @@ describe("AppStore.now (共有tick)", () => {
     expect(app.now).toBe(after);
   });
 });
+
+describe("#applyAvatarRadius (Issue #94: アイコンの丸みカスタマイズ)", () => {
+  beforeEach(() => {
+    // 直前の "AppStore.now" ブロックが boot() を list_accounts 以外 data:null で
+    // 呼び出すため、this.ui.theme が undefined のまま残ることがある(#applyTheme が
+    // parseThemeRef(undefined) で例外を投げるのを防ぐため、既知の値に戻しておく)。
+    app.ui = { ...app.ui, theme: "auto" };
+  });
+
+  afterEach(() => {
+    document.documentElement.style.removeProperty("--avatar-radius");
+    vi.unstubAllGlobals();
+  });
+
+  it("setUiPrefsでavatarRadiusを指定すると--avatar-radius CSS変数に反映される", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, avatarRadius: 65 });
+    expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("65%");
+  });
+
+  it("avatarRadiusが範囲外(100超)でも100%にクランプされる", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, avatarRadius: 150 });
+    expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("100%");
+  });
+
+  it("avatarRadiusが範囲外(負数)でも0%にクランプされる", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, avatarRadius: -10 });
+    expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("0%");
+  });
+});

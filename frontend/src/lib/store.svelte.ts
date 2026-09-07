@@ -160,6 +160,7 @@ class AppStore {
     noteCacheLimit: 10000,
     noteCacheMaxAgeDays: 0,
     noteCacheMaxSizeMb: 0,
+    avatarRadius: 20,
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -250,11 +251,13 @@ class AppStore {
         noteCacheMaxAgeDays: ui.noteCacheMaxAgeDays ?? 0,
         noteCacheMaxSizeMb: ui.noteCacheMaxSizeMb ?? 0,
         instanceTicker: ui.instanceTicker ?? "remote",
+        avatarRadius: ui.avatarRadius ?? 20,
       };
       this.#applyTheme(this.ui.theme);
       this.#applySyntaxTheme(this.ui.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
       this.#applyFont(this.ui.fontFamily ?? "");
       this.#applyBackground(this.ui);
+      this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
       this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
@@ -1321,11 +1324,13 @@ class AppStore {
       noteCacheLimit: prefs.noteCacheLimit ?? 10000,
       noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
       noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
+      avatarRadius: prefs.avatarRadius ?? 20,
     };
     this.#applyTheme(prefs.theme);
     this.#applySyntaxTheme(prefs.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
     this.#applyFont(prefs.fontFamily ?? "");
     this.#applyBackground(this.ui);
+    this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
     this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
     this.#log("info", "表示設定を保存しました");
   }
@@ -1492,6 +1497,13 @@ class AppStore {
   /// 大きく見たい人は大きくできるように設定可能にしてある）。
   #applyMediaThumbnailHeight(px: number) {
     document.documentElement.style.setProperty("--media-thumbnail-height", `${px}px`);
+  }
+
+  /// アバター画像の角丸を <html> に反映する（0=直角 〜 100=真円、%。Issue #94）。
+  /// 保存済み値が範囲外(不正な手動編集等)でもCSSが壊れないよう 0〜100 にクランプする。
+  #applyAvatarRadius(pct: number) {
+    const clamped = Math.min(100, Math.max(0, pct));
+    document.documentElement.style.setProperty("--avatar-radius", `${clamped}%`);
   }
 
   // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。
