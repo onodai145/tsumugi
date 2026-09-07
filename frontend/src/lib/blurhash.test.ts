@@ -7,6 +7,7 @@ describe("extractAvgColorFromBlurhash", () => {
     // "LEHV6nWB2yk8pyo0adR*.7kCMdnj" の3〜6文字目("HV6n")をbase83デコードした値。
     const result = extractAvgColorFromBlurhash("LEHV6nWB2yk8pyo0adR*.7kCMdnj");
     expect(result).toMatch(/^#[0-9a-f]{6}$/);
+    expect(result).toBe("#979695");
   });
 
   it("null/undefinedはundefinedを返す", () => {

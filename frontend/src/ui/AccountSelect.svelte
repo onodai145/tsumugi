@@ -68,24 +68,24 @@
   bind:ref={trigger}
 >
   {#if selected}
-    {#if selected.avatarUrl}
-      <Avatar
-        isCat={selected.isCat}
-        avatarBlurhash={selected.avatarBlurhash}
-        class={large ? "size-9 flex-none" : "size-[22px] flex-none"}
-      >
+    <Avatar
+      isCat={selected.isCat}
+      avatarBlurhash={selected.avatarBlurhash}
+      class={large ? "size-9 flex-none" : "size-[22px] flex-none"}
+    >
+      {#if selected.avatarUrl}
         <img src={selected.avatarUrl} alt="" class={large ? "h-full w-full rounded-lg object-cover" : "h-full w-full rounded-md object-cover"} />
-      </Avatar>
-    {:else}
-      <!-- text-[0.7rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。
-           22px四方の小アバター・チェブロンなど収まりの厳しい箇所のため例外的に即値を維持。 -->
-      <span
-        class={large
-          ? "grid size-9 flex-none place-items-center rounded-lg bg-accent text-base font-bold text-muted-foreground"
-          : "grid size-[22px] flex-none place-items-center rounded-md bg-accent text-[0.7rem] font-bold text-muted-foreground"}
-        >{(selected.displayName || selected.username).charAt(0)}</span
-      >
-    {/if}
+      {:else}
+        <!-- text-[0.7rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。
+             22px四方の小アバター・チェブロンなど収まりの厳しい箇所のため例外的に即値を維持。 -->
+        <span
+          class={large
+            ? "grid h-full w-full place-items-center rounded-lg bg-accent text-base font-bold text-muted-foreground"
+            : "grid h-full w-full place-items-center rounded-md bg-accent text-[0.7rem] font-bold text-muted-foreground"}
+          >{(selected.displayName || selected.username).charAt(0)}</span
+        >
+      {/if}
+    </Avatar>
     {#if showLabel}
       <span class="overflow-hidden text-ellipsis whitespace-nowrap">{handle(selected)}</span>
     {/if}
@@ -120,16 +120,16 @@
             : "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-[inherit] text-foreground hover:bg-muted"}
           onclick={() => choose(a.id)}
         >
-          {#if a.avatarUrl}
-            <Avatar isCat={a.isCat} avatarBlurhash={a.avatarBlurhash} class="size-7 flex-none">
+          <Avatar isCat={a.isCat} avatarBlurhash={a.avatarBlurhash} class="size-7 flex-none">
+            {#if a.avatarUrl}
               <img src={a.avatarUrl} alt="" class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover" />
-            </Avatar>
-          {:else}
-            <span
-              class="grid size-7 flex-none place-items-center rounded-[var(--avatar-radius,20%)] bg-accent text-[0.7rem] font-bold text-muted-foreground"
-              >{(a.displayName || a.username).charAt(0)}</span
-            >
-          {/if}
+            {:else}
+              <span
+                class="grid h-full w-full place-items-center rounded-[var(--avatar-radius,20%)] bg-accent text-[0.7rem] font-bold text-muted-foreground"
+                >{(a.displayName || a.username).charAt(0)}</span
+              >
+            {/if}
+          </Avatar>
           <span class="flex min-w-0 flex-col">
             <span class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold"
               >{a.displayName || a.username}</span

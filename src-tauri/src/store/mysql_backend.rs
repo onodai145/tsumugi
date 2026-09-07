@@ -193,7 +193,8 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     pool.execute(user.as_str()).await?;
     // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
     // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
-    // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(冪等)。
+    // ALTER TABLE ... ADD COLUMN を別途実行する(add_column_if_missingが事前に列有無を
+    // 確認するため冪等。MySQLにはADD COLUMN IF NOT EXISTS構文が無いため使用していない)。
     add_column_if_missing(pool, "ALTER TABLE `user` ADD COLUMN avatar_blurhash TEXT").await?;
 
     let note_reaction = Table::create()
