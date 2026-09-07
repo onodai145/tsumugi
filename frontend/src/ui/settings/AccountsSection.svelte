@@ -2,6 +2,7 @@
   import { app } from "../../lib/store.svelte";
   import type { Account } from "../../bindings/tauri.gen";
   import { Button } from "$lib/components/ui/button";
+  import Avatar from "../Avatar.svelte";
 
   let {
     onAddAccount,
@@ -43,11 +44,13 @@
   <ul class="m-0 mb-3 flex list-none flex-col gap-1.5 p-0">
     {#each app.accounts as a (a.id)}
       <li class="flex items-center gap-2.5 rounded-lg border border-border bg-muted p-2">
-        {#if a.avatarUrl}
-          <img class="h-[34px] w-[34px] flex-none rounded-[var(--avatar-radius,20%)] object-cover" src={a.avatarUrl} alt="" />
-        {:else}
-          <div class="grid h-[34px] w-[34px] flex-none place-items-center rounded-[var(--avatar-radius,20%)] bg-accent font-bold text-muted-foreground">{(a.displayName || a.username).charAt(0)}</div>
-        {/if}
+        <Avatar isCat={a.isCat} avatarBlurhash={a.avatarBlurhash} class="h-[34px] w-[34px] flex-none">
+          {#if a.avatarUrl}
+            <img class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover" src={a.avatarUrl} alt="" />
+          {:else}
+            <div class="grid h-full w-full place-items-center rounded-[var(--avatar-radius,20%)] bg-accent font-bold text-muted-foreground">{(a.displayName || a.username).charAt(0)}</div>
+          {/if}
+        </Avatar>
         <div class="min-w-0 flex-1">
           <!-- text-[0.68rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。極小バッジのため例外的に即値を維持。 -->
           <div class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge ml-1.5 rounded px-1.5 py-px text-[0.68rem] font-semibold text-primary">既定</span>{/if}</div>
