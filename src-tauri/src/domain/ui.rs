@@ -189,6 +189,9 @@ pub struct UiPrefs {
     /// "always" = ローカルユーザー（自分と同一インスタンス）の投稿にも表示。
     #[serde(default = "default_instance_ticker")]
     pub instance_ticker: String,
+    /// アバター画像の角丸（0=直角 〜 100=真円、%）。既定は20（Issue #94）。
+    #[serde(default = "default_avatar_radius")]
+    pub avatar_radius: i32,
 }
 
 fn default_column_opacity() -> i32 {
@@ -250,6 +253,10 @@ fn default_instance_ticker() -> String {
     "remote".into()
 }
 
+fn default_avatar_radius() -> i32 {
+    20
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -282,6 +289,7 @@ impl Default for UiPrefs {
             url_preview_enabled: default_url_preview_enabled(),
             summaly_proxy_url: String::new(),
             instance_ticker: default_instance_ticker(),
+            avatar_radius: default_avatar_radius(),
         }
     }
 }
@@ -330,6 +338,9 @@ mod tests {
         assert!(v.custom_syntax_themes.is_empty());
         assert!(v.url_preview_enabled);
         assert_eq!(v.summaly_proxy_url, "");
+        // avatar_radius も同様に既定値(20%, Issue #94追加前の rounded-md 相当の見た目)へ
+        // フォールバックすること。
+        assert_eq!(v.avatar_radius, 20);
     }
 
     #[test]
@@ -410,6 +421,7 @@ mod tests {
             url_preview_enabled: false,
             summaly_proxy_url: "https://my-proxy.example.com/preview".into(),
             instance_ticker: "always".into(),
+            avatar_radius: 65,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -452,5 +464,13 @@ mod tests {
         // instance_ticker 追加前に保存された JSON も読めること（#[serde(default)]）。
         let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.instance_ticker, "remote");
+    }
+
+    #[test]
+    fn avatar_radius_defaults_to_20_for_legacy_json() {
+        // avatar_radius 追加前に保存された JSON も読めること（#[serde(default)]）。
+        // 既定は20%(追加前の rounded-md に近い見た目、Issue #94)。
+        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.avatar_radius, 20);
     }
 }

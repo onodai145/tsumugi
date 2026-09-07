@@ -83,7 +83,7 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <img
-        class="h-6 w-6 flex-none rounded-md object-cover"
+        class="h-6 w-6 flex-none rounded-[var(--avatar-radius,20%)] object-cover"
         data-testid="notification-avatar"
         src={n.user.avatarUrl}
         alt=""

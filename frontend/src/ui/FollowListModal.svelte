@@ -102,9 +102,9 @@
           onclick={() => openProfile({ userId: entry.user.id }, accountId)}
         >
           {#if entry.user.avatarUrl}
-            <img class="h-10 w-10 flex-none rounded-lg object-cover" src={entry.user.avatarUrl} alt="" />
+            <img class="h-10 w-10 flex-none rounded-[var(--avatar-radius,20%)] object-cover" src={entry.user.avatarUrl} alt="" />
           {:else}
-            <div class="avatar-ph h-10 w-10 flex-none rounded-lg"></div>
+            <div class="avatar-ph h-10 w-10 flex-none rounded-[var(--avatar-radius,20%)]"></div>
           {/if}
           <span class="flex min-w-0 flex-col gap-0.5">
             <span class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold"

@@ -977,6 +977,8 @@ export type UiPrefs = {
 	 *  "always" = ローカルユーザー（自分と同一インスタンス）の投稿にも表示。
 	 */
 	instanceTicker?: string,
+	/**  アバター画像の角丸（0=直角 〜 100=真円、%）。既定は20（Issue #94）。 */
+	avatarRadius?: number,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */
