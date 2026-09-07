@@ -214,6 +214,8 @@ mod tests {
                 display_name: "Me".into(),
                 avatar_url: None,
                 instance: None,
+                is_cat: false,
+                avatar_blurhash: None,
             })
             .unwrap();
 

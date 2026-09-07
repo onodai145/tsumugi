@@ -20,4 +20,10 @@ pub struct Account {
     /// `/api/meta` から取得して埋める。取得前・失敗時は None。
     #[serde(default)]
     pub instance: Option<crate::domain::InstanceInfo>,
+    /// ログイン中ユーザー自身が`isCat`か(アカウント切替UIでの猫耳表示用)。
+    #[serde(default)]
+    pub is_cat: bool,
+    /// アバター画像のBlurHash文字列(猫耳の色抽出用)。
+    #[serde(default)]
+    pub avatar_blurhash: Option<String>,
 }
