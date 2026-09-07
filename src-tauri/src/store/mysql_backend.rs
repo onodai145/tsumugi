@@ -95,6 +95,28 @@ async fn execute_index(pool: &sqlx::MySqlPool, index_sql: &str) -> Result<()> {
     }
 }
 
+/// `ALTER TABLE ... ADD COLUMN`を実行し、列が既に存在する場合(Duplicate column name)は無視する。
+/// MySQLには`ADD COLUMN IF NOT EXISTS`のネイティブ構文が無い(MariaDB専用拡張であり、
+/// 実際のMySQLでは構文エラー(1064)になる)ため、`alter_sql`には`IF NOT EXISTS`を含めず
+/// 素のALTER文を渡し、2回目以降の`ensure_schema()`呼び出しで既存の列に対して発生する
+/// エラー1060(ER_DUP_FIELDNAME)だけをここで握りつぶす。`execute_index`と同じ理由で、
+/// `MySqlDatabaseError::number()`で正確な数値コードを判定する(メッセージ文字列の
+/// 部分一致では他のエラーまで誤って握りつぶしてしまうため避ける)。
+async fn add_column_if_missing(pool: &sqlx::MySqlPool, alter_sql: &str) -> Result<()> {
+    match pool.execute(alter_sql).await {
+        Ok(_) => Ok(()),
+        Err(sqlx::Error::Database(db_err))
+            if db_err
+                .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+                .map(|e| e.number())
+                == Some(1060) =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
 pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     let note = Table::create()
@@ -172,7 +194,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
     // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
     // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(冪等)。
-    pool.execute("ALTER TABLE `user` ADD COLUMN IF NOT EXISTS avatar_blurhash TEXT").await?;
+    add_column_if_missing(pool, "ALTER TABLE `user` ADD COLUMN avatar_blurhash TEXT").await?;
 
     let note_reaction = Table::create()
         .table(NoteReactionTable::Table)
