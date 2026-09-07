@@ -105,6 +105,17 @@ describe("NotificationCard note actions", () => {
     });
     expect(container.querySelector('[data-testid="notification-note-preview"]')).toBeNull();
   });
+
+  it("通知元ユーザーのisCatがtrueのとき猫耳(.ears)を描画する", () => {
+    const notification = makeNotification({
+      type: "mention",
+      user: makeUser({ id: "u2", name: "Bob", avatarUrl: "https://example.com/b.png", isCat: true }),
+    });
+    const { container } = render(NotificationCard, {
+      props: { notification, accountId: "a1" },
+    });
+    expect(container.querySelector(".ears")).not.toBeNull();
+  });
 });
 
 // 通知欄からもノート同様にプロフィールへ遷移できるようにする要望(Issue #91 follow-up)の回帰テスト。
