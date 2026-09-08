@@ -18,7 +18,14 @@
 </script>
 
 <span class="avatar-frame relative inline-block {className}">
-  {@render children()}
+  <!-- 本家Misskey(MkAvatar.vue)は .inner(アバター画像側)に z-index:1 を明示することで、
+       .ears(position:absoluteだがz-index未指定=auto)より確実に手前に描画されるようにしている。
+       このラッパーが無いと、position:absoluteな.earsは「非positioned要素は常にpositioned要素より
+       背面」というCSSのスタッキング規則により、通常配置(position:static)のアバター画像より
+       手前に描画されてしまい、耳が顔を覆ってしまう(Issue #41フォローアップで判明)。 -->
+  <span class="avatar-content relative z-[1] block h-full w-full">
+    {@render children()}
+  </span>
   {#if isCat}
     <span class="ears" style="color: {earColor}" aria-hidden="true">
       <span class="ear-left"></span>
