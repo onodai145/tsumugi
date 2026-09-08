@@ -75,6 +75,20 @@ output 自体を強制的に `true` にする)。
 `None` を返す二重チェックがある。`prerelease: true` で公開する nightly Release は
 アプリ本体の更新チェックに一切影響しない。
 
+## 既存ワークフローへの影響: update-pkgbuild.yml
+
+`.github/workflows/update-pkgbuild.yml` は `release: types: [released, published]`
+で起動し、`prerelease` かどうかを問わず発火する。nightly Release は
+`prerelease: true, draft: false` = GitHub 上は "published" イベントとして扱われる
+ため、このままでは毎晩誤発火し、`TAG=nightly` で `scripts/update-pkgbuild.py` が
+実行されてしまう(存在しない URL へのアクセスで失敗する、または PKGBUILD を
+誤った内容で更新する PR が毎晩作られる)。
+
+対策として `update-pkgbuild.yml` の `update` ジョブに
+`if: github.event.release.prerelease == false` を追加し、prerelease な
+Release(nightly を含む将来の prerelease 運用全般)ではこのジョブをスキップする。
+正式リリース(`prerelease: false`)の挙動は変わらない。
+
 ## スコープ外
 
 - Nightly ビルドの自動更新機能(アプリ内での nightly→nightly 自動アップデート)は
