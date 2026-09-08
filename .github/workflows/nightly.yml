@@ -45,3 +45,17 @@ jobs:
           else
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
+
+  # 前日以前のnightly Release/タグを削除してから作り直す(前日分のアセットを
+  # 残さないため)。初回実行時はReleaseが存在せず削除コマンドが失敗するので
+  # `|| true` で許容する。
+  cleanup:
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 既存のnightly Releaseとタグを削除
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "$NIGHTLY_TAG" --yes --cleanup-tag --repo "${{ github.repository }}" || true
