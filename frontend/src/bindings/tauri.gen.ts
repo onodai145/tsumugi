@@ -354,6 +354,10 @@ export type Account = {
 	 *  `/api/meta` から取得して埋める。取得前・失敗時は None。
 	 */
 	instance?: InstanceInfo | null,
+	/**  ログイン中ユーザー自身が`isCat`か(アカウント切替UIでの猫耳表示用)。 */
+	isCat?: boolean,
+	/**  アバター画像のBlurHash文字列(猫耳の色抽出用)。 */
+	avatarBlurhash?: string | null,
 };
 
 /**
@@ -1031,6 +1035,11 @@ export type User = {
 	 *  このフィールドを付与しない）。追加前に保存されたキャッシュ済みJSONとの後方互換のため default。
 	 */
 	instance?: InstanceInfo | null,
+	/**
+	 *  アバター画像のBlurHash文字列。猫耳の色抽出に使う(フロント側 `extractAvgColorFromBlurhash`)。
+	 *  追加前に保存されたキャッシュ済みJSONとの後方互換のため default。
+	 */
+	avatarBlurhash?: string | null,
 };
 
 /**  ユーザリスト（List カラムのソース選択用）。 */

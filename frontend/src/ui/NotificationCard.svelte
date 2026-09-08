@@ -2,6 +2,7 @@
   import type { Notification } from "../bindings/tauri.gen";
   import type { Component } from "svelte";
   import NoteCard from "./NoteCard.svelte";
+  import Avatar from "./Avatar.svelte";
   import CustomEmoji from "../render/CustomEmoji.svelte";
   import UnicodeEmoji from "../render/UnicodeEmoji.svelte";
   import Mfm from "../render/Mfm.svelte";
@@ -80,17 +81,19 @@
   <div class="flex items-center gap-2 text-sm">
     <span class="inline-flex flex-none text-muted-foreground"><IconComp size={16} /></span>
     {#if n.user?.avatarUrl}
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <img
-        class="h-6 w-6 flex-none rounded-[var(--avatar-radius,20%)] object-cover"
-        data-testid="notification-avatar"
-        src={n.user.avatarUrl}
-        alt=""
-        loading="lazy"
-        onclick={() => n.user && openProfile({ userId: n.user.id }, accountId)}
-        style="cursor: pointer"
-      />
+      <Avatar isCat={n.user.isCat} avatarBlurhash={n.user.avatarBlurhash} class="h-6 w-6 flex-none">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <img
+          class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover"
+          data-testid="notification-avatar"
+          src={n.user.avatarUrl}
+          alt=""
+          loading="lazy"
+          onclick={() => n.user && openProfile({ userId: n.user.id }, accountId)}
+          style="cursor: pointer"
+        />
+      </Avatar>
     {/if}
     <span class="min-w-0 flex-1">
       <!-- role="button"だがButtonプリミティブ非経由のため、キーボードフォーカス時の視認性を

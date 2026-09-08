@@ -126,6 +126,8 @@ mod tests {
             display_name: "Alice".to_string(),
             avatar_url: None,
             instance: None,
+            is_cat: false,
+            avatar_blurhash: None,
         }
     }
 

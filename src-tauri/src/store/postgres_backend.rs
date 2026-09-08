@@ -124,8 +124,13 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::InstanceName).text())
         .col(ColumnDef::new(UserTable::InstanceIconUrl).text())
         .col(ColumnDef::new(UserTable::InstanceThemeColor).text())
+        .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
         .build(PostgresQueryBuilder);
     pool.execute(user.as_str()).await?;
+    // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
+    // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
+    // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(Postgres専用構文、冪等)。
+    pool.execute("ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS avatar_blurhash TEXT").await?;
 
     let note_reaction = Table::create()
         .table(NoteReactionTable::Table)
@@ -358,6 +363,7 @@ enum UserTable {
     InstanceName,
     InstanceIconUrl,
     InstanceThemeColor,
+    AvatarBlurhash,
 }
 
 #[derive(sea_query::Iden)]
@@ -1053,7 +1059,7 @@ mod tests {
                 id: "u1".into(), username: "alice".into(), host: None, name: Some("Alice".into()),
                 avatar_url: None, is_bot: false, is_cat: false,
                 followers_count: 5, following_count: 3, notes_count: 42,
-                emojis: std::collections::HashMap::new(), bio: None, banner_url: None, instance: None,
+                emojis: std::collections::HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
             },
             reply_id: None, renote_id: None, renote: None,
             files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into() }],

@@ -20,7 +20,7 @@ afterEach(() => {
   invokeMock.mockClear();
 });
 
-function makeUser(id: string, username: string) {
+function makeUser(id: string, username: string, overrides: Partial<{ isCat: boolean }> = {}) {
   return {
     id,
     username,
@@ -35,13 +35,14 @@ function makeUser(id: string, username: string) {
     emojis: {},
     bio: null,
     bannerUrl: null,
+    ...overrides,
   };
 }
 
 // users/followers・users/following はFollowingレコードのidでページングするため、
 // レスポンスは {user, cursor} のペア。cursor はユーザーIDとは別のFollowingレコードID。
-function makeEntry(userId: string, username: string, cursor: string) {
-  return { user: makeUser(userId, username), cursor };
+function makeEntry(userId: string, username: string, cursor: string, userOverrides: Partial<{ isCat: boolean }> = {}) {
+  return { user: makeUser(userId, username, userOverrides), cursor };
 }
 
 // invokeMockは生成コードのtypedError()に渡される前のraw invoke()相当。
@@ -163,5 +164,17 @@ describe("FollowListModal", () => {
     await fireEvent.scroll(list);
     await fireEvent.scroll(list);
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("エントリのuser.isCatがtrueのとき猫耳(.ears)を描画する", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_user_followers") return Promise.resolve([makeEntry("u2", "bob", "f2", { isCat: true })]);
+      return Promise.resolve(null);
+    });
+    const { getByText } = render(FollowListModal, {
+      props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("bob")).toBeTruthy());
+    expect(document.querySelector(".ears")).not.toBeNull();
   });
 });

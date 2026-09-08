@@ -68,6 +68,8 @@ pub struct RawUser {
     pub banner_url: Option<String>,
     #[serde(default)]
     pub instance: Option<RawInstanceInfo>,
+    #[serde(default)]
+    pub avatar_blurhash: Option<String>,
 }
 
 impl From<RawUser> for User {
@@ -94,6 +96,7 @@ impl From<RawUser> for User {
             emojis: r.emojis,
             bio: r.description,
             banner_url: r.banner_url,
+            avatar_blurhash: r.avatar_blurhash.clone(),
             instance,
         }
     }
@@ -502,5 +505,13 @@ mod tests {
         let instance = user.instance.expect("instance should be present for remote user");
         assert_eq!(instance.icon_url, Some("https://remote.example/favicon.ico".to_string()));
         assert_eq!(instance.theme_color, Some("#777777".to_string()));
+    }
+
+    #[test]
+    fn raw_user_maps_avatar_blurhash_into_user() {
+        let json = r#"{"id":"u1","username":"alice","avatarBlurhash":"LEHV6nWB2yk8pyo0adR*.7kCMdnj"}"#;
+        let raw: RawUser = serde_json::from_str(json).unwrap();
+        let user: User = raw.into();
+        assert_eq!(user.avatar_blurhash.as_deref(), Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj"));
     }
 }

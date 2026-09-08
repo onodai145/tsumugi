@@ -432,6 +432,8 @@ pub fn migrate_from_legacy_sqlite(
                 display_name: r.get(4)?,
                 avatar_url: r.get(5)?,
                 instance: None,
+                is_cat: false,
+                avatar_blurhash: None,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -539,6 +541,8 @@ mod tests {
             display_name: "Me".into(),
             avatar_url: Some("http://x/a.png".into()),
             instance: None,
+            is_cat: false,
+            avatar_blurhash: None,
         }
     }
 

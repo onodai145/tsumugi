@@ -611,6 +611,7 @@ mod tests {
                 emojis: std::collections::HashMap::new(),
                 bio: None,
                 banner_url: None,
+                avatar_blurhash: None,
                 instance: None,
             },
             reply_id: None,
@@ -691,6 +692,7 @@ mod tests {
                 emojis: HashMap::new(),
                 bio: None,
                 banner_url: None,
+                avatar_blurhash: None,
                 instance: None,
             };
             renoted

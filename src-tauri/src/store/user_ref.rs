@@ -23,8 +23,9 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
         "INSERT INTO user (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
+            avatar_blurhash
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ON CONFLICT(id) DO UPDATE SET
             username = excluded.username,
             host = excluded.host,
@@ -40,7 +41,8 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
             banner_url = COALESCE(excluded.banner_url, user.banner_url),
             instance_name = COALESCE(excluded.instance_name, user.instance_name),
             instance_icon_url = COALESCE(excluded.instance_icon_url, user.instance_icon_url),
-            instance_theme_color = COALESCE(excluded.instance_theme_color, user.instance_theme_color)",
+            instance_theme_color = COALESCE(excluded.instance_theme_color, user.instance_theme_color),
+            avatar_blurhash = COALESCE(excluded.avatar_blurhash, user.avatar_blurhash)",
         params![
             user.id,
             user.username,
@@ -58,6 +60,7 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
             instance_name,
             instance_icon_url,
             instance_theme_color,
+            user.avatar_blurhash,
         ],
     )?;
     Ok(())
@@ -82,8 +85,9 @@ pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<
         "INSERT INTO user (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
+            avatar_blurhash
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ON CONFLICT(id) DO UPDATE SET
             username = COALESCE(user.username, excluded.username),
             host = COALESCE(user.host, excluded.host),
@@ -99,7 +103,8 @@ pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<
             banner_url = COALESCE(user.banner_url, excluded.banner_url),
             instance_name = COALESCE(user.instance_name, excluded.instance_name),
             instance_icon_url = COALESCE(user.instance_icon_url, excluded.instance_icon_url),
-            instance_theme_color = COALESCE(user.instance_theme_color, excluded.instance_theme_color)",
+            instance_theme_color = COALESCE(user.instance_theme_color, excluded.instance_theme_color),
+            avatar_blurhash = COALESCE(user.avatar_blurhash, excluded.avatar_blurhash)",
         params![
             user.id,
             user.username,
@@ -117,6 +122,7 @@ pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<
             instance_name,
             instance_icon_url,
             instance_theme_color,
+            user.avatar_blurhash,
         ],
     )?;
     Ok(())
@@ -204,7 +210,8 @@ pub(crate) fn fetch_users_by_ids(conn: &Connection, ids: &[String]) -> Result<Ha
     let sql = format!(
         "SELECT id, username, host, name, avatar_url, is_bot, is_cat,
                 followers_count, following_count, notes_count, emojis,
-                bio, banner_url, instance_name, instance_icon_url, instance_theme_color
+                bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
+                avatar_blurhash
          FROM user WHERE id IN ({placeholders})"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -237,6 +244,7 @@ pub(crate) fn fetch_users_by_ids(conn: &Connection, ids: &[String]) -> Result<Ha
             emojis: serde_json::from_str(&emojis_json).unwrap_or_default(),
             bio: r.get(11)?,
             banner_url: r.get(12)?,
+            avatar_blurhash: r.get(16)?,
             instance,
         })
     })?;
@@ -270,6 +278,7 @@ mod tests {
             emojis: HashMap::new(),
             bio: None,
             banner_url: None,
+            avatar_blurhash: None,
             instance: None,
         }
     }
@@ -518,5 +527,19 @@ mod tests {
         let conn = open_cache_in_memory().unwrap();
         let users = fetch_users_by_ids(&conn, &[]).unwrap();
         assert!(users.is_empty());
+    }
+
+    #[test]
+    fn upsert_user_and_fetch_roundtrips_avatar_blurhash() {
+        let conn = open_cache_in_memory().unwrap();
+        let mut u = user_lite("u1", "Alice");
+        u.avatar_blurhash = Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into());
+        upsert_user(&conn, &u).unwrap();
+
+        let got = fetch_users_by_ids(&conn, &["u1".to_string()]).unwrap();
+        assert_eq!(
+            got["u1"].avatar_blurhash.as_deref(),
+            Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+        );
     }
 }

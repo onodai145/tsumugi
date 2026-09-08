@@ -95,6 +95,28 @@ async fn execute_index(pool: &sqlx::MySqlPool, index_sql: &str) -> Result<()> {
     }
 }
 
+/// `ALTER TABLE ... ADD COLUMN`を実行し、列が既に存在する場合(Duplicate column name)は無視する。
+/// MySQLには`ADD COLUMN IF NOT EXISTS`のネイティブ構文が無い(MariaDB専用拡張であり、
+/// 実際のMySQLでは構文エラー(1064)になる)ため、`alter_sql`には`IF NOT EXISTS`を含めず
+/// 素のALTER文を渡し、2回目以降の`ensure_schema()`呼び出しで既存の列に対して発生する
+/// エラー1060(ER_DUP_FIELDNAME)だけをここで握りつぶす。`execute_index`と同じ理由で、
+/// `MySqlDatabaseError::number()`で正確な数値コードを判定する(メッセージ文字列の
+/// 部分一致では他のエラーまで誤って握りつぶしてしまうため避ける)。
+async fn add_column_if_missing(pool: &sqlx::MySqlPool, alter_sql: &str) -> Result<()> {
+    match pool.execute(alter_sql).await {
+        Ok(_) => Ok(()),
+        Err(sqlx::Error::Database(db_err))
+            if db_err
+                .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+                .map(|e| e.number())
+                == Some(1060) =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
 pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     let note = Table::create()
@@ -166,8 +188,14 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::InstanceName).text())
         .col(ColumnDef::new(UserTable::InstanceIconUrl).text())
         .col(ColumnDef::new(UserTable::InstanceThemeColor).text())
+        .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
         .build(MysqlQueryBuilder);
     pool.execute(user.as_str()).await?;
+    // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
+    // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
+    // ALTER TABLE ... ADD COLUMN を別途実行する(add_column_if_missingが事前に列有無を
+    // 確認するため冪等。MySQLにはADD COLUMN IF NOT EXISTS構文が無いため使用していない)。
+    add_column_if_missing(pool, "ALTER TABLE `user` ADD COLUMN avatar_blurhash TEXT").await?;
 
     let note_reaction = Table::create()
         .table(NoteReactionTable::Table)
@@ -283,7 +311,7 @@ enum UserTable {
     #[iden = "user"]
     Table, Id, Username, Host, Name, AvatarUrl, IsBot, IsCat, FollowersCount,
     FollowingCount, NotesCount, Emojis, Bio, BannerUrl, InstanceName,
-    InstanceIconUrl, InstanceThemeColor,
+    InstanceIconUrl, InstanceThemeColor, AvatarBlurhash,
 }
 
 #[derive(sea_query::Iden)]
@@ -1055,7 +1083,7 @@ mod tests {
                 id: "u1".into(), username: "alice".into(), host: None, name: Some("Alice".into()),
                 avatar_url: None, is_bot: false, is_cat: false,
                 followers_count: 5, following_count: 3, notes_count: 42,
-                emojis: std::collections::HashMap::new(), bio: None, banner_url: None, instance: None,
+                emojis: std::collections::HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
             },
             reply_id: None, renote_id: None, renote: None,
             files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into() }],

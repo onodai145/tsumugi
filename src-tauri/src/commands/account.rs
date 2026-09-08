@@ -147,6 +147,8 @@ fn build_account(existing_id: Option<String>, host: &str, raw: &RawUser) -> Acco
         display_name: raw.name.clone().unwrap_or_else(|| raw.username.clone()),
         avatar_url: raw.avatar_url.clone(),
         instance: None,
+        is_cat: raw.is_cat,
+        avatar_blurhash: raw.avatar_blurhash.clone(),
     }
 }
 
@@ -186,5 +188,16 @@ mod tests {
             serde_json::from_str(r#"{"id":"u1","username":"alice","name":"Alice A"}"#).unwrap();
         let a = build_account(Some("existing-id".into()), "misskey.io", &raw);
         assert_eq!(a.id, "existing-id");
+    }
+
+    #[test]
+    fn build_account_carries_is_cat_and_avatar_blurhash() {
+        let raw: RawUser = serde_json::from_str(
+            r#"{"id":"u1","username":"alice","isCat":true,"avatarBlurhash":"LEHV6nWB2yk8pyo0adR*.7kCMdnj"}"#,
+        )
+        .unwrap();
+        let a = build_account(None, "misskey.io", &raw);
+        assert!(a.is_cat);
+        assert_eq!(a.avatar_blurhash.as_deref(), Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj"));
     }
 }

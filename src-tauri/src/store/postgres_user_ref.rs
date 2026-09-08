@@ -16,8 +16,9 @@ pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> 
         "INSERT INTO \"user\" (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
+            avatar_blurhash
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         ON CONFLICT (id) DO UPDATE SET
             username = excluded.username,
             host = excluded.host,
@@ -33,7 +34,8 @@ pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> 
             banner_url = COALESCE(excluded.banner_url, \"user\".banner_url),
             instance_name = COALESCE(excluded.instance_name, \"user\".instance_name),
             instance_icon_url = COALESCE(excluded.instance_icon_url, \"user\".instance_icon_url),
-            instance_theme_color = COALESCE(excluded.instance_theme_color, \"user\".instance_theme_color)",
+            instance_theme_color = COALESCE(excluded.instance_theme_color, \"user\".instance_theme_color),
+            avatar_blurhash = COALESCE(excluded.avatar_blurhash, \"user\".avatar_blurhash)",
     )
     .bind(&user.id)
     .bind(&user.username)
@@ -51,6 +53,7 @@ pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> 
     .bind(&instance_name)
     .bind(&instance_icon_url)
     .bind(&instance_theme_color)
+    .bind(&user.avatar_blurhash)
     .execute(pool)
     .await?;
     Ok(())
@@ -68,8 +71,9 @@ pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) ->
         "INSERT INTO \"user\" (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
+            avatar_blurhash
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         ON CONFLICT (id) DO UPDATE SET
             username = COALESCE(\"user\".username, excluded.username),
             host = COALESCE(\"user\".host, excluded.host),
@@ -85,7 +89,8 @@ pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) ->
             banner_url = COALESCE(\"user\".banner_url, excluded.banner_url),
             instance_name = COALESCE(\"user\".instance_name, excluded.instance_name),
             instance_icon_url = COALESCE(\"user\".instance_icon_url, excluded.instance_icon_url),
-            instance_theme_color = COALESCE(\"user\".instance_theme_color, excluded.instance_theme_color)",
+            instance_theme_color = COALESCE(\"user\".instance_theme_color, excluded.instance_theme_color),
+            avatar_blurhash = COALESCE(\"user\".avatar_blurhash, excluded.avatar_blurhash)",
     )
     .bind(&user.id)
     .bind(&user.username)
@@ -103,6 +108,7 @@ pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) ->
     .bind(&instance_name)
     .bind(&instance_icon_url)
     .bind(&instance_theme_color)
+    .bind(&user.avatar_blurhash)
     .execute(pool)
     .await?;
     Ok(())
@@ -113,17 +119,38 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> R
     if ids.is_empty() {
         return Ok(out);
     }
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, Option<String>, i16, i16, i64, i64, i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(
+    // 列数が17でsqlx `FromRow`のタプル実装上限(16)を超えるため、タプルではなく
+    // `sqlx::Row`から列名で直接取り出す(`sqlx::Row`トレイトの`try_get`を使う)。
+    use sqlx::Row;
+    let rows = sqlx::query(
         "SELECT id, username, host, name, avatar_url, is_bot, is_cat,
                 followers_count, following_count, notes_count, emojis,
-                bio, banner_url, instance_name, instance_icon_url, instance_theme_color
+                bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
+                avatar_blurhash
          FROM \"user\" WHERE id = ANY($1)",
     )
     .bind(ids)
     .fetch_all(pool)
     .await?;
 
-    for (id, username, host, name, avatar_url, is_bot, is_cat, followers_count, following_count, notes_count, emojis_json, bio, banner_url, instance_name, instance_icon_url, instance_theme_color) in rows {
+    for row in rows {
+        let id: String = row.try_get("id")?;
+        let username: String = row.try_get("username")?;
+        let host: Option<String> = row.try_get("host")?;
+        let name: Option<String> = row.try_get("name")?;
+        let avatar_url: Option<String> = row.try_get("avatar_url")?;
+        let is_bot: i16 = row.try_get("is_bot")?;
+        let is_cat: i16 = row.try_get("is_cat")?;
+        let followers_count: i64 = row.try_get("followers_count")?;
+        let following_count: i64 = row.try_get("following_count")?;
+        let notes_count: i64 = row.try_get("notes_count")?;
+        let emojis_json: String = row.try_get("emojis")?;
+        let bio: Option<String> = row.try_get("bio")?;
+        let banner_url: Option<String> = row.try_get("banner_url")?;
+        let instance_name: Option<String> = row.try_get("instance_name")?;
+        let instance_icon_url: Option<String> = row.try_get("instance_icon_url")?;
+        let instance_theme_color: Option<String> = row.try_get("instance_theme_color")?;
+        let avatar_blurhash: Option<String> = row.try_get("avatar_blurhash")?;
         let emojis: HashMap<String, String> = serde_json::from_str(&emojis_json).unwrap_or_default();
         let instance = if instance_name.is_some() || instance_icon_url.is_some() || instance_theme_color.is_some() {
             Some(InstanceInfo { name: instance_name, icon_url: instance_icon_url, theme_color: instance_theme_color })
@@ -146,6 +173,7 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> R
                 emojis,
                 bio,
                 banner_url,
+                avatar_blurhash,
                 instance,
             },
         );
@@ -188,6 +216,7 @@ mod tests {
             emojis: HashMap::new(),
             bio: None,
             banner_url: None,
+            avatar_blurhash: None,
             instance: None,
         }
     }
@@ -199,6 +228,21 @@ mod tests {
         upsert_user(&pool, &user("u1")).await.unwrap();
         let got = fetch_users_by_ids(&pool, &["u1".to_string()]).await.unwrap();
         assert_eq!(got.get("u1").unwrap().name.as_deref(), Some("Alice"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_user_roundtrips_avatar_blurhash() {
+        let pool = pool().await;
+        let mut u = user("u1");
+        u.avatar_blurhash = Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into());
+        upsert_user(&pool, &u).await.unwrap();
+
+        let got = fetch_users_by_ids(&pool, &["u1".to_string()]).await.unwrap();
+        assert_eq!(
+            got.get("u1").unwrap().avatar_blurhash.as_deref(),
+            Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+        );
     }
 
     #[tokio::test]
