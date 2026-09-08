@@ -1,0 +1,296 @@
+name: nightly
+
+on:
+  schedule:
+    # UTC 18:00 = JST 3:00
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+env:
+  NIGHTLY_TAG: nightly
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # mainのHEADとnightlyタグが指すコミットを比較し、差分が無ければ以降の
+  # ビルド・Release作成を全てスキップする(Issue #299: 文字通りのNightly Build)。
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.diff.outputs.should_run }}
+    steps:
+      - name: mainとnightlyタグの差分を確認
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # commits/{ref} は ref の種別(lightweight/annotated tag等)によらず
+          # 常にコミットSHAへ解決される。タグが無ければコマンドは失敗するので、
+          # その場合は初回実行として扱う。
+          if nightly_sha=$(gh api "repos/${{ github.repository }}/commits/${NIGHTLY_TAG}" --jq .sha 2>/dev/null); then
+            if [ "$nightly_sha" = "${{ github.sha }}" ]; then
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # 前日以前のnightly Release/タグを削除してから作り直す(前日分のアセットを
+  # 残さないため)。初回実行時はReleaseが存在せず削除コマンドが失敗するので
+  # `|| true` で許容する。
+  cleanup:
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 既存のnightly Releaseとタグを削除
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "$NIGHTLY_TAG" --yes --cleanup-tag --repo "${{ github.repository }}" || true
+
+  # release.ymlのreleaseジョブと同じビルド手順。tagName/releaseNameとポータブルexeの
+  # ファイル名だけ NIGHTLY_TAG ベースに、releaseCommitish/prerelease/releaseDraftを
+  # nightly向けに変えている。
+  build:
+    needs: [check, cleanup]
+    if: needs.check.outputs.should_run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install system dependencies (Tauri v2 Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libasound2-dev \
+            patchelf
+
+      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
+      # resolves the current stable Rust release, so it is left unpinned by design.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+
+      # package.json の packageManager は frontend/ 配下にあり action-setup のデフォルト
+      # 検出(リポジトリルート)では拾えないため version を明示指定する。
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm install
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # Releaseの名称に使う日付・short shaを算出(全プラットフォームで同じ値になるよう
+      # bashで統一。Windows runnerにもGit Bash由来のbashがある)。
+      - name: Releaseメタデータ算出
+        id: meta
+        shell: bash
+        run: |
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "shortsha=$(echo "${{ github.sha }}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ env.NIGHTLY_TAG }}
+          releaseName: "tsumugi nightly (${{ steps.meta.outputs.date }} @ ${{ steps.meta.outputs.shortsha }})"
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }}
+
+      # Windows は既定で MSI/NSIS インストーラのみが生成されるため、
+      # インストーラ無しでそのまま実行できるポータブル版exeを別途リリース資産へ追加する。
+      - name: Prepare portable exe (Windows only)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: Copy-Item src-tauri/target/release/tsumugi.exe "tsumugi-$env:NIGHTLY_TAG-portable-windows-x64.exe"
+
+      - name: Upload portable exe to release (Windows only)
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.NIGHTLY_TAG }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: true
+          files: tsumugi-${{ env.NIGHTLY_TAG }}-portable-windows-x64.exe
+
+  # release.ymlのandroidジョブと同じビルド・署名手順。ファイル名とtag_name/
+  # target_commitish/prerelease/draftのみnightly向けに変えている。
+  android:
+    needs: [check, cleanup]
+    if: needs.check.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    environment: "Android Build"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          local-cache: true
+
+      # setup-ndk が展開する toolchain 内のシンボリックリンクは相対パスのままで、
+      # 展開先ディレクトリが変わるとリンク切れになる(clang ラッパーが exit 127 で失敗する)。
+      # tauri-apps/tauri の公式CIワークフローと同じ手当てで絶対パスに直す。
+      - name: Restore Android NDK symlinks
+        run: |
+          directory="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          find "$directory" -type l | while read -r link; do
+              current_target=$(readlink "$link")
+              new_target="$directory/$(basename "$current_target")"
+              ln -sf "$new_target" "$link"
+          done
+
+      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
+      # resolves the current stable Rust release, so it is left unpinned by design.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Cache cargo-tauri CLI
+        id: cache-tauri-cli
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: cargo-tauri-cli-v2-${{ runner.os }}
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "^2" --locked
+
+      # package.json の packageManager は frontend/ 配下にあり action-setup のデフォルト
+      # 検出(リポジトリルート)では拾えないため version を明示指定する。
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm install
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # https://tauri.app/distribute/sign/android/ の CI 手順どおり、署名鍵を
+      # 都度 keystore.properties として生成する(リポジトリには含めない・.gitignore済み)。
+      - name: Set up Android signing
+        env:
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+        run: |
+          cd src-tauri/gen/android
+          echo "keyAlias=$ANDROID_KEY_ALIAS" > keystore.properties
+          echo "password=$ANDROID_KEY_PASSWORD" >> keystore.properties
+          base64 -d <<< "$ANDROID_KEY_BASE64" > "$RUNNER_TEMP/keystore.jks"
+          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
+
+      # cargo-mobile2 の実装上、--split-per-abi はuniversalビルドと排他
+      # (付けるとassembleUniversal*系ではなくassemble{Arch}*系のみが走る)。
+      # universal・アーキテクチャ別の両方が欲しいため2回に分けて実行する。
+      # 2回目のRustクロスコンパイルは1回目でuniversal向けに全arch分ビルド済み
+      # (buildSrcのuniversalフレーバーが全archのrustBuildタスクに依存しているため)
+      # キャッシュが効きほぼ再ビルドは発生しない。
+      - name: cargo tauri android build (release, 署名済み, universal)
+        working-directory: src-tauri
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo tauri android build
+
+      - name: cargo tauri android build (release, 署名済み, per-ABI)
+        working-directory: src-tauri
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo tauri android build --split-per-abi
+
+      # 全部入りのuniversal APKはファイルサイズが大きくなるため(Issue #69)、
+      # アーキテクチャ別APK(cargo tauri android build が productFlavor 経由で
+      # 同時に生成済み。src-tauri/gen/android/buildSrc の RustPlugin.kt 参照)も
+      # 個別にリネームし、universalと併せてリリース資産に含める。
+      - name: Rename Android artifacts
+        run: |
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk \
+            "tsumugi-$NIGHTLY_TAG-android-universal.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk \
+            "tsumugi-$NIGHTLY_TAG-android-arm64-v8a.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/arm/release/app-arm-release.apk \
+            "tsumugi-$NIGHTLY_TAG-android-armeabi-v7a.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/x86/release/app-x86-release.apk \
+            "tsumugi-$NIGHTLY_TAG-android-x86.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/x86_64/release/app-x86_64-release.apk \
+            "tsumugi-$NIGHTLY_TAG-android-x86_64.apk"
+
+      - name: Upload Android artifacts to release
+        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.NIGHTLY_TAG }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: true
+          files: |
+            tsumugi-${{ env.NIGHTLY_TAG }}-android-universal.apk
+            tsumugi-${{ env.NIGHTLY_TAG }}-android-arm64-v8a.apk
+            tsumugi-${{ env.NIGHTLY_TAG }}-android-armeabi-v7a.apk
+            tsumugi-${{ env.NIGHTLY_TAG }}-android-x86.apk
+            tsumugi-${{ env.NIGHTLY_TAG }}-android-x86_64.apk
