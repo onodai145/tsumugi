@@ -11,6 +11,10 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    # nightly build(Issue #299)はprerelease:trueで公開されるが、release イベントの
+    # types: [released, published] はprereleaseかどうかを問わず発火するため、
+    # ここでガードしないと毎晩 TAG=nightly でこのジョブが誤って走ってしまう。
+    if: github.event.release.prerelease == false
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
