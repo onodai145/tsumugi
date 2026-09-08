@@ -71,6 +71,16 @@
    - `draft: false`
    - `prerelease: true`
 
+   **`Android Build` environment の deployment branch policy に注意**:
+   `release.yml` の android ジョブは `refs/tags/v*` 上でしか動かないため、
+   このリポジトリの `Android Build` environment には元々 `v*` タグのみを
+   許可する branch policy が設定されている。nightly の android ジョブは
+   `main` ブランチ上(schedule/workflow_dispatch とも)で動くため、この
+   policy に `main` ブランチも追加しないと environment 保護で毎回弾かれる
+   (このリポジトリでは最終レビュー時に `gh api -X POST
+   repos/onodai145/tsumugi/environments/Android%20Build/deployment-branch-policies
+   -f name=main -f type=branch` で追加済み)。
+
 **build と android の両方が `prerelease: true` / `draft: false` を明示すること。**
 `tauri-action`・`softprops/action-gh-release` はどちらも対象タグの Release が
 存在しなければ新規作成する。cleanup でタグを消しているため、build と android の
@@ -95,8 +105,15 @@ output 自体を強制的に `true` にする)。
 - Android APK: universal / arm64-v8a / armeabi-v7a / x86 / x86_64 (署名済み。
   正式リリースと同じ署名鍵を使う)
 
-ファイル名は `release.yml` と同じ命名規則を踏襲し、`REF_NAME` 相当の部分が
-`NIGHTLY_TAG`(= `nightly`)になる(例: `tsumugi-nightly-portable-windows-x64.exe`)。
+Windows portable exe と Android APK 5種は `release.yml` と同じ命名規則を踏襲し、
+`REF_NAME` 相当の部分が `NIGHTLY_TAG`(= `nightly`)になる(例:
+`tsumugi-nightly-portable-windows-x64.exe`)。一方 tauri-action が生成する
+Linux/macOS/Windows のインストーラ本体(deb/AppImage/dmg/msi/nsis)は
+`release.yml` と同様にタグ名ではなく**アプリのバージョン番号**でファイル名が
+決まる(例: `tsumugi_0.10.0_amd64.deb`)。アプリのバージョンは意図的に変更しない
+ため、nightly ビルドのインストーラ本体は直近正式リリースと同名になりうる —
+ファイル名では両者を区別できない。区別は GitHub Release 一覧の Pre-release
+バッジで行う。
 
 ## 更新通知への非干渉性の確認
 
@@ -119,6 +136,21 @@ output 自体を強制的に `true` にする)。
 `if: github.event.release.prerelease == false` を追加し、prerelease な
 Release(nightly を含む将来の prerelease 運用全般)ではこのジョブをスキップする。
 正式リリース(`prerelease: false`)の挙動は変わらない。
+
+## 既知の制約
+
+- `cleanup` の `gh release delete ... || true` は「Release が存在しない」以外の
+  失敗(権限不足・タグ保護ルール等)も一様に飲み込む。もし将来 `nightly` タグに
+  対するタグ保護ルールを追加した場合、削除が毎晩失敗し続けても気付けなくなる
+  (タグが進まなくなり、`check` の差分検知が壊れたように見える)。現時点では
+  このリポジトリにタグ保護ルールは存在しないため実害はないが、追加時は
+  この挙動を再確認すること。
+- `build` と `android` のどちらが先に Release を新規作成するかにより、
+  Release タイトルは `build` 側が設定する `tsumugi nightly (<date> @
+  <shortsha>)` になる場合と、`android` 側が先勝ちしてタイトル未設定のまま
+  タグ名 `nightly` がそのまま表示される場合がありうる(android は NDK
+  ビルドが2回走るため通常は `build` が先に完了するが、保証はない)。実害は
+  タイトル表示のみで、タグ・commitish・アセット内容には影響しない。
 
 ## 検証方法
 
