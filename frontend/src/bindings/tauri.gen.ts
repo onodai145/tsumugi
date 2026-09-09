@@ -992,6 +992,8 @@ export type UiPrefs = {
 	instanceTicker?: string,
 	/**  アバター画像の角丸（0=直角 〜 100=真円、%）。既定は20（Issue #94）。 */
 	avatarRadius?: number,
+	/**  ハプティクス(振動)を有効にするか（モバイル版のみ意味を持つ。Issue #26）。既定はON。 */
+	hapticsEnabled?: boolean,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */
