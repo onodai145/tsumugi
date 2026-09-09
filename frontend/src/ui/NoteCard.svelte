@@ -588,8 +588,12 @@
   </div>
   {#if hoverTarget && hoverPos && accountId}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- position:fixedはそれ自身が新しいスタッキングコンテキストを作るため、z-indexは中の
+         ReactionUsersPopover側ではなくこのラッパー自身に付けないと、Modal.svelte(z-[1000])
+         などの祖先スタッキングコンテキストと正しく比較されず前面に出ない(Issue #301)。 -->
     <div
       use:portal
+      class="z-[1010]"
       style={`position:fixed; left:0; top:0;`}
       onmouseenter={keepHover}
       onmouseleave={leaveHover}

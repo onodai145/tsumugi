@@ -527,3 +527,23 @@ describe("猫耳アバター", () => {
     expect(container.querySelector(".ears")).toBeNull();
   });
 });
+
+describe("リアクションユーザー一覧ポップオーバーのz-index", () => {
+  it("ホバー時、body直下にportalされるposition:fixedラッパー自身にz-[1010]が付き、Modal(z-[1000])より前面に出る（Issue #301）", async () => {
+    const note = makeNote({ reactions: { "👍": 1 }, reactionCount: 1 });
+    const { container } = render(NoteCard, { props: { note, accountId: "a1" } });
+    const wrap = container.querySelector('[data-testid="note-reaction-wrap"]') as HTMLElement;
+    wrap.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    // enterHover は150ms遅延後にhoverTargetをセットするので待つ
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const popover = document.body.querySelector('div[class*="z-[1010]"]') as HTMLElement | null;
+    expect(popover).not.toBeNull();
+    // position:fixedはそれ自身が新しいスタッキングコンテキストを作るため、z-indexは
+    // 中の子要素ではなく、この position:fixed なラッパー自身に付いていないと
+    // Modal.svelte (z-[1000]) を含む祖先のスタッキングコンテキストと正しく比較されない。
+    const fixedWrapper = popover!.closest('[style*="position: fixed"]') as HTMLElement | null;
+    expect(fixedWrapper).not.toBeNull();
+    expect(fixedWrapper!.className).toContain("z-[1010]");
+  });
+});
