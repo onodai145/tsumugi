@@ -397,10 +397,22 @@
   let autoSaveTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     // 依存関係として拾うため、使う値をすべて先に読む
-    const snapshot = { text, cw, useCw, attachmentsLen: attachments.length, usePoll, hasAccount: !!accountId };
+    const snapshot = {
+      text,
+      cw,
+      useCw,
+      attachmentsLen: attachments.length,
+      usePoll,
+      hasAccount: !!accountId,
+      busy,
+    };
     clearTimeout(autoSaveTimer);
     autoSaveTimer = undefined;
-    if (!snapshot.hasAccount || !autoRestoreDone) return;
+    // busy(投稿処理中)の間は再武装しない: 添付アップロード完了によるattachments更新など
+    // 投稿処理自体が起こす状態変化でこの効果が再実行されても、post_noteの往復が
+    // デバウンス(2000ms)より長くかかった場合に投稿完了後のclear_auto_draftより後へ
+    // save_auto_draftが届き、投稿済みなのに下書きが残留してしまう(Issue #303)。
+    if (!snapshot.hasAccount || !autoRestoreDone || snapshot.busy) return;
     const acc = accountId!;
     const nonEmpty =
       snapshot.text.trim() !== "" ||
@@ -670,6 +682,12 @@
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
     if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
     const expiresAt = computePollExpiresAt();
+
+    // 投稿処理(特にpost_noteの往復)がデバウンス(2000ms)より長くかかると、投稿完了後の
+    // clear_auto_draftより後にこのタイマーのsave_auto_draftが届き、投稿済みなのに下書きが
+    // 残留してしまう(Issue #303)。投稿開始時点で確定的にキャンセルしておく。
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = undefined;
 
     busy = true;
     failedAttachmentId = null;
