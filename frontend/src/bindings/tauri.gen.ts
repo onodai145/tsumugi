@@ -269,6 +269,8 @@ export const commands = {
 	saveAutoDraft: (accountId: string, input: DraftInput) => typedError<null, Error>(__TAURI_INVOKE("save_auto_draft", { accountId, input })),
 	/**  自動一時下書きを消す。 */
 	clearAutoDraft: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("clear_auto_draft", { accountId })),
+	/**  振動を発火する。失敗してもUXに影響しないため、呼び出し側(フロント)で例外を握りつぶす想定。 */
+	vibrate: (pattern: HapticPattern) => typedError<null, Error>(__TAURI_INVOKE("vibrate", { pattern })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */
@@ -608,6 +610,13 @@ export type FollowListEntry = {
 	user: User,
 	cursor: string,
 };
+
+/**
+ *  振動パターン。値はAndroid Kotlin側(HapticsPlugin.kt)のVibrationEffectマッピングと対応する。
+ *  Light/Medium のみ現時点で呼び出し元があり、Success/Warning/Errorは将来の用途
+ *  (投稿失敗フィードバック、破壊的操作の確認など)を見越した先行定義（Issue #26設計参照）。
+ */
+export type HapticPattern = "light" | "medium" | "success" | "warning" | "error";
 
 /**
  *  投稿元インスタンスの表示情報（Instance Ticker用、Issue #103）。

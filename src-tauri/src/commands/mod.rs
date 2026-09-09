@@ -6,6 +6,7 @@ pub mod cache_backend;
 pub mod clip;
 pub mod column;
 pub mod draft;
+pub mod haptics;
 pub mod mute;
 pub mod note;
 pub mod sound;

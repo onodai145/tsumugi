@@ -98,6 +98,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::draft::get_auto_draft,
             commands::draft::save_auto_draft,
             commands::draft::clear_auto_draft,
+            commands::haptics::vibrate,
             commands::mute::get_mute,
             commands::mute::set_mute,
             commands::mute::get_notify,
