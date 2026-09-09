@@ -14,6 +14,10 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
+// このテストファイルはモバイル向けのハプティクス発火を検証するため、実機OS判定に依らず
+// isMobilePlatform を true に固定する(@tauri-apps/plugin-os のモックは "linux" のまま)。
+vi.mock("../lib/platform", () => ({ isMobilePlatform: true }));
+
 // __TAURI_INVOKE(生成bindings内でのinvoke呼び出し)は素の値を返す(typedError()側で
 // { status: "ok", data } に包まれる)。ここで { status, data } を返してしまうと二重に
 // 包まれてしまい unwrapAcc() 側の判定が壊れるため、コマンドごとの「生の戻り値」を返す。
@@ -414,6 +418,22 @@ describe("ComposeBar 下書き", () => {
     });
     await waitFor(() => {
       expect(screen.getAllByTitle("削除")).toHaveLength(2);
+    });
+  });
+});
+
+describe("ハプティクス(Issue #26)", () => {
+  it("投稿成功後にvibrateコマンドをmediumパターンで呼ぶ", async () => {
+    setupAccount();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "post_note") return Promise.resolve({ id: "n1" });
+      return Promise.resolve(null);
+    });
+    const { getByTestId } = render(ComposeBar);
+    await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "hello" } });
+    await fireEvent.click(getByTestId("compose-submit"));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("vibrate", { pattern: "medium" });
     });
   });
 });
