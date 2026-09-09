@@ -115,6 +115,115 @@ describe("ComposeBar 下書き", () => {
     }
   });
 
+  it("投稿処理中にデバウンスが発火してもsave_auto_draftを送らない(Issue #303: 投稿完了後のclear_auto_draftより後に反映され下書きが残留するのを防ぐ)", async () => {
+    vi.useFakeTimers();
+    let resolvePostNote!: (value: unknown) => void;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      if (cmd === "get_auto_draft") return Promise.resolve(null);
+      if (cmd === "post_note") {
+        // モバイルの低速回線などでpost_noteの往復が2秒デバウンスより長くかかる状況を模す。
+        return new Promise((resolve) => {
+          resolvePostNote = resolve;
+        });
+      }
+      return Promise.resolve(null);
+    });
+    try {
+      const { getByTestId } = render(ComposeBar);
+      await vi.advanceTimersByTimeAsync(0); // マウント時のget_auto_draft(非同期)を先に消化する
+      await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "投稿する本文" } });
+      // デバウンスが確定する(2000ms)前に投稿を開始する
+      await vi.advanceTimersByTimeAsync(500);
+      await fireEvent.click(getByTestId("compose-submit"));
+      // post_noteがまだ解決していない間にデバウンスの残り時間が経過しても、
+      // save_auto_draftが発火してはならない(発火するとclear_auto_draftより後に
+      // 届いて下書きが残留しうる)。
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(invokeMock).not.toHaveBeenCalledWith("save_auto_draft", expect.anything());
+      resolvePostNote({ id: "n1" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invokeMock).toHaveBeenCalledWith("clear_auto_draft", { accountId: "acc1" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("添付アップロード完了で自動保存effectが再武装しても投稿処理中はsave_auto_draftを送らない(Issue #303)", async () => {
+    vi.useFakeTimers();
+    let resolvePostNote!: (value: unknown) => void;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      if (cmd === "get_auto_draft") return Promise.resolve(null);
+      if (cmd === "upload_file") {
+        return Promise.resolve({
+          id: "f1",
+          name: "doc.txt",
+          mimeType: "text/plain",
+          size: 1,
+          url: "https://misskey.io/files/f1",
+          thumbnailUrl: null,
+          isSensitive: false,
+          comment: null,
+        });
+      }
+      if (cmd === "post_note") {
+        // 添付アップロード完了(=attachments更新)で自動保存effectが再武装した後、
+        // post_note自体の往復がデバウンスより長くかかる状況を模す。
+        return new Promise((resolve) => {
+          resolvePostNote = resolve;
+        });
+      }
+      return Promise.resolve(null);
+    });
+    try {
+      render(ComposeBar);
+      await vi.advanceTimersByTimeAsync(0); // マウント時のget_auto_draft(非同期)を先に消化する
+      app.openCompose("acc1", { text: "写真の説明", filePaths: ["/tmp/doc.txt"] });
+      await vi.advanceTimersByTimeAsync(0); // addLocalAttachmentの非同期処理を消化する
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("写真の説明")).toBeTruthy();
+      });
+      await fireEvent.click(screen.getByTestId("compose-submit"));
+      await vi.advanceTimersByTimeAsync(0); // アップロード(upload_file)の解決とattachments更新を消化する
+      // post_noteがまだ解決していない間に、再武装されたデバウンスの2000msが経過しても
+      // save_auto_draftが発火してはならない(発火するとclear_auto_draftより後に届いて
+      // 下書きが残留しうる)。
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(invokeMock).not.toHaveBeenCalledWith("save_auto_draft", expect.anything());
+      resolvePostNote({ id: "n1" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invokeMock).toHaveBeenCalledWith("clear_auto_draft", { accountId: "acc1" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("投稿失敗後は自動保存が再武装され下書きが保持される(Issue #303のbusyガードが失敗時の復帰を妨げないことの確認)", async () => {
+    vi.useFakeTimers();
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      if (cmd === "get_auto_draft") return Promise.resolve(null);
+      if (cmd === "post_note") return Promise.reject(new Error("network error"));
+      return Promise.resolve(null);
+    });
+    try {
+      const { getByTestId } = render(ComposeBar);
+      await vi.advanceTimersByTimeAsync(0); // マウント時のget_auto_draft(非同期)を先に消化する
+      await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "失敗する投稿" } });
+      await vi.advanceTimersByTimeAsync(500);
+      await fireEvent.click(getByTestId("compose-submit"));
+      await vi.advanceTimersByTimeAsync(0); // post_noteの拒否とcatch節を消化する
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(invokeMock).toHaveBeenCalledWith(
+        "save_auto_draft",
+        expect.objectContaining({ accountId: "acc1" }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("デバウンス確定前にアンマウントされてもsave_auto_draftがflushされる", async () => {
     vi.useFakeTimers();
     try {
