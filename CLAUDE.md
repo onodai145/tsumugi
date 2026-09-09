@@ -77,6 +77,7 @@ Misskey's OpenAPI spec (`/api-doc.json`, snapshotted at `src-tauri/openapi/missk
 - After pushing, don't poll CI with Monitor/wait loops; the user checks CI results themselves.
 - Commit messages: subject line only, no body/bullet points (the Co-Authored-By trailer is appended separately).
 - `Agent` calls with `isolation: "worktree"` branch off `main`, not off the current feature branch — don't use that isolation mode for subtasks that depend on in-progress feature-branch changes.
+- `.github/pull_request_template.md` only gets applied on the Web UI, or via `gh pr create` when it opens an interactive editor (no `--body`/`--body-file`/`--fill`). Passing `--body`/`--fill` to `gh pr create` skips the template, so PR bodies written that way need to follow its structure manually.
 
 ## PR merging
 
