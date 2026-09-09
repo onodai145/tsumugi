@@ -1,10 +1,12 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { isMobilePlatform } from "../../lib/platform";
 
   let width = $state(app.ui.defaultColumnWidth);
   let uiMode = $state(app.ui.uiMode ?? "auto");
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
+  let hapticsEnabled = $state(app.ui.hapticsEnabled ?? true);
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -32,6 +34,7 @@
         defaultColumnWidth: w,
         uiMode,
         mediaThumbnailHeight: thumbHeight,
+        hapticsEnabled,
       });
       saved = true;
     } catch (e) {
@@ -59,6 +62,13 @@
   </div>
   <p class="mb-4 mt-0 text-xs text-muted-foreground">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
 </div>
+
+{#if isMobilePlatform}
+  <label class="mb-2 flex items-center gap-2 text-sm"
+    ><input type="checkbox" bind:checked={hapticsEnabled} /> ハプティクス(振動)を有効にする</label
+  >
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">ノート投稿時とリアクション付与時に端末を振動させます(Issue #26)。</p>
+{/if}
 
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">新規カラムの既定幅(px, 220〜720)</span>
