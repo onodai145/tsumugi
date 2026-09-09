@@ -1,6 +1,6 @@
 // アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
-import { commands, events, playNotifySound, unwrap, unwrapAcc, formatError, ForbiddenError } from "./ipc";
+import { commands, events, playNotifySound, unwrap, unwrapAcc, formatError, ForbiddenError, vibrate } from "./ipc";
 import { invalidateReactionUsers } from "./reactionUsersCache";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -1754,6 +1754,7 @@ class AppStore {
         if (already) await unwrapAcc(accountId, commands.unreact(accountId, noteId));
         await unwrapAcc(accountId, commands.react(accountId, noteId, reaction));
         this.#log("success", `リアクション ${reaction}`);
+        if (isMobilePlatform && (this.ui.hapticsEnabled ?? true)) vibrate("light");
       }
     } catch (e) {
       backups.forEach(restoreReaction);

@@ -192,6 +192,9 @@ pub struct UiPrefs {
     /// アバター画像の角丸（0=直角 〜 100=真円、%）。既定は20（Issue #94）。
     #[serde(default = "default_avatar_radius")]
     pub avatar_radius: i32,
+    /// ハプティクス(振動)を有効にするか（モバイル版のみ意味を持つ。Issue #26）。既定はON。
+    #[serde(default = "default_haptics_enabled")]
+    pub haptics_enabled: bool,
 }
 
 fn default_column_opacity() -> i32 {
@@ -257,6 +260,10 @@ fn default_avatar_radius() -> i32 {
     20
 }
 
+fn default_haptics_enabled() -> bool {
+    true
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -290,6 +297,7 @@ impl Default for UiPrefs {
             summaly_proxy_url: String::new(),
             instance_ticker: default_instance_ticker(),
             avatar_radius: default_avatar_radius(),
+            haptics_enabled: default_haptics_enabled(),
         }
     }
 }
@@ -341,6 +349,8 @@ mod tests {
         // avatar_radius も同様に既定値(20%, Issue #94追加前の rounded-md 相当の見た目)へ
         // フォールバックすること。
         assert_eq!(v.avatar_radius, 20);
+        // haptics_enabled も同様に既定値(true, 追加前は常にON相当の挙動)へフォールバックすること。
+        assert!(v.haptics_enabled);
     }
 
     #[test]
@@ -422,6 +432,7 @@ mod tests {
             summaly_proxy_url: "https://my-proxy.example.com/preview".into(),
             instance_ticker: "always".into(),
             avatar_radius: 65,
+            haptics_enabled: true,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();

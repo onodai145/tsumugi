@@ -7,7 +7,8 @@
   import Dropdown from "./Dropdown.svelte";
   import DrivePicker from "./DrivePicker.svelte";
   import Modal from "./Modal.svelte";
-  import { commands, unwrap, unwrapAcc, formatError } from "../lib/ipc";
+  import { commands, unwrap, unwrapAcc, formatError, vibrate } from "../lib/ipc";
+  import { isMobilePlatform } from "../lib/platform";
   import { open } from "@tauri-apps/plugin-dialog";
   import { FileText, ImagePlus, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
@@ -725,6 +726,7 @@
         reactionAcceptance,
       };
       await app.postNote(accountId, draft);
+      if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("medium");
       const draftToDelete = loadedDraftId;
       void unwrapAcc(accountId, commands.clearAutoDraft(accountId)).catch(() => {});
       if (draftToDelete) {

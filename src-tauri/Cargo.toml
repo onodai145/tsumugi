@@ -76,6 +76,7 @@ png = "0.18"
 # Android の SAF (content:// URI) で選ばれたファイルを読むために使う。
 # デスクトップでは std::fs 相当のまま(read_image_data_url 側で target_os 分岐)。
 tauri-plugin-fs = "2"
+tauri-plugin-haptics = { path = "plugins/tauri-plugin-haptics" }
 infer = "0.22.0"
 rodio = "0.22"
 async-trait = "0.1.92"

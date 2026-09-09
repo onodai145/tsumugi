@@ -1,6 +1,6 @@
 // Tauri command のラッパ。生成された bindings の Result を unwrap し、
 // 失敗時は型付き Error を Error オブジェクトに変換して throw する。
-import { commands, type Error as ApiError } from "../bindings/tauri.gen";
+import { commands, type Error as ApiError, type HapticPattern } from "../bindings/tauri.gen";
 
 export { commands };
 export * from "../bindings/tauri.gen";
@@ -41,4 +41,11 @@ export function formatError(e: ApiError): string {
 /// (play_notify_sound コマンド自体は常に Ok を返す設計で、失敗は Rust 側で warn ログのみ)。
 export function playNotifySound(choice: string): void {
   void unwrap(commands.playNotifySound(choice)).catch(() => {});
+}
+
+/// ハプティクス(振動)を発火する(Issue #26)。isMobilePlatform && 設定ONの場合のみ呼ぶこと
+/// (このガードは呼び出し側の責務。ここでは行わない)。IPC自体の失敗(未対応デバイス等)は
+/// UXに影響しないため握りつぶす(playNotifySoundと同じfire-and-forgetパターン)。
+export function vibrate(pattern: HapticPattern): void {
+  void unwrap(commands.vibrate(pattern)).catch(() => {});
 }

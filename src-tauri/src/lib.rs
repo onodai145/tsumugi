@@ -98,6 +98,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::draft::get_auto_draft,
             commands::draft::save_auto_draft,
             commands::draft::clear_auto_draft,
+            commands::haptics::vibrate,
             commands::mute::get_mute,
             commands::mute::set_mute,
             commands::mute::get_notify,
@@ -170,6 +171,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_haptics::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

@@ -1,0 +1,24 @@
+[package]
+name = "tauri-plugin-haptics"
+version = "0.1.0"
+authors = ["onodai145"]
+description = "Android haptics (vibration) support for tsumugi"
+edition = "2021"
+rust-version = "1.77.2"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+links = "tauri-plugin-haptics"
+
+# tsumugi本体(src-tauri)の暗黙workspaceに巻き込まれないようにする
+# (`cargo build --workspace`等の挙動を変えないため)。
+[workspace]
+
+[dependencies]
+tauri = { version = "2" }
+serde = { version = "1", features = ["derive"] }
+# tsumugi本体でspecta/tauri-specta を =2.0.0-rc.25 に固定しているため合わせる
+# (src-tauri/Cargo.toml のコメント参照。TSバインディング生成の互換性のため緩めない)。
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
