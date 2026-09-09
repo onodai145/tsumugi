@@ -17,13 +17,14 @@ tsumugiのモバイル対応はAndroidのみ（`src-tauri/gen/android` は存在
 
 ### Rust API
 
-パターンは今回使う分だけでなく、将来の用途（投稿失敗時のフィードバックなど）を見越して4種を先に定義する。実装対象は`Medium`と`Light`の2箇所のみで、`Success`/`Error`は今回未使用（呼び出し元なし）。
+パターンは今回使う分だけでなく、将来の用途（投稿失敗時のフィードバック、破壊的操作の確認など）を見越して5種を先に定義する。実装対象は`Medium`と`Light`の2箇所のみで、`Success`/`Warning`/`Error`は今回未使用（呼び出し元なし）。
 
 ```rust
 pub enum HapticPattern {
     Light,   // 10ms, 単発 — リアクション付与
     Medium,  // 35ms, 単発 — ノート投稿完了
-    Success, // 15ms を2回, 40ms間隔のパルス — (将来用、今回は未使用)
+    Success, // 15msを2回, 40ms間隔のパルス — (将来用、今回は未使用)
+    Warning, // 25msを2回, 80ms間隔のパルス — (将来用、今回は未使用。削除/ブロックなど破壊的操作の確認用を想定)
     Error,   // 60ms, 単発 — (将来用、今回は未使用)
 }
 
@@ -70,7 +71,7 @@ pub fn vibrate(app: AppHandle, pattern: HapticPattern) -> Result<(), String>
 
 ## テスト
 
-- Rust: `HapticPattern` → `VibrationEffect` のマッピングはAndroid実機/エミュレータ依存のため自動テストは行わない（手動確認）。プラグインのRust側コマンドがpanicしないことのみ最小限のユニットテストで担保。`Success`/`Error`は未使用のため、呼び出しのモックテストは`Light`/`Medium`のみ書く。
+- Rust: `HapticPattern` → `VibrationEffect` のマッピングはAndroid実機/エミュレータ依存のため自動テストは行わない（手動確認）。プラグインのRust側コマンドがpanicしないことのみ最小限のユニットテストで担保。`Success`/`Warning`/`Error`は未使用のため、呼び出しのモックテストは`Light`/`Medium`のみ書く。
 - フロントエンド:
   - `ComposeBar.test.ts`: 投稿成功時に `commands.vibrate` が `Medium` で呼ばれることをモックで検証（`isMobilePlatform` をモックしてtrueにするケース）
   - `store.svelte.test.ts`: `toggleReaction` で新規リアクション付与時のみ `commands.vibrate` が `Light` で呼ばれ、取り消し時は呼ばれないことを検証
