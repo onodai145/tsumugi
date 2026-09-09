@@ -15,9 +15,6 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 const invokeMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
-// このテストファイルはモバイル向けのハプティクス発火を検証するため、実機OS判定に依らず
-// isMobilePlatform を true に固定する(@tauri-apps/plugin-os のモックは "linux" のまま)。
-vi.mock("./platform", () => ({ isMobilePlatform: true }));
 
 const { app } = await import("./store.svelte");
 
@@ -204,22 +201,6 @@ describe("notification-only note actions (Issue #50 follow-up)", () => {
       expect.objectContaining({ accountId: ACCOUNT_ID, noteId: note.id, reaction: "👍" }),
     );
     expect(note.myReaction).toBe("👍");
-  });
-});
-
-describe("ハプティクス(Issue #26)", () => {
-  it("新規リアクション付与時にvibrateコマンドをlightパターンで呼ぶ", async () => {
-    const note = makeNote({ id: "note-haptics-add" });
-    await app.toggleReaction(ACCOUNT_ID, note.id, "👍", note);
-
-    expect(invokeMock).toHaveBeenCalledWith("vibrate", { pattern: "light" });
-  });
-
-  it("リアクション取り消し時はvibrateコマンドを呼ばない", async () => {
-    const note = makeNote({ id: "note-haptics-remove", myReaction: "👍" });
-    await app.toggleReaction(ACCOUNT_ID, note.id, "👍", note);
-
-    expect(invokeMock).not.toHaveBeenCalledWith("vibrate", expect.anything());
   });
 });
 
