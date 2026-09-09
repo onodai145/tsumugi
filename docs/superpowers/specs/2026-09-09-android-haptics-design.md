@@ -12,24 +12,25 @@ tsumugiのモバイル対応はAndroidのみ（`src-tauri/gen/android` は存在
 
 自作Tauriプラグイン `tauri-plugin-haptics` を `src-tauri/plugins/tauri-plugin-haptics/` にワークスペースクレートとして追加し、`src-tauri/Cargo.toml` からpath依存で参照する。crates.io公開や別リポジトリへの切り出しは行わない（再利用予定がなくYAGNIに反するため）。
 
-- Android実装（Kotlin, `PluginActivityHandler`相当）で `View.performHapticFeedback(HapticFeedbackConstants)` を呼ぶ
+- Android実装（Kotlin）で `Vibrator`/`VibratorManager` から取得した `Vibrator.vibrate(VibrationEffect)` を呼ぶ。`HapticFeedbackConstants`（`View.performHapticFeedback`）は使わない — OSの「タッチフィードバック」設定に連動してしまい、機種や設定次第で震え方が変わる/震えないことがあるため、`VibrationEffect.createOneShot(durationMs, amplitude)` でduration/振幅を直接指定する
 - デスクトップ実装（Rust側のno-op fallback）はビルドを通すためだけに存在し、何もしない
 
 ### Rust API
 
+パターンは今回使う分だけでなく、将来の用途（投稿失敗時のフィードバックなど）を見越して4種を先に定義する。実装対象は`Medium`と`Light`の2箇所のみで、`Success`/`Error`は今回未使用（呼び出し元なし）。
+
 ```rust
 pub enum HapticPattern {
-    Light,
-    Medium,
+    Light,   // 10ms, 単発 — リアクション付与
+    Medium,  // 35ms, 単発 — ノート投稿完了
+    Success, // 15ms を2回, 40ms間隔のパルス — (将来用、今回は未使用)
+    Error,   // 60ms, 単発 — (将来用、今回は未使用)
 }
 
 pub fn vibrate(app: &AppHandle, pattern: HapticPattern) -> Result<()>;
 ```
 
-- `Light` → `HapticFeedbackConstants.CLOCK_TICK`（軽いタップ、リアクション用）
-- `Medium` → `HapticFeedbackConstants.CONFIRM`（しっかりした振動、投稿完了用）
-
-2種類のみを公開する。将来用途が増えたら追加する（先行して汎用enumを用意しない）。
+振幅はいずれも `VibrationEffect.DEFAULT_AMPLITUDE` に任せる（機種ごとの最大振幅に依存させ、特定の値に固定しない）。
 
 ### `#[tauri::command]`
 
@@ -69,7 +70,7 @@ pub fn vibrate(app: AppHandle, pattern: HapticPattern) -> Result<(), String>
 
 ## テスト
 
-- Rust: `HapticPattern` → `HapticFeedbackConstants` のマッピングはAndroid実機/エミュレータ依存のため自動テストは行わない（手動確認）。プラグインのRust側コマンドがpanicしないことのみ最小限のユニットテストで担保。
+- Rust: `HapticPattern` → `VibrationEffect` のマッピングはAndroid実機/エミュレータ依存のため自動テストは行わない（手動確認）。プラグインのRust側コマンドがpanicしないことのみ最小限のユニットテストで担保。`Success`/`Error`は未使用のため、呼び出しのモックテストは`Light`/`Medium`のみ書く。
 - フロントエンド:
   - `ComposeBar.test.ts`: 投稿成功時に `commands.vibrate` が `Medium` で呼ばれることをモックで検証（`isMobilePlatform` をモックしてtrueにするケース）
   - `store.svelte.test.ts`: `toggleReaction` で新規リアクション付与時のみ `commands.vibrate` が `Light` で呼ばれ、取り消し時は呼ばれないことを検証
