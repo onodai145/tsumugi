@@ -3,3 +3,10 @@
 # "ignored builds" でエラー終了するのを防ぐ（=cargo tauri dev の pnpm dev も通す）。
 allowBuilds:
   esbuild: true
+
+# postcss の推移的依存(shadcn-svelte/vite関連のdevDependency経由)を、
+# ソースマップ自動読込のパストラバーサル脆弱性(GHSA-7fh5-64p2-3v2j /
+# GHSA-6g55-p6wh-862q, Dependabot alert #2, #3)の修正版へ引き上げる。
+# 8.x内のsemver互換なのでoverridesのみで解決する。
+overrides:
+  postcss: ">=8.5.23"
