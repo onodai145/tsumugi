@@ -3,6 +3,7 @@
   import NotifySection from "./settings/NotifySection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
   import LayoutSection from "./settings/LayoutSection.svelte";
+  import MobileSection from "./settings/MobileSection.svelte";
   import AppearanceSection from "./settings/AppearanceSection.svelte";
   import BackgroundSection from "./settings/BackgroundSection.svelte";
   import ReactionSection from "./settings/ReactionSection.svelte";
@@ -12,8 +13,9 @@
   import KeysSection from "./settings/KeysSection.svelte";
   import AboutSection from "./settings/AboutSection.svelte";
   import Modal from "./Modal.svelte";
+  import { isMobilePlatform } from "../lib/platform";
 
-  type Section = "accounts" | "layout" | "appearance" | "background" | "reaction" | "data" | "cacheBackend" | "notify" | "mute" | "keys" | "about";
+  type Section = "accounts" | "layout" | "mobile" | "appearance" | "background" | "reaction" | "data" | "cacheBackend" | "notify" | "mute" | "keys" | "about";
 
   let {
     onclose,
@@ -27,9 +29,11 @@
     initial?: Section;
   } = $props();
 
+  // モバイル(振動等)はデスクトップでは意味を持たないタブ自体を隠す。
   const nav: { id: Section; label: string }[] = [
     { id: "accounts", label: "アカウント" },
     { id: "layout", label: "レイアウト" },
+    ...(isMobilePlatform ? [{ id: "mobile" as const, label: "モバイル" }] : []),
     { id: "appearance", label: "外観" },
     { id: "background", label: "背景" },
     { id: "reaction", label: "リアクション" },
@@ -70,6 +74,8 @@
           <AccountsSection {onAddAccount} {onReauth} />
         {:else if active === "layout"}
           <LayoutSection />
+        {:else if active === "mobile"}
+          <MobileSection />
         {:else if active === "appearance"}
           <AppearanceSection />
         {:else if active === "background"}
