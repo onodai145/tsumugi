@@ -459,6 +459,13 @@ class AppStore {
     this.focusedGroupId = groupId;
   }
 
+  /// モバイル版のカラム間Scroll Snap確定時に呼ぶ(Issue #296)。タブは変えず、
+  /// フォーカスのみ対象カラムへ移す。存在しないgroupIdなら何もしない。
+  focusColumn(groupId: string) {
+    if (!this.groups.some((g) => g.id === groupId)) return;
+    this.focusedGroupId = groupId;
+  }
+
   /// タブ名を変更（空なら自動生成名に戻す）。永続化して即反映。
   async renameTab(tabId: string, title: string) {
     const trimmed = title.trim();
