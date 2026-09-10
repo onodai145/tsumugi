@@ -54,6 +54,7 @@
   let drag = $state<SwipeDrag | null>(null);
   let settling = $state(false);
   let contentEl = $state<HTMLElement | null>(null);
+  let activePaneEl = $state<HTMLElement | null>(null);
 
   /// スワイプ移動先(target)が表示すべきタブを返す。タブ送りならそのタブ、
   /// カラム移動なら移動先カラムの現在のアクティブタブ。
@@ -108,7 +109,13 @@
     settling = true;
     drag.dx = commitDirection === null ? 0 : commitDirection === "next" ? -(contentEl?.clientWidth ?? drag.dx) : (contentEl?.clientWidth ?? -drag.dx);
     setTimeout(() => {
-      if (commitDirection) app.applySwipe(group.id, commitDirection);
+      if (commitDirection) {
+        // ペイン切り替え確定時、以前のタブでのスクロール位置が新しいタブの内容に
+        // そのまま残ってジャンプして見えるのを防ぐため、確定と同時にリセットする
+        // (リバート時は同じタブに留まるためスクロール位置を保持したいので、ここでは触らない)。
+        if (activePaneEl) activePaneEl.scrollTop = 0;
+        app.applySwipe(group.id, commitDirection);
+      }
       drag = null;
       settling = false;
     }, SETTLE_MS);
@@ -129,6 +136,19 @@
 
   function onSwipeCancel(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.pointerId) return;
+    // 直前の別ジェスチャーのcommit/revertアニメーションがまだ`settling`中に
+    // 再度settle(null)を呼ぶと、アニメーション途中のdrag.dxを0へスナップさせて
+    // 進行中の遷移を壊してしまうため、再入をガードする(onSwipeDownと同様)。
+    if (settling) return;
+    // touch-action: pan-yの下では、ネイティブの縦スクロールが引き継いだ瞬間に
+    // pointercancelが飛んでくる。ここで軸チェックせずsettle(null)を呼ぶと、縦スクロール
+    // のたびに180msのsettling状態(=次のスワイプ開始をブロック)が発生してしまうため、
+    // 横方向ジェスチャーでない場合はアニメーションなしで即座にdragをクリアする
+    // (onSwipeUpの同等のファストパスと揃える)。
+    if (drag.axis !== "horizontal") {
+      drag = null;
+      return;
+    }
     settle(null);
   }
 
@@ -385,7 +405,7 @@
             {@render tabBody(peek)}
           </div>
         {/if}
-        <div class="h-full w-full flex-none overflow-y-auto" onscroll={onScroll}>
+        <div class="h-full w-full flex-none overflow-y-auto" bind:this={activePaneEl} onscroll={onScroll}>
           {@render tabBody(activeTab)}
         </div>
         {#if peek && !peekFirst}
