@@ -7,6 +7,8 @@
   import { Button } from "$lib/components/ui/button";
   import { portal } from "../lib/portal";
   import { edgeFromPointer } from "../lib/paneEdge";
+  import { activeSlotIndex, computeTabSlots, notesForSlot } from "../lib/tabSlots";
+  import { resolveSettledIndex } from "../lib/scrollSnapIndex";
 
   let {
     group,
@@ -35,6 +37,62 @@
       app.loadMore(activeTab.id);
     }
   }
+
+  // モバイル版: カラム内タブの横スワイプをCSS Scroll Snapで実現する(Issue #296)。
+  // 前/アクティブ/次の最大3スロットを横並びに描画し、scrollend(またはscrollの
+  // デバウンス)で着地したスロットを検知してsetActiveTabを呼ぶ。
+  // デスクトップUIでは`computeTabSlots`を使わず常に1要素([activeTab])に固定し、
+  // 既存の見た目・挙動を完全に変えない。
+  const slots = $derived(
+    app.useMobileUi()
+      ? computeTabSlots(group.tabs, group.activeTabId)
+      : activeTab
+        ? [{ tab: activeTab, role: "active" as const }]
+        : [],
+  );
+  let tabsEl = $state<HTMLElement | null>(null);
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
+  const supportsScrollEnd = typeof window !== "undefined" && "onscrollend" in window;
+
+  // スロット構成(=activeTabId)が変わるたびに、スクロール位置をアニメーション無しで
+  // 対応するスロットへ即座に合わせ直す。タブバーのタップによる切替でも、スワイプ確定に
+  // よる切替でも、この一箇所で辻褄を合わせる(前/次の中身が入れ替わることでスロット配列の
+  // 要素数・並びが変わりうるため、常にscrollLeftを引き直す必要がある)。
+  // 依存はactiveIndex(数値)ではなくslots(配列参照)そのものにする。例えば4タブ中
+  // 中間のタブ間の切替(B→C等)ではactiveSlotIndexの値が1のまま変わらないことがあり、
+  // $derivedが同じプリミティブ値に収束すると依存側は再実行されないため、値ではなく
+  // 配列参照の変化を捕まえる必要がある。
+  $effect(() => {
+    const s = slots;
+    if (!tabsEl) return;
+    const width = tabsEl.clientWidth;
+    if (width <= 0) return;
+    tabsEl.scrollLeft = Math.max(0, activeSlotIndex(s)) * width;
+  });
+
+  function onTabsSettled() {
+    if (!tabsEl || tabsEl.clientWidth <= 0) return;
+    const idx = resolveSettledIndex(tabsEl.scrollLeft, tabsEl.clientWidth, slots.length);
+    const settled = slots[idx]?.tab;
+    if (settled && settled.id !== group.activeTabId) {
+      app.setActiveTab(group.id, settled.id);
+    }
+  }
+
+  function onTabsScroll() {
+    // scrollend対応環境ではそちらに任せる(二重発火を避けるため、ここでは何もしない)。
+    if (supportsScrollEnd) return;
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(onTabsSettled, 120);
+  }
+
+  // アンマウント後に保留中のデバウンスタイマーが発火してsetActiveTabを呼ばないよう、
+  // コンポーネント破棄時にタイマーを片付ける(scrollend未対応環境のフォールバック経路向け)。
+  $effect(() => {
+    return () => {
+      if (settleTimer) clearTimeout(settleTimer);
+    };
+  });
 
   // 幅リサイズ
   let resizing = false;
@@ -234,17 +292,17 @@
     </div>
   {/if}
 
-  {#snippet tabBody(tab: TabView)}
+  {#snippet tabBody(tab: TabView, role: "prev" | "active" | "next" = "active")}
     {@const notif = tab.kind.type === "notifications"}
     {#if notif}
-      {#each tab.notifications as n (n.id)}
+      {#each notesForSlot(tab.notifications, role) as n (n.id)}
         <NotificationCard notification={n} accountId={tab.accountId} />
       {/each}
       {#if tab.notifications.length === 0 && !tab.loadingMore}
         <div class="p-3.5 text-center text-sm text-muted-foreground">まだ通知がありません</div>
       {/if}
     {:else}
-      {#each tab.notes as note (note.id)}
+      {#each notesForSlot(tab.notes, role) as note (note.id)}
         <NoteCard {note} accountId={tab.accountId} tabId={tab.id} selected={note.id === tab.selectedNoteId} />
         {#if tab.gapMarker && note.id === tab.gapMarker.boundaryId}
           <div class="flex items-center gap-2 border-y border-border bg-muted/40 px-3.5 py-2 text-sm text-muted-foreground">
@@ -269,8 +327,18 @@
   {/snippet}
 
   {#if activeTab}
-    <div class="flex-1 overflow-y-auto" onscroll={onScroll}>
-      {@render tabBody(activeTab)}
+    <div
+      class="flex min-h-0 flex-1 [overflow-x:auto] [overscroll-behavior-x:auto]"
+      style:scroll-snap-type={app.useMobileUi() ? "x mandatory" : undefined}
+      bind:this={tabsEl}
+      onscroll={onTabsScroll}
+      onscrollend={onTabsSettled}
+    >
+      {#each slots as slot (slot.tab.id)}
+        <div class="h-full w-full flex-none [scroll-snap-align:start] [scroll-snap-stop:always] overflow-y-auto" onscroll={slot.role === "active" ? onScroll : undefined}>
+          {@render tabBody(slot.tab, slot.role)}
+        </div>
+      {/each}
     </div>
   {/if}
 
