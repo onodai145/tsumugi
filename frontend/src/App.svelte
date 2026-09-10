@@ -160,7 +160,7 @@
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。
       </div>
     {:else}
-      <div class="flex h-full overflow-x-auto">
+      <div class="flex h-full overflow-x-auto" data-columns-scroll>
         <Pane node={app.paneRoot} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} onSplitDown={splitDown} onSplitRight={splitRight} />
       </div>
     {/if}

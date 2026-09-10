@@ -95,13 +95,24 @@
     }
     if (drag.axis === "vertical") return; // ネイティブの縦スクロールに任せる
     e.preventDefault();
-    // 横方向のジェスチャーだと確定した最初のフレームでのみキャプチャする(縦スクロール
-    // 候補の間はキャプチャしない。pointerdown時点で捕捉するとネイティブの縦スクロールが
-    // 阻害される環境があるため。以降のmoveで毎回呼ぶのは避ける)。
-    if (drag.dir === null) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    drag.dir = dx < 0 ? "next" : "prev";
+    // 横方向のジェスチャーだと確定した最初のフレームでのみ方向(dir)を確定し、キャプチャする
+    // (縦スクロール候補の間はキャプチャしない。pointerdown時点で捕捉するとネイティブの
+    // 縦スクロールが阻害される環境があるため。以降のmoveで毎回呼ぶのは避ける)。
+    // dirはジェスチャー中に一度確定したら変更しない(sticky)。dxの符号だけを見て毎フレーム
+    // 再判定すると、ドラッグ方向を反転させた瞬間にpeek対象・DOM順序・transformの基準
+    // オフセットが不整合に入れ替わってしまうため。
+    if (drag.dir === null) {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      drag.dir = dx < 0 ? "next" : "prev";
+    }
     drag.target = resolveSwipeTarget(app.groups, app.paneRoot, group.id, drag.dir);
-    drag.dx = drag.target ? dx : applyRubberBand(dx);
+    // dir確定後にドラッグ方向を反転させると、生のdxはdirが示す符号と逆になり得る。
+    // 移動先(target)がある場合のtransformは`-100%`基準オフセット(prev)/素の位置(next)を
+    // 前提にしているため、逆符号のdxをそのまま使うと空白が見えてしまう。逆符号側は0で
+    // クランプし、「まだスワイプが始まっていない」状態として扱う(移動先が無い場合の
+    // ラバーバンドは対称に効かせたいのでここでは影響させない)。
+    const effectiveDx = drag.dir === "next" ? Math.min(dx, 0) : Math.max(dx, 0);
+    drag.dx = drag.target ? effectiveDx : applyRubberBand(dx);
   }
 
   function settle(commitDirection: "next" | "prev" | null) {
@@ -110,11 +121,23 @@
     drag.dx = commitDirection === null ? 0 : commitDirection === "next" ? -(contentEl?.clientWidth ?? drag.dx) : (contentEl?.clientWidth ?? -drag.dx);
     setTimeout(() => {
       if (commitDirection) {
-        // ペイン切り替え確定時、以前のタブでのスクロール位置が新しいタブの内容に
-        // そのまま残ってジャンプして見えるのを防ぐため、確定と同時にリセットする
-        // (リバート時は同じタブに留まるためスクロール位置を保持したいので、ここでは触らない)。
-        if (activePaneEl) activePaneEl.scrollTop = 0;
-        app.applySwipe(group.id, commitDirection);
+        // 実際に何が適用されたかはapp.applySwipe()の戻り値を正とする(drag.targetは
+        // ドラッグ中のスナップショットに過ぎず、確定時点の状態と一致する保証がないため)。
+        const applied = app.applySwipe(group.id, commitDirection);
+        if (applied?.kind === "tab") {
+          // 同一カラム内のタブ切り替え確定時、以前のタブでのスクロール位置が新しいタブの
+          // 内容にそのまま残ってジャンプして見えるのを防ぐため、確定と同時にリセットする
+          // (リバート時は同じタブに留まるためスクロール位置を保持したいので、ここでは触らない)。
+          if (activePaneEl) activePaneEl.scrollTop = 0;
+        } else if (applied?.kind === "group") {
+          // カラム移動確定時: このカラム自身のactiveTabIdは変わらないため、このカラムの
+          // 読みかけのスクロール位置は保持する。代わりに実際に移動先カラムが見えるよう、
+          // その要素までスクロールする(既存の「カラム領域を横ドラッグしてパンする」
+          // 手段が縦スワイプハンドラのtouch-actionで奪われた分の代替)。
+          const scrollRoot = contentEl?.closest("[data-columns-scroll]");
+          const targetEl = scrollRoot?.querySelector(`[data-group-id="${CSS.escape(applied.groupId)}"]`);
+          targetEl?.scrollIntoView({ inline: "start", behavior: "smooth", block: "nearest" });
+        }
       }
       drag = null;
       settling = false;
@@ -130,7 +153,11 @@
     const elapsed = Math.max(1, e.timeStamp - drag.startTime);
     const velocity = drag.dx / elapsed;
     const width = contentEl?.clientWidth ?? 0;
-    const willCommit = drag.target !== null && shouldCommitSwipe(drag.dx, width, velocity);
+    // drag.dxはonSwipeMoveで既にdirと逆符号側は0にクランプ済みだが、速度起因の誤コミット
+    // (ほぼ0のdxでも速度だけで閾値を超えるケース)への保険として、dxの符号がdirと一致する
+    // 場合のみコミットを許可する(dir==="next"はdx<0、dir==="prev"はdx>0が正しい符号)。
+    const dirAgrees = drag.dir === "next" ? drag.dx < 0 : drag.dx > 0;
+    const willCommit = drag.target !== null && dirAgrees && shouldCommitSwipe(drag.dx, width, velocity);
     settle(willCommit ? drag.dir : null);
   }
 
@@ -205,6 +232,7 @@
   style={stretch ? "flex:1 1 0;min-width:0" : group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
   class:opacity-55={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
+  data-group-id={group.id}
   ondragover={(e) => {
     if (!app.draggingGroupId) return;
     e.preventDefault();
@@ -391,14 +419,14 @@
       <div
         class="flex h-full"
         style={[
-          `transform:translateX(calc(${peekFirst ? "-100% + " : ""}${drag?.dx ?? 0}px))`,
+          drag || settling ? `transform:translateX(calc(${peekFirst ? "-100% + " : ""}${drag?.dx ?? 0}px))` : "",
           settling ? `transition:transform ${SETTLE_MS}ms ease-out` : "",
         ].join(";")}
         onpointerdown={onSwipeDown}
         onpointermove={onSwipeMove}
         onpointerup={onSwipeUp}
         onpointercancel={onSwipeCancel}
-        style:touch-action="pan-y"
+        style:touch-action={app.useMobileUi() ? "pan-y" : undefined}
       >
         {#if peekFirst && peek}
           <div class="h-full w-full flex-none overflow-y-auto">
