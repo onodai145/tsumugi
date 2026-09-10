@@ -45,7 +45,7 @@
   // 既存の見た目・挙動を完全に変えない。
   const slots = $derived(
     app.useMobileUi()
-      ? computeTabSlots(group.tabs, group.activeTabId)
+      ? computeTabSlots(group.tabs, activeTab?.id ?? "")
       : activeTab
         ? [{ tab: activeTab, role: "active" as const }]
         : [],
