@@ -7,6 +7,8 @@
   import { Button } from "$lib/components/ui/button";
   import { portal } from "../lib/portal";
   import { edgeFromPointer } from "../lib/paneEdge";
+  import { resolveSwipeTarget, type SwipeTarget } from "../lib/swipeNav";
+  import { applyRubberBand, resolveSwipeAxis, shouldCommitSwipe, type SwipeAxis } from "../lib/swipeGesture";
 
   let {
     group,
@@ -29,13 +31,105 @@
   const activeTab = $derived(
     group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[0],
   );
-  const isNotif = $derived(activeTab?.kind.type === "notifications");
-
   function onScroll(e: Event) {
     const el = e.currentTarget as HTMLElement;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300 && activeTab) {
       app.loadMore(activeTab.id);
     }
+  }
+
+  // モバイル版: カラム本体の左右スワイプでタブ/カラムを移動する(Issue #296)。
+  const SETTLE_MS = 180;
+
+  type SwipeDrag = {
+    pointerId: number;
+    axis: SwipeAxis | null;
+    startX: number;
+    startY: number;
+    startTime: number;
+    dx: number;
+    target: SwipeTarget;
+    dir: "next" | "prev" | null;
+  };
+  let drag = $state<SwipeDrag | null>(null);
+  let settling = $state(false);
+  let contentEl = $state<HTMLElement | null>(null);
+
+  /// スワイプ移動先(target)が表示すべきタブを返す。タブ送りならそのタブ、
+  /// カラム移動なら移動先カラムの現在のアクティブタブ。
+  function peekTab(target: SwipeTarget): TabView | null {
+    if (!target) return null;
+    const g = app.groups.find((x) => x.id === target.groupId);
+    if (!g) return null;
+    if (target.kind === "tab") return g.tabs.find((t) => t.id === target.tabId) ?? null;
+    return g.tabs.find((t) => t.id === g.activeTabId) ?? g.tabs[0] ?? null;
+  }
+
+  function onSwipeDown(e: PointerEvent) {
+    // 他のオーバーレイ(カラムメニュー/投稿モーダル/エラーモーダル/リアクションピッカー)や
+    // 既存のタブ・カラムのドラッグ&ドロップ操作中はスワイプジェスチャーを無効化する。
+    if (
+      !app.useMobileUi() ||
+      e.pointerType !== "touch" ||
+      drag ||
+      settling ||
+      menuOpen ||
+      app.showComposeModal ||
+      app.errorModal ||
+      app.reactPicker ||
+      app.draggingTabId ||
+      app.draggingGroupId
+    )
+      return;
+    drag = { pointerId: e.pointerId, axis: null, startX: e.clientX, startY: e.clientY, startTime: e.timeStamp, dx: 0, target: null, dir: null };
+  }
+
+  function onSwipeMove(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (drag.axis === null) {
+      drag.axis = resolveSwipeAxis(dx, dy);
+      if (drag.axis === null) return;
+    }
+    if (drag.axis === "vertical") return; // ネイティブの縦スクロールに任せる
+    e.preventDefault();
+    // 横方向のジェスチャーだと確定した最初のフレームでのみキャプチャする(縦スクロール
+    // 候補の間はキャプチャしない。pointerdown時点で捕捉するとネイティブの縦スクロールが
+    // 阻害される環境があるため。以降のmoveで毎回呼ぶのは避ける)。
+    if (drag.dir === null) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    drag.dir = dx < 0 ? "next" : "prev";
+    drag.target = resolveSwipeTarget(app.groups, app.paneRoot, group.id, drag.dir);
+    drag.dx = drag.target ? dx : applyRubberBand(dx);
+  }
+
+  function settle(commitDirection: "next" | "prev" | null) {
+    if (!drag) return;
+    settling = true;
+    drag.dx = commitDirection === null ? 0 : commitDirection === "next" ? -(contentEl?.clientWidth ?? drag.dx) : (contentEl?.clientWidth ?? -drag.dx);
+    setTimeout(() => {
+      if (commitDirection) app.applySwipe(group.id, commitDirection);
+      drag = null;
+      settling = false;
+    }, SETTLE_MS);
+  }
+
+  function onSwipeUp(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    if (drag.axis !== "horizontal") {
+      drag = null;
+      return;
+    }
+    const elapsed = Math.max(1, e.timeStamp - drag.startTime);
+    const velocity = drag.dx / elapsed;
+    const width = contentEl?.clientWidth ?? 0;
+    const willCommit = drag.target !== null && shouldCommitSwipe(drag.dx, width, velocity);
+    settle(willCommit ? drag.dir : null);
+  }
+
+  function onSwipeCancel(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    settle(null);
   }
 
   // 幅リサイズ
@@ -235,43 +329,71 @@
     </div>
   {/if}
 
-  {#if activeTab}
-    <div class="flex-1 overflow-y-auto" onscroll={onScroll}>
-      {#if isNotif}
-        {#each activeTab.notifications as n (n.id)}
-          <NotificationCard notification={n} accountId={activeTab.accountId} />
-        {/each}
-        {#if activeTab.notifications.length === 0 && !activeTab.loadingMore}
-          <div class="p-3.5 text-center text-sm text-muted-foreground">まだ通知がありません</div>
-        {/if}
-      {:else}
-        {#each activeTab.notes as note (note.id)}
-          <NoteCard
-            {note}
-            accountId={activeTab.accountId}
-            tabId={activeTab.id}
-            selected={note.id === activeTab.selectedNoteId}
-          />
-          {#if activeTab.gapMarker && note.id === activeTab.gapMarker.boundaryId}
-            <div class="flex items-center gap-2 border-y border-border bg-muted/40 px-3.5 py-2 text-sm text-muted-foreground">
-              <span class="flex-1">この間の投稿は省略されています</span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={activeTab.fillingGap}
-                onclick={() => app.fillRemainingGap(activeTab.id)}
-              >
-                {activeTab.fillingGap ? "取得中…" : "省略された投稿を表示"}
-              </Button>
-            </div>
-          {/if}
-        {/each}
-        {#if activeTab.notes.length === 0 && !activeTab.loadingMore}
-          <div class="p-3.5 text-center text-sm text-muted-foreground">まだノートがありません</div>
-        {/if}
+  {#snippet tabBody(tab: TabView)}
+    {@const notif = tab.kind.type === "notifications"}
+    {#if notif}
+      {#each tab.notifications as n (n.id)}
+        <NotificationCard notification={n} accountId={tab.accountId} />
+      {/each}
+      {#if tab.notifications.length === 0 && !tab.loadingMore}
+        <div class="p-3.5 text-center text-sm text-muted-foreground">まだ通知がありません</div>
       {/if}
-      {#if activeTab.loadingMore}<div class="p-3.5 text-center text-sm text-muted-foreground">読み込み中…</div>{/if}
+    {:else}
+      {#each tab.notes as note (note.id)}
+        <NoteCard {note} accountId={tab.accountId} tabId={tab.id} selected={note.id === tab.selectedNoteId} />
+        {#if tab.gapMarker && note.id === tab.gapMarker.boundaryId}
+          <div class="flex items-center gap-2 border-y border-border bg-muted/40 px-3.5 py-2 text-sm text-muted-foreground">
+            <span class="flex-1">この間の投稿は省略されています</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={tab.fillingGap}
+              onclick={() => app.fillRemainingGap(tab.id)}
+            >
+              {tab.fillingGap ? "取得中…" : "省略された投稿を表示"}
+            </Button>
+          </div>
+        {/if}
+      {/each}
+      {#if tab.notes.length === 0 && !tab.loadingMore}
+        <div class="p-3.5 text-center text-sm text-muted-foreground">まだノートがありません</div>
+      {/if}
+    {/if}
+    {#if tab.loadingMore}<div class="p-3.5 text-center text-sm text-muted-foreground">読み込み中…</div>{/if}
+  {/snippet}
+
+  {#if activeTab}
+    {@const peek = drag ? peekTab(drag.target) : null}
+    {@const peekFirst = !!(drag && drag.dir === "prev" && peek)}
+    <div class="relative flex-1 overflow-hidden" bind:this={contentEl}>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="flex h-full"
+        style={[
+          `transform:translateX(calc(${peekFirst ? "-100% + " : ""}${drag?.dx ?? 0}px))`,
+          settling ? `transition:transform ${SETTLE_MS}ms ease-out` : "",
+        ].join(";")}
+        onpointerdown={onSwipeDown}
+        onpointermove={onSwipeMove}
+        onpointerup={onSwipeUp}
+        onpointercancel={onSwipeCancel}
+        style:touch-action="pan-y"
+      >
+        {#if peekFirst && peek}
+          <div class="h-full w-full flex-none overflow-y-auto">
+            {@render tabBody(peek)}
+          </div>
+        {/if}
+        <div class="h-full w-full flex-none overflow-y-auto" onscroll={onScroll}>
+          {@render tabBody(activeTab)}
+        </div>
+        {#if peek && !peekFirst}
+          <div class="h-full w-full flex-none overflow-y-auto">
+            {@render tabBody(peek)}
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 
