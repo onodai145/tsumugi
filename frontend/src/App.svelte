@@ -19,11 +19,48 @@
   import { Pencil } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { setupPendingShareListener } from "./lib/pendingShare";
+  import { topLevelLeafGroupIds } from "./lib/swipeNav";
+  import { resolveSettledIndex } from "./lib/scrollSnapIndex";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
   // モバイル版UIかPC版UIか(設定→表示で上書き可能、既定はOS判定。Issue #51)
   const useMobileUi = $derived(app.useMobileUi());
+
+  // モバイル版: カラム間の横スワイプをCSS Scroll Snapで実現する(Issue #296)。
+  let columnsScrollEl = $state<HTMLElement | null>(null);
+  let columnSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  const supportsScrollEnd = typeof window !== "undefined" && "onscrollend" in window;
+
+  function onColumnsSettled() {
+    if (!useMobileUi || !columnsScrollEl || columnsScrollEl.clientWidth <= 0) return;
+    const order = topLevelLeafGroupIds(app.paneRoot);
+    if (order.length === 0) return;
+    const idx = resolveSettledIndex(columnsScrollEl.scrollLeft, columnsScrollEl.clientWidth, order.length);
+    const groupId = order[idx];
+    if (groupId && groupId !== app.focusedGroupId) app.focusColumn(groupId);
+  }
+
+  function onColumnsScroll() {
+    if (supportsScrollEnd) return;
+    if (columnSettleTimer) clearTimeout(columnSettleTimer);
+    columnSettleTimer = setTimeout(onColumnsSettled, 120);
+  }
+
+  // フォーカス対象カラムが変わるたび(スワイプ着地・タブバータップ以外にキーボード
+  // ショートカット等の経路もある)、モバイルでは外側スクロール位置をアニメーション
+  // 無しで追随させる。onColumnsSettledがapp.focusColumnを呼んだ結果としてこの
+  // $effectが再度走っても、既に正しい位置にいるためscrollLeftの代入は無変化(冪等)。
+  $effect(() => {
+    const groupId = app.focusedGroupId;
+    if (!useMobileUi || !columnsScrollEl || !groupId) return;
+    const order = topLevelLeafGroupIds(app.paneRoot);
+    const idx = order.indexOf(groupId);
+    if (idx < 0) return;
+    const width = columnsScrollEl.clientWidth;
+    if (width <= 0) return;
+    columnsScrollEl.scrollLeft = idx * width;
+  });
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
@@ -160,7 +197,14 @@
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。
       </div>
     {:else}
-      <div class="flex h-full overflow-x-auto" data-columns-scroll>
+      <div
+        class="flex h-full overflow-x-auto"
+        data-columns-scroll
+        style:scroll-snap-type={useMobileUi ? "x mandatory" : undefined}
+        bind:this={columnsScrollEl}
+        onscroll={onColumnsScroll}
+        onscrollend={onColumnsSettled}
+      >
         <Pane node={app.paneRoot} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} onSplitDown={splitDown} onSplitRight={splitRight} />
       </div>
     {/if}

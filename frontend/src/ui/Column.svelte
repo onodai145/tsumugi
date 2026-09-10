@@ -144,10 +144,12 @@
 
 <section
   class="column-root relative flex flex-none flex-col h-full border-r border-border col-bg"
-  style={stretch ? "flex:1 1 0;min-width:0" : group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
+  style={app.useMobileUi() ? "flex:0 0 100%;width:100%;min-width:0" : stretch ? "flex:1 1 0;min-width:0" : group.auto ? "flex:1 1 0;min-width:220px" : `width:${group.width}px`}
   class:opacity-55={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
   data-group-id={group.id}
+  style:scroll-snap-align={app.useMobileUi() ? "start" : undefined}
+  style:scroll-snap-stop={app.useMobileUi() ? "always" : undefined}
   ondragover={(e) => {
     if (!app.draggingGroupId) return;
     e.preventDefault();
