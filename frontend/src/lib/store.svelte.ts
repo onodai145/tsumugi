@@ -41,6 +41,7 @@ import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { withRecentEmojiUsage } from "./recentEmojis";
 import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
 import { isMobilePlatform } from "./platform";
+import { resolveSwipeTarget, type SwipeDirection, type SwipeTarget } from "./swipeNav";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1クリックあたりの取得ページ上限（Issue #148）
@@ -457,6 +458,21 @@ class AppStore {
     const g = this.groups.find((x) => x.id === groupId);
     if (g) g.activeTabId = tabId;
     this.focusedGroupId = groupId;
+  }
+
+  /// モバイル版の左右スワイプ確定時に呼ぶ(Issue #296)。タブ送り、または
+  /// タブの端でのカラム移動を実際に適用する。ドラッグ中の中間状態では呼ばず、
+  /// ドラッグ確定時にのみ呼ぶこと。戻り値は実際に適用した内容
+  /// (呼び出し側=Column.svelteのアニメーション演出に使う)。
+  applySwipe(groupId: string, direction: SwipeDirection): SwipeTarget {
+    const target = resolveSwipeTarget(this.groups, this.paneRoot, groupId, direction);
+    if (!target) return null;
+    if (target.kind === "tab") {
+      this.setActiveTab(target.groupId, target.tabId);
+    } else {
+      this.focusedGroupId = target.groupId;
+    }
+    return target;
   }
 
   /// タブ名を変更（空なら自動生成名に戻す）。永続化して即反映。
