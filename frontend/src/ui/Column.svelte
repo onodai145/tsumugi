@@ -305,7 +305,7 @@
       {/if}
     {:else}
       {#each notesForSlot(tab.notes, role) as note (note.id)}
-        <NoteCard {note} accountId={tab.accountId} tabId={tab.id} selected={note.id === tab.selectedNoteId} />
+        <NoteCard {note} accountId={tab.accountId} tabId={tab.id} selected={role === "active" && note.id === tab.selectedNoteId} />
         {#if tab.gapMarker && note.id === tab.gapMarker.boundaryId}
           <div class="flex items-center gap-2 border-y border-border bg-muted/40 px-3.5 py-2 text-sm text-muted-foreground">
             <span class="flex-1">この間の投稿は省略されています</span>

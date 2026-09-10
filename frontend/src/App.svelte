@@ -19,8 +19,7 @@
   import { Pencil } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { setupPendingShareListener } from "./lib/pendingShare";
-  import { topLevelLeafGroupIds } from "./lib/swipeNav";
-  import { resolveSettledIndex } from "./lib/scrollSnapIndex";
+  import { pageOrder } from "./lib/swipeNav";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
@@ -45,7 +44,7 @@
   $effect(() => {
     const groupId = app.focusedGroupId;
     if (!useMobileUi || !columnsScrollEl || !groupId) return;
-    const order = topLevelLeafGroupIds(app.paneRoot);
+    const order = pageOrder(app.paneRoot);
     const idx = order.indexOf(groupId);
     if (idx < 0) return;
     const width = columnsScrollEl.clientWidth;

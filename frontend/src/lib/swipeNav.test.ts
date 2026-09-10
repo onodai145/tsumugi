@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PaneNode } from "../bindings/tauri.gen";
-import { topLevelLeafGroupIds } from "./swipeNav";
+import { pageOrder, topLevelLeafGroupIds } from "./swipeNav";
 
 function leaf(id: string, groupId: string): PaneNode {
   return { type: "leaf", id, groupId };
@@ -24,5 +24,22 @@ describe("topLevelLeafGroupIds", () => {
 
   it("rootがleaf単体の場合はそのgroupIdのみ返す", () => {
     expect(topLevelLeafGroupIds(leaf("l1", "g1"))).toEqual(["g1"]);
+  });
+});
+
+describe("pageOrder", () => {
+  it("leafのみのrootではtopLevelLeafGroupIdsと同じ配列になる", () => {
+    const root = row("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
+    expect(pageOrder(root)).toEqual(["g1", "g2", "g3"]);
+  });
+
+  it("leafの間にネストしたsplitがある場合、splitの位置はnullになる", () => {
+    const nested = row("nested", [leaf("l2", "g2"), leaf("l3", "g3")]);
+    const root = row("root", [leaf("l1", "g1"), nested, leaf("l4", "g4")]);
+    expect(pageOrder(root)).toEqual(["g1", null, "g4"]);
+  });
+
+  it("rootがleaf単体の場合はそのgroupIdのみ返す", () => {
+    expect(pageOrder(leaf("l1", "g1"))).toEqual(["g1"]);
   });
 });

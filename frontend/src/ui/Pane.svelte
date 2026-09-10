@@ -2,7 +2,7 @@
   import type { PaneChild, PaneNode } from "../bindings/tauri.gen";
   import type { TabView } from "../lib/store.svelte";
   import { app } from "../lib/store.svelte";
-  import { topLevelLeafGroupIds } from "../lib/swipeNav";
+  import { pageOrder } from "../lib/swipeNav";
   import { resolveSettledIndex } from "../lib/scrollSnapIndex";
   import Column from "./Column.svelte";
   import Pane from "./Pane.svelte";
@@ -49,10 +49,11 @@
 
   function onRowSettled() {
     if (!root || !app.useMobileUi() || !rowScrollEl || rowScrollEl.clientWidth <= 0) return;
-    const order = topLevelLeafGroupIds(app.paneRoot);
+    const order = pageOrder(app.paneRoot);
     if (order.length === 0) return;
     const idx = resolveSettledIndex(rowScrollEl.scrollLeft, rowScrollEl.clientWidth, order.length);
     const groupId = order[idx];
+    // ネストしたsplitのページ(null)に着地した場合はフォーカス対象が無いためスキップする。
     if (groupId && groupId !== app.focusedGroupId) app.focusColumn(groupId);
   }
 
