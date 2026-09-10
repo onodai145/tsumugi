@@ -2,6 +2,8 @@
   import type { PaneChild, PaneNode } from "../bindings/tauri.gen";
   import type { TabView } from "../lib/store.svelte";
   import { app } from "../lib/store.svelte";
+  import { pageOrder } from "../lib/swipeNav";
+  import { resolveSettledIndex } from "../lib/scrollSnapIndex";
   import Column from "./Column.svelte";
   import Pane from "./Pane.svelte";
 
@@ -13,6 +15,8 @@
     onSplitDown,
     onSplitRight,
     stretch = false,
+    root = false,
+    onRowScrollElement,
   }: {
     node: PaneNode;
     onAddTab: (groupId: string) => void;
@@ -21,7 +25,44 @@
     onSplitDown: (groupId: string) => void;
     onSplitRight: (groupId: string) => void;
     stretch?: boolean;
+    // このPane呼び出しがApp.svelteからの最上位呼び出し(node={app.paneRoot})かどうか。
+    // trueのときのみ、row描画時にカラム間Scroll Snap(Issue #296)を有効化する。
+    // ネストしたSplit用の再帰呼び出しではデフォルトのfalseのまま渡さない(Task 1の
+    // topLevelLeafGroupIdsのスコープ決定と揃える: ネストしたSplit自体はスワイプ先にしない)。
+    root?: boolean;
+    // root=trueのときのみ、実際に横スクロールするDOM要素(row描画時の内側div)を
+    // 呼び出し元(App.svelte)へ伝える。App.svelte側のフォーカス変更時の再センタリング
+    // effectが、この要素を参照してscrollLeftを合わせ直すために使う。
+    onRowScrollElement?: (el: HTMLElement | null) => void;
   } = $props();
+
+  // モバイル版: カラム間の横スワイプをCSS Scroll Snapで実現する(Issue #296)。
+  // root=trueのrow描画(App.svelteの最上位呼び出し)でのみ意味を持つ。ネストした
+  // Split内の再帰呼び出しではrootがfalseのため、以下のハンドラは全て早期returnする。
+  let rowScrollEl = $state<HTMLElement | null>(null);
+  let columnSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  const supportsScrollEnd = typeof window !== "undefined" && "onscrollend" in window;
+
+  $effect(() => {
+    if (root) onRowScrollElement?.(rowScrollEl);
+  });
+
+  function onRowSettled() {
+    if (!root || !app.useMobileUi() || !rowScrollEl || rowScrollEl.clientWidth <= 0) return;
+    const order = pageOrder(app.paneRoot);
+    if (order.length === 0) return;
+    const idx = resolveSettledIndex(rowScrollEl.scrollLeft, rowScrollEl.clientWidth, order.length);
+    const groupId = order[idx];
+    // ネストしたsplitのページ(null)に着地した場合はフォーカス対象が無いためスキップする。
+    if (groupId && groupId !== app.focusedGroupId) app.focusColumn(groupId);
+  }
+
+  function onRowScroll() {
+    if (!root) return;
+    if (supportsScrollEnd) return;
+    if (columnSettleTimer) clearTimeout(columnSettleTimer);
+    columnSettleTimer = setTimeout(onRowSettled, 120);
+  }
 
   // Row内のネストしたSplit子の幅(px)ドラッグリサイズ。Leaf子はColumn.svelte自身の
   // ハンドル(group.width)を使うのでここでは扱わない。
@@ -127,7 +168,13 @@
        いっぱいに広がるために必須。flex-1(flex:1 1 0)だとコンテンツ幅にshrink-to-fitし、
        内部のauto幅Columnがビューポート幅ではなく縮んだ幅を基準に均等割りしようとして破綻する
        (ウィンドウ幅を変えるたびbroken widthが変わって見えるのはこれが原因)。 -->
-  <div class="flex flex-auto min-w-0 h-full overflow-x-auto">
+  <div
+    class="flex flex-auto min-w-0 h-full overflow-x-auto"
+    style:scroll-snap-type={root && app.useMobileUi() ? "x mandatory" : undefined}
+    bind:this={rowScrollEl}
+    onscroll={onRowScroll}
+    onscrollend={onRowSettled}
+  >
     {#each node.children as child (child.node.id)}
       {#if child.node.type === "leaf"}
         <!-- Leafの幅は今まで通りColumn.svelte側(ColumnGroup.width/auto)が決める。
@@ -136,10 +183,22 @@
         <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} />
       {:else}
         <!-- ネストしたSplit(例: 下に分割された塊)にはColumn.svelteに相当する幅指定元が
-             無いため、PaneChild.size/autoをそのままflex指定に使う。 -->
+             無いため、PaneChild.size/autoをそのままflex指定に使う。モバイルでは、
+             カラム間Scroll Snap(root側のこのdiv)がchild数=topLevelLeafGroupIds+ネストSplitの
+             DOM子数という前提で等幅ページングするため、ネストしたSplit自身も他のカラムと
+             同じ1ページ分の幅を占有させる必要がある(Issue #296 Finding 2)。
+             topLevelLeafGroupIdsはこのSplit自体をスワイプ先の候補には含めない
+             (スコープはTask 1のまま不変)が、幅だけは合わせておかないと、この後に
+             続くトップレベルカラムのインデックス計算がずれる。 -->
         <div
           class="relative flex flex-col h-full min-h-0 min-w-0"
-          style={child.auto ? "flex:1 1 0;min-width:220px" : `flex:0 0 ${child.size}px`}
+          style={app.useMobileUi()
+            ? "flex:0 0 100%;width:100%;min-width:0"
+            : child.auto
+              ? "flex:1 1 0;min-width:220px"
+              : `flex:0 0 ${child.size}px`}
+          style:scroll-snap-align={app.useMobileUi() ? "start" : undefined}
+          style:scroll-snap-stop={app.useMobileUi() ? "always" : undefined}
         >
           <Pane node={child.node} {onAddTab} {onEditTab} {onEditGroup} {onSplitDown} {onSplitRight} />
           {#if !child.auto}

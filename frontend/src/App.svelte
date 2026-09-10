@@ -19,11 +19,38 @@
   import { Pencil } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { setupPendingShareListener } from "./lib/pendingShare";
+  import { pageOrder } from "./lib/swipeNav";
 
   // ユーザのキー上書きを反映した実効キーマップ（設定変更で即反映）
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
   // モバイル版UIかPC版UIか(設定→表示で上書き可能、既定はOS判定。Issue #51)
   const useMobileUi = $derived(app.useMobileUi());
+
+  // モバイル版: カラム間の横スワイプをCSS Scroll Snapで実現する(Issue #296)。
+  // 実際にスクロールするDOM要素は、カラムが2つ以上ある場合はPane.svelteのrow描画内側div
+  // (トップレベルのPane呼び出し=root、node={app.paneRoot}のときのみ)であり、
+  // App.svelte側のこの外側div([data-columns-scroll])ではない
+  // (flex-auto子1個をラップするだけでscrollWidth===clientWidthとなり実際には
+  // スクロールしないため; カラムが1つだけのLeafケースは、そもそもスワイプ対象が
+  // 無いため考慮不要)。そのためScroll Snap自体の付与・着地検知はPane.svelte側で行い、
+  // ここではPane.svelteが`onRowScrollElement`経由で渡してくる実DOM要素への参照だけを
+  // 保持し、フォーカス変更時の再センタリングに使う。
+  let columnsScrollEl = $state<HTMLElement | null>(null);
+
+  // フォーカス対象カラムが変わるたび(スワイプ着地・タブバータップ以外にキーボード
+  // ショートカット等の経路もある)、モバイルでは外側スクロール位置をアニメーション
+  // 無しで追随させる。Pane.svelte側のonRowSettledがapp.focusColumnを呼んだ結果として
+  // この$effectが再度走っても、既に正しい位置にいるためscrollLeftの代入は無変化(冪等)。
+  $effect(() => {
+    const groupId = app.focusedGroupId;
+    if (!useMobileUi || !columnsScrollEl || !groupId) return;
+    const order = pageOrder(app.paneRoot);
+    const idx = order.indexOf(groupId);
+    if (idx < 0) return;
+    const width = columnsScrollEl.clientWidth;
+    if (width <= 0) return;
+    columnsScrollEl.scrollLeft = idx * width;
+  });
 
   let showAdd = $state(false);
   let showAddColumn = $state(false);
@@ -160,8 +187,22 @@
         「＋カラム」からソースとフィルタを選んでカラムを追加してください。
       </div>
     {:else}
-      <div class="flex h-full overflow-x-auto">
-        <Pane node={app.paneRoot} onAddTab={openAddTab} onEditTab={openEditTab} onEditGroup={openColumnSettings} onSplitDown={splitDown} onSplitRight={splitRight} />
+      <!-- data-columns-scrollはE2E/デバッグ向けのマーカー属性として残すが、Scroll Snap
+           CSS/ハンドラ自体は(カラムが2つ以上あるときは実際にスクロールしない要素のため)
+           ここには付けない。実スクロール要素の参照はPane.svelteのonRowScrollElement経由で
+           columnsScrollElへ受け取る(Leafケース=カラム1つのみのときはbind先が無いため
+           columnsScrollElはnullのままだが、その場合はスワイプ対象自体が無いため問題ない)。 -->
+      <div class="flex h-full overflow-x-auto" data-columns-scroll>
+        <Pane
+          node={app.paneRoot}
+          root={true}
+          onRowScrollElement={(el) => (columnsScrollEl = el)}
+          onAddTab={openAddTab}
+          onEditTab={openEditTab}
+          onEditGroup={openColumnSettings}
+          onSplitDown={splitDown}
+          onSplitRight={splitRight}
+        />
       </div>
     {/if}
   </main>
