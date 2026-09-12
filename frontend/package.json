@@ -20,7 +20,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/svelte": "^5.4.2",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^24.13.2",
+    "@types/node": "^26.4.0",
     "jsdom": "^30.0.1",
     "shadcn-svelte": "^1.6.1",
     "svelte": "^5.57.0",
