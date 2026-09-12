@@ -146,4 +146,14 @@
     height: 100%;
     margin: 0 !important;
   }
+  /* viewerjs はノッチ/ホームインジケータのセーフエリアを考慮しないため、
+     閉じるボタン(画面右上隅)とフッター(ツールバー等、画面下端)を
+     env(safe-area-inset-*) 分だけ内側にずらす(Issue #331)。 */
+  :global(.viewer-container .viewer-close) {
+    top: calc(-40px + env(safe-area-inset-top));
+    right: calc(-40px + env(safe-area-inset-right));
+  }
+  :global(.viewer-container .viewer-footer) {
+    bottom: env(safe-area-inset-bottom);
+  }
 </style>
