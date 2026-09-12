@@ -6,7 +6,6 @@ description = "Android haptics (vibration) support for tsumugi"
 edition = "2021"
 rust-version = "1.77.2"
 exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
-links = "tauri-plugin-haptics"
 
 # tsumugi本体(src-tauri)の暗黙workspaceに巻き込まれないようにする
 # (`cargo build --workspace`等の挙動を変えないため)。
