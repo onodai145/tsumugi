@@ -417,7 +417,7 @@ pub(crate) fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
             n.local_only as i64,
             n.user.id,
             n.reply_id,
-            Option::<String>::None, // reply_user_id: Note には無いため NULL（reply_to_me は限定的）
+            n.reply_user_id,
             n.renote_id,
             n.channel_id,
             n.via,
@@ -653,6 +653,20 @@ mod tests {
             conn.query_row("SELECT payload FROM note WHERE id = 'n1'", [], |r| r.get(0)).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw_payload).unwrap();
         assert_eq!(v["user"], serde_json::json!({ "id": "u1" }));
+    }
+
+    #[test]
+    fn upsert_note_stores_reply_user_id_column() {
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
+        let mut n = note("n1", 100);
+        n.reply_id = Some("r1".into());
+        n.reply_user_id = Some("bob-id".into());
+        upsert_note(&conn, &n).unwrap();
+
+        let stored: Option<String> = conn
+            .query_row("SELECT reply_user_id FROM note WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some("bob-id"));
     }
 
     #[tokio::test]
