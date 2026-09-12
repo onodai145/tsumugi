@@ -1,7 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/store.svelte";
-  import { X } from "@lucide/svelte";
-  import { Button } from "$lib/components/ui/button";
+  import Modal from "./Modal.svelte";
 
   // カラム(視覚カラム)自体の設定。タブ設定とは別に、グリップのダブルクリックで開く。
   let { groupId, onclose }: { groupId: string; onclose: () => void } = $props();
@@ -49,137 +48,118 @@
   }
 </script>
 
-<div
-  class="fixed inset-0 z-50 grid items-start justify-items-center bg-black/45 pt-[max(8vh,env(safe-area-inset-top))]"
-  onclick={onclose}
-  onkeydown={(e) => e.key === "Escape" && onclose()}
-  role="presentation"
->
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div
-    class="w-[min(360px,92vw)] rounded-xl border border-border bg-background p-4"
-    onclick={(e) => e.stopPropagation()}
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-  >
-    <header class="mb-3 flex items-center justify-between font-semibold">
-      <span>カラム設定</span>
-      <Button type="button" variant="ghost" size="icon-xs" onclick={onclose}><X size={16} /></Button>
-    </header>
+<Modal title="カラム設定" {onclose} width="360px">
+  {#if group}
+    {#if rowSlot?.isLeaf}
+      <div class="flex flex-col gap-1 text-sm">
+        <span class="text-muted-foreground">幅</span>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input
+            type="radio"
+            name="width-mode"
+            class="accent-primary"
+            checked={!group.auto}
+            onchange={() => setAuto(false)}
+          /> 固定（ドラッグで調整）
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input
+            type="radio"
+            name="width-mode"
+            class="accent-primary"
+            checked={group.auto}
+            onchange={() => setAuto(true)}
+          /> 自動調整（ウィンドウ幅に合わせて均等割付）
+        </label>
+      </div>
 
-    {#if group}
-      {#if rowSlot?.isLeaf}
-        <div class="flex flex-col gap-1 text-sm">
-          <span class="text-muted-foreground">幅</span>
-          <label class="flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="width-mode"
-              class="accent-primary"
-              checked={!group.auto}
-              onchange={() => setAuto(false)}
-            /> 固定（ドラッグで調整）
-          </label>
-          <label class="flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="width-mode"
-              class="accent-primary"
-              checked={group.auto}
-              onchange={() => setAuto(true)}
-            /> 自動調整（ウィンドウ幅に合わせて均等割付）
-          </label>
-        </div>
-
-        {#if !group.auto}
-          <label class="mt-2.5 flex flex-col gap-1 text-sm">
-            <span class="text-muted-foreground">幅（px、220〜720）</span>
-            <input
-              class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-              type="number"
-              min="220"
-              max="720"
-              value={group.width}
-              onchange={(e) => setWidth(Number((e.currentTarget as HTMLInputElement).value))}
-            />
-          </label>
-        {/if}
-      {:else if rowSlot}
-        <div class="flex flex-col gap-1 text-sm">
-          <span class="text-muted-foreground">分割ブロック全体の幅</span>
-          <label class="flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="block-width-mode"
-              class="accent-primary"
-              checked={!rowSlot.auto}
-              onchange={() => setBlockAuto(false)}
-            /> 固定
-          </label>
-          <label class="flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="block-width-mode"
-              class="accent-primary"
-              checked={rowSlot.auto}
-              onchange={() => setBlockAuto(true)}
-            /> 自動調整（ウィンドウ幅に合わせて均等割付）
-          </label>
-        </div>
-
-        {#if !rowSlot.auto}
-          <label class="mt-2.5 flex flex-col gap-1 text-sm">
-            <span class="text-muted-foreground">幅（px、220〜720）</span>
-            <input
-              class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-              type="number"
-              min="220"
-              max="720"
-              value={Math.round(rowSlot.size)}
-              onchange={(e) => setBlockWidth(Number((e.currentTarget as HTMLInputElement).value))}
-            />
-          </label>
-        {/if}
+      {#if !group.auto}
+        <label class="mt-2.5 flex flex-col gap-1 text-sm">
+          <span class="text-muted-foreground">幅（px、220〜720）</span>
+          <input
+            class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+            type="number"
+            min="220"
+            max="720"
+            value={group.width}
+            onchange={(e) => setWidth(Number((e.currentTarget as HTMLInputElement).value))}
+          />
+        </label>
       {/if}
+    {:else if rowSlot}
+      <div class="flex flex-col gap-1 text-sm">
+        <span class="text-muted-foreground">分割ブロック全体の幅</span>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input
+            type="radio"
+            name="block-width-mode"
+            class="accent-primary"
+            checked={!rowSlot.auto}
+            onchange={() => setBlockAuto(false)}
+          /> 固定
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input
+            type="radio"
+            name="block-width-mode"
+            class="accent-primary"
+            checked={rowSlot.auto}
+            onchange={() => setBlockAuto(true)}
+          /> 自動調整（ウィンドウ幅に合わせて均等割付）
+        </label>
+      </div>
 
-      {#if paneCtx}
-        <div class="flex flex-col gap-1 text-sm">
-          <span class="text-muted-foreground">高さ</span>
-          <label class="flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="height-mode"
-              class="accent-primary"
-              checked={!paneCtx.auto}
-              onchange={() => setHeightAuto(false)}
-            /> 固定
-          </label>
-          <label class="flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="height-mode"
-              class="accent-primary"
-              checked={paneCtx.auto}
-              onchange={() => setHeightAuto(true)}
-            /> 自動調整（残りを均等割り）
-          </label>
-        </div>
-
-        {#if !paneCtx.auto}
-          <label class="mt-2.5 flex flex-col gap-1 text-sm">
-            <span class="text-muted-foreground">高さ（%、5〜95）</span>
-            <input
-              class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-              type="number"
-              min="5"
-              max="95"
-              value={Math.round(paneCtx.size)}
-              onchange={(e) => setHeightPercent(Number((e.currentTarget as HTMLInputElement).value))}
-            />
-          </label>
-        {/if}
+      {#if !rowSlot.auto}
+        <label class="mt-2.5 flex flex-col gap-1 text-sm">
+          <span class="text-muted-foreground">幅（px、220〜720）</span>
+          <input
+            class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+            type="number"
+            min="220"
+            max="720"
+            value={Math.round(rowSlot.size)}
+            onchange={(e) => setBlockWidth(Number((e.currentTarget as HTMLInputElement).value))}
+          />
+        </label>
       {/if}
     {/if}
-  </div>
-</div>
+
+    {#if paneCtx}
+      <div class="flex flex-col gap-1 text-sm">
+        <span class="text-muted-foreground">高さ</span>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input
+            type="radio"
+            name="height-mode"
+            class="accent-primary"
+            checked={!paneCtx.auto}
+            onchange={() => setHeightAuto(false)}
+          /> 固定
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          <input
+            type="radio"
+            name="height-mode"
+            class="accent-primary"
+            checked={paneCtx.auto}
+            onchange={() => setHeightAuto(true)}
+          /> 自動調整（残りを均等割り）
+        </label>
+      </div>
+
+      {#if !paneCtx.auto}
+        <label class="mt-2.5 flex flex-col gap-1 text-sm">
+          <span class="text-muted-foreground">高さ（%、5〜95）</span>
+          <input
+            class="w-[100px] rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+            type="number"
+            min="5"
+            max="95"
+            value={Math.round(paneCtx.size)}
+            onchange={(e) => setHeightPercent(Number((e.currentTarget as HTMLInputElement).value))}
+          />
+        </label>
+      {/if}
+    {/if}
+  {/if}
+</Modal>

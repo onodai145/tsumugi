@@ -1,8 +1,9 @@
 <script lang="ts">
   import { commands, unwrap } from "../lib/ipc";
-  import { X, Check } from "@lucide/svelte";
+  import { Check } from "@lucide/svelte";
   import type { DriveFile, SourceItem } from "../bindings/tauri.gen";
   import { Button } from "$lib/components/ui/button";
+  import Modal from "./Modal.svelte";
 
   let {
     accountId,
@@ -100,108 +101,89 @@
   void refresh();
 </script>
 
-<div
-  class="fixed inset-0 z-[60] grid items-start justify-items-center bg-black/45 pt-[max(8vh,env(safe-area-inset-top))]"
-  onclick={onclose}
-  onkeydown={(e) => e.key === "Escape" && onclose()}
-  role="presentation"
->
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div
-    class="flex max-h-[78vh] w-[min(520px,92vw)] flex-col rounded-xl border border-border bg-background p-4"
-    onclick={(e) => e.stopPropagation()}
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-  >
-    <header class="mb-2.5 flex flex-none items-center justify-between font-semibold">
-      <span>ドライブから選択</span>
-      <Button type="button" variant="ghost" size="icon-xs" onclick={onclose}><X size={16} /></Button>
-    </header>
-
-    <nav class="mb-2.5 flex flex-none flex-wrap items-center gap-1 text-sm">
+<Modal title="ドライブから選択" {onclose} width="520px" maxHeight="78vh">
+  <nav class="mb-2.5 flex flex-none flex-wrap items-center gap-1 text-sm">
+    <button
+      type="button"
+      class={path.length === 0
+        ? "px-1 py-0.5 font-[inherit] font-semibold text-foreground"
+        : "px-1 py-0.5 font-[inherit] text-muted-foreground"}
+      onclick={() => goToBreadcrumb(-1)}>ドライブ</button
+    >
+    {#each path as p, i (p.id)}
+      <span class="text-muted-foreground">/</span>
       <button
         type="button"
-        class={path.length === 0
+        class={i === path.length - 1
           ? "px-1 py-0.5 font-[inherit] font-semibold text-foreground"
           : "px-1 py-0.5 font-[inherit] text-muted-foreground"}
-        onclick={() => goToBreadcrumb(-1)}>ドライブ</button
+        onclick={() => goToBreadcrumb(i)}
       >
-      {#each path as p, i (p.id)}
-        <span class="text-muted-foreground">/</span>
+        {p.name || "(無題)"}
+      </button>
+    {/each}
+  </nav>
+
+  {#if loading}
+    <p class="text-sm text-muted-foreground">読み込み中…</p>
+  {:else}
+    {#if folders.length === 0 && files.length === 0}
+      <p class="text-sm text-muted-foreground">ファイルがありません</p>
+    {/if}
+    <div class="grid min-h-0 flex-1 auto-rows-[84px] grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2 overflow-y-auto">
+      {#each folders as f (f.id)}
         <button
           type="button"
-          class={i === path.length - 1
-            ? "px-1 py-0.5 font-[inherit] font-semibold text-foreground"
-            : "px-1 py-0.5 font-[inherit] text-muted-foreground"}
-          onclick={() => goToBreadcrumb(i)}
+          class="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-1.5 text-xs break-all text-foreground"
+          onclick={() => enterFolder(f)}
         >
-          {p.name || "(無題)"}
+          📁 {f.name || "(無題)"}
         </button>
       {/each}
-    </nav>
-
-    {#if loading}
-      <p class="text-sm text-muted-foreground">読み込み中…</p>
-    {:else}
-      {#if folders.length === 0 && files.length === 0}
-        <p class="text-sm text-muted-foreground">ファイルがありません</p>
-      {/if}
-      <div class="grid min-h-0 flex-1 auto-rows-[84px] grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2 overflow-y-auto">
-        {#each folders as f (f.id)}
-          <button
-            type="button"
-            class="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-1.5 text-xs break-all text-foreground"
-            onclick={() => enterFolder(f)}
-          >
-            📁 {f.name || "(無題)"}
-          </button>
-        {/each}
-        {#each files as f (f.id)}
-          <button
-            type="button"
-            class={selected.has(f.id)
-              ? "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-xs text-foreground outline outline-2 outline-offset-[-2px] outline-primary"
-              : "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-xs text-foreground"}
-            onclick={() => onFileClick(f)}
-          >
-            {#if f.isSensitive && !revealed[f.id]}
-              <span class="p-1 text-muted-foreground">閲覧注意（クリックで表示）</span>
-            {:else if f.mimeType.startsWith("image/")}
-              <img src={f.thumbnailUrl ?? f.url} alt={f.name} loading="lazy" class="h-full w-full object-cover" />
-            {:else}
-              <span class="text-muted-foreground">{f.mimeType.split("/")[0] || "file"}</span>
-            {/if}
-            {#if selected.has(f.id)}
-              <span
-                class="absolute top-1 right-1 flex size-[18px] items-center justify-center rounded-full bg-primary text-white"
-                ><Check size={16} /></span
-              >
-            {/if}
-          </button>
-        {/each}
-      </div>
-      {#if !noMoreFiles && files.length > 0}
-        <Button
+      {#each files as f (f.id)}
+        <button
           type="button"
-          variant="outline"
-          size="sm"
-          class="mt-2 self-center"
-          disabled={loadingMore}
-          onclick={loadMore}
+          class={selected.has(f.id)
+            ? "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-xs text-foreground outline outline-2 outline-offset-[-2px] outline-primary"
+            : "relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted p-0 text-xs text-foreground"}
+          onclick={() => onFileClick(f)}
         >
-          {loadingMore ? "読み込み中…" : "もっと見る"}
-        </Button>
-      {/if}
-    {/if}
-
-    {#if err}<p class="mt-2 flex-none text-sm break-words text-destructive">{err}</p>{/if}
-
-    <div class="mt-3 flex flex-none items-center justify-between">
-      <span class="text-sm text-muted-foreground">選択中 {selected.size}件</span>
-      <Button type="button" variant="default" size="sm" disabled={selected.size === 0} onclick={confirm}
-        >添付</Button
-      >
+          {#if f.isSensitive && !revealed[f.id]}
+            <span class="p-1 text-muted-foreground">閲覧注意（クリックで表示）</span>
+          {:else if f.mimeType.startsWith("image/")}
+            <img src={f.thumbnailUrl ?? f.url} alt={f.name} loading="lazy" class="h-full w-full object-cover" />
+          {:else}
+            <span class="text-muted-foreground">{f.mimeType.split("/")[0] || "file"}</span>
+          {/if}
+          {#if selected.has(f.id)}
+            <span
+              class="absolute top-1 right-1 flex size-[18px] items-center justify-center rounded-full bg-primary text-white"
+              ><Check size={16} /></span
+            >
+          {/if}
+        </button>
+      {/each}
     </div>
+    {#if !noMoreFiles && files.length > 0}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        class="mt-2 self-center"
+        disabled={loadingMore}
+        onclick={loadMore}
+      >
+        {loadingMore ? "読み込み中…" : "もっと見る"}
+      </Button>
+    {/if}
+  {/if}
+
+  {#if err}<p class="mt-2 flex-none text-sm break-words text-destructive">{err}</p>{/if}
+
+  <div class="mt-3 flex flex-none items-center justify-between">
+    <span class="text-sm text-muted-foreground">選択中 {selected.size}件</span>
+    <Button type="button" variant="default" size="sm" disabled={selected.size === 0} onclick={confirm}
+      >添付</Button
+    >
   </div>
-</div>
+</Modal>

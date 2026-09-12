@@ -8,7 +8,14 @@
     onclose,
     children,
     width = "480px",
-  }: { title: string; onclose: () => void; children: Snippet; width?: string } = $props();
+    maxHeight,
+  }: {
+    title: string;
+    onclose: () => void;
+    children: Snippet;
+    width?: string;
+    maxHeight?: string;
+  } = $props();
 
   // 深くネストされたコンポーネントから呼ばれても
   // content-visibility/containの包含ブロックを脱出できるよう portal で body 直下に置く。
@@ -33,18 +40,24 @@
 >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
-    class="w-[min(var(--modal-w),92vw)] rounded-xl border border-border bg-background p-4"
-    style={`--modal-w:${width}`}
+    class={`w-[min(var(--modal-w),92vw)] rounded-xl border border-border bg-background p-4 ${maxHeight ? "flex flex-col" : ""}`}
+    style={`--modal-w:${width};${maxHeight ? ` max-height:${maxHeight};` : ""}`}
     bind:this={modalEl}
     onclick={(e) => e.stopPropagation()}
     role="dialog"
     aria-modal="true"
     tabindex="-1"
   >
-    <header class="mb-3 flex items-center justify-between font-semibold">
+    <header class="mb-3 flex flex-none items-center justify-between font-semibold">
       <span>{title}</span>
       <Button variant="ghost" size="icon-xs" onclick={onclose}><X size={16} /></Button>
     </header>
-    {@render children()}
+    {#if maxHeight}
+      <div class="flex flex-1 flex-col min-h-0">
+        {@render children()}
+      </div>
+    {:else}
+      {@render children()}
+    {/if}
   </div>
 </div>
