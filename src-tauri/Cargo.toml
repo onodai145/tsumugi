@@ -80,7 +80,7 @@ tauri-plugin-haptics = { path = "plugins/tauri-plugin-haptics" }
 infer = "0.22.0"
 rodio = "0.22"
 async-trait = "0.1.92"
-sqlx = { version = "0.8.6", default-features = false, features = ["mysql", "postgres", "runtime-tokio", "tls-rustls"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["mysql", "postgres", "runtime-tokio", "tls-rustls"] }
 sea-query = { version = "1.0.2", default-features = false, features = ["backend-mysql", "backend-postgres", "derive"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

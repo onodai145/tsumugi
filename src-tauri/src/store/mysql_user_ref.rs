@@ -136,7 +136,9 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::MySqlPool, ids: &[String]) -
                 avatar_blurhash
          FROM `user` WHERE id IN ({placeholders})"
     );
-    let mut query = sqlx::query(&sql);
+    // `placeholders`は`ids.len()`個の`?`を繰り返し連結しただけ(値そのものは含まない)で、
+    // 各`id`の値は必ず`.bind()`経由で渡すため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         query = query.bind(id);
     }

@@ -52,6 +52,12 @@ impl PostgresBackend {
 }
 
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
+///
+/// この関数内の`pool.execute(sqlx::AssertSqlSafe(..))`は全てsea-queryの`Table::create()`
+/// `/Index::create()`ビルダーが生成したDDL文字列であり、外部入力・ユーザーデータは一切
+/// 混入しない(列名/型/インデックス名はすべてソース中のリテラル)。sqlx 0.9の`SqlSafeStr`
+/// が要求する監査は本コメントで満たす(sea-queryの出力は`String`であり
+/// `&'static str`ではないためラップが必要)。
 pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
     let note = Table::create()
         .table(NoteTable::Table)
@@ -86,7 +92,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteTable::IsFavoritedByMe).small_integer().not_null().default(0))
         .col(ColumnDef::new(NoteTable::Payload).text().not_null())
         .build(PostgresQueryBuilder);
-    pool.execute(note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note)).await?;
 
     let idx_note_created = Index::create()
         .if_not_exists()
@@ -94,7 +100,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteTable::Table)
         .col(NoteTable::CreatedAt)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_note_created.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_note_created)).await?;
 
     let idx_note_user = Index::create()
         .if_not_exists()
@@ -102,7 +108,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteTable::Table)
         .col(NoteTable::UserId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_note_user.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_note_user)).await?;
 
     let user = Table::create()
         .table(UserTable::Table)
@@ -126,7 +132,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::InstanceThemeColor).text())
         .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
         .build(PostgresQueryBuilder);
-    pool.execute(user.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(user)).await?;
     // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
     // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
     // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(Postgres専用構文、冪等)。
@@ -139,7 +145,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteReactionTable::EmojiKey).text())
         .col(ColumnDef::new(NoteReactionTable::Count).big_integer())
         .build(PostgresQueryBuilder);
-    pool.execute(note_reaction.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_reaction)).await?;
 
     let note_tag = Table::create()
         .table(NoteTagTable::Table)
@@ -147,7 +153,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteTagTable::NoteId).text())
         .col(ColumnDef::new(NoteTagTable::Tag).text())
         .build(PostgresQueryBuilder);
-    pool.execute(note_tag.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_tag)).await?;
 
     let note_mention = Table::create()
         .table(NoteMentionTable::Table)
@@ -155,7 +161,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteMentionTable::NoteId).text())
         .col(ColumnDef::new(NoteMentionTable::UserId).text())
         .build(PostgresQueryBuilder);
-    pool.execute(note_mention.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_mention)).await?;
 
     let note_emoji = Table::create()
         .table(NoteEmojiTable::Table)
@@ -163,7 +169,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteEmojiTable::NoteId).text())
         .col(ColumnDef::new(NoteEmojiTable::Emoji).text())
         .build(PostgresQueryBuilder);
-    pool.execute(note_emoji.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_emoji)).await?;
 
     let note_file = Table::create()
         .table(NoteFileTable::Table)
@@ -174,7 +180,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         // is_sensitiveも同じ理由(`bool_field`の`f.is_sensitive=1`比較)でSMALLINTにする。
         .col(ColumnDef::new(NoteFileTable::IsSensitive).small_integer())
         .build(PostgresQueryBuilder);
-    pool.execute(note_file.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_file)).await?;
 
     let idx_nr_note = Index::create()
         .if_not_exists()
@@ -182,7 +188,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteReactionTable::Table)
         .col(NoteReactionTable::NoteId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nr_note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nr_note)).await?;
 
     let idx_nt_note = Index::create()
         .if_not_exists()
@@ -190,7 +196,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteTagTable::Table)
         .col(NoteTagTable::NoteId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nt_note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nt_note)).await?;
 
     let idx_nm_note = Index::create()
         .if_not_exists()
@@ -198,7 +204,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteMentionTable::Table)
         .col(NoteMentionTable::NoteId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nm_note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nm_note)).await?;
 
     let idx_ne_note = Index::create()
         .if_not_exists()
@@ -206,7 +212,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteEmojiTable::Table)
         .col(NoteEmojiTable::NoteId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_ne_note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_ne_note)).await?;
 
     let idx_nf_note = Index::create()
         .if_not_exists()
@@ -214,7 +220,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteFileTable::Table)
         .col(NoteFileTable::NoteId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nf_note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nf_note)).await?;
 
     let idx_nr_unique = Index::create()
         .if_not_exists()
@@ -224,7 +230,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(NoteReactionTable::NoteId)
         .col(NoteReactionTable::EmojiKey)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nr_unique.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nr_unique)).await?;
 
     let idx_nt_unique = Index::create()
         .if_not_exists()
@@ -234,7 +240,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(NoteTagTable::NoteId)
         .col(NoteTagTable::Tag)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nt_unique.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nt_unique)).await?;
 
     let idx_nm_unique = Index::create()
         .if_not_exists()
@@ -244,7 +250,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(NoteMentionTable::NoteId)
         .col(NoteMentionTable::UserId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nm_unique.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nm_unique)).await?;
 
     let idx_ne_unique = Index::create()
         .if_not_exists()
@@ -254,7 +260,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(NoteEmojiTable::NoteId)
         .col(NoteEmojiTable::Emoji)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_ne_unique.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_ne_unique)).await?;
 
     let idx_nf_unique = Index::create()
         .if_not_exists()
@@ -266,7 +272,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(NoteFileTable::MimeCategory)
         .col(NoteFileTable::IsSensitive)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_nf_unique.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_nf_unique)).await?;
 
     let column_note = Table::create()
         .table(ColumnNoteTable::Table)
@@ -281,7 +287,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
                 .col(ColumnNoteTable::NoteId),
         )
         .build(PostgresQueryBuilder);
-    pool.execute(column_note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_note)).await?;
 
     let idx_cn_column = Index::create()
         .if_not_exists()
@@ -289,7 +295,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(ColumnNoteTable::Table)
         .col(ColumnNoteTable::ColumnId)
         .build(PostgresQueryBuilder);
-    pool.execute(idx_cn_column.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_cn_column)).await?;
 
     let idx_cn_column_created = Index::create()
         .if_not_exists()
@@ -299,7 +305,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col((ColumnNoteTable::CreatedAt, IndexOrder::Desc))
         .col((ColumnNoteTable::NoteId, IndexOrder::Desc))
         .build(PostgresQueryBuilder);
-    pool.execute(idx_cn_column_created.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_cn_column_created)).await?;
 
     let column_fetch_boundary = Table::create()
         .table(ColumnFetchBoundaryTable::Table)
@@ -307,7 +313,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(ColumnFetchBoundaryTable::ColumnId).text().primary_key())
         .col(ColumnDef::new(ColumnFetchBoundaryTable::OldestFetchedId).text().not_null())
         .build(PostgresQueryBuilder);
-    pool.execute(column_fetch_boundary.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_fetch_boundary)).await?;
 
     Ok(())
 }
@@ -883,8 +889,10 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
     .await?;
     let max_deleted_by_column: std::collections::HashMap<String, String> = max_deleted_rows.into_iter().collect();
 
+    // `table`はソース中に直書きした固定リストのみを走査し、`ids`は`.bind()`経由でのみ渡す
+    // ため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
     for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE note_id = ANY($1)")).bind(ids).execute(&mut **tx).await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE note_id = ANY($1)"))).bind(ids).execute(&mut **tx).await?;
     }
 
     for (column_id,) in &affected_columns {
@@ -973,6 +981,9 @@ async fn search_cache_impl(
 ) -> Result<Vec<Note>> {
     use crate::filter::sql::SqlParam;
 
+    // `converted_where`はTQLコンパイラ(`filter/sql.rs`)が生成した固定文字列を`$n`番号の
+    // 振り直しのみ行ったもので、値は一切埋め込まず`where_sql.params`(下でbind)経由のみで
+    // 渡す設計のため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
     let converted_where = to_postgres_sql(where_sql);
     let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN \"user\" u ON u.id = n.user_id WHERE ({converted_where})");
     let mut next_placeholder = where_sql.params.len() + 1;
@@ -982,7 +993,7 @@ async fn search_cache_impl(
     }
     sql.push_str(&format!(" ORDER BY n.created_at DESC, n.id DESC LIMIT ${next_placeholder}"));
 
-    let mut query = sqlx::query_as::<_, (String, String)>(&sql);
+    let mut query = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
     for p in &where_sql.params {
         query = match p {
             SqlParam::Text(s) => query.bind(s.clone()),
