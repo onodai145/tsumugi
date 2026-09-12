@@ -6,6 +6,13 @@ description = "Android haptics (vibration) support for tsumugi"
 edition = "2021"
 rust-version = "1.77.2"
 exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+links = "tauri-plugin-haptics"
+# Dependabotのcargo updaterはpath依存の取得対象ファイルを Cargo.toml の
+# 静的解析で決めており、build.rsが暗黙(自動検出)のままだとローカルpath依存の
+# build.rs実体を取得できず `links` 要求(下記)とかみ合わずに
+# cargo update自体が失敗する(Dependabotのupdate jobログで確認)。
+# build を明示することでDependabotにもbuild.rsの存在を認識させる。
+build = "build.rs"
 
 # tsumugi本体(src-tauri)の暗黙workspaceに巻き込まれないようにする
 # (`cargo build --workspace`等の挙動を変えないため)。
