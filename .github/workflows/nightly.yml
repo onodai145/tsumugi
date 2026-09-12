@@ -82,6 +82,16 @@ jobs:
           echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
           echo "shortsha=$(echo "${{ github.sha }}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
+      # cleanupジョブの削除が(権限エラー等で)失敗して前回のRelease/タグが
+      # 残っていても、このジョブでのRelease作成が422 (already exists)で
+      # 落ちて当日のNightly全体が成果物ゼロにならないよう、念のためここでも
+      # 削除しておく(cleanup同様、無ければ失敗するため`|| true`で許容)。
+      - name: 念のため既存のnightly Releaseとタグを再削除
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "$NIGHTLY_TAG" --yes --cleanup-tag --repo "${{ github.repository }}" || true
+
       - name: 空のnightly Releaseをnotes生成付きで作成
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -159,6 +169,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ env.NIGHTLY_TAG }}
+          # Releaseは`release`ジョブが先に確定させるため、通常はtauri-actionが
+          # 既存Releaseを見つけるだけでこの値は使われない(名称の書き換えはしない)。
+          # 万一`release`ジョブがRelease作成に失敗していた場合のフォールバックとして残す。
           releaseName: "tsumugi nightly (${{ needs.release.outputs.date }} @ ${{ needs.release.outputs.shortsha }})"
           releaseCommitish: ${{ github.sha }}
           releaseDraft: false
