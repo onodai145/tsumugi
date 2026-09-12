@@ -212,8 +212,9 @@ pub struct RawNote {
     pub local_only: bool,
     #[serde(default)]
     pub reply_id: Option<String>,
+    /// ネストされた返信元ノート（reply_user_id 抽出用。浅く1階層のみ使う）
     #[serde(default)]
-    pub reply_user_id: Option<String>,
+    pub reply: Option<Box<RawNote>>,
     #[serde(default)]
     pub renote_id: Option<String>,
     #[serde(default)]
@@ -303,7 +304,7 @@ impl From<RawNote> for Note {
             local_only: r.local_only,
             user: r.user.into(),
             reply_id: r.reply_id,
-            reply_user_id: r.reply_user_id,
+            reply_user_id: r.reply.as_ref().map(|reply| reply.user.id.clone()),
             renote_id: r.renote_id,
             renote: r.renote.map(|n| Box::new((*n).into())),
             files: r.files.into_iter().map(Into::into).collect(),
@@ -360,6 +361,40 @@ mod tests {
         assert_eq!(n.files[0].mime_type, "image/png");
         assert_eq!(n.emojis.get("blobcat").map(String::as_str), Some("http://x/e.png"));
         assert_eq!(n.tags, vec!["rust".to_string()]);
+    }
+
+    #[test]
+    fn extracts_reply_user_id_from_nested_reply() {
+        let raw: RawNote = serde_json::from_str(
+            r#"{
+              "id":"n2","createdAt":"2026-07-05T12:00:00.000Z","text":"@bob hi",
+              "user":{"id":"u1","username":"alice","host":null},
+              "visibility":"public","replyId":"r1",
+              "reply":{
+                "id":"r1","createdAt":"2026-07-05T11:00:00.000Z","text":"original",
+                "user":{"id":"bob-id","username":"bob","host":null},
+                "visibility":"public"
+              }
+            }"#,
+        )
+        .unwrap();
+        let n: Note = raw.into();
+        assert_eq!(n.reply_id.as_deref(), Some("r1"));
+        assert_eq!(n.reply_user_id.as_deref(), Some("bob-id"));
+    }
+
+    #[test]
+    fn reply_user_id_is_none_when_not_a_reply() {
+        let raw: RawNote = serde_json::from_str(
+            r#"{
+              "id":"n3","createdAt":"2026-07-05T12:00:00.000Z","text":"hi",
+              "user":{"id":"u1","username":"alice","host":null},
+              "visibility":"public"
+            }"#,
+        )
+        .unwrap();
+        let n: Note = raw.into();
+        assert_eq!(n.reply_user_id, None);
     }
 
     #[test]
