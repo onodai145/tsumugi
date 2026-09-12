@@ -1290,6 +1290,7 @@ mod tests {
                 instance: None,
             },
             reply_id: None,
+            reply_user_id: None,
             renote_id: None,
             renote: None,
             files: vec![],

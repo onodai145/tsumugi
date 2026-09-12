@@ -213,6 +213,8 @@ pub struct RawNote {
     #[serde(default)]
     pub reply_id: Option<String>,
     #[serde(default)]
+    pub reply_user_id: Option<String>,
+    #[serde(default)]
     pub renote_id: Option<String>,
     #[serde(default)]
     pub renote: Option<Box<RawNote>>,
@@ -301,6 +303,7 @@ impl From<RawNote> for Note {
             local_only: r.local_only,
             user: r.user.into(),
             reply_id: r.reply_id,
+            reply_user_id: r.reply_user_id,
             renote_id: r.renote_id,
             renote: r.renote.map(|n| Box::new((*n).into())),
             files: r.files.into_iter().map(Into::into).collect(),
