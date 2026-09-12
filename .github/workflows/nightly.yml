@@ -60,11 +60,44 @@ jobs:
         run: |
           gh release delete "$NIGHTLY_TAG" --yes --cleanup-tag --repo "${{ github.repository }}" || true
 
+  # buildとandroidが並列でReleaseを新規作成しようとするとRelease notes生成の
+  # レースが発生する(action-gh-releaseは`body`等未指定時に既存値を保持するだけで
+  # 自ら生成はしないため、先に完了した側の結果に依存してしまう)。
+  # このジョブが空のReleaseを`--generate-notes`付きで先に確定させることで、
+  # build/androidはどちらも「既存Releaseへのアセット追加」のみになり、
+  # notes生成ロジックが1箇所に集まる。
+  release:
+    needs: [check, cleanup]
+    if: needs.check.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      date: ${{ steps.meta.outputs.date }}
+      shortsha: ${{ steps.meta.outputs.shortsha }}
+    steps:
+      # Releaseの名称に使う日付・short shaを算出(build/androidジョブへ
+      # outputs経由で渡すため、算出はここでのみ行う)。
+      - name: Releaseメタデータ算出
+        id: meta
+        run: |
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "shortsha=$(echo "${{ github.sha }}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: 空のnightly Releaseをnotes生成付きで作成
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$NIGHTLY_TAG" \
+            --repo "${{ github.repository }}" \
+            --title "tsumugi nightly (${{ steps.meta.outputs.date }} @ ${{ steps.meta.outputs.shortsha }})" \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            --generate-notes
+
   # release.ymlのreleaseジョブと同じビルド手順。tagName/releaseNameとポータブルexeの
   # ファイル名だけ NIGHTLY_TAG ベースに、releaseCommitish/prerelease/releaseDraftを
   # nightly向けに変えている。
   build:
-    needs: [check, cleanup]
+    needs: [check, cleanup, release]
     if: needs.check.outputs.should_run == 'true'
     strategy:
       fail-fast: false
@@ -121,21 +154,12 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      # Releaseの名称に使う日付・short shaを算出(全プラットフォームで同じ値になるよう
-      # bashで統一。Windows runnerにもGit Bash由来のbashがある)。
-      - name: Releaseメタデータ算出
-        id: meta
-        shell: bash
-        run: |
-          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
-          echo "shortsha=$(echo "${{ github.sha }}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
-
       - uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ env.NIGHTLY_TAG }}
-          releaseName: "tsumugi nightly (${{ steps.meta.outputs.date }} @ ${{ steps.meta.outputs.shortsha }})"
+          releaseName: "tsumugi nightly (${{ needs.release.outputs.date }} @ ${{ needs.release.outputs.shortsha }})"
           releaseCommitish: ${{ github.sha }}
           releaseDraft: false
           prerelease: true
@@ -171,7 +195,7 @@ jobs:
   # release.ymlのandroidジョブと同じビルド・署名手順。ファイル名とtag_name/
   # target_commitish/prerelease/draftのみnightly向けに変えている。
   android:
-    needs: [check, cleanup]
+    needs: [check, cleanup, release]
     if: needs.check.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     environment: "Android Build"
