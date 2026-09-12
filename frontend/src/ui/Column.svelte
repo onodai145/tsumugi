@@ -331,6 +331,7 @@
   {#if activeTab}
     <div
       class="flex min-h-0 flex-1 [overflow-x:auto] [overscroll-behavior-x:auto]"
+      class:mobile-scroll-snap={app.useMobileUi()}
       style:scroll-snap-type={app.useMobileUi() ? "x mandatory" : undefined}
       bind:this={tabsEl}
       onscroll={onTabsScroll}

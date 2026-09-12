@@ -130,6 +130,17 @@
   background: var(--text-dim);
 }
 
+/* モバイル版のカラム間/タブ間スワイプ(CSS Scroll Snap)用スクロール領域は、
+   上記スクロールバーをそのまま出すとカラム用・タブ用の2本が縦に並んで表示され邪魔になる
+   (Issue #330)。操作はスワイプ前提でスクロールバー自体を操作する必要がないため、
+   Scroll Snapを有効化している間だけ非表示にする。 */
+.mobile-scroll-snap {
+  scrollbar-width: none;
+}
+.mobile-scroll-snap::-webkit-scrollbar {
+  display: none;
+}
+
 /* 背景画像（設定→表示で選択）。#applyBackground が --bg-image 等を <html> にセットする。
    body ではなく ::before に描画し、blur を背景だけに掛ける（body 自体を blur すると
    子要素まで巻き込まれるため）。位置は fixed で viewport 全体、z-index で最背面に固定。 */
