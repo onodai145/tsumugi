@@ -52,6 +52,12 @@ impl PostgresBackend {
 }
 
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
+///
+/// この関数内の`pool.execute(sqlx::AssertSqlSafe(..))`は全てsea-queryの`Table::create()`
+/// `/Index::create()`ビルダーが生成したDDL文字列であり、外部入力・ユーザーデータは一切
+/// 混入しない(列名/型/インデックス名はすべてソース中のリテラル)。sqlx 0.9の`SqlSafeStr`
+/// が要求する監査は本コメントで満たす(sea-queryの出力は`String`であり
+/// `&'static str`ではないためラップが必要)。
 pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
     let note = Table::create()
         .table(NoteTable::Table)
@@ -883,6 +889,8 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
     .await?;
     let max_deleted_by_column: std::collections::HashMap<String, String> = max_deleted_rows.into_iter().collect();
 
+    // `table`はソース中に直書きした固定リストのみを走査し、`ids`は`.bind()`経由でのみ渡す
+    // ため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
     for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
         sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE note_id = ANY($1)"))).bind(ids).execute(&mut **tx).await?;
     }
@@ -973,6 +981,9 @@ async fn search_cache_impl(
 ) -> Result<Vec<Note>> {
     use crate::filter::sql::SqlParam;
 
+    // `converted_where`はTQLコンパイラ(`filter/sql.rs`)が生成した固定文字列を`$n`番号の
+    // 振り直しのみ行ったもので、値は一切埋め込まず`where_sql.params`(下でbind)経由のみで
+    // 渡す設計のため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
     let converted_where = to_postgres_sql(where_sql);
     let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN \"user\" u ON u.id = n.user_id WHERE ({converted_where})");
     let mut next_placeholder = where_sql.params.len() + 1;

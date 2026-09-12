@@ -71,6 +71,9 @@ fn long_text(col: &mut ColumnDef) -> &mut ColumnDef {
 }
 
 /// インデックス作成を実行し、既に存在する場合（Duplicate key name）は無視する。
+///
+/// 呼び出し元は全てsea-queryの`Index::create()`ビルダー出力かリテラルのDDL文字列を渡す
+/// (`ensure_schema`参照)ため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
 async fn execute_index(pool: &sqlx::MySqlPool, index_sql: &str) -> Result<()> {
     match pool.execute(sqlx::AssertSqlSafe(index_sql)).await {
         Ok(_) => Ok(()),
@@ -102,6 +105,9 @@ async fn execute_index(pool: &sqlx::MySqlPool, index_sql: &str) -> Result<()> {
 /// エラー1060(ER_DUP_FIELDNAME)だけをここで握りつぶす。`execute_index`と同じ理由で、
 /// `MySqlDatabaseError::number()`で正確な数値コードを判定する(メッセージ文字列の
 /// 部分一致では他のエラーまで誤って握りつぶしてしまうため避ける)。
+///
+/// 呼び出し元は全てリテラルの`ALTER TABLE ... ADD COLUMN`文字列を渡す(`ensure_schema`
+/// 参照)ため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
 async fn add_column_if_missing(pool: &sqlx::MySqlPool, alter_sql: &str) -> Result<()> {
     match pool.execute(sqlx::AssertSqlSafe(alter_sql)).await {
         Ok(_) => Ok(()),
@@ -118,6 +124,12 @@ async fn add_column_if_missing(pool: &sqlx::MySqlPool, alter_sql: &str) -> Resul
 }
 
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
+///
+/// この関数内の`pool.execute(sqlx::AssertSqlSafe(..))`は全てsea-queryの`Table::create()`
+/// `/Index::create()`ビルダーが生成したDDL文字列であり、外部入力・ユーザーデータは一切
+/// 混入しない(列名/型/インデックス名はすべてソース中のリテラル)。sqlx 0.9の`SqlSafeStr`
+/// が要求する監査は本コメントで満たす(sea-queryの出力は`String`であり
+/// `&'static str`ではないためラップが必要)。
 pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     let note = Table::create()
         .table(NoteTable::Table)
@@ -530,6 +542,10 @@ async fn upsert_note_tx(tx: &mut sqlx::MySqlTransaction<'_>, n: &Note) -> Result
 /// `table`のうち`note_id = note_id`で`key_col`の値が`current_keys`に含まれない行を削除する
 /// (取り消されたリアクション/タグ/メンション/絵文字の掃除)。`current_keys`が空なら
 /// `NOT IN ()`が構文エラーになるため、`key_col IS NOT NULL`(=全行削除)に分岐する。
+///
+/// `table`/`key_col`は呼び出し元(`"note_reaction"`/`"emoji_key"`等)がすべてリテラルで
+/// 渡す固定値であり、`current_keys`(ユーザーデータ由来)は`?`プレースホルダ経由の`.bind()`
+/// でのみ渡すため、`sqlx::AssertSqlSafe`でのSQL文字列化は安全(SQLインジェクション監査済み)。
 async fn delete_stale_by_key(
     tx: &mut sqlx::MySqlTransaction<'_>,
     table: &str,
@@ -861,6 +877,11 @@ async fn delete_matching_ids_with_chunk_size(
 /// チェックしない、呼び出し元が保証する)。noteおよび側テーブルからの削除と、
 /// このチャンクで影響を受けたカラムID・カラムごとの削除ID最大値の収集のみを行い、
 /// fetch_boundaryの調整は呼び出し元が全チャンク分をマージしてから1回だけ行う。
+///
+/// この関数内で`format!`組み立てのSQLに`sqlx::AssertSqlSafe`を使っている箇所は、
+/// `placeholders`が`ids.len()`個の`?`を繰り返し連結しただけ(値そのものは含まない)、
+/// `table`はソース中に直書きしたテーブル名のリスト由来で、`ids`の各値は必ず`.bind()`
+/// 経由で渡すため、SQLインジェクションの懸念はない(監査済み)。
 async fn delete_matching_ids_chunk(
     tx: &mut sqlx::MySqlTransaction<'_>,
     ids: &[String],
@@ -950,6 +971,9 @@ async fn search_cache_impl(
 
     // SqlWhere.sql(`?`プレースホルダ、` REGEXP `)は無変換でそのまま使う
     // (Global Constraints参照、to_mysql_sqlに相当する変換関数は実装しない)。
+    // `where_sql.sql`はTQLコンパイラ(`filter/sql.rs`)が生成する固定文字列で、値は
+    // 一切埋め込まず`where_sql.params`(下でbind)経由のみで渡す設計のため、
+    // `sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
     let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN `user` u ON u.id = n.user_id WHERE ({})", where_sql.sql);
     if until_id.is_some() {
         sql.push_str(" AND n.id < ?");
