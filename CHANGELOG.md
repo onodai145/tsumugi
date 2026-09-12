@@ -2,6 +2,70 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-09-12
+
+### 🚀 Features
+
+- AndroidのVibrationEffect実装とVIBRATE権限を追加(Issue #26)
+- Vibrateコマンドを追加してTSバインディングを生成(Issue #26)
+- フロントにvibrate()ラッパーを追加(Issue #26)
+- ノート投稿成功時にハプティクスを発火する(Issue #26)
+- 設定画面にハプティクスON/OFFトグルを追加(Issue #26)
+- スワイプでの次/前タブ・カラム解決ロジックを追加
+- スワイプの軸判定・確定判定・ラバーバンド計算を追加
+- AppStoreにスワイプ確定メソッドapplySwipeを追加
+- モバイル版でカラム本体の左右スワイプによるタブ/カラム移動を実装
+- タブScroll Snap用のスロット解決ロジックを追加
+- Scroll Snapの着地スロット解決ロジックを追加
+- AppStoreにfocusColumnメソッドを追加
+- モバイル版のタブ横スワイプをCSS Scroll Snapで実装
+- モバイル版のカラム横スワイプをCSS Scroll Snapで実装
+- Modal.svelteにmaxHeight propを追加
+
+### 🐛 Bug Fixes
+
+- 投稿処理中の自動下書き再保存で投稿済みでも下書きが残留する不具合を修正
+- Github-actionsのcooldownからsemver-major-daysを削除
+- リアクションユーザー一覧ポップオーバーがModalの背後に隠れる問題を修正
+- スワイプのスクロール位置ジャンプとキャンセル時のロックアウトを修正
+- 最終レビュー指摘(カラム移動スクロール実装/方向反転バグ/スコープ限定修正)
+- モバイルタブスロットのactiveTabId孤立時フォールバックを修正
+- カラムScroll Snapの対象要素を実際にスクロールするPane.svelte側へ修正
+- 最終レビュー指摘(プレビュースロットのselected漏れ/ネストした分割のpage-order食い違い/ユーザーガイド追記/チェックリスト拡充)
+- モバイル版のカラム/タブスクロールバーを非表示化
+- Nightly Release成果物のファイル名がリリース版バージョン番号のままになる問題を修正
+- Viewer.jsの閉じるボタン/ツールバーがセーフエリアを無視する問題を修正
+
+### 🚜 Refactor
+
+- Pointer-drag方式のスワイプ実装を削除(Scroll Snap方式への移行準備)
+- ColumnSettings.svelteを共有Modal.svelteに統一
+- DrivePicker.svelteを共有Modal.svelteに統一
+
+### 📚 Documentation
+
+- PRテンプレートを追加
+- PRテンプレートがgh pr createのbody指定時は使われない旨を明記
+- ユーザーガイドにハプティクス設定の記載を追加
+- モバイル版スワイプでのタブ/カラム移動の設計を追加(Issue #296)
+- モバイル版スワイプ実装の計画を追加(Issue #296)
+- 実機検証結果を踏まえCSS Scroll Snap版の設計に刷新(Issue #296)
+- CSS Scroll Snap版の実装計画を追加(Issue #296)
+- Nightly Release notes自動生成の設計を追加(Issue #333)
+- Nightly Release notes自動生成の実装計画を追加(Issue #333)
+- DrivePicker/ColumnSettingsのModal統一 設計ドキュメント追加(Issue #196)
+- DrivePicker/ColumnSettings Modal統一 実装計画を追加(Issue #196)
+
+### 🧪 Testing
+
+- ハプティクステストをファイルスコープmockごと専用ファイルへ分離
+
+### ⚙️ Miscellaneous Tasks
+
+- Dependabot version updates(npm/cargo/github-actions)を設定
+- Dependabotにcooldown(default 7日/major 14日)を設定
+- Nightly Releaseの本文を専用ジョブでauto-generateする(Issue #333)
+- Nightly Release作成の冪等性を上げコメントを補足する
 ## [0.10.0] - 2026-08-29
 
 ### 🚀 Features
