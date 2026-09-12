@@ -72,7 +72,7 @@ fn long_text(col: &mut ColumnDef) -> &mut ColumnDef {
 
 /// インデックス作成を実行し、既に存在する場合（Duplicate key name）は無視する。
 async fn execute_index(pool: &sqlx::MySqlPool, index_sql: &str) -> Result<()> {
-    match pool.execute(index_sql).await {
+    match pool.execute(sqlx::AssertSqlSafe(index_sql)).await {
         Ok(_) => Ok(()),
         // MySQL error 1061: Duplicate key name — CREATE INDEXにはネイティブの
         // IF NOT EXISTSが無いため、2回目以降のensure_schema()呼び出しで既存の
@@ -103,7 +103,7 @@ async fn execute_index(pool: &sqlx::MySqlPool, index_sql: &str) -> Result<()> {
 /// `MySqlDatabaseError::number()`で正確な数値コードを判定する(メッセージ文字列の
 /// 部分一致では他のエラーまで誤って握りつぶしてしまうため避ける)。
 async fn add_column_if_missing(pool: &sqlx::MySqlPool, alter_sql: &str) -> Result<()> {
-    match pool.execute(alter_sql).await {
+    match pool.execute(sqlx::AssertSqlSafe(alter_sql)).await {
         Ok(_) => Ok(()),
         Err(sqlx::Error::Database(db_err))
             if db_err
@@ -151,7 +151,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(NoteTable::IsFavoritedByMe).boolean().not_null().default(false))
         .col(long_text(&mut ColumnDef::new(NoteTable::Payload)).not_null())
         .build(MysqlQueryBuilder);
-    pool.execute(note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note)).await?;
 
     let idx_note_created = Index::create()
         .if_not_exists()
@@ -190,7 +190,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::InstanceThemeColor).text())
         .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
         .build(MysqlQueryBuilder);
-    pool.execute(user.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(user)).await?;
     // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
     // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
     // ALTER TABLE ... ADD COLUMN を別途実行する(add_column_if_missingが事前に列有無を
@@ -204,7 +204,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(NoteReactionTable::EmojiKey).string_len(64))
         .col(ColumnDef::new(NoteReactionTable::Count).big_integer())
         .build(MysqlQueryBuilder);
-    pool.execute(note_reaction.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_reaction)).await?;
 
     let note_tag = Table::create()
         .table(NoteTagTable::Table)
@@ -212,7 +212,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(NoteTagTable::NoteId).string_len(64))
         .col(ColumnDef::new(NoteTagTable::Tag).string_len(64))
         .build(MysqlQueryBuilder);
-    pool.execute(note_tag.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_tag)).await?;
 
     let note_mention = Table::create()
         .table(NoteMentionTable::Table)
@@ -220,7 +220,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(NoteMentionTable::NoteId).string_len(64))
         .col(ColumnDef::new(NoteMentionTable::UserId).string_len(64))
         .build(MysqlQueryBuilder);
-    pool.execute(note_mention.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_mention)).await?;
 
     let note_emoji = Table::create()
         .table(NoteEmojiTable::Table)
@@ -228,7 +228,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(NoteEmojiTable::NoteId).string_len(64))
         .col(ColumnDef::new(NoteEmojiTable::Emoji).string_len(64))
         .build(MysqlQueryBuilder);
-    pool.execute(note_emoji.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_emoji)).await?;
 
     let note_file = Table::create()
         .table(NoteFileTable::Table)
@@ -238,7 +238,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(NoteFileTable::MimeCategory).string_len(64))
         .col(ColumnDef::new(NoteFileTable::IsSensitive).boolean())
         .build(MysqlQueryBuilder);
-    pool.execute(note_file.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(note_file)).await?;
 
     let idx_nr_note = Index::create().if_not_exists().name("idx_nr_note").table(NoteReactionTable::Table).col(NoteReactionTable::NoteId).build(MysqlQueryBuilder);
     execute_index(pool, idx_nr_note.as_str()).await?;
@@ -271,7 +271,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(ColumnNoteTable::CreatedAt).big_integer().not_null().default(0))
         .primary_key(Index::create().col(ColumnNoteTable::ColumnId).col(ColumnNoteTable::NoteId))
         .build(MysqlQueryBuilder);
-    pool.execute(column_note.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_note)).await?;
 
     let idx_cn_column = Index::create().if_not_exists().name("idx_cn_column").table(ColumnNoteTable::Table).col(ColumnNoteTable::ColumnId).build(MysqlQueryBuilder);
     execute_index(pool, idx_cn_column.as_str()).await?;
@@ -292,7 +292,7 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(ColumnFetchBoundaryTable::ColumnId).string_len(64).primary_key())
         .col(ColumnDef::new(ColumnFetchBoundaryTable::OldestFetchedId).text().not_null())
         .build(MysqlQueryBuilder);
-    pool.execute(column_fetch_boundary.as_str()).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_fetch_boundary)).await?;
 
     Ok(())
 }
@@ -539,12 +539,12 @@ async fn delete_stale_by_key(
 ) -> Result<()> {
     if current_keys.is_empty() {
         let sql = format!("DELETE FROM {table} WHERE note_id = ?");
-        sqlx::query(&sql).bind(note_id).execute(&mut **tx).await?;
+        sqlx::query(sqlx::AssertSqlSafe(sql)).bind(note_id).execute(&mut **tx).await?;
         return Ok(());
     }
     let placeholders = current_keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!("DELETE FROM {table} WHERE note_id = ? AND {key_col} NOT IN ({placeholders})");
-    let mut query = sqlx::query(&sql).bind(note_id);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(note_id);
     for k in current_keys {
         query = query.bind(k);
     }
@@ -871,14 +871,14 @@ async fn delete_matching_ids_chunk(
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
 
     let sql = format!("DELETE FROM note WHERE id IN ({placeholders})");
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         q = q.bind(id);
     }
     let deleted = q.execute(&mut **tx).await?.rows_affected() as i64;
 
     let sql = format!("SELECT DISTINCT column_id FROM column_note WHERE note_id IN ({placeholders})");
-    let mut q = sqlx::query_as::<_, (String,)>(&sql);
+    let mut q = sqlx::query_as::<_, (String,)>(sqlx::AssertSqlSafe(sql));
     for id in ids {
         q = q.bind(id);
     }
@@ -887,7 +887,7 @@ async fn delete_matching_ids_chunk(
     // MIN/MAX(note_id)による大小比較も、load_cached_beforeと同様MySQLのデフォルト
     // 照合順序に依存する(Global Constraints参照)。
     let sql = format!("SELECT column_id, MAX(note_id) FROM column_note WHERE note_id IN ({placeholders}) GROUP BY column_id");
-    let mut q = sqlx::query_as::<_, (String, String)>(&sql);
+    let mut q = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
     for id in ids {
         q = q.bind(id);
     }
@@ -896,7 +896,7 @@ async fn delete_matching_ids_chunk(
 
     for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
         let sql = format!("DELETE FROM {table} WHERE note_id IN ({placeholders})");
-        let mut q = sqlx::query(&sql);
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
         for id in ids {
             q = q.bind(id);
         }
@@ -956,7 +956,7 @@ async fn search_cache_impl(
     }
     sql.push_str(" ORDER BY n.created_at DESC, n.id DESC LIMIT ?");
 
-    let mut query = sqlx::query_as::<_, (String, String)>(&sql);
+    let mut query = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
     for p in &where_sql.params {
         query = match p {
             SqlParam::Text(s) => query.bind(s.clone()),

@@ -136,7 +136,7 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::MySqlPool, ids: &[String]) -
                 avatar_blurhash
          FROM `user` WHERE id IN ({placeholders})"
     );
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         query = query.bind(id);
     }
