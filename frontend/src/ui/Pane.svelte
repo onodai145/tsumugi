@@ -170,6 +170,7 @@
        (ウィンドウ幅を変えるたびbroken widthが変わって見えるのはこれが原因)。 -->
   <div
     class="flex flex-auto min-w-0 h-full overflow-x-auto"
+    class:mobile-scroll-snap={app.useMobileUi()}
     style:scroll-snap-type={root && app.useMobileUi() ? "x mandatory" : undefined}
     bind:this={rowScrollEl}
     onscroll={onRowScroll}
