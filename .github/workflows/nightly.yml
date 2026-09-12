@@ -139,6 +139,14 @@ jobs:
           releaseCommitish: ${{ github.sha }}
           releaseDraft: false
           prerelease: true
+          # 既定ではdeb/rpm/AppImage/dmg/msi/nsis-exeのファイル名にtauri.conf.jsonの
+          # versionがそのまま使われる。Nightly Buildはバージョンを上げないため、素の値の
+          # ままだと直前にリリースしたバージョン番号が成果物ファイル名に残ってしまい、
+          # あたかもそのバージョンのビルドであるかのように誤解させる(Issue #329)。
+          # tauri.conf.json自体は書き換えず(msi/rpmはバージョン文字列の形式に制約があり、
+          # 例えばmsiはプレリリース識別子が数値以外だとビルド自体が失敗する)、
+          # アップロード時のファイル名だけをnightly向けに差し替える。
+          assetNamePattern: "[name]-nightly-[platform]-[arch][setup][ext]"
           args: ${{ matrix.args }}
 
       # Windows は既定で MSI/NSIS インストーラのみが生成されるため、
