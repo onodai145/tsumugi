@@ -6768,7 +6768,7 @@ dependencies = [
  "android-native-keyring-store",
  "apple-native-keyring-store",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "futures-util",
  "infer 0.22.0",
