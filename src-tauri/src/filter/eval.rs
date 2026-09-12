@@ -122,8 +122,7 @@ fn eval_bool(v: &Value, n: &Note, ctx: &EvalContext) -> bool {
         Cat => n.user.is_cat,
         Direct => n.visibility == Visibility::Specified,
         ToMe => n.mentions.iter().any(|m| ctx.my_user_ids.contains(m)),
-        // reply_user_id は domain::Note に無いため未対応（常に false）
-        ReplyToMe => false,
+        ReplyToMe => n.reply_user_id.as_ref().map_or(false, |u| ctx.my_user_ids.contains(u)),
         HasMention => !n.mentions.is_empty(),
         HasLink => n.text.as_deref().map(has_url).unwrap_or(false),
         Pinned => n.is_pinned,
@@ -391,5 +390,22 @@ mod tests {
         let n = base_note();
         assert!(matches("from home where (renote || has_files) && !bot", &n));
         assert!(!matches("from home where (bot || cat) && has_files", &n));
+    }
+
+    #[test]
+    fn reply_to_me_matches_when_reply_user_id_is_mine() {
+        let mut n = base_note();
+        n.reply_id = Some("r1".into());
+        // ctx() の my_user_ids は "me1" を含む（本ファイル既存の ctx() ヘルパー参照）
+        n.reply_user_id = Some("me1".into());
+        assert!(matches("from home where reply_to_me", &n));
+    }
+
+    #[test]
+    fn reply_to_me_does_not_match_when_reply_user_id_is_someone_else() {
+        let mut n = base_note();
+        n.reply_id = Some("r1".into());
+        n.reply_user_id = Some("stranger".into());
+        assert!(!matches("from home where reply_to_me", &n));
     }
 }
