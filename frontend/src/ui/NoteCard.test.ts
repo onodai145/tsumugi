@@ -217,7 +217,9 @@ describe("投稿削除メニュー", () => {
     await getByLabelText("その他").click();
 
     expect(getByText("削除")).toBeTruthy();
-    expect(baseElement.querySelector("svg.lucide-trash-2")).toBeTruthy();
+    // @lucide/svelte 1.41.0 で Trash2 が trash-2.svelte から trash.svelte(name="trash")の
+    // 別名エクスポートに統合され、生成される class が lucide-trash-2 → lucide-trash に変わった。
+    expect(baseElement.querySelector("svg.lucide-trash")).toBeTruthy();
   });
 
   it("他人の投稿では削除項目を表示しない", async () => {

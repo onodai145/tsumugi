@@ -50,9 +50,13 @@
           flipVertical: true,
           // viewerjs 組み込みキーではないカスタムボタン(公式の custom-toolbar 例と同じ作法)。
           // `.image` は型定義に無いランタイムプロパティ(現在表示中の<img>のクローン)なのでキャストする。
-          download: () => {
-            const img = (viewer as unknown as { image?: HTMLImageElement } | undefined)?.image;
-            if (img) void saveToDisk(img.src, img.alt || "image");
+          // viewerjs 1.12.0 で ToolbarOption 型から裸の Function が外れ、
+          // ToolbarButtonOptions({ click }) 形式が必須になった。
+          download: {
+            click: () => {
+              const img = (viewer as unknown as { image?: HTMLImageElement } | undefined)?.image;
+              if (img) void saveToDisk(img.src, img.alt || "image");
+            },
           },
         },
       });
