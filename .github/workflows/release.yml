@@ -9,7 +9,30 @@ permissions:
   contents: write
 
 jobs:
+  # release/android の各ジョブが並行して同名タグのdraft releaseを検索・作成すると、
+  # ほぼ同時に走った複数ジョブがどれも「まだ存在しない」と判定し、それぞれ別々の
+  # draft releaseを作ってしまうレースコンディションが起きうる(Issue発生時に実際に
+  # ubuntu-latestとmacos-latestが別のdraft releaseを作った)。
+  # そのため release 作成だけを専用ジョブに集約し、後続の全ジョブへ release_id を
+  # 受け渡して「作成は1回だけ、以降は追記のみ」にする。
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - name: Create draft release
+        id: create
+        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "tsumugi ${{ github.ref_name }}"
+          draft: true
+          prerelease: false
+
   release:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +92,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           tagName: ${{ github.ref_name }}
           releaseName: "tsumugi ${{ github.ref_name }}"
           releaseDraft: true
@@ -99,6 +123,7 @@ jobs:
           files: tsumugi-${{ env.REF_NAME }}-portable-windows-x64.exe
 
   android:
+    needs: create-release
     runs-on: ubuntu-latest
     environment: "Android Build"
     steps:
