@@ -8,8 +8,9 @@ use crate::domain::ShareReceived;
 #[cfg(target_os = "android")]
 mod android {
     use super::ShareReceived;
+    use jni::errors::LogErrorAndDefault;
     use jni::objects::{JObject, JObjectArray, JString};
-    use jni::JNIEnv;
+    use jni::EnvUnowned;
     use std::sync::Mutex;
 
     static PENDING_SHARE: Mutex<Option<ShareReceived>> = Mutex::new(None);
@@ -18,37 +19,41 @@ mod android {
     /// `text` は無ければ Java 側で null、`file_paths` は要素0件の配列で渡ってくる想定。
     #[no_mangle]
     pub extern "system" fn Java_com_onodai_tsumugi_MainActivity_nativeShareReceived<'local>(
-        mut env: JNIEnv<'local>,
+        mut unowned_env: EnvUnowned<'local>,
         _this: JObject<'local>,
         text: JString<'local>,
-        file_paths: JObjectArray<'local>,
+        file_paths: JObjectArray<'local, JString<'local>>,
     ) {
-        let text = if text.is_null() {
-            None
-        } else {
-            env.get_string(&text).ok().map(|s| s.into())
-        };
+        unowned_env
+            .with_env(|env| -> jni::errors::Result<()> {
+                let text = if text.is_null() {
+                    None
+                } else {
+                    text.try_to_string(env).ok()
+                };
 
-        let len = env.get_array_length(&file_paths).unwrap_or(0).max(0);
-        let mut paths = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            let Ok(obj) = env.get_object_array_element(&file_paths, i) else {
-                continue;
-            };
-            let jstr = JString::from(obj);
-            if let Some(s) = env.get_string(&jstr).ok().map(|s| s.into()) {
-                paths.push(s);
-            }
-        }
+                let len = file_paths.len(env).unwrap_or(0);
+                let mut paths = Vec::with_capacity(len);
+                for i in 0..len {
+                    let Ok(jstr) = file_paths.get_element(env, i) else {
+                        continue;
+                    };
+                    if let Ok(s) = jstr.try_to_string(env) {
+                        paths.push(s);
+                    }
+                }
 
-        if text.is_none() && paths.is_empty() {
-            return;
-        }
+                if text.is_none() && paths.is_empty() {
+                    return Ok(());
+                }
 
-        *PENDING_SHARE.lock().unwrap() = Some(ShareReceived {
-            text,
-            file_paths: paths,
-        });
+                *PENDING_SHARE.lock().unwrap() = Some(ShareReceived {
+                    text,
+                    file_paths: paths,
+                });
+                Ok(())
+            })
+            .resolve::<LogErrorAndDefault>();
     }
 
     pub fn take_pending_share() -> Option<ShareReceived> {
