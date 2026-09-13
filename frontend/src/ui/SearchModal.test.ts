@@ -53,6 +53,7 @@ function makeNote(id: string, createdAt: number, text = "hello"): Note {
     localOnly: false,
     user: makeUser(),
     replyId: null,
+    replyUserId: null,
     renoteId: null,
     renote: null,
     files: [],

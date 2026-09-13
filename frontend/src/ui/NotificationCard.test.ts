@@ -47,6 +47,7 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     localOnly: false,
     user: makeUser({ id: "u2", name: "Bob" }),
     replyId: null,
+    replyUserId: null,
     renoteId: null,
     renote: null,
     files: [],
