@@ -1,5 +1,7 @@
 //! 永続化。設定（Account/Column, settings.rs）と下書き（draft.rs）はプレーンテキスト(JSON)の
-//! 1ファイル、ノートキャッシュ（note_cache.rs, 破棄前提）のみ rusqlite 経由の SQLite。
+//! 1ファイル。ノートキャッシュ（note_cache.rs, 破棄前提）はデフォルトでrusqlite経由のSQLiteだが、
+//! `NoteCacheBackend`トレイトにより差し替え可能で、PostgreSQL/MySQLバックエンドも選択できる
+//! （postgres_backend.rs / mysql_backend.rs, 設定画面から切替。Issue #115 Phase 2/3）。
 //! いずれも再起動時に復元する。
 
 pub mod db;

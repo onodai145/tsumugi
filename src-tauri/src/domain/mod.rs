@@ -1,8 +1,8 @@
 //! 正規化済みドメイン型。`serde` + `specta::Type` を付け、`tauri-specta` で TS 型を生成する。
 //! 定義は docs/design/phase0-scaffold.md §2 / docs/design/filter-dsl-design.md §7 に対応。
 //!
-//! Phase 1 では Account/User のみを command が使う。Note/Column/Reaction 系は Phase 2 以降で
-//! 参照するため型定義だけ先行して置く（dead_code を許容）。
+//! 型の一部はTSバインディング生成専用でRust側からは未参照のものがあるため、
+//! モジュール全体で dead_code を許容している。
 #![allow(dead_code, unused_imports)]
 
 mod account;
