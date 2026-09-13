@@ -56,7 +56,7 @@ List/Antenna/Channelは、Misskey側に作成済みのものが一覧に表示�
 
 「エキスパート(TQL)」モードでは `from home, list("id") where has_files && !cw` のように、複数ソースを合成した完全なクエリを直接書けます。使えるソース: `home` / `local` / `hybrid` / `global` / `list("id")` / `antenna("id")` / `channel("id")` / `user("@acct")` / `tag("name")` / `search("q")` / `cache`（ローカルキャッシュ検索）。list/antenna/channelは生のIDを指定する必要があります。
 
-Local/Hybridカラムは返信も含めて全件表示します。従来のように返信を非表示にしたい場合は、TQLで `where !reply`（返信を除外）や `where reply_to_me`（自分宛の返信のみ）のように指定してください。
+Local/Hybridカラムは返信も含めて全件表示します。従来のように返信を非表示にしたい場合は、TQLで `where !reply`（返信をすべて除外）や `where !reply || reply_to_me`（自分宛の返信は残しつつ、他人宛の返信だけ除外）のように指定してください。`reply_to_me` は「自分宛の返信」に絞り込む述語なので、単体で指定すると返信でない通常の投稿まで消えてしまう点に注意してください。
 
 TQLの文法の詳細は設計書 [`docs/design/filter-dsl-design.md`](../design/filter-dsl-design.md) を参照してください。
 
