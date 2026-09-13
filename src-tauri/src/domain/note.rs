@@ -19,6 +19,8 @@ pub struct Note {
     pub local_only: bool,
     pub user: User,
     pub reply_id: Option<String>,
+    /// 返信先ノートの投稿者 userId（`reply_to_me` 述語用）。返信でない場合は None
+    pub reply_user_id: Option<String>,
     pub renote_id: Option<String>,
     /// 引用/Renote先（浅く保持）
     pub renote: Option<Box<Note>>,
@@ -166,6 +168,7 @@ mod tests {
                 instance: None,
             },
             reply_id: None,
+            reply_user_id: None,
             renote_id: None,
             renote: None,
             files: vec![],
@@ -185,6 +188,19 @@ mod tests {
             is_favorited_by_me: false,
             is_pinned: false,
         }
+    }
+
+    #[test]
+    fn reply_user_id_round_trips_as_camel_case() {
+        let mut n = minimal_note();
+        n.reply_id = Some("r1".into());
+        n.reply_user_id = Some("target-user".into());
+
+        let v = serde_json::to_value(&n).unwrap();
+        assert_eq!(v["replyUserId"], "target-user");
+
+        let back: Note = serde_json::from_value(v).unwrap();
+        assert_eq!(back.reply_user_id.as_deref(), Some("target-user"));
     }
 
     #[test]

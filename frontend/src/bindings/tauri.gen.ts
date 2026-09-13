@@ -663,6 +663,8 @@ export type Note = {
 	localOnly: boolean,
 	user: User,
 	replyId: string | null,
+	/**  返信先ノートの投稿者 userId（`reply_to_me` 述語用）。返信でない場合は None */
+	replyUserId: string | null,
 	renoteId: string | null,
 	/**  引用/Renote先（浅く保持） */
 	renote: Note | null,

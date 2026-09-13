@@ -75,9 +75,9 @@ impl ColumnKind {
         use serde_json::json;
         Some(match self {
             ColumnKind::Home => ("homeTimeline", json!({})),
-            ColumnKind::Local => ("localTimeline", json!({})),
+            ColumnKind::Local => ("localTimeline", json!({ "withReplies": true })),
             ColumnKind::Global => ("globalTimeline", json!({})),
-            ColumnKind::Hybrid => ("hybridTimeline", json!({})),
+            ColumnKind::Hybrid => ("hybridTimeline", json!({ "withReplies": true })),
             ColumnKind::List { list_id } => ("userList", json!({ "listId": list_id })),
             ColumnKind::Antenna { antenna_id } => ("antenna", json!({ "antennaId": antenna_id })),
             ColumnKind::Channel { channel_id } => ("channel", json!({ "channelId": channel_id })),
@@ -95,9 +95,15 @@ impl ColumnKind {
         }
         Some(match self {
             ColumnKind::Home => ("notes/timeline", body),
-            ColumnKind::Local => ("notes/local-timeline", body),
+            ColumnKind::Local => {
+                body["withReplies"] = json!(true);
+                ("notes/local-timeline", body)
+            }
             ColumnKind::Global => ("notes/global-timeline", body),
-            ColumnKind::Hybrid => ("notes/hybrid-timeline", body),
+            ColumnKind::Hybrid => {
+                body["withReplies"] = json!(true);
+                ("notes/hybrid-timeline", body)
+            }
             ColumnKind::List { list_id } => {
                 body["listId"] = json!(list_id);
                 ("notes/user-list-timeline", body)
@@ -171,6 +177,47 @@ mod tests {
         assert_eq!(v["antennaId"], "a1");
         let back: ColumnKind = serde_json::from_value(v).unwrap();
         assert_eq!(back, a);
+    }
+
+    #[test]
+    fn local_and_hybrid_stream_request_include_with_replies() {
+        let local = ColumnKind::Local;
+        let (ch, params) = local.stream_request().unwrap();
+        assert_eq!(ch, "localTimeline");
+        assert_eq!(params["withReplies"], true);
+
+        let hybrid = ColumnKind::Hybrid;
+        let (ch, params) = hybrid.stream_request().unwrap();
+        assert_eq!(ch, "hybridTimeline");
+        assert_eq!(params["withReplies"], true);
+    }
+
+    #[test]
+    fn local_and_hybrid_rest_request_include_with_replies() {
+        let local = ColumnKind::Local;
+        let (ep, body) = local.rest_request(20, None).unwrap();
+        assert_eq!(ep, "notes/local-timeline");
+        assert_eq!(body["withReplies"], true);
+
+        let hybrid = ColumnKind::Hybrid;
+        let (ep, body) = hybrid.rest_request(20, None).unwrap();
+        assert_eq!(ep, "notes/hybrid-timeline");
+        assert_eq!(body["withReplies"], true);
+    }
+
+    #[test]
+    fn home_and_global_do_not_include_with_replies() {
+        let home = ColumnKind::Home;
+        let (_, params) = home.stream_request().unwrap();
+        assert!(params.get("withReplies").is_none());
+        let (_, body) = home.rest_request(20, None).unwrap();
+        assert!(body.get("withReplies").is_none());
+
+        let global = ColumnKind::Global;
+        let (_, params) = global.stream_request().unwrap();
+        assert!(params.get("withReplies").is_none());
+        let (_, body) = global.rest_request(20, None).unwrap();
+        assert!(body.get("withReplies").is_none());
     }
 }
 

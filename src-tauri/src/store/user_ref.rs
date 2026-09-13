@@ -293,6 +293,7 @@ mod tests {
             local_only: false,
             user,
             reply_id: None,
+            reply_user_id: None,
             renote_id: None,
             renote: None,
             files: Vec::<DriveFile>::new(),

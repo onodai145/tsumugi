@@ -437,7 +437,7 @@ async fn upsert_note_tx(tx: &mut sqlx::MySqlTransaction<'_>, n: &Note) -> Result
     .bind(n.local_only)
     .bind(&n.user.id)
     .bind(&n.reply_id)
-    .bind(Option::<String>::None)
+    .bind(&n.reply_user_id)
     .bind(&n.renote_id)
     .bind(&n.channel_id)
     .bind(&n.via)
@@ -1109,7 +1109,7 @@ mod tests {
                 followers_count: 5, following_count: 3, notes_count: 42,
                 emojis: std::collections::HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
             },
-            reply_id: None, renote_id: None, renote: None,
+            reply_id: None, reply_user_id: None, renote_id: None, renote: None,
             files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into() }],
             poll: None, tags: vec!["rust".into()], mentions: vec![],
             emojis: std::collections::HashMap::new(), channel_id: None, via: None, lang: None,
@@ -1153,6 +1153,20 @@ mod tests {
 
         let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'").fetch_one(s.pool()).await.unwrap();
         assert_eq!(rc, 0);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_note_stores_reply_user_id_column() {
+        let s = backend().await;
+        let mut n = note("n1", 100);
+        n.reply_id = Some("r1".into());
+        n.reply_user_id = Some("bob-id".into());
+        s.cache_note("col1", &n).await.unwrap();
+
+        let (stored,): (Option<String>,) =
+            sqlx::query_as("SELECT reply_user_id FROM note WHERE id = 'n1'").fetch_one(s.pool()).await.unwrap();
+        assert_eq!(stored.as_deref(), Some("bob-id"));
     }
 
     #[tokio::test]
