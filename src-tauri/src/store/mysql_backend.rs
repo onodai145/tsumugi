@@ -437,7 +437,7 @@ async fn upsert_note_tx(tx: &mut sqlx::MySqlTransaction<'_>, n: &Note) -> Result
     .bind(n.local_only)
     .bind(&n.user.id)
     .bind(&n.reply_id)
-    .bind(Option::<String>::None)
+    .bind(&n.reply_user_id)
     .bind(&n.renote_id)
     .bind(&n.channel_id)
     .bind(&n.via)
@@ -1153,6 +1153,20 @@ mod tests {
 
         let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'").fetch_one(s.pool()).await.unwrap();
         assert_eq!(rc, 0);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_note_stores_reply_user_id_column() {
+        let s = backend().await;
+        let mut n = note("n1", 100);
+        n.reply_id = Some("r1".into());
+        n.reply_user_id = Some("bob-id".into());
+        s.cache_note("col1", &n).await.unwrap();
+
+        let (stored,): (Option<String>,) =
+            sqlx::query_as("SELECT reply_user_id FROM note WHERE id = 'n1'").fetch_one(s.pool()).await.unwrap();
+        assert_eq!(stored.as_deref(), Some("bob-id"));
     }
 
     #[tokio::test]
