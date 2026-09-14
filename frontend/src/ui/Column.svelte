@@ -168,6 +168,7 @@
     if (e.pointerType !== "touch" || !app.useMobileUi()) return;
     touchDragTabPendingId = tabId;
     touchDragStartX = e.clientX;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     tabDrag.onPointerDown(e.clientX, e.clientY);
   }
 
@@ -192,8 +193,7 @@
     else app.dragOverTabBarEnd(hit.groupId);
   }
 
-  function endTabTouchDrag() {
-    const wasArmed = tabDrag.armed;
+  function endTabTouchDrag(wasArmed: boolean) {
     touchDraggingTabId = null;
     touchDragTabPendingId = null;
     touchDragDeltaX = 0;
@@ -202,14 +202,16 @@
 
   function onTabPointerUp(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
+    const wasArmed = tabDrag.armed;
     tabDrag.onPointerUp();
-    endTabTouchDrag();
+    endTabTouchDrag(wasArmed);
   }
 
   function onTabPointerCancel(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
+    const wasArmed = tabDrag.armed;
     tabDrag.onPointerCancel();
-    endTabTouchDrag();
+    endTabTouchDrag(wasArmed);
   }
 </script>
 
