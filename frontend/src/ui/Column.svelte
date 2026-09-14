@@ -204,7 +204,16 @@
     console.log("[tab-debug] pointerdown", { tabId, x: e.clientX, y: e.clientY, id: e.pointerId, t: performance.now() });
     touchDragTabPendingId = tabId;
     touchDragStartX = e.clientX;
-    touchDragPendingEl = e.currentTarget as HTMLElement;
+    // ポインターキャプチャの対象は、ドラッグ中のタブ自身(e.currentTarget)ではなく、
+    // 常に位置が変わらないタブバーコンテナ(data-tabbar-group-id)にする。ドラッグ中に
+    // app.dragOverTab/dragOverTabBarEndでgroup.tabsが並び替わると、Svelteのkeyed each
+    // ブロックがドラッグ中タブのDOM要素自体をinsertBeforeで物理的に移動させる。
+    // アクティブなポインターキャプチャを持つ要素がこうしてDOM内で移動すると、一部の
+    // Android WebViewではその後pointerup/pointercancelが一切届かなくなり、ドラッグが
+    // 完了しないまま固着することが実機で確認された(Issue #354)。タブバーコンテナ自身は
+    // 子要素の並びが変わっても自身の位置は動かないため、キャプチャ先をこちらにすることで
+    // イベント配信を安定させる。
+    touchDragPendingEl = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-tabbar-group-id]");
     touchDragPendingPointerId = e.pointerId;
     tabDrag.onPointerDown(e.clientX, e.clientY);
   }
@@ -404,6 +413,9 @@
           app.dragOverTabBarEnd(group.id);
         }
       }}
+      onpointermove={onTabPointerMove}
+      onpointerup={onTabPointerUp}
+      onpointercancel={onTabPointerCancel}
     >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span
