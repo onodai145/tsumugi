@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PaneNode } from "../bindings/tauri.gen";
-import { pageOrder, topLevelLeafGroupIds } from "./swipeNav";
+import { adjacentColumnId, canMoveAdjacentColumn, pageOrder, topLevelLeafGroupIds } from "./swipeNav";
 
 function leaf(id: string, groupId: string): PaneNode {
   return { type: "leaf", id, groupId };
@@ -8,6 +8,10 @@ function leaf(id: string, groupId: string): PaneNode {
 
 function row(id: string, children: PaneNode[]): PaneNode {
   return { type: "split", id, direction: "row", children: children.map((node) => ({ node, size: null, auto: true })) };
+}
+
+function column(id: string, children: PaneNode[]): PaneNode {
+  return { type: "split", id, direction: "column", children: children.map((node) => ({ node, size: null, auto: true })) };
 }
 
 describe("topLevelLeafGroupIds", () => {
@@ -25,6 +29,11 @@ describe("topLevelLeafGroupIds", () => {
   it("rootがleaf単体の場合はそのgroupIdのみ返す", () => {
     expect(topLevelLeafGroupIds(leaf("l1", "g1"))).toEqual(["g1"]);
   });
+
+  it("rootがcolumn分割の場合は直下leafでも空配列を返す", () => {
+    const root = column("root", [leaf("l1", "g1"), leaf("l2", "g2")]);
+    expect(topLevelLeafGroupIds(root)).toEqual([]);
+  });
 });
 
 describe("pageOrder", () => {
@@ -41,5 +50,72 @@ describe("pageOrder", () => {
 
   it("rootがleaf単体の場合はそのgroupIdのみ返す", () => {
     expect(pageOrder(leaf("l1", "g1"))).toEqual(["g1"]);
+  });
+
+  it("rootがcolumn分割の場合は空配列を返す(横ページが存在しないため)", () => {
+    const root = column("root", [leaf("l1", "g1"), leaf("l2", "g2")]);
+    expect(pageOrder(root)).toEqual([]);
+  });
+});
+
+describe("canMoveAdjacentColumn", () => {
+  const root = row("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
+
+  it("先頭カラムはprevへ移動できない", () => {
+    expect(canMoveAdjacentColumn(root, "g1", "prev")).toBe(false);
+  });
+  it("末尾カラムはnextへ移動できない", () => {
+    expect(canMoveAdjacentColumn(root, "g3", "next")).toBe(false);
+  });
+  it("中間カラムはどちらへも移動できる", () => {
+    expect(canMoveAdjacentColumn(root, "g2", "prev")).toBe(true);
+    expect(canMoveAdjacentColumn(root, "g2", "next")).toBe(true);
+  });
+  it("対象外のgroupIdはfalseを返す", () => {
+    expect(canMoveAdjacentColumn(root, "missing", "next")).toBe(false);
+  });
+
+  it("column分割(縦並び)配下のカラムはどちらへも移動できない", () => {
+    const colRoot = column("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
+    for (const g of ["g1", "g2", "g3"]) {
+      expect(canMoveAdjacentColumn(colRoot, g, "prev")).toBe(false);
+      expect(canMoveAdjacentColumn(colRoot, g, "next")).toBe(false);
+    }
+  });
+});
+
+describe("adjacentColumnId", () => {
+  const root = row("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
+
+  it("中間カラムはprev/nextそれぞれの隣のgroupIdを返す", () => {
+    expect(adjacentColumnId(root, "g2", "prev")).toBe("g1");
+    expect(adjacentColumnId(root, "g2", "next")).toBe("g3");
+  });
+
+  it("先頭カラムのprevはnull", () => {
+    expect(adjacentColumnId(root, "g1", "prev")).toBeNull();
+  });
+
+  it("末尾カラムのnextはnull", () => {
+    expect(adjacentColumnId(root, "g3", "next")).toBeNull();
+  });
+
+  it("topLevelLeafGroupIdsに無いgroupIdはnull", () => {
+    expect(adjacentColumnId(root, "missing", "next")).toBeNull();
+  });
+
+  it("ネストしたsplit配下のカラムはnull", () => {
+    const nested = row("nested", [leaf("l4", "g4"), leaf("l5", "g5")]);
+    const rootWithNested = row("root", [leaf("l1", "g1"), nested]);
+    expect(adjacentColumnId(rootWithNested, "g4", "next")).toBeNull();
+    expect(adjacentColumnId(rootWithNested, "g4", "prev")).toBeNull();
+  });
+
+  it("column分割(縦並び)rootの直下leafはprev/nextともnull", () => {
+    const colRoot = column("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
+    expect(adjacentColumnId(colRoot, "g2", "prev")).toBeNull();
+    expect(adjacentColumnId(colRoot, "g2", "next")).toBeNull();
+    expect(adjacentColumnId(colRoot, "g1", "next")).toBeNull();
+    expect(adjacentColumnId(colRoot, "g3", "prev")).toBeNull();
   });
 });

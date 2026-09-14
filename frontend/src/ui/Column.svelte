@@ -3,12 +3,16 @@
   import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
-  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitHorizontal, SquareSplitVertical, Settings } from "@lucide/svelte";
+  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitHorizontal, SquareSplitVertical, Settings, ChevronLeft, ChevronRight } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { portal } from "../lib/portal";
   import { edgeFromPointer } from "../lib/paneEdge";
   import { activeSlotIndex, computeTabSlots, notesForSlot } from "../lib/tabSlots";
   import { resolveSettledIndex } from "../lib/scrollSnapIndex";
+  import { createLongPressDrag } from "../lib/longPressDrag";
+  import { vibrate } from "../lib/ipc";
+  import { isMobilePlatform } from "../lib/platform";
+  import { resolveColumnDragHint, type ColumnDragDirection } from "../lib/columnDragHint";
 
   let {
     group,
@@ -140,6 +144,218 @@
     menuOpen = false;
     action();
   }
+
+  // 長押しドラッグ中(タブ/カラムグリップ共通)、指がタブバーの外(ノート本文など、
+  // `select-text`で意図的に選択可能にしているテキスト)へ僅かにずれただけで、OS標準の
+  // 「長押しでテキスト選択」がドラッグと同時に発火してしまうことが実機で確認された
+  // (Issue #354)。ドラッグ確定(armed)からドラッグ終了までの間はページ全体を選択不可にし、
+  // 終了時に元の状態へ戻す(sortablejs等のドラッグ実装で広く使われる標準的な回避策)。
+  let restoreUserSelect: (() => void) | null = null;
+  function suppressTextSelectionDuringDrag() {
+    if (restoreUserSelect) return; // 既に抑制中なら多重に上書きしない
+    const html = document.documentElement;
+    const prevUserSelect = html.style.userSelect;
+    const prevWebkitUserSelect = html.style.getPropertyValue("-webkit-user-select");
+    html.style.userSelect = "none";
+    html.style.setProperty("-webkit-user-select", "none");
+    restoreUserSelect = () => {
+      html.style.userSelect = prevUserSelect;
+      html.style.setProperty("-webkit-user-select", prevWebkitUserSelect || "");
+      restoreUserSelect = null;
+    };
+  }
+  function restoreTextSelection() {
+    restoreUserSelect?.();
+  }
+
+  // タッチ長押しでのタブ並び替え(Issue #354)。native drag-and-dropはタッチでは
+  // dragstartが発火しないため、長押し(400ms)が成立したら同じapp.startDragTab等を
+  // 呼び出す形でモバイル版に対応する。マウス操作(pointerType!=="touch")では何もせず、
+  // 既存のdraggable属性によるnative DnDに委ねる。
+  let touchDraggingTabId = $state<string | null>(null);
+  let touchDragTabPendingId: string | null = null;
+  let touchDragStartX = 0;
+  let touchDragDeltaX = $state(0);
+  let touchDragPendingEl: HTMLElement | null = null;
+  let touchDragPendingPointerId: number | null = null;
+
+  const tabDrag = createLongPressDrag({
+    onArmed: () => {
+      const tabId = touchDragTabPendingId;
+      if (!tabId) return;
+      touchDraggingTabId = tabId;
+      touchDragDeltaX = 0;
+      // ポインターキャプチャはここ(長押し成立後)で初めて行う。pointerdown時点で
+      // 即座にキャプチャすると、キャプチャ要素へのclickリターゲティング(Pointer Events
+      // のcompatibility mapping仕様)により、キャプチャ対象の外側divより内側にある
+      // タブ切替ボタンのonclickが、長押しに至らない通常タップでも届かなくなる恐れがある。
+      if (touchDragPendingEl && touchDragPendingPointerId !== null) {
+        touchDragPendingEl.setPointerCapture(touchDragPendingPointerId);
+      }
+      if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
+      suppressTextSelectionDuringDrag();
+      app.startDragTab(tabId);
+    },
+  });
+
+  function onTabPointerDown(e: PointerEvent, tabId: string) {
+    if (e.pointerType !== "touch" || !app.useMobileUi()) return;
+    touchDragTabPendingId = tabId;
+    touchDragStartX = e.clientX;
+    // ポインターキャプチャの対象は、ドラッグ中のタブ自身(e.currentTarget)ではなく、
+    // 常に位置が変わらないタブバーコンテナ(data-tabbar-group-id)にする。ドラッグ中に
+    // app.dragOverTab/dragOverTabBarEndでgroup.tabsが並び替わると、Svelteのkeyed each
+    // ブロックがドラッグ中タブのDOM要素自体をinsertBeforeで物理的に移動させる。
+    // アクティブなポインターキャプチャを持つ要素がこうしてDOM内で移動すると、一部の
+    // Android WebViewではその後pointerup/pointercancelが一切届かなくなり、ドラッグが
+    // 完了しないまま固着することが実機で確認された(Issue #354)。タブバーコンテナ自身は
+    // 子要素の並びが変わっても自身の位置は動かないため、キャプチャ先をこちらにすることで
+    // イベント配信を安定させる。
+    touchDragPendingEl = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-tabbar-group-id]");
+    touchDragPendingPointerId = e.pointerId;
+    tabDrag.onPointerDown(e.clientX, e.clientY);
+  }
+
+  /// ドラッグ中の指の位置から並び替え対象を解決する。タブの上ならそのタブ、タブの無い
+  /// 「タブバーの空き部分」なら末尾送り(tabId:null)。カラム内でもタブバーの外
+  /// (ノート一覧など)はドロップ対象外なのでnullを返す。data-group-idはカラムの
+  /// <section>全体に付いているため、空き部分の判定にはタブバー自身の
+  /// data-tabbar-group-id を使う(デスクトップのnative DnDと同じ範囲に揃える)。
+  function resolveTabHit(clientX: number, clientY: number): { groupId: string; tabId: string | null } | null {
+    const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    if (!el) return null;
+    const tabEl = el.closest<HTMLElement>("[data-tab-id]");
+    if (tabEl) {
+      const groupEl = tabEl.closest<HTMLElement>("[data-group-id]");
+      if (!groupEl) return null;
+      return { groupId: groupEl.dataset.groupId!, tabId: tabEl.dataset.tabId! };
+    }
+    const tabBarEl = el.closest<HTMLElement>("[data-tabbar-group-id]");
+    if (!tabBarEl) return null;
+    return { groupId: tabBarEl.dataset.tabbarGroupId!, tabId: null };
+  }
+
+  /// 現在のタブ並び(全グループ分)のスナップショット。dragOverTab/dragOverTabBarEndが
+  /// 実際に並びを変えたかどうかを判定するために使う(どちらも「自分自身の上」「既に末尾」
+  /// といった条件で何もせず返るため、解決先のIDの変化だけでは入れ替え有無を判定できない)。
+  function tabOrderSnapshot(): string {
+    return app.groups.map((g) => `${g.id}:${g.tabs.map((t) => t.id).join(",")}`).join("|");
+  }
+
+  function onTabPointerMove(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    tabDrag.onPointerMove(e.clientX, e.clientY);
+    if (!tabDrag.armed) return;
+    e.preventDefault();
+    touchDragDeltaX = e.clientX - touchDragStartX;
+    const hit = resolveTabHit(e.clientX, e.clientY);
+    if (!hit) return;
+    const before = tabOrderSnapshot();
+    if (hit.tabId) app.dragOverTab(hit.groupId, hit.tabId);
+    else app.dragOverTabBarEnd(hit.groupId);
+    // 入れ替えが実際に起きた場合、ドラッグ中タブのレイアウト上の位置自体が動くため、
+    // translateXの基準を今の指の位置へ取り直す。取り直さないと、元のpointerdown位置から
+    // の差分が新しいレイアウト位置に上乗せされ、入れ替えのたびに指より1タブ分ずつ
+    // 先走って見える。
+    if (tabOrderSnapshot() !== before) {
+      touchDragStartX = e.clientX;
+      touchDragDeltaX = 0;
+    }
+  }
+
+  function endTabTouchDrag(wasArmed: boolean) {
+    touchDraggingTabId = null;
+    touchDragTabPendingId = null;
+    touchDragDeltaX = 0;
+    touchDragPendingEl = null;
+    touchDragPendingPointerId = null;
+    restoreTextSelection();
+    if (wasArmed) void app.endDragTab();
+  }
+
+  function onTabPointerUp(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    const wasArmed = tabDrag.armed;
+    tabDrag.onPointerUp();
+    endTabTouchDrag(wasArmed);
+  }
+
+  function onTabPointerCancel(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    const wasArmed = tabDrag.armed;
+    tabDrag.onPointerCancel();
+    endTabTouchDrag(wasArmed);
+  }
+
+  // タッチ長押しでのカラム並び替え(Issue #354)。モバイル版は1カラムが画面全幅表示のため、
+  // 隣のカラムが画面外にあり位置に追従する自由なドラッグは分かりにくい。そのため
+  // 「前へ/次へ」の1ステップ移動として実装する(resolveColumnDragHintのトグル式判定)。
+  let columnDragHint = $state<ColumnDragDirection | null>(null);
+  // 長押しが成立した時点でtrue。「前へ/次へ」のヒントは、まだどちらへも動かしていない
+  // (columnDragHint === null)段階から両方を非活性表示で出しておくため、オーバーレイの
+  // 表示可否はcolumnDragHintではなくこちらで判定する。
+  let columnDragArmed = $state(false);
+  let columnDragStartX = 0;
+  let gripPendingEl: HTMLElement | null = null;
+  let gripPendingPointerId: number | null = null;
+
+  const columnDrag = createLongPressDrag({
+    onArmed: () => {
+      columnDragHint = null;
+      columnDragArmed = true;
+      // タブ側と同じく、ポインターキャプチャは長押し成立後に行う(理由はonTabPointerDown
+      // 付近のコメント参照)。
+      if (gripPendingEl && gripPendingPointerId !== null) {
+        gripPendingEl.setPointerCapture(gripPendingPointerId);
+      }
+      if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
+      suppressTextSelectionDuringDrag();
+    },
+  });
+
+  function onGripPointerDown(e: PointerEvent) {
+    if (e.pointerType !== "touch" || !app.useMobileUi()) return;
+    columnDragStartX = e.clientX;
+    gripPendingEl = e.currentTarget as HTMLElement;
+    gripPendingPointerId = e.pointerId;
+    columnDrag.onPointerDown(e.clientX, e.clientY);
+  }
+
+  function onGripPointerMove(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    columnDrag.onPointerMove(e.clientX, e.clientY);
+    if (!columnDrag.armed) return;
+    e.preventDefault();
+    const deltaX = e.clientX - columnDragStartX;
+    columnDragHint = resolveColumnDragHint(
+      deltaX,
+      app.canMoveColumnAdjacent(group.id, "prev"),
+      app.canMoveColumnAdjacent(group.id, "next"),
+    );
+  }
+
+  function endGripTouchDrag(wasArmed: boolean) {
+    const hint = columnDragHint;
+    columnDragHint = null;
+    columnDragArmed = false;
+    gripPendingEl = null;
+    gripPendingPointerId = null;
+    restoreTextSelection();
+    if (wasArmed && hint) void app.moveColumnAdjacent(group.id, hint);
+  }
+
+  function onGripPointerUp(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    const wasArmed = columnDrag.armed;
+    columnDrag.onPointerUp();
+    endGripTouchDrag(wasArmed);
+  }
+
+  function onGripPointerCancel(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    columnDrag.onPointerCancel();
+    endGripTouchDrag(false);
+  }
 </script>
 
 <section
@@ -168,22 +384,30 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="flex min-w-0 flex-1 items-stretch gap-px overflow-x-auto"
+      data-tabbar-group-id={group.id}
       ondragover={(e) => {
         if (app.draggingTabId) {
           e.preventDefault();
           app.dragOverTabBarEnd(group.id);
         }
       }}
+      onpointermove={onTabPointerMove}
+      onpointerup={onTabPointerUp}
+      onpointercancel={onTabPointerCancel}
     >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span
-        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing"
-        draggable="true"
+        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing [touch-action:none] [-webkit-touch-callout:none]"
+        draggable={!app.useMobileUi()}
         ondragstart={(e) => {
           e.dataTransfer?.setData("text/plain", group.id);
           app.startDragGroup(group.id);
         }}
         ondragend={() => app.endDragGroup()}
+        onpointerdown={onGripPointerDown}
+        onpointermove={onGripPointerMove}
+        onpointerup={onGripPointerUp}
+        onpointercancel={onGripPointerCancel}
         title="ドラッグでカラムを並べ替え"
       ><GripVertical size={16} /></span>
 
@@ -191,13 +415,16 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class={[
-            "flex cursor-grab items-center active:cursor-grabbing",
+            "flex cursor-grab items-center active:cursor-grabbing select-none [touch-action:none] [-webkit-touch-callout:none]",
             {
               "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
+              "relative z-20 scale-105 shadow-[0_8px_24px_rgba(0,0,0,0.25)] pointer-events-none": touchDraggingTabId === t.id,
             },
             app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
           ]}
-          draggable="true"
+          style:transform={touchDraggingTabId === t.id ? `translateX(${touchDragDeltaX}px)` : undefined}
+          data-tab-id={t.id}
+          draggable={!app.useMobileUi()}
           ondragstart={(e) => {
             e.dataTransfer?.setData("text/plain", t.id);
             e.stopPropagation();
@@ -211,6 +438,10 @@
               app.dragOverTab(group.id, t.id);
             }
           }}
+          onpointerdown={(e) => onTabPointerDown(e, t.id)}
+          onpointermove={onTabPointerMove}
+          onpointerup={onTabPointerUp}
+          onpointercancel={onTabPointerCancel}
         >
           <button
             class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
@@ -282,6 +513,26 @@
         >
           <SquareSplitVertical size={16} /> 下に分割
         </button>
+        {#if app.canMoveColumnAdjacent(group.id, "prev")}
+          <button
+            type="button"
+            role="menuitem"
+            class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+            onclick={() => pickMenuItem(() => app.moveColumnAdjacent(group.id, "prev"))}
+          >
+            <ChevronLeft size={16} /> 左に移動
+          </button>
+        {/if}
+        {#if app.canMoveColumnAdjacent(group.id, "next")}
+          <button
+            type="button"
+            role="menuitem"
+            class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+            onclick={() => pickMenuItem(() => app.moveColumnAdjacent(group.id, "next"))}
+          >
+            <ChevronRight size={16} /> 右に移動
+          </button>
+        {/if}
         <button
           type="button"
           role="menuitem"
@@ -369,6 +620,19 @@
       style:height={edge === "top" || edge === "bottom" ? "35%" : "auto"}
       style="z-index:6"
     ></div>
+  {/if}
+
+  {#if columnDragArmed}
+    <div class="pointer-events-none fixed inset-x-0 top-[max(4px,env(safe-area-inset-top))] z-30 flex justify-center" use:portal>
+      <div class="flex items-center gap-3 rounded-lg bg-background px-3 py-1.5 text-sm shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
+        <span class:text-foreground={columnDragHint === "prev"} class:text-muted-foreground={columnDragHint !== "prev"}>
+          <ChevronLeft size={16} class="inline" /> 前へ
+        </span>
+        <span class:text-foreground={columnDragHint === "next"} class:text-muted-foreground={columnDragHint !== "next"}>
+          次へ <ChevronRight size={16} class="inline" />
+        </span>
+      </div>
+    </div>
   {/if}
 </section>
 
