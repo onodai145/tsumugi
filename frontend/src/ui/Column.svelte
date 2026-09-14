@@ -344,7 +344,12 @@
 >
   <!-- メニューボタンはタブ数に関係なく常にカラム右端に固定表示したいため、グリップ＋タブの
        横スクロール領域(内側のoverflow-x-auto)と分離し、外側のflex行にflex-noneで置く。 -->
-  <div class="tabbar-bg flex min-h-[26px] items-stretch border-b border-border border-t-2">
+  <!-- モバイル版はタッチターゲットが小さすぎて長押しドラッグを掴みにくいとの実機報告
+       (Issue #354)を受け、タブバー高さ・グリップ幅・タブのpaddingをモバイルのときだけ
+       拡大する。デスクトップの見た目は一切変えない。 -->
+  <div
+    class={["tabbar-bg flex items-stretch border-b border-border border-t-2", app.useMobileUi() ? "min-h-10" : "min-h-[26px]"]}
+  >
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="flex min-w-0 flex-1 items-stretch gap-px overflow-x-auto"
@@ -358,7 +363,10 @@
     >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span
-        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing [touch-action:none]"
+        class={[
+          "flex flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing [touch-action:none] [-webkit-touch-callout:none]",
+          app.useMobileUi() ? "w-10" : "w-[26px]",
+        ]}
         draggable="true"
         ondragstart={(e) => {
           e.dataTransfer?.setData("text/plain", group.id);
@@ -376,7 +384,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class={[
-            "flex cursor-grab items-center active:cursor-grabbing [touch-action:none]",
+            "flex cursor-grab items-center active:cursor-grabbing select-none [touch-action:none] [-webkit-touch-callout:none]",
             {
               "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
               "relative z-20 scale-105 shadow-[0_8px_24px_rgba(0,0,0,0.25)] pointer-events-none": touchDraggingTabId === t.id,
@@ -405,7 +413,10 @@
           onpointercancel={onTabPointerCancel}
         >
           <button
-            class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
+            class={[
+              "flex items-center gap-1 whitespace-nowrap border-none bg-transparent text-foreground",
+              app.useMobileUi() ? "px-3 py-2.5 text-sm" : "px-1.5 py-0.5 text-xs",
+            ]}
             onclick={() => app.setActiveTab(group.id, t.id)}
             ondblclick={() => onEditTab(t)}
             title={`${tabName(t)}（ダブルクリックで編集）`}

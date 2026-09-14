@@ -1,10 +1,12 @@
 // タッチでの長押しドラッグ検知(Issue #354)。native drag-and-dropはタッチでは
 // dragstartが発火しないため、pointerdown起点で「長押し(400ms)が成立したらドラッグ開始」
 // という状態遷移をDOM非依存の純粋なロジックとして提供する。
-// 指が閾値(8px)以上動いた状態でタイマーが成立前なら中断し、タップ/横スクロールに委ねる。
+// 指が閾値以上動いた状態でタイマーが成立前なら中断し、タップ/横スクロールに委ねる。
+// 閾値は当初8pxだったが、実機確認で「長押し中の自然な指のブレで頻繁に中断してしまい
+// 長押しが成立しにくい」との報告があり16pxに緩和した。
 
 export const LONG_PRESS_MS = 400;
-export const CANCEL_THRESHOLD_PX = 8;
+export const CANCEL_THRESHOLD_PX = 16;
 
 export interface LongPressDragController {
   /** 長押しが成立してドラッグ中かどうか。 */
