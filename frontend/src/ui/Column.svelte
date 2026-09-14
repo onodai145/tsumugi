@@ -183,13 +183,30 @@
     tabDrag.onPointerDown(e.clientX, e.clientY);
   }
 
+  /// ドラッグ中の指の位置から並び替え対象を解決する。タブの上ならそのタブ、タブの無い
+  /// 「タブバーの空き部分」なら末尾送り(tabId:null)。カラム内でもタブバーの外
+  /// (ノート一覧など)はドロップ対象外なのでnullを返す。data-group-idはカラムの
+  /// <section>全体に付いているため、空き部分の判定にはタブバー自身の
+  /// data-tabbar-group-id を使う(デスクトップのnative DnDと同じ範囲に揃える)。
   function resolveTabHit(clientX: number, clientY: number): { groupId: string; tabId: string | null } | null {
     const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
     if (!el) return null;
-    const groupEl = el.closest<HTMLElement>("[data-group-id]");
-    if (!groupEl) return null;
     const tabEl = el.closest<HTMLElement>("[data-tab-id]");
-    return { groupId: groupEl.dataset.groupId!, tabId: tabEl?.dataset.tabId ?? null };
+    if (tabEl) {
+      const groupEl = tabEl.closest<HTMLElement>("[data-group-id]");
+      if (!groupEl) return null;
+      return { groupId: groupEl.dataset.groupId!, tabId: tabEl.dataset.tabId! };
+    }
+    const tabBarEl = el.closest<HTMLElement>("[data-tabbar-group-id]");
+    if (!tabBarEl) return null;
+    return { groupId: tabBarEl.dataset.tabbarGroupId!, tabId: null };
+  }
+
+  /// 現在のタブ並び(全グループ分)のスナップショット。dragOverTab/dragOverTabBarEndが
+  /// 実際に並びを変えたかどうかを判定するために使う(どちらも「自分自身の上」「既に末尾」
+  /// といった条件で何もせず返るため、解決先のIDの変化だけでは入れ替え有無を判定できない)。
+  function tabOrderSnapshot(): string {
+    return app.groups.map((g) => `${g.id}:${g.tabs.map((t) => t.id).join(",")}`).join("|");
   }
 
   function onTabPointerMove(e: PointerEvent) {
@@ -200,8 +217,17 @@
     touchDragDeltaX = e.clientX - touchDragStartX;
     const hit = resolveTabHit(e.clientX, e.clientY);
     if (!hit) return;
+    const before = tabOrderSnapshot();
     if (hit.tabId) app.dragOverTab(hit.groupId, hit.tabId);
     else app.dragOverTabBarEnd(hit.groupId);
+    // 入れ替えが実際に起きた場合、ドラッグ中タブのレイアウト上の位置自体が動くため、
+    // translateXの基準を今の指の位置へ取り直す。取り直さないと、元のpointerdown位置から
+    // の差分が新しいレイアウト位置に上乗せされ、入れ替えのたびに指より1タブ分ずつ
+    // 先走って見える。
+    if (tabOrderSnapshot() !== before) {
+      touchDragStartX = e.clientX;
+      touchDragDeltaX = 0;
+    }
   }
 
   function endTabTouchDrag(wasArmed: boolean) {
@@ -231,11 +257,23 @@
   // 隣のカラムが画面外にあり位置に追従する自由なドラッグは分かりにくい。そのため
   // 「前へ/次へ」の1ステップ移動として実装する(resolveColumnDragHintのトグル式判定)。
   let columnDragHint = $state<ColumnDragDirection | null>(null);
+  // 長押しが成立した時点でtrue。「前へ/次へ」のヒントは、まだどちらへも動かしていない
+  // (columnDragHint === null)段階から両方を非活性表示で出しておくため、オーバーレイの
+  // 表示可否はcolumnDragHintではなくこちらで判定する。
+  let columnDragArmed = $state(false);
   let columnDragStartX = 0;
+  let gripPendingEl: HTMLElement | null = null;
+  let gripPendingPointerId: number | null = null;
 
   const columnDrag = createLongPressDrag({
     onArmed: () => {
       columnDragHint = null;
+      columnDragArmed = true;
+      // タブ側と同じく、ポインターキャプチャは長押し成立後に行う(理由はonTabPointerDown
+      // 付近のコメント参照)。
+      if (gripPendingEl && gripPendingPointerId !== null) {
+        gripPendingEl.setPointerCapture(gripPendingPointerId);
+      }
       if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
     },
   });
@@ -243,6 +281,8 @@
   function onGripPointerDown(e: PointerEvent) {
     if (e.pointerType !== "touch" || !app.useMobileUi()) return;
     columnDragStartX = e.clientX;
+    gripPendingEl = e.currentTarget as HTMLElement;
+    gripPendingPointerId = e.pointerId;
     columnDrag.onPointerDown(e.clientX, e.clientY);
   }
 
@@ -262,6 +302,9 @@
   function endGripTouchDrag(wasArmed: boolean) {
     const hint = columnDragHint;
     columnDragHint = null;
+    columnDragArmed = false;
+    gripPendingEl = null;
+    gripPendingPointerId = null;
     if (wasArmed && hint) void app.moveColumnAdjacent(group.id, hint);
   }
 
@@ -275,7 +318,7 @@
   function onGripPointerCancel(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
     columnDrag.onPointerCancel();
-    columnDragHint = null;
+    endGripTouchDrag(false);
   }
 </script>
 
@@ -305,6 +348,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="flex min-w-0 flex-1 items-stretch gap-px overflow-x-auto"
+      data-tabbar-group-id={group.id}
       ondragover={(e) => {
         if (app.draggingTabId) {
           e.preventDefault();
@@ -314,7 +358,7 @@
     >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span
-        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing"
+        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing [touch-action:none]"
         draggable="true"
         ondragstart={(e) => {
           e.dataTransfer?.setData("text/plain", group.id);
@@ -539,7 +583,7 @@
     ></div>
   {/if}
 
-  {#if columnDragHint !== null}
+  {#if columnDragArmed}
     <div class="pointer-events-none absolute inset-x-0 top-1 z-30 flex justify-center" use:portal>
       <div class="flex items-center gap-3 rounded-lg bg-background px-3 py-1.5 text-sm shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
         <span class:text-foreground={columnDragHint === "prev"} class:text-muted-foreground={columnDragHint !== "prev"}>
