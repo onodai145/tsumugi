@@ -41,6 +41,7 @@ import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { withRecentEmojiUsage } from "./recentEmojis";
 import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
 import { isMobilePlatform } from "./platform";
+import { swapAdjacentColumns, canMoveAdjacentColumn, type AdjacentDirection } from "./swipeNav";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1クリックあたりの取得ページ上限（Issue #148）
@@ -464,6 +465,26 @@ class AppStore {
   focusColumn(groupId: string) {
     if (!this.groups.some((g) => g.id === groupId)) return;
     this.focusedGroupId = groupId;
+  }
+
+  /// タッチ長押しドラッグ確定時、および「…」メニューの「左/右に移動」から呼ぶ(Issue #354)。
+  /// 対象はtopLevelLeafGroupIds上でgroupIdと隣接するtop-level leafカラムのみ(ネストした
+  /// 分割配下のカラムは対象外)。移動できない場合(端、対象外のgroupId)は何もしない。
+  canMoveColumnAdjacent(groupId: string, direction: AdjacentDirection): boolean {
+    return canMoveAdjacentColumn(this.paneRoot, groupId, direction);
+  }
+
+  async moveColumnAdjacent(groupId: string, direction: AdjacentDirection) {
+    const next = swapAdjacentColumns(this.groups, this.paneRoot, groupId, direction);
+    if (!next) return;
+    this.groups = next;
+    await this.#queuePaneWrite(async () => {
+      try {
+        await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
+      } catch (e) {
+        this.#logFailure(e);
+      }
+    });
   }
 
   /// タブ名を変更（空なら自動生成名に戻す）。永続化して即反映。
