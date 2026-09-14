@@ -41,7 +41,7 @@ import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { withRecentEmojiUsage } from "./recentEmojis";
 import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
 import { isMobilePlatform } from "./platform";
-import { swapAdjacentColumns, canMoveAdjacentColumn, type AdjacentDirection } from "./swipeNav";
+import { adjacentColumnId, canMoveAdjacentColumn, type AdjacentDirection } from "./swipeNav";
 
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1クリックあたりの取得ページ上限（Issue #148）
@@ -474,13 +474,18 @@ class AppStore {
     return canMoveAdjacentColumn(this.paneRoot, groupId, direction);
   }
 
+  /// 実際に表示順を決めているのはthis.groups(フラット配列)ではなくpaneRoot(木)なので、
+  /// デスクトップのドラッグ&ドロップ(endDragGroup)と同じくmovePaneで木を書き換え、
+  /// loadPaneLayoutで木を取り直す。"prev"は隣のカラムの手前(Edge::Left)、"next"は
+  /// 隣のカラムの直後(Edge::Right)へ差し込む＝隣と1つ入れ替わる。
   async moveColumnAdjacent(groupId: string, direction: AdjacentDirection) {
-    const next = swapAdjacentColumns(this.groups, this.paneRoot, groupId, direction);
-    if (!next) return;
-    this.groups = next;
+    const otherId = adjacentColumnId(this.paneRoot, groupId, direction);
+    if (!otherId) return;
+    const edge: Edge = direction === "prev" ? "left" : "right";
     await this.#queuePaneWrite(async () => {
       try {
-        await unwrap(commands.reorderGroups(this.groups.map((g) => g.id)));
+        await unwrap(commands.movePane(groupId, otherId, edge));
+        this.paneRoot = await unwrap(commands.loadPaneLayout());
       } catch (e) {
         this.#logFailure(e);
       }

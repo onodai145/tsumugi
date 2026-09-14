@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PaneNode } from "../bindings/tauri.gen";
-import { canMoveAdjacentColumn, pageOrder, swapAdjacentColumns, topLevelLeafGroupIds } from "./swipeNav";
+import { adjacentColumnId, canMoveAdjacentColumn, pageOrder, topLevelLeafGroupIds } from "./swipeNav";
 
 function leaf(id: string, groupId: string): PaneNode {
   return { type: "leaf", id, groupId };
@@ -62,32 +62,30 @@ describe("canMoveAdjacentColumn", () => {
   });
 });
 
-describe("swapAdjacentColumns", () => {
+describe("adjacentColumnId", () => {
   const root = row("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
-  const groups = [{ id: "g1" }, { id: "g2" }, { id: "g3" }];
 
-  it("nextで隣のカラムと入れ替わる", () => {
-    const result = swapAdjacentColumns(groups, root, "g1", "next");
-    expect(result?.map((g) => g.id)).toEqual(["g2", "g1", "g3"]);
+  it("中間カラムはprev/nextそれぞれの隣のgroupIdを返す", () => {
+    expect(adjacentColumnId(root, "g2", "prev")).toBe("g1");
+    expect(adjacentColumnId(root, "g2", "next")).toBe("g3");
   });
 
-  it("prevで隣のカラムと入れ替わる", () => {
-    const result = swapAdjacentColumns(groups, root, "g3", "prev");
-    expect(result?.map((g) => g.id)).toEqual(["g1", "g3", "g2"]);
+  it("先頭カラムのprevはnull", () => {
+    expect(adjacentColumnId(root, "g1", "prev")).toBeNull();
   });
 
-  it("先頭カラムでprevを指定するとnullを返す", () => {
-    expect(swapAdjacentColumns(groups, root, "g1", "prev")).toBeNull();
+  it("末尾カラムのnextはnull", () => {
+    expect(adjacentColumnId(root, "g3", "next")).toBeNull();
   });
 
-  it("末尾カラムでnextを指定するとnullを返す", () => {
-    expect(swapAdjacentColumns(groups, root, "g3", "next")).toBeNull();
+  it("topLevelLeafGroupIdsに無いgroupIdはnull", () => {
+    expect(adjacentColumnId(root, "missing", "next")).toBeNull();
   });
 
-  it("ネストしたsplit配下のカラムはnullを返す", () => {
+  it("ネストしたsplit配下のカラムはnull", () => {
     const nested = row("nested", [leaf("l4", "g4"), leaf("l5", "g5")]);
     const rootWithNested = row("root", [leaf("l1", "g1"), nested]);
-    const groupsWithNested = [{ id: "g1" }, { id: "g4" }, { id: "g5" }];
-    expect(swapAdjacentColumns(groupsWithNested, rootWithNested, "g4", "next")).toBeNull();
+    expect(adjacentColumnId(rootWithNested, "g4", "next")).toBeNull();
+    expect(adjacentColumnId(rootWithNested, "g4", "prev")).toBeNull();
   });
 });
