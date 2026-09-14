@@ -3,7 +3,7 @@
   import { app, tabName } from "../lib/store.svelte";
   import NoteCard from "./NoteCard.svelte";
   import NotificationCard from "./NotificationCard.svelte";
-  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitHorizontal, SquareSplitVertical, Settings } from "@lucide/svelte";
+  import { X, GripVertical, MoreHorizontal, Plus, SquareSplitHorizontal, SquareSplitVertical, Settings, ChevronLeft, ChevronRight } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { portal } from "../lib/portal";
   import { edgeFromPointer } from "../lib/paneEdge";
@@ -12,6 +12,7 @@
   import { createLongPressDrag } from "../lib/longPressDrag";
   import { vibrate } from "../lib/ipc";
   import { isMobilePlatform } from "../lib/platform";
+  import { resolveColumnDragHint, type ColumnDragDirection } from "../lib/columnDragHint";
 
   let {
     group,
@@ -225,6 +226,57 @@
     tabDrag.onPointerCancel();
     endTabTouchDrag(wasArmed);
   }
+
+  // タッチ長押しでのカラム並び替え(Issue #354)。モバイル版は1カラムが画面全幅表示のため、
+  // 隣のカラムが画面外にあり位置に追従する自由なドラッグは分かりにくい。そのため
+  // 「前へ/次へ」の1ステップ移動として実装する(resolveColumnDragHintのトグル式判定)。
+  let columnDragHint = $state<ColumnDragDirection | null>(null);
+  let columnDragStartX = 0;
+
+  const columnDrag = createLongPressDrag({
+    onArmed: () => {
+      columnDragHint = null;
+      if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
+    },
+  });
+
+  function onGripPointerDown(e: PointerEvent) {
+    if (e.pointerType !== "touch" || !app.useMobileUi()) return;
+    columnDragStartX = e.clientX;
+    columnDrag.onPointerDown(e.clientX, e.clientY);
+  }
+
+  function onGripPointerMove(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    columnDrag.onPointerMove(e.clientX, e.clientY);
+    if (!columnDrag.armed) return;
+    e.preventDefault();
+    const deltaX = e.clientX - columnDragStartX;
+    columnDragHint = resolveColumnDragHint(
+      deltaX,
+      app.canMoveColumnAdjacent(group.id, "prev"),
+      app.canMoveColumnAdjacent(group.id, "next"),
+    );
+  }
+
+  function endGripTouchDrag(wasArmed: boolean) {
+    const hint = columnDragHint;
+    columnDragHint = null;
+    if (wasArmed && hint) void app.moveColumnAdjacent(group.id, hint);
+  }
+
+  function onGripPointerUp(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    const wasArmed = columnDrag.armed;
+    columnDrag.onPointerUp();
+    endGripTouchDrag(wasArmed);
+  }
+
+  function onGripPointerCancel(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    columnDrag.onPointerCancel();
+    columnDragHint = null;
+  }
 </script>
 
 <section
@@ -269,6 +321,10 @@
           app.startDragGroup(group.id);
         }}
         ondragend={() => app.endDragGroup()}
+        onpointerdown={onGripPointerDown}
+        onpointermove={onGripPointerMove}
+        onpointerup={onGripPointerUp}
+        onpointercancel={onGripPointerCancel}
         title="ドラッグでカラムを並べ替え"
       ><GripVertical size={16} /></span>
 
@@ -461,6 +517,19 @@
       style:height={edge === "top" || edge === "bottom" ? "35%" : "auto"}
       style="z-index:6"
     ></div>
+  {/if}
+
+  {#if columnDragHint !== null}
+    <div class="pointer-events-none absolute inset-x-0 top-1 z-30 flex justify-center" use:portal>
+      <div class="flex items-center gap-3 rounded-lg bg-background px-3 py-1.5 text-sm shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
+        <span class:text-foreground={columnDragHint === "prev"} class:text-muted-foreground={columnDragHint !== "prev"}>
+          <ChevronLeft size={16} class="inline" /> 前へ
+        </span>
+        <span class:text-foreground={columnDragHint === "next"} class:text-muted-foreground={columnDragHint !== "next"}>
+          次へ <ChevronRight size={16} class="inline" />
+        </span>
+      </div>
+    </div>
   {/if}
 </section>
 
