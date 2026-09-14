@@ -292,12 +292,20 @@
 
   const columnDrag = createLongPressDrag({
     onArmed: () => {
+      console.log("[grip-debug] armed", { t: performance.now() });
       columnDragHint = null;
       columnDragArmed = true;
       // タブ側と同じく、ポインターキャプチャは長押し成立後に行う(理由はonTabPointerDown
       // 付近のコメント参照)。
-      if (gripPendingEl && gripPendingPointerId !== null) {
-        gripPendingEl.setPointerCapture(gripPendingPointerId);
+      try {
+        if (gripPendingEl && gripPendingPointerId !== null) {
+          gripPendingEl.setPointerCapture(gripPendingPointerId);
+          console.log("[grip-debug] setPointerCapture ok");
+        } else {
+          console.log("[grip-debug] setPointerCapture skipped(no pendingEl/pointerId)");
+        }
+      } catch (err) {
+        console.log("[grip-debug] setPointerCapture threw", err);
       }
       if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
       suppressTextSelectionDuringDrag();
@@ -306,6 +314,7 @@
 
   function onGripPointerDown(e: PointerEvent) {
     if (e.pointerType !== "touch" || !app.useMobileUi()) return;
+    console.log("[grip-debug] pointerdown", { x: e.clientX, y: e.clientY, id: e.pointerId, t: performance.now() });
     columnDragStartX = e.clientX;
     gripPendingEl = e.currentTarget as HTMLElement;
     gripPendingPointerId = e.pointerId;
@@ -316,6 +325,7 @@
     if (e.pointerType !== "touch") return;
     columnDrag.onPointerMove(e.clientX, e.clientY);
     if (!columnDrag.armed) return;
+    console.log("[grip-debug] pointermove(armed)", { x: e.clientX, y: e.clientY, t: performance.now() });
     e.preventDefault();
     const deltaX = e.clientX - columnDragStartX;
     columnDragHint = resolveColumnDragHint(
@@ -337,6 +347,7 @@
 
   function onGripPointerUp(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
+    console.log("[grip-debug] pointerup", { armed: columnDrag.armed, hint: columnDragHint, t: performance.now() });
     const wasArmed = columnDrag.armed;
     columnDrag.onPointerUp();
     endGripTouchDrag(wasArmed);
@@ -344,6 +355,7 @@
 
   function onGripPointerCancel(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
+    console.log("[grip-debug] pointercancel", { armed: columnDrag.armed, hint: columnDragHint, t: performance.now() });
     columnDrag.onPointerCancel();
     endGripTouchDrag(false);
   }
@@ -396,6 +408,7 @@
         ]}
         draggable="true"
         ondragstart={(e) => {
+          console.log("[grip-debug] native dragstart(!)", { t: performance.now() });
           e.dataTransfer?.setData("text/plain", group.id);
           app.startDragGroup(group.id);
         }}
