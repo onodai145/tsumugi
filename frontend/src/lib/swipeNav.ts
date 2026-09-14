@@ -17,3 +17,37 @@ export function pageOrder(paneRoot: PaneNode): (string | null)[] {
   if (paneRoot.type === "leaf") return [paneRoot.groupId];
   return paneRoot.children.map((c) => (c.node.type === "leaf" ? (c.node as { groupId: string }).groupId : null));
 }
+
+export type AdjacentDirection = "prev" | "next";
+
+/// groupIdが最上位rowのleafの並びの中で、前/次に隣接カラムへ移動できるかどうか。
+export function canMoveAdjacentColumn(paneRoot: PaneNode, groupId: string, direction: AdjacentDirection): boolean {
+  const order = topLevelLeafGroupIds(paneRoot);
+  const i = order.indexOf(groupId);
+  if (i < 0) return false;
+  const j = direction === "prev" ? i - 1 : i + 1;
+  return j >= 0 && j < order.length;
+}
+
+/// groupIdと隣接するtop-level leafカラムの位置を1つ入れ替えた新しい全体順序(groups配列と
+/// 同じ要素を持つ配列)を返す。移動できない場合(端、対象外のgroupId、ネスト配下のカラム)は
+/// nullを返す。ネストしたsplit配下のカラムの相対順序には触れない。
+export function swapAdjacentColumns<T extends { id: string }>(
+  groups: T[],
+  paneRoot: PaneNode,
+  groupId: string,
+  direction: AdjacentDirection,
+): T[] | null {
+  const order = topLevelLeafGroupIds(paneRoot);
+  const i = order.indexOf(groupId);
+  if (i < 0) return null;
+  const j = direction === "prev" ? i - 1 : i + 1;
+  if (j < 0 || j >= order.length) return null;
+  const otherId = order[j];
+  const gi = groups.findIndex((g) => g.id === groupId);
+  const gj = groups.findIndex((g) => g.id === otherId);
+  if (gi < 0 || gj < 0) return null;
+  const next = [...groups];
+  [next[gi], next[gj]] = [next[gj], next[gi]];
+  return next;
+}
