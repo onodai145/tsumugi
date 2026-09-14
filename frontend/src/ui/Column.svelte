@@ -9,6 +9,9 @@
   import { edgeFromPointer } from "../lib/paneEdge";
   import { activeSlotIndex, computeTabSlots, notesForSlot } from "../lib/tabSlots";
   import { resolveSettledIndex } from "../lib/scrollSnapIndex";
+  import { createLongPressDrag } from "../lib/longPressDrag";
+  import { vibrate } from "../lib/ipc";
+  import { isMobilePlatform } from "../lib/platform";
 
   let {
     group,
@@ -140,6 +143,74 @@
     menuOpen = false;
     action();
   }
+
+  // タッチ長押しでのタブ並び替え(Issue #354)。native drag-and-dropはタッチでは
+  // dragstartが発火しないため、長押し(400ms)が成立したら同じapp.startDragTab等を
+  // 呼び出す形でモバイル版に対応する。マウス操作(pointerType!=="touch")では何もせず、
+  // 既存のdraggable属性によるnative DnDに委ねる。
+  let touchDraggingTabId = $state<string | null>(null);
+  let touchDragTabPendingId: string | null = null;
+  let touchDragStartX = 0;
+  let touchDragDeltaX = $state(0);
+
+  const tabDrag = createLongPressDrag({
+    onArmed: () => {
+      const tabId = touchDragTabPendingId;
+      if (!tabId) return;
+      touchDraggingTabId = tabId;
+      touchDragDeltaX = 0;
+      if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
+      app.startDragTab(tabId);
+    },
+  });
+
+  function onTabPointerDown(e: PointerEvent, tabId: string) {
+    if (e.pointerType !== "touch" || !app.useMobileUi()) return;
+    touchDragTabPendingId = tabId;
+    touchDragStartX = e.clientX;
+    tabDrag.onPointerDown(e.clientX, e.clientY);
+  }
+
+  function resolveTabHit(clientX: number, clientY: number): { groupId: string; tabId: string | null } | null {
+    const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    if (!el) return null;
+    const groupEl = el.closest<HTMLElement>("[data-group-id]");
+    if (!groupEl) return null;
+    const tabEl = el.closest<HTMLElement>("[data-tab-id]");
+    return { groupId: groupEl.dataset.groupId!, tabId: tabEl?.dataset.tabId ?? null };
+  }
+
+  function onTabPointerMove(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    tabDrag.onPointerMove(e.clientX, e.clientY);
+    if (!tabDrag.armed) return;
+    e.preventDefault();
+    touchDragDeltaX = e.clientX - touchDragStartX;
+    const hit = resolveTabHit(e.clientX, e.clientY);
+    if (!hit) return;
+    if (hit.tabId) app.dragOverTab(hit.groupId, hit.tabId);
+    else app.dragOverTabBarEnd(hit.groupId);
+  }
+
+  function endTabTouchDrag() {
+    const wasArmed = tabDrag.armed;
+    touchDraggingTabId = null;
+    touchDragTabPendingId = null;
+    touchDragDeltaX = 0;
+    if (wasArmed) void app.endDragTab();
+  }
+
+  function onTabPointerUp(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    tabDrag.onPointerUp();
+    endTabTouchDrag();
+  }
+
+  function onTabPointerCancel(e: PointerEvent) {
+    if (e.pointerType !== "touch") return;
+    tabDrag.onPointerCancel();
+    endTabTouchDrag();
+  }
 </script>
 
 <section
@@ -194,9 +265,12 @@
             "flex cursor-grab items-center active:cursor-grabbing",
             {
               "shadow-[inset_0_-2px_0_var(--color-primary)]": t.id === group.activeTabId,
+              "relative z-20 scale-105 shadow-[0_8px_24px_rgba(0,0,0,0.25)] pointer-events-none": touchDraggingTabId === t.id,
             },
             app.draggingTabId === t.id ? "opacity-40" : t.id !== group.activeTabId ? "opacity-65" : "",
           ]}
+          style:transform={touchDraggingTabId === t.id ? `translateX(${touchDragDeltaX}px)` : undefined}
+          data-tab-id={t.id}
           draggable="true"
           ondragstart={(e) => {
             e.dataTransfer?.setData("text/plain", t.id);
@@ -211,6 +285,10 @@
               app.dragOverTab(group.id, t.id);
             }
           }}
+          onpointerdown={(e) => onTabPointerDown(e, t.id)}
+          onpointermove={onTabPointerMove}
+          onpointerup={onTabPointerUp}
+          onpointercancel={onTabPointerCancel}
         >
           <button
             class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
