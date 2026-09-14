@@ -181,7 +181,6 @@
 
   const tabDrag = createLongPressDrag({
     onArmed: () => {
-      console.log("[tab-debug] armed", { t: performance.now() });
       const tabId = touchDragTabPendingId;
       if (!tabId) return;
       touchDraggingTabId = tabId;
@@ -201,7 +200,6 @@
 
   function onTabPointerDown(e: PointerEvent, tabId: string) {
     if (e.pointerType !== "touch" || !app.useMobileUi()) return;
-    console.log("[tab-debug] pointerdown", { tabId, x: e.clientX, y: e.clientY, id: e.pointerId, t: performance.now() });
     touchDragTabPendingId = tabId;
     touchDragStartX = e.clientX;
     // ポインターキャプチャの対象は、ドラッグ中のタブ自身(e.currentTarget)ではなく、
@@ -246,21 +244,8 @@
 
   function onTabPointerMove(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
-    const wasArmedBefore = tabDrag.armed;
     tabDrag.onPointerMove(e.clientX, e.clientY);
-    if (wasArmedBefore && !tabDrag.armed) {
-      console.log("[tab-debug] unexpected: armed flipped to false via onPointerMove (should not happen)");
-    }
-    if (!tabDrag.armed) {
-      if (!wasArmedBefore) {
-        console.log("[tab-debug] pointermove(waiting, not armed yet)", {
-          dx: e.clientX - touchDragStartX,
-          t: performance.now(),
-        });
-      }
-      return;
-    }
-    console.log("[tab-debug] pointermove(armed)", { x: e.clientX, y: e.clientY, t: performance.now() });
+    if (!tabDrag.armed) return;
     e.preventDefault();
     touchDragDeltaX = e.clientX - touchDragStartX;
     const hit = resolveTabHit(e.clientX, e.clientY);
@@ -290,7 +275,6 @@
 
   function onTabPointerUp(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
-    console.log("[tab-debug] pointerup", { armed: tabDrag.armed, t: performance.now() });
     const wasArmed = tabDrag.armed;
     tabDrag.onPointerUp();
     endTabTouchDrag(wasArmed);
@@ -298,7 +282,6 @@
 
   function onTabPointerCancel(e: PointerEvent) {
     if (e.pointerType !== "touch") return;
-    console.log("[tab-debug] pointercancel", { armed: tabDrag.armed, t: performance.now() });
     const wasArmed = tabDrag.armed;
     tabDrag.onPointerCancel();
     endTabTouchDrag(wasArmed);

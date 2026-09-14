@@ -170,6 +170,21 @@ moveColumnAdjacent(groupId: string, direction: "prev" | "next") {
   タッチ操作からネイティブドラッグが一切開始されないようにした。デスクトップ版
   （`useMobileUi()`が`false`）では従来通り`draggable="true"`のまま。
 
+  上記の修正でカラムは解消したが、タブは「長押しが成立しにくい/途中で中断される」という
+  報告が続いた。`chrome://inspect`でのポインターイベントトレースで、armed成立後に
+  `pointermove`が何度か発火した後、`pointerup`/`pointercancel`のどちらも一切発火せずに
+  ログが途切れる（ドラッグが完了しないまま固着する）ことを確認した。原因は、ドラッグ中の
+  `app.dragOverTab`/`dragOverTabBarEnd`呼び出しで`group.tabs`が並び替わるたびに、Svelteの
+  keyed `{#each}`ブロックがドラッグ中タブのDOM要素自体を`insertBefore`で物理的に移動させて
+  いたこと。ポインターキャプチャを持つ要素がこうしてDOM内を移動すると、Android WebView上で
+  以後`pointerup`/`pointercancel`が一切配信されなくなることが実機で確認された（カラム
+  グリップは要素自体が一切移動しない設計だったため、この問題が起きなかった）。対処として、
+  ポインターキャプチャの対象を「ドラッグ中に移動するタブ要素自身」ではなく「常に位置が
+  変わらないタブバーコンテナ（`data-tabbar-group-id`）」に変更した。`pointermove`/
+  `pointerup`/`pointercancel`のハンドラもコンテナ側に追加し、キャプチャ後のイベントが
+  正しく届くようにしている。修正後、`pointerup {armed: true}`まで完走することを実機で
+  確認済み。
+
 ## 非スコープ・既知の制限
 
 - タブバー内でのオートスクロール（並び替え中に端まで来た場合の自動スクロール）。
