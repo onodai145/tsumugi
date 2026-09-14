@@ -430,6 +430,26 @@
         >
           <SquareSplitVertical size={16} /> 下に分割
         </button>
+        {#if app.canMoveColumnAdjacent(group.id, "prev")}
+          <button
+            type="button"
+            role="menuitem"
+            class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+            onclick={() => pickMenuItem(() => app.moveColumnAdjacent(group.id, "prev"))}
+          >
+            <ChevronLeft size={16} /> 左に移動
+          </button>
+        {/if}
+        {#if app.canMoveColumnAdjacent(group.id, "next")}
+          <button
+            type="button"
+            role="menuitem"
+            class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+            onclick={() => pickMenuItem(() => app.moveColumnAdjacent(group.id, "next"))}
+          >
+            <ChevronRight size={16} /> 右に移動
+          </button>
+        {/if}
         <button
           type="button"
           role="menuitem"
