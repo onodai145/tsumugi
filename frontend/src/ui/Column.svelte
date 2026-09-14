@@ -145,6 +145,29 @@
     action();
   }
 
+  // 長押しドラッグ中(タブ/カラムグリップ共通)、指がタブバーの外(ノート本文など、
+  // `select-text`で意図的に選択可能にしているテキスト)へ僅かにずれただけで、OS標準の
+  // 「長押しでテキスト選択」がドラッグと同時に発火してしまうことが実機で確認された
+  // (Issue #354)。ドラッグ確定(armed)からドラッグ終了までの間はページ全体を選択不可にし、
+  // 終了時に元の状態へ戻す(sortablejs等のドラッグ実装で広く使われる標準的な回避策)。
+  let restoreUserSelect: (() => void) | null = null;
+  function suppressTextSelectionDuringDrag() {
+    if (restoreUserSelect) return; // 既に抑制中なら多重に上書きしない
+    const html = document.documentElement;
+    const prevUserSelect = html.style.userSelect;
+    const prevWebkitUserSelect = html.style.getPropertyValue("-webkit-user-select");
+    html.style.userSelect = "none";
+    html.style.setProperty("-webkit-user-select", "none");
+    restoreUserSelect = () => {
+      html.style.userSelect = prevUserSelect;
+      html.style.setProperty("-webkit-user-select", prevWebkitUserSelect || "");
+      restoreUserSelect = null;
+    };
+  }
+  function restoreTextSelection() {
+    restoreUserSelect?.();
+  }
+
   // タッチ長押しでのタブ並び替え(Issue #354)。native drag-and-dropはタッチでは
   // dragstartが発火しないため、長押し(400ms)が成立したら同じapp.startDragTab等を
   // 呼び出す形でモバイル版に対応する。マウス操作(pointerType!=="touch")では何もせず、
@@ -170,6 +193,7 @@
         touchDragPendingEl.setPointerCapture(touchDragPendingPointerId);
       }
       if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
+      suppressTextSelectionDuringDrag();
       app.startDragTab(tabId);
     },
   });
@@ -236,6 +260,7 @@
     touchDragDeltaX = 0;
     touchDragPendingEl = null;
     touchDragPendingPointerId = null;
+    restoreTextSelection();
     if (wasArmed) void app.endDragTab();
   }
 
@@ -275,6 +300,7 @@
         gripPendingEl.setPointerCapture(gripPendingPointerId);
       }
       if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
+      suppressTextSelectionDuringDrag();
     },
   });
 
@@ -305,6 +331,7 @@
     columnDragArmed = false;
     gripPendingEl = null;
     gripPendingPointerId = null;
+    restoreTextSelection();
     if (wasArmed && hint) void app.moveColumnAdjacent(group.id, hint);
   }
 
