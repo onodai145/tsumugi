@@ -152,6 +152,8 @@
   let touchDragTabPendingId: string | null = null;
   let touchDragStartX = 0;
   let touchDragDeltaX = $state(0);
+  let touchDragPendingEl: HTMLElement | null = null;
+  let touchDragPendingPointerId: number | null = null;
 
   const tabDrag = createLongPressDrag({
     onArmed: () => {
@@ -159,6 +161,13 @@
       if (!tabId) return;
       touchDraggingTabId = tabId;
       touchDragDeltaX = 0;
+      // ポインターキャプチャはここ(長押し成立後)で初めて行う。pointerdown時点で
+      // 即座にキャプチャすると、キャプチャ要素へのclickリターゲティング(Pointer Events
+      // のcompatibility mapping仕様)により、キャプチャ対象の外側divより内側にある
+      // タブ切替ボタンのonclickが、長押しに至らない通常タップでも届かなくなる恐れがある。
+      if (touchDragPendingEl && touchDragPendingPointerId !== null) {
+        touchDragPendingEl.setPointerCapture(touchDragPendingPointerId);
+      }
       if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("light");
       app.startDragTab(tabId);
     },
@@ -168,7 +177,8 @@
     if (e.pointerType !== "touch" || !app.useMobileUi()) return;
     touchDragTabPendingId = tabId;
     touchDragStartX = e.clientX;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    touchDragPendingEl = e.currentTarget as HTMLElement;
+    touchDragPendingPointerId = e.pointerId;
     tabDrag.onPointerDown(e.clientX, e.clientY);
   }
 
@@ -197,6 +207,8 @@
     touchDraggingTabId = null;
     touchDragTabPendingId = null;
     touchDragDeltaX = 0;
+    touchDragPendingEl = null;
+    touchDragPendingPointerId = null;
     if (wasArmed) void app.endDragTab();
   }
 
