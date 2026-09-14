@@ -158,6 +158,18 @@ moveColumnAdjacent(groupId: string, direction: "prev" | "next") {
   を一時的に適用し、終了時に元へ戻す方式にした（sortablejs等のドラッグ実装で広く使われる
   標準的な回避策）。タブ・カラムグリップの両方の長押しドラッグに共通で適用する。
 
+  さらに、「カラムグリップの長押しドラッグが成立してヒントが出た直後に、すぐ消えて移動も
+  完了しない」という実機報告があり、`chrome://inspect`でのpointerイベントトレースにより
+  根本原因を特定した。armed成立の約80ms後に`native dragstart(!)`（我々のJSではなくブラウザが
+  発火させたHTML5 native dragstartイベント）が記録されており、その直後に`pointercancel`が
+  飛んでドラッグが中断されていた。原因はグリップ（およびタブ）に残していた`draggable="true"`
+  （デスクトップのnative DnD用）で、Android系WebViewには「`draggable="true"`要素を長押し
+  するとネイティブHTML5ドラッグを開始する」という組み込み挙動があり、これが我々の
+  `pointerdown`起点の長押しジェスチャーと同じ入力を奪い合って割り込んでいた。対処として、
+  `draggable`をモバイル版では`false`にする（`draggable={!app.useMobileUi()}`）ことで、
+  タッチ操作からネイティブドラッグが一切開始されないようにした。デスクトップ版
+  （`useMobileUi()`が`false`）では従来通り`draggable="true"`のまま。
+
 ## 非スコープ・既知の制限
 
 - タブバー内でのオートスクロール（並び替え中に端まで来た場合の自動スクロール）。
