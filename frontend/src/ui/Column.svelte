@@ -380,12 +380,7 @@
 >
   <!-- メニューボタンはタブ数に関係なく常にカラム右端に固定表示したいため、グリップ＋タブの
        横スクロール領域(内側のoverflow-x-auto)と分離し、外側のflex行にflex-noneで置く。 -->
-  <!-- モバイル版はタッチターゲットが小さすぎて長押しドラッグを掴みにくいとの実機報告
-       (Issue #354)を受け、タブバー高さ・グリップ幅・タブのpaddingをモバイルのときだけ
-       拡大する。デスクトップの見た目は一切変えない。 -->
-  <div
-    class={["tabbar-bg flex items-stretch border-b border-border border-t-2", app.useMobileUi() ? "min-h-10" : "min-h-[26px]"]}
-  >
+  <div class="tabbar-bg flex min-h-[26px] items-stretch border-b border-border border-t-2">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="flex min-w-0 flex-1 items-stretch gap-px overflow-x-auto"
@@ -402,10 +397,7 @@
     >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span
-        class={[
-          "flex flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing [touch-action:none] [-webkit-touch-callout:none]",
-          app.useMobileUi() ? "w-10" : "w-[26px]",
-        ]}
+        class="flex w-[26px] flex-none cursor-grab select-none items-center justify-center text-muted-foreground active:cursor-grabbing [touch-action:none] [-webkit-touch-callout:none]"
         draggable={!app.useMobileUi()}
         ondragstart={(e) => {
           e.dataTransfer?.setData("text/plain", group.id);
@@ -452,10 +444,7 @@
           onpointercancel={onTabPointerCancel}
         >
           <button
-            class={[
-              "flex items-center gap-1 whitespace-nowrap border-none bg-transparent text-foreground",
-              app.useMobileUi() ? "px-3 py-2.5 text-sm" : "px-1.5 py-0.5 text-xs",
-            ]}
+            class="flex items-center gap-1 whitespace-nowrap border-none bg-transparent px-1.5 py-0.5 text-xs text-foreground"
             onclick={() => app.setActiveTab(group.id, t.id)}
             ondblclick={() => onEditTab(t)}
             title={`${tabName(t)}（ダブルクリックで編集）`}
