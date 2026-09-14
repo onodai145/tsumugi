@@ -10,6 +10,10 @@ function row(id: string, children: PaneNode[]): PaneNode {
   return { type: "split", id, direction: "row", children: children.map((node) => ({ node, size: null, auto: true })) };
 }
 
+function column(id: string, children: PaneNode[]): PaneNode {
+  return { type: "split", id, direction: "column", children: children.map((node) => ({ node, size: null, auto: true })) };
+}
+
 describe("topLevelLeafGroupIds", () => {
   it("最上位rowの直下のleafのgroupIdを出現順で返す", () => {
     const root = row("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
@@ -24,6 +28,11 @@ describe("topLevelLeafGroupIds", () => {
 
   it("rootがleaf単体の場合はそのgroupIdのみ返す", () => {
     expect(topLevelLeafGroupIds(leaf("l1", "g1"))).toEqual(["g1"]);
+  });
+
+  it("rootがcolumn分割の場合は直下leafでも空配列を返す", () => {
+    const root = column("root", [leaf("l1", "g1"), leaf("l2", "g2")]);
+    expect(topLevelLeafGroupIds(root)).toEqual([]);
   });
 });
 
@@ -42,6 +51,11 @@ describe("pageOrder", () => {
   it("rootがleaf単体の場合はそのgroupIdのみ返す", () => {
     expect(pageOrder(leaf("l1", "g1"))).toEqual(["g1"]);
   });
+
+  it("rootがcolumn分割の場合は空配列を返す(横ページが存在しないため)", () => {
+    const root = column("root", [leaf("l1", "g1"), leaf("l2", "g2")]);
+    expect(pageOrder(root)).toEqual([]);
+  });
 });
 
 describe("canMoveAdjacentColumn", () => {
@@ -59,6 +73,14 @@ describe("canMoveAdjacentColumn", () => {
   });
   it("対象外のgroupIdはfalseを返す", () => {
     expect(canMoveAdjacentColumn(root, "missing", "next")).toBe(false);
+  });
+
+  it("column分割(縦並び)配下のカラムはどちらへも移動できない", () => {
+    const colRoot = column("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
+    for (const g of ["g1", "g2", "g3"]) {
+      expect(canMoveAdjacentColumn(colRoot, g, "prev")).toBe(false);
+      expect(canMoveAdjacentColumn(colRoot, g, "next")).toBe(false);
+    }
   });
 });
 
@@ -87,5 +109,13 @@ describe("adjacentColumnId", () => {
     const rootWithNested = row("root", [leaf("l1", "g1"), nested]);
     expect(adjacentColumnId(rootWithNested, "g4", "next")).toBeNull();
     expect(adjacentColumnId(rootWithNested, "g4", "prev")).toBeNull();
+  });
+
+  it("column分割(縦並び)rootの直下leafはprev/nextともnull", () => {
+    const colRoot = column("root", [leaf("l1", "g1"), leaf("l2", "g2"), leaf("l3", "g3")]);
+    expect(adjacentColumnId(colRoot, "g2", "prev")).toBeNull();
+    expect(adjacentColumnId(colRoot, "g2", "next")).toBeNull();
+    expect(adjacentColumnId(colRoot, "g1", "next")).toBeNull();
+    expect(adjacentColumnId(colRoot, "g3", "prev")).toBeNull();
   });
 });
