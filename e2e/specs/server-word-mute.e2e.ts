@@ -18,72 +18,13 @@
 // あり、「自分自身の投稿は対象外になる」という仕様(未決定・未実装)を主張するものではない。
 // is_word_note_muted()は投稿者を見ないため、種付けユーザー自身の投稿でもミュート対象なら
 // 隠れる。それがこのテストの前提。
-import { chromium, type Page } from "playwright";
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { signInAsSeededUser, setMutedWords, createNote } from "../helpers/misskeyApi";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
+import { clickThroughAccountSelect } from "../helpers/accountSelect";
 
 const MISSKEY_HOST = "misskey.local:8443";
 const MUTED_WORD = "tsumugie2ewordmute";
-
-function attachPageDiagnostics(page: Page, label: string): void {
-  page.on("console", (msg) => debugLog(`serverWordMute:${label}:console`, `${msg.type()}: ${msg.text()}`));
-  page.on("pageerror", (err) => debugLog(`serverWordMute:${label}:pageerror`, err.stack ?? err.message));
-}
-
-async function dumpFailureArtifacts(page: Page, stage: string): Promise<void> {
-  try {
-    const bodyText = await page.innerText("body").catch((e) => `<failed to read body: ${String(e)}>`);
-    debugLog("serverWordMute:failure", `stage=${stage} url=${page.url()} bodyText(先頭2000文字)=${bodyText.slice(0, 2000)}`);
-  } catch (err) {
-    debugLog("serverWordMute:failure", `stage=${stage} failed to dump body text: ${String(err)}`);
-  }
-  try {
-    const screenshotPath = debugLogPath(`server-word-mute-failure-${stage}.png`);
-    await page.screenshot({ path: screenshotPath });
-    debugLog("serverWordMute:failure", `screenshot saved: ${screenshotPath}`);
-  } catch (err) {
-    debugLog("serverWordMute:failure", `stage=${stage} failed to save screenshot: ${String(err)}`);
-  }
-}
-
-// account-post-reaction.e2e.tsのclickThroughAccountSelect()と同一の理由・同一の実装
-// (アカウント選択画面 → 「続ける」)。miauthBridge.tsは変更せず、spec側でCDP経由の
-// 別クライアントとして接続する既存パターンをそのまま踏襲する。
-async function clickThroughAccountSelect(cdpPort: number): Promise<void> {
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
-  try {
-    const context = browser.contexts()[0];
-    if (!context) throw new Error("clickThroughAccountSelect: no browser context found via CDP");
-    const existing = context.pages().find((p) => p.url().includes("/miauth/"));
-    const page = existing ?? (await context.waitForEvent("page", { timeout: 30000 }));
-    attachPageDiagnostics(page, existing ? "existing" : "waited");
-
-    await page.waitForLoadState("domcontentloaded");
-
-    await page
-      .getByText("e2etestadmin", { exact: false })
-      .first()
-      .click({ timeout: 5000 })
-      .catch(() => {});
-
-    const continueButton = page.getByRole("button", { name: "続ける" });
-    try {
-      await continueButton.waitFor({ state: "attached", timeout: 15000 });
-    } catch (err) {
-      await dumpFailureArtifacts(page, "button-not-attached");
-      throw err;
-    }
-    try {
-      await continueButton.click({ timeout: 15000 });
-    } catch (err) {
-      await dumpFailureArtifacts(page, "button-click-failed");
-      throw err;
-    }
-  } finally {
-    await browser.close();
-  }
-}
 
 describe("server-side word mute (mutedWords) hides matching notes", () => {
   let bridge: MiauthBridge;
@@ -136,7 +77,11 @@ describe("server-side word mute (mutedWords) hides matching notes", () => {
     await hostInput.setValue(MISSKEY_HOST);
 
     const startButton = await $('[data-testid="add-account-start"]');
-    await Promise.all([bridge.approveNext(), clickThroughAccountSelect(bridge.cdpPort), startButton.click()]);
+    await Promise.all([
+      bridge.approveNext(),
+      clickThroughAccountSelect(bridge.cdpPort, { logTag: "serverWordMute", accountLabel: "e2etestadmin" }),
+      startButton.click(),
+    ]);
 
     const completeButton = await $('[data-testid="add-account-complete"]');
     await completeButton.waitForDisplayed({ timeout: 15000 });
