@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import path from "node:path";
 import { defineConfig } from "vite";
+import { coverageConfigDefaults } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -40,8 +41,9 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      // 生成物のためカバレッジ集計から除外
-      exclude: ["src/bindings/tauri.gen.ts"],
+      include: ["src/**"],
+      // 生成物のためカバレッジ集計から除外(標準除外パターンも明示的に復元)
+      exclude: [...coverageConfigDefaults.exclude, "src/bindings/tauri.gen.ts"],
     },
   },
   // vitest実行時、Svelteパッケージがサーバー向けビルドに解決され

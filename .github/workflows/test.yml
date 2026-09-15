@@ -119,6 +119,8 @@ jobs:
             libasound2-dev \
             patchelf
 
+      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
+      # resolves the current stable Rust release, so it is left unpinned by design.
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
         with:
