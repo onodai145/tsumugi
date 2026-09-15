@@ -6,7 +6,23 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BINARY="$REPO_ROOT/src-tauri/target/debug/tsumugi"
 
-TMP_HOME="$(mktemp -d /tmp/tsumugi-e2e-XXXXXX)"
+# E2E_REUSE_HOME_FILE が指定されている場合、そのファイルに書かれたディレクトリを
+# TMP_HOME として再利用する(無ければ新規作成してパスを書き込む)。
+# settings-persistence-restart シナリオ(Issue #223)が、アプリを一度正常終了させた後に
+# 同じ設定ディレクトリで再起動して永続化を検証するために使う。この変数が未設定の
+# 既存の全シナリオは従来どおり毎回mktempする(挙動変化なし)。
+if [ -n "${E2E_REUSE_HOME_FILE:-}" ]; then
+  if [ -s "$E2E_REUSE_HOME_FILE" ]; then
+    TMP_HOME="$(cat "$E2E_REUSE_HOME_FILE")"
+    mkdir -p "$TMP_HOME"
+  else
+    TMP_HOME="$(mktemp -d /tmp/tsumugi-e2e-XXXXXX)"
+    mkdir -p "$(dirname "$E2E_REUSE_HOME_FILE")"
+    printf '%s' "$TMP_HOME" > "$E2E_REUSE_HOME_FILE"
+  fi
+else
+  TMP_HOME="$(mktemp -d /tmp/tsumugi-e2e-XXXXXX)"
+fi
 export XDG_CONFIG_HOME="$TMP_HOME/config"
 export XDG_CACHE_HOME="$TMP_HOME/cache"
 export XDG_DATA_HOME="$TMP_HOME/data"
