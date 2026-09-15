@@ -106,11 +106,17 @@ interface SigninFlowFinished {
  * `launchPersistentContext()` はコンテキストが1つしか存在しないため、
  * CDPで開いたタブも `addInitScript()` によるlocalStorage注入も
  * 同じコンテキストに属し、両方が機能する。
+ *
+ * `credentials`を渡すと、シードアカウントではなくそのユーザーとしてMiAuthの
+ * 同意画面を(既にサインイン済み扱いで)通過できる。複数アカウントを扱う
+ * シナリオ(2人目以降のユーザー)向け。省略時は従来どおりシードアカウント。
  */
-export async function startMiauthBridge(): Promise<MiauthBridge> {
-  const seeded: SeededAccount = JSON.parse(
-    readFileSync(join(__dirname, "..", "certs", "seeded-account.json"), "utf-8"),
-  );
+export async function startMiauthBridge(
+  credentials?: { username: string; password: string },
+): Promise<MiauthBridge> {
+  const seeded: SeededAccount =
+    credentials ??
+    JSON.parse(readFileSync(join(__dirname, "..", "certs", "seeded-account.json"), "utf-8"));
 
   const userDataDir = mkdtempSync(join(tmpdir(), "tsumugi-e2e-miauth-bridge-"));
 
