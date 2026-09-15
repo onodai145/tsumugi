@@ -2,7 +2,7 @@ name: update-pkgbuild
 
 on:
   release:
-    types: [released, published]
+    types: [published]
 
 permissions:
   contents: write
@@ -12,8 +12,12 @@ jobs:
   update:
     runs-on: ubuntu-latest
     # nightly build(Issue #299)はprerelease:trueで公開されるが、release イベントの
-    # types: [released, published] はprereleaseかどうかを問わず発火するため、
+    # types: [published] はprereleaseかどうかを問わず発火するため、
     # ここでガードしないと毎晩 TAG=nightly でこのジョブが誤って走ってしまう。
+    #
+    # types に released を含めない理由(Issue #345): 下書きリリースをpublishすると
+    # published と released の両方が発火し、同じブランチ/PRを取り合って競合するため。
+    # このリポジトリのリリースフローはdraft->手動publishのみなので published だけで足りる。
     if: github.event.release.prerelease == false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
@@ -25,6 +29,9 @@ jobs:
 
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
+          # release イベントでは actions/checkout がdetached HEADでチェックアウトするため、
+          # base を明示しないと「'base' input must be supplied」で失敗する
+          base: main
           branch: chore/update-pkgbuild-${{ github.event.release.tag_name }}
           title: "chore: update PKGBUILD for ${{ github.event.release.tag_name }}"
           commit-message: "chore: update PKGBUILD for ${{ github.event.release.tag_name }}"
