@@ -165,6 +165,15 @@ jobs:
         working-directory: src-tauri
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
 
+      - name: Upload coverage to Codecov
+        if: needs.changes.outputs.code == 'true'
+        uses: codecov/codecov-action@046562be8d17331600874a09d2c2062c27752c20 # v7.1.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: src-tauri/lcov.info
+          flags: rust
+          fail_ci_if_error: false
+
   frontend-check:
     needs: changes
     runs-on: ubuntu-latest
@@ -227,6 +236,15 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm test:coverage
+
+      - name: Upload coverage to Codecov
+        if: needs.changes.outputs.code == 'true'
+        uses: codecov/codecov-action@046562be8d17331600874a09d2c2062c27752c20 # v7.1.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
 
   # e2e/scripts/run-app.sh の要件(実機検証済み)に基づく: DNS解決用のLD_PRELOADシムを
   # ビルドするgcc、D-Bus Secret Service用のgnome-keyring-daemon、それを立てる

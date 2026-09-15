@@ -1,0 +1,21 @@
+codecov:
+  require_ci_to_pass: false
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+flags:
+  rust:
+    paths:
+      - src-tauri/
+  frontend:
+    paths:
+      - frontend/src/
+
+comment: true
