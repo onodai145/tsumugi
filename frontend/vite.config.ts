@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import path from "node:path";
 import { defineConfig } from "vite";
+import { coverageConfigDefaults } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -37,6 +38,13 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["src/**"],
+      // 生成物のためカバレッジ集計から除外(標準除外パターンも明示的に復元)
+      exclude: [...coverageConfigDefaults.exclude, "src/bindings/tauri.gen.ts"],
+    },
   },
   // vitest実行時、Svelteパッケージがサーバー向けビルドに解決され
   // mount()が使えなくなる(lifecycle_function_unavailable)ため、

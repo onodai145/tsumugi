@@ -99,6 +99,83 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+  rust-coverage:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - name: Install system dependencies (Tauri v2 Linux)
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libasound2-dev \
+            patchelf
+
+      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
+      # resolves the current stable Rust release, so it is left unpinned by design.
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.code == 'true'
+        with:
+          components: llvm-tools
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        if: needs.changes.outputs.code == 'true'
+        with:
+          workspaces: src-tauri
+
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+        if: needs.changes.outputs.code == 'true'
+        with:
+          tool: cargo-llvm-cov
+
+      # package.json の packageManager は frontend/ 配下にあり action-setup のデフォルト
+      # 検出(リポジトリルート)では拾えないため version を明示指定する。
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        if: needs.changes.outputs.code == 'true'
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: needs.changes.outputs.code == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm install
+        if: needs.changes.outputs.code == 'true'
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # cargo test/llvm-cov は tauri::generate_context!() をコンパイル時に評価するため、
+      # tauri.conf.json の frontendDist(../frontend/dist) が実在している必要がある。
+      - name: pnpm build (frontendDist生成)
+        if: needs.changes.outputs.code == 'true'
+        working-directory: frontend
+        run: pnpm build
+
+      - name: cargo llvm-cov
+        if: needs.changes.outputs.code == 'true'
+        working-directory: src-tauri
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        if: needs.changes.outputs.code == 'true'
+        uses: codecov/codecov-action@046562be8d17331600874a09d2c2062c27752c20 # v7.1.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: src-tauri/lcov.info
+          flags: rust
+          fail_ci_if_error: false
+
   frontend-check:
     needs: changes
     runs-on: ubuntu-latest
@@ -133,6 +210,43 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         working-directory: frontend
         run: pnpm test
+
+  frontend-coverage:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        if: needs.changes.outputs.code == 'true'
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: needs.changes.outputs.code == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm install
+        if: needs.changes.outputs.code == 'true'
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: vitest (coverage)
+        if: needs.changes.outputs.code == 'true'
+        working-directory: frontend
+        run: pnpm test:coverage
+
+      - name: Upload coverage to Codecov
+        if: needs.changes.outputs.code == 'true'
+        uses: codecov/codecov-action@046562be8d17331600874a09d2c2062c27752c20 # v7.1.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
 
   # e2e/scripts/run-app.sh の要件(実機検証済み)に基づく: DNS解決用のLD_PRELOADシムを
   # ビルドするgcc、D-Bus Secret Service用のgnome-keyring-daemon、それを立てる

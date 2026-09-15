@@ -1,6 +1,7 @@
 # tsumugi
 
 [![test](https://github.com/onodai145/tsumugi/actions/workflows/test.yml/badge.svg)](https://github.com/onodai145/tsumugi/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/onodai145/tsumugi/branch/main/graph/badge.svg)](https://codecov.io/gh/onodai145/tsumugi)
 [![Release](https://img.shields.io/github/v/release/onodai145/tsumugi)](https://github.com/onodai145/tsumugi/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/onodai145/tsumugi)](LICENSE)
 [![Vibe Coding](https://img.shields.io/badge/100%25-vibe%20coded-ff69b4)](https://github.com/onodai145/tsumugi)
