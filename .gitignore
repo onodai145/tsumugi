@@ -1,5 +1,6 @@
 # Rust
 /src-tauri/target
+/src-tauri/lcov.info
 /target
 
 # Node / frontend
