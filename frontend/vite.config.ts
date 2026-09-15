@@ -37,6 +37,12 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      // 生成物のためカバレッジ集計から除外
+      exclude: ["src/bindings/tauri.gen.ts"],
+    },
   },
   // vitest実行時、Svelteパッケージがサーバー向けビルドに解決され
   // mount()が使えなくなる(lifecycle_function_unavailable)ため、
