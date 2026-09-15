@@ -408,6 +408,7 @@
         placeholder={'from home, list("...") where has_files && !cw'}
         invalid={!!tqlErr}
         oninput={onTqlInput}
+        testid="add-column-tql-textarea"
         {lists}
         {antennas}
         {channels}

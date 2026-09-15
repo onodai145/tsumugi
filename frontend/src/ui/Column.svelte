@@ -364,6 +364,7 @@
   class:opacity-55={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
   data-group-id={group.id}
+  data-account-id={activeTab?.accountId}
   style:scroll-snap-align={app.useMobileUi() ? "start" : undefined}
   style:scroll-snap-stop={app.useMobileUi() ? "always" : undefined}
   ondragover={(e) => {

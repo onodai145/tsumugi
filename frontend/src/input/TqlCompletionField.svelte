@@ -25,6 +25,7 @@
     lists = [],
     antennas = [],
     channels = [],
+    testid,
   }: {
     mode: TqlEditMode;
     value: string;
@@ -35,6 +36,7 @@
     lists?: UserList[];
     antennas?: SourceItem[];
     channels?: SourceItem[];
+    testid?: string;
   } = $props();
 
   let el = $state<HTMLTextAreaElement | HTMLInputElement | undefined>(undefined);
@@ -180,6 +182,7 @@
       : 'rounded-lg border border-border bg-muted px-2.5 py-2 font-[ui-monospace,"Cascadia_Code","SF_Mono",monospace] text-sm text-foreground resize-y'}
     {rows}
     {placeholder}
+    data-testid={testid}
     bind:value
     bind:this={el}
     onkeydown={onKeydown}
