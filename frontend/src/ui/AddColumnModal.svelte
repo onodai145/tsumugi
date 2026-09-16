@@ -426,7 +426,7 @@
   {#if uiMode === "guided"}
   <div class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">ソース</span>
-    <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} />
+    <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} testid="add-column-source-select" />
   </div>
 
   {#if sourceType === "list"}
