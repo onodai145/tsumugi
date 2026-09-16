@@ -384,7 +384,7 @@
     </div>
   </div>
 
-  <div class="mb-2.5 flex flex-col gap-1 text-sm">
+  <div class="mb-2.5 flex flex-col gap-1 text-sm" data-testid="add-column-account-select">
     <span class="text-muted-foreground">アカウント{isEdit ? "（変更不可）" : ""}</span>
     <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel disabled={isEdit} />
   </div>

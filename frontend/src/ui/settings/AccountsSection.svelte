@@ -43,7 +43,7 @@
 {:else}
   <ul class="m-0 mb-3 flex list-none flex-col gap-1.5 p-0">
     {#each app.accounts as a (a.id)}
-      <li class="flex items-center gap-2.5 rounded-lg border border-border bg-muted p-2">
+      <li class="flex items-center gap-2.5 rounded-lg border border-border bg-muted p-2" data-account-row-id={a.id}>
         <Avatar isCat={a.isCat} avatarBlurhash={a.avatarBlurhash} class="h-[34px] w-[34px] flex-none">
           {#if a.avatarUrl}
             <img class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover" src={a.avatarUrl} alt="" />
@@ -81,7 +81,7 @@
 </p>
 
 <div class="flex justify-start">
-  <Button type="button" variant="outline" class="border-primary text-primary hover:text-primary" onclick={onAddAccount}>＋ アカウントを追加</Button>
+  <Button type="button" variant="outline" class="border-primary text-primary hover:text-primary" data-testid="settings-accounts-add" onclick={onAddAccount}>＋ アカウントを追加</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
 
