@@ -47,8 +47,11 @@ docker compose down -v
 
 - `pnpm seed` — `scripts/seed-misskey.ts`。テスト用管理者アカウントを作成し、
   `certs/seeded-account.json` に `{username, password}`(初回作成時のみ`token`も)を書く。
-- `pnpm e2e` — `wdio run wdio.conf.ts`。`specs/**/*.e2e.ts` を実行する。
-  失敗時のログは `wdio-logs/` に出力される。
+- `pnpm e2e` — `wdio run wdio.conf.ts`。`specs/**/*.e2e.ts` を実行する
+  (`settings-persistence-restart.*.e2e.ts` は除く)。失敗時のログは `wdio-logs/` に出力される。
+- `pnpm e2e:persistence` — `settings-persistence-restart.part1.e2e.ts` → `part2.e2e.ts` を
+  `E2E_REUSE_HOME_FILE` 経由で同じ一時HOMEを再利用しながら1回の `wdio run` で連続実行し、
+  設定・カラム構成がアプリ再起動後も復元されることを検証する専用コマンド。
 
 ## アプリの起動方法について
 

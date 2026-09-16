@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "seed": "NODE_EXTRA_CA_CERTS=./certs/ca.pem ts-node scripts/seed-misskey.ts",
-    "e2e": "NODE_EXTRA_CA_CERTS=./certs/ca.pem wdio run wdio.conf.ts"
+    "e2e": "NODE_EXTRA_CA_CERTS=./certs/ca.pem wdio run wdio.conf.ts",
+    "e2e:persistence": "rm -f ./wdio-logs/persistence-home-path.txt && NODE_EXTRA_CA_CERTS=./certs/ca.pem E2E_REUSE_HOME_FILE=./wdio-logs/persistence-home-path.txt wdio run wdio.conf.ts --spec ./specs/settings-persistence-restart.part1.e2e.ts --spec ./specs/settings-persistence-restart.part2.e2e.ts"
   },
   "keywords": [],
   "author": "",
