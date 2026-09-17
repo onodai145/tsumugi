@@ -69,19 +69,26 @@ impl MisskeyClient {
     {
         let value = self.build_body(body)?;
         let url = format!("{}/{}", self.api_base, endpoint.trim_start_matches('/'));
+        let started = std::time::Instant::now();
         let resp = self.http.post(&url).json(&value).send().await?;
         let status = resp.status();
+        let bytes = resp.bytes().await?;
+        log::debug!(
+            target: "api",
+            "{endpoint} -> {status} ({} bytes, {}ms)",
+            bytes.len(),
+            started.elapsed().as_millis()
+        );
 
         if status.is_success() {
             // 204 No Content 等、本文が空なら null として扱う
-            let bytes = resp.bytes().await?;
             if bytes.is_empty() {
                 return Ok(serde_json::from_value(Value::Null)?);
             }
             return Ok(serde_json::from_slice(&bytes)?);
         }
 
-        Err(Self::map_error(endpoint, status, resp.text().await.ok()))
+        Err(Self::map_error(endpoint, status, String::from_utf8(bytes.to_vec()).ok()))
     }
 
     /// `body`（任意の Serialize）を JSON オブジェクト化し、token があれば `i` を差し込む。
@@ -244,5 +251,31 @@ mod tests {
             Some(r#"{"error":{"code":"CREDENTIAL_REQUIRED","message":"x"}}"#.into()),
         );
         assert!(matches!(e, Error::Unauthorized(_)));
+    }
+
+    #[tokio::test]
+    async fn post_maps_error_body_to_typed_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/show"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "NO_SUCH_NOTE", "message": "No such note." }
+            })))
+            .mount(&mock)
+            .await;
+
+        let c = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let res: Result<serde_json::Value> = c.post("notes/show", &json!({})).await;
+
+        match res {
+            Err(Error::NotFound(detail)) => {
+                assert!(detail.contains("NO_SUCH_NOTE"), "detail should contain error code: {detail}");
+                assert!(detail.contains("No such note."), "detail should contain error message: {detail}");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
     }
 }
