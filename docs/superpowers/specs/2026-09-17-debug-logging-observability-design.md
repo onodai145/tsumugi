@@ -30,7 +30,9 @@ Rust側の`log::{info,warn,error}!`呼び出しは34箇所(`log::debug!`/`trace!
 
 ## 1. Misskey APIアクセスログ
 
-`src-tauri/src/api/client.rs::post`で、レスポンスのステータスが確定した時点(成功・エラー両方の分岐に入る前)に1行出す。
+`src-tauri/src/api/client.rs::post`で、レスポンスのステータス・本文サイズが確定した時点(成功・エラー分岐に入る前)に1行出す。DevTools(WebView)のNetworkタブには、Tauriバックエンド(Rust)から`reqwest`で直接発行するMisskey API通信は一切映らない(DevToolsが見えるのはWebViewのJSが発行した通信のみ)。このアクセスログがRust側通信を見る唯一の手段になる。
+
+本文サイズもログに含めるため、成功/エラーで別々に読んでいた`resp.bytes()`/`resp.text()`を先に一度だけ読む形に整理する。
 
 ```rust
 pub async fn post<B, R>(&self, endpoint: &str, body: &B) -> Result<R>
@@ -43,15 +45,29 @@ where
     let started = std::time::Instant::now();
     let resp = self.http.post(&url).json(&value).send().await?;
     let status = resp.status();
-    log::debug!(target: "api", "{endpoint} -> {status} ({}ms)", started.elapsed().as_millis());
+    let bytes = resp.bytes().await?;
+    log::debug!(
+        target: "api",
+        "{endpoint} -> {status} ({} bytes, {}ms)",
+        bytes.len(),
+        started.elapsed().as_millis()
+    );
 
     if status.is_success() {
-        ...
+        if bytes.is_empty() {
+            return Ok(serde_json::from_value(Value::Null)?);
+        }
+        return Ok(serde_json::from_slice(&bytes)?);
+    }
+
+    Err(Self::map_error(endpoint, status, String::from_utf8(bytes.to_vec()).ok()))
+}
 ```
 
 - `target: "api"`にすることで、将来的にレベルを個別調整できるようにする(`frontend`ターゲットと同じ扱い)
-- ログにはエンドポイント名・ステータス・所要時間のみを含め、リクエストボディ(トークンを含む`value`)やレスポンス本文は一切出力しない
+- ログにはエンドポイント名・ステータス・本文サイズ(バイト数)・所要時間のみを含め、リクエストボディ(トークンを含む`value`)やレスポンス本文の中身は一切出力しない
 - レベルは`debug`。3節の変更でdevビルドでは既定表示、releaseビルドでは`enable_file_logging`時のみ表示(既存のdebugレベル運用と同じ)
+- `map_error`への本文引き渡しは、既存の`resp.text().await.ok()`から`String::from_utf8(bytes.to_vec()).ok()`に変わる(先に読んだ`bytes`を再利用するため)。UTF-8として読めない本文は`None`扱いになる点は`resp.text()`のエラー握りつぶし(`.ok()`)と同じ挙動
 
 ## 2. キャッシュhit/fallbackカウンタとBackstage「メトリクス」タブ
 
