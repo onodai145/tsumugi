@@ -11,7 +11,7 @@ use crate::domain::{
 };
 use crate::error::{Error, Result};
 use crate::filter::{ast, eval::EvalContext, parser, sql, CompiledFilter};
-use crate::state::AppState;
+use crate::state::{AppState, BackfillOutcome};
 use crate::store::NoteCacheStore;
 use serde::Serialize;
 use specta::Type;
@@ -288,7 +288,9 @@ pub async fn resume_column(
         vec![]
     } else {
         let cached = state.cache.load_cached(&column.id, INITIAL_LIMIT).await?;
-        if cached.is_empty() { vec![] } else { cached }
+        let notes = if cached.is_empty() { vec![] } else { cached };
+        state.cache_metrics.record_resume(!notes.is_empty());
+        notes
     };
 
     let (fresh_notes, notifications) = if notes.is_empty() {
@@ -428,8 +430,14 @@ pub async fn fetch_backfill(
                 && !state.is_word_muted(&column.account_id, n)
         });
         if let Some(notes) = cache_backfill_page(boundary.as_deref(), &until_id, cached, INITIAL_LIMIT) {
+            state.cache_metrics.record_backfill(BackfillOutcome::Hit);
             return Ok(notes);
         }
+        state.cache_metrics.record_backfill(if boundary.is_none() {
+            BackfillOutcome::FallbackBoundaryUnset
+        } else {
+            BackfillOutcome::FallbackOther
+        });
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
