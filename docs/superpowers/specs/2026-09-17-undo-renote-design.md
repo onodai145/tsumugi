@@ -35,7 +35,7 @@ Misskeyの「Renote」(引用なしの純粋なRenote)を取り消す手段がts
 - 新しいprop `pureRenoteOf?: Note` を受け取る。
 - `canUndoRenote = pureRenoteOf != null && app.accounts.find(a => a.id === accountId)?.userId === pureRenoteOf.user.id` を算出。
 - `canUndoRenote` が真のとき、「Renote取り消し」メニュー項目を表示する(既存の「削除」ボタンとは独立した項目。アイコンは `Repeat2` を使用し、`text-destructive` で危険操作であることを示す)。
-- 押下で確認ダイアログ(既存の `ConfirmDialog` を再利用。文言: タイトル「Renoteの取り消し」、メッセージ「このRenoteを取り消します。取り消せません。よろしいですか？」、confirmLabel「取り消す」)を出し、確認後に `app.deleteNote(accountId, pureRenoteOf.id)` を呼ぶ。
+- 押下で確認ダイアログ(既存の `ConfirmDialog` を再利用。文言: タイトル「Renoteの取り消し」、メッセージ「このRenoteを取り消しますか？」、confirmLabel「取り消す」)を出し、確認後に `app.deleteNote(accountId, pureRenoteOf.id)` を呼ぶ。「取り消します」「取り消せません」のように同じ語を二重に使う言い回しは避ける(紛らわしいというフィードバックを反映)。
 - 実装は既存の `requestDelete`/`confirmDelete` と同様のパターン(`confirmUndoRenoteOpen` state, `requestUndoRenote`/`confirmUndoRenote` 関数)を並列に追加する形にする。
 
 ### テスト
