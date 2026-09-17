@@ -75,7 +75,8 @@ impl MisskeyClient {
         let bytes = resp.bytes().await?;
         log::debug!(
             target: "api",
-            "{endpoint} -> {status} ({} bytes, {}ms)",
+            "[{}] {endpoint} -> {status} ({} bytes, {}ms)",
+            self.host,
             bytes.len(),
             started.elapsed().as_millis()
         );

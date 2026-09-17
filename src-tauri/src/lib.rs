@@ -226,25 +226,30 @@ pub fn run() {
             // log::info!等が無音でどこにも出ないと調査しづらいため)。releaseビルドの挙動は
             // enable_file_logging設定通りで変更なし。
             if cfg!(debug_assertions) || settings.load_ui().unwrap_or_default().enable_file_logging {
-                let mut log_builder = tauri_plugin_log::Builder::default()
-                    .level(log::LevelFilter::Info)
-                    // フロントの"発火"系詳細ログ(commands::app::log_frontend_event)だけは
-                    // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
-                    // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
-                    .level_for("frontend", log::LevelFilter::Debug);
-                if cfg!(debug_assertions) {
-                    // api/filterのDebugログはdevビルド限定。tauri-plugin-logの既定ローテーション
-                    // (RotationStrategy::KeepOne、上限40KB、アーカイブ無し)のもとでこれをreleaseでも
-                    // 有効にすると、REST呼び出しやStreaming受信のたびにDebugログが出て40KBの
-                    // ウィンドウを数分で使い切り、enable_file_loggingが本来残したいWS再接続/ping
-                    // タイムアウトの長期ログ(Issue #12)が上書き消滅してしまう。
-                    log_builder = log_builder
-                        // Misskey APIアクセスログ(Issue #241、api/client.rs::post)
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        // フロントの"発火"系詳細ログ(commands::app::log_frontend_event)だけは
+                        // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
+                        // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
+                        .level_for("frontend", log::LevelFilter::Debug)
+                        // Misskey APIアクセスログ(Issue #241、api/client.rs::post)。debugビルド限定に
+                        // すると、enable_file_logging設定でreleaseビルドの本番動作を追いたい場面
+                        // (Issue #12)でこそ肝心のAPI呼び出しログが見えなくなり本末転倒なので、
+                        // devビルドに限らず常時有効にする。
                         .level_for("api", log::LevelFilter::Debug)
-                        // Streaming受信時のフィルタ/ミュートdropログ(Issue #241、stream/connection.rs)
-                        .level_for("filter", log::LevelFilter::Debug);
-                }
-                app.handle().plugin(log_builder.build())?;
+                        // Streaming受信時のフィルタ/ミュートdropログ(Issue #241、stream/connection.rs)。
+                        // 上記と同じ理由でdevビルド限定にはしない。
+                        .level_for("filter", log::LevelFilter::Debug)
+                        // 既定(RotationStrategy::KeepOne、上限40KB、アーカイブ無し)のままだと、
+                        // 上記2ターゲットのDebugログでファイルが数分で一巡し、enable_file_loggingが
+                        // 本来残したいWS再接続/pingタイムアウトの長期ログ(Issue #12)が消えてしまう。
+                        // 上限を広げ、アーカイブせず削除するKeepOneではなく複数世代を残すKeepSomeに
+                        // 変更することで、Debugログを流しつつ過去分も一定期間追えるようにする。
+                        .max_file_size(2_000_000) // 1ファイルあたり2MB
+                        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5)) // 直近5世代まで保持
+                        .build(),
+                )?;
             }
 
             let cache_conn =
