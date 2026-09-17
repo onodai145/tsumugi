@@ -15,3 +15,20 @@ redis:
 setupPassword: "e2e-test-setup-password"
 
 id: "aidx"
+
+# Misskeyの/api/signin-flowはIPアドレス単位で「1時間に最大10リクエスト」の
+# レート制限を内蔵している(packages/backend/src/server/api/SigninApiService.ts:
+# `rateLimiterService.limit({ key: 'signin', duration: 60*60*1000, max: 10,
+# minInterval: 1000 }, getIpHash(request.ip))`、成功/失敗を問わず全リクエストが
+# カウント対象)。CIの`pnpm e2e`はデフォルトでspecファイル6本を1インスタンスに
+# 対して連続実行し、各specがMiAuthアカウント追加のたびに`/api/signin-flow`を
+# 複数回叩くため(`startMiauthBridge()`の内部signin-flow + 一部specの
+# `signInAsSeededUser()`)、合計呼び出し回数が容易に10回を超え、後半のspec
+# (実行順で最後になったもの)がTOO_MANY_AUTHENTICATION_FAILURES(429)で
+# 確実に失敗する(実際にCIで観測・Misskeyソースで確認済み)。
+# このE2E用Misskeyインスタンスはdocker composeで都度使い捨てで起動される、
+# インターネットに公開されない検証専用インスタンスであり、IPベースの
+# ブルートフォース対策は意味を持たない(かつ実害が無い)ため無効化する。
+# アカウント単位のエンドポイント別レート制限(各APIの`limit`メタデータ)は
+# このフラグとは独立で、無効化後も引き続き有効。
+enableIpRateLimit: false
