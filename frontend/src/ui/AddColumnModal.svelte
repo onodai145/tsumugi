@@ -395,6 +395,7 @@
       class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
       placeholder={edit?.title ?? "自動でつけます"}
       bind:value={name}
+      data-testid="add-column-name-input"
     />
   </label>
 

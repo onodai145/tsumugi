@@ -2,13 +2,12 @@
 // ComposeBarのアカウント切り替えが正しく機能することを検証する(Issue #223)。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { clickThroughAccountSelect } from "../helpers/accountSelect";
-import { signUp, signInAsSeededUser } from "../helpers/misskeyApi";
+import { signUp, signInAsSeededUser, allowRegistration } from "../helpers/misskeyApi";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
 
 const MISSKEY_HOST = "misskey.local:8443";
 const SECOND_USERNAME = "e2etestuser2";
 const SECOND_PASSWORD = "e2eTestPassword2!";
-const BASE_URL = process.env.E2E_MISSKEY_URL ?? "https://misskey.local:8443";
 
 describe("multiple accounts used simultaneously", () => {
   // 重要: startMiauthBridge()が起動するChromiumは常に同じ固定CDPポート
@@ -35,14 +34,7 @@ describe("multiple accounts used simultaneously", () => {
     // signUp()(セルフサインアップ)を呼ぶ前に管理者トークンでdisableRegistrationを
     // 解除しておく必要がある(Task 3実装者が実機確認済み)。
     const adminToken = await signInAsSeededUser();
-    const updateMetaRes = await fetch(`${BASE_URL}/api/admin/update-meta`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ i: adminToken, disableRegistration: false }),
-    });
-    if (!updateMetaRes.ok) {
-      throw new Error(`admin/update-meta failed ${updateMetaRes.status}: ${await updateMetaRes.text()}`);
-    }
+    await allowRegistration(adminToken);
 
     await signUp(SECOND_USERNAME, SECOND_PASSWORD);
   });
@@ -202,7 +194,9 @@ describe("multiple accounts used simultaneously", () => {
     expect(accountIds.length).toBe(2);
     const [accountIdA, accountIdB] = accountIds;
 
-    // Modal.svelteの背景要素はEscapeキーでonclose()を呼ぶ(専用のcloseボタンにtestidは無い)。
+    // Modal.svelteには`data-testid="modal-close"`のcloseボタンがある(Task 9で追加、
+    // client-user-mute.e2e.ts参照)が、ここではEscapeキーでもonclose()が呼べるため
+    // それを使う。
     await browser.keys("Escape");
 
     await addHomeColumnFor(accountIdA);

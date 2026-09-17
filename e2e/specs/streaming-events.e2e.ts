@@ -2,13 +2,12 @@
 // リアルタイムに反映されることを検証する(Issue #223、stream/connection.rs)。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { clickThroughAccountSelect } from "../helpers/accountSelect";
-import { signUp, createNote, renoteNote, deleteNote, signInAsSeededUser } from "../helpers/misskeyApi";
+import { signUp, createNote, renoteNote, deleteNote, signInAsSeededUser, allowRegistration, followUser } from "../helpers/misskeyApi";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
 
 const MISSKEY_HOST = "misskey.local:8443";
 const SECOND_USERNAME = "e2etestuser3";
 const SECOND_PASSWORD = "e2eTestPassword3!";
-const BASE_URL = process.env.E2E_MISSKEY_URL ?? "https://misskey.local:8443";
 
 describe("streaming events reflect in real time", () => {
   let bridge: MiauthBridge;
@@ -21,14 +20,7 @@ describe("streaming events reflect in real time", () => {
     // signUp()(セルフサインアップ)を呼ぶ前に管理者トークンでdisableRegistrationを
     // 解除しておく必要がある(Task 3実装者が実機確認済み、multi-account.e2e.tsと同じ手順)。
     const adminToken = await signInAsSeededUser();
-    const updateMetaRes = await fetch(`${BASE_URL}/api/admin/update-meta`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ i: adminToken, disableRegistration: false }),
-    });
-    if (!updateMetaRes.ok) {
-      throw new Error(`admin/update-meta failed ${updateMetaRes.status}: ${await updateMetaRes.text()}`);
-    }
+    await allowRegistration(adminToken);
 
     const signUpResult = await signUp(SECOND_USERNAME, SECOND_PASSWORD);
     tokenB = signUpResult.token;
@@ -36,23 +28,7 @@ describe("streaming events reflect in real time", () => {
     // Homeタイムラインはフォロー中ユーザー+自分のノートのみを表示するため、
     // 管理者(アカウントA)がuserBをフォローしないとBの投稿/リノートはHomeカラムに
     // 出てこない(実機確認済み: フォロー前は"まだノートがありません"のまま)。
-    const showRes = await fetch(`${BASE_URL}/api/users/show`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ i: adminToken, username: SECOND_USERNAME }),
-    });
-    if (!showRes.ok) {
-      throw new Error(`users/show failed ${showRes.status}: ${await showRes.text()}`);
-    }
-    const { id: userBId } = (await showRes.json()) as { id: string };
-    const followRes = await fetch(`${BASE_URL}/api/following/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ i: adminToken, userId: userBId }),
-    });
-    if (!followRes.ok) {
-      throw new Error(`following/create failed ${followRes.status}: ${await followRes.text()}`);
-    }
+    await followUser(adminToken, SECOND_USERNAME);
 
     await new Promise((resolve) => setTimeout(resolve, 10000));
     bridge = await startMiauthBridge();
@@ -165,16 +141,22 @@ describe("streaming events reflect in real time", () => {
     const originalNoteId = await createNote(tokenB, originalText);
     await renoteNote(tokenB, originalNoteId);
 
+    // 元ノートとリノートは別々のノートID(dedupeで潰されない)なので、両方がHomeカラムへ
+    // 届いていることを確認するには、originalTextを含む要素が2件以上(元ノート自身+
+    // NoteCard.svelteのisPureRenoteによって元ノートのテキストが表示されるリノート)
+    // 現れるまで待つ必要がある。1件だけの確認では、リノート自体が届く前に元ノートの
+    // 表示だけで満たされてしまい、リノートの検証にならない(実機確認済み)。
     await browser.waitUntil(
       async () => {
         const noteTexts = await $$('[data-testid="note-text"]');
+        let count = 0;
         for (const el of noteTexts) {
           const text = await el.getText().catch(() => "");
-          if (text.includes(originalText)) return true;
+          if (text.includes(originalText)) count++;
         }
-        return false;
+        return count >= 2;
       },
-      { timeout: 20000, interval: 300, timeoutMsg: "renote did not appear live" },
+      { timeout: 20000, interval: 300, timeoutMsg: "renote did not appear live (expected original + renote, only found 1)" },
     );
   });
 

@@ -131,6 +131,39 @@ export async function signUp(username: string, password: string): Promise<{ toke
   return { token: body.token };
 }
 
+/** `/api/admin/update-meta` で自己サインアップ(disableRegistration)を有効化する。管理者トークンが必要。 */
+export async function allowRegistration(adminToken: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/admin/update-meta`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: adminToken, disableRegistration: false }),
+  });
+  if (!res.ok) {
+    throw new Error(`allowRegistration: admin/update-meta failed ${res.status}: ${await res.text()}`);
+  }
+}
+
+/** `/api/users/show` でusernameからuserIdを引き、`/api/following/create` でフォローする。 */
+export async function followUser(token: string, username: string): Promise<void> {
+  const showRes = await fetch(`${BASE_URL}/api/users/show`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, username }),
+  });
+  if (!showRes.ok) {
+    throw new Error(`followUser: users/show failed ${showRes.status}: ${await showRes.text()}`);
+  }
+  const user = (await showRes.json()) as { id: string };
+  const followRes = await fetch(`${BASE_URL}/api/following/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, userId: user.id }),
+  });
+  if (!followRes.ok) {
+    throw new Error(`followUser: following/create failed ${followRes.status}: ${await followRes.text()}`);
+  }
+}
+
 /** `notes/create` に `renoteId` を渡してリノートし、作成されたリノートのidを返す。 */
 export async function renoteNote(token: string, noteId: string): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/notes/create`, {

@@ -2,13 +2,12 @@
 // ことを検証する(Issue #223)。server-word-mute.e2e.tsのクライアント側版。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { clickThroughAccountSelect } from "../helpers/accountSelect";
-import { signUp, createNote, signInAsSeededUser } from "../helpers/misskeyApi";
+import { signUp, createNote, signInAsSeededUser, allowRegistration, followUser } from "../helpers/misskeyApi";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
 
 const MISSKEY_HOST = "misskey.local:8443";
 const MUTED_USERNAME = "e2etestuser4";
 const MUTED_PASSWORD = "e2eTestPassword4!";
-const BASE_URL = process.env.E2E_MISSKEY_URL ?? "https://misskey.local:8443";
 
 describe("client-side user mute hides the muted user's notes", () => {
   let bridge: MiauthBridge;
@@ -22,14 +21,7 @@ describe("client-side user mute hides the muted user's notes", () => {
     // signUp()(セルフサインアップ)を呼ぶ前に管理者トークンでdisableRegistrationを
     // 解除しておく必要がある(multi-account.e2e.ts/streaming-events.e2e.tsと同じ手順)。
     const adminToken = await signInAsSeededUser();
-    const updateMetaRes = await fetch(`${BASE_URL}/api/admin/update-meta`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ i: adminToken, disableRegistration: false }),
-    });
-    if (!updateMetaRes.ok) {
-      throw new Error(`admin/update-meta failed ${updateMetaRes.status}: ${await updateMetaRes.text()}`);
-    }
+    await allowRegistration(adminToken);
 
     const { token } = await signUp(MUTED_USERNAME, MUTED_PASSWORD);
 
@@ -37,28 +29,15 @@ describe("client-side user mute hides the muted user's notes", () => {
     // と同じ実機確認済みの制約)、admin(tsumugiに追加するアカウント)がMUTED_USERNAMEを
     // フォローしないと対象ノートがそもそもHomeカラムに出てこず、クライアント側ミュートの
     // 効果を確認できない。ここで先にフォローしておく。
-    const showRes = await fetch(`${BASE_URL}/api/users/show`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ i: adminToken, username: MUTED_USERNAME }),
-    });
-    if (!showRes.ok) {
-      throw new Error(`users/show failed ${showRes.status}: ${await showRes.text()}`);
-    }
-    const { id: mutedUserId } = (await showRes.json()) as { id: string };
-    const followRes = await fetch(`${BASE_URL}/api/following/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ i: adminToken, userId: mutedUserId }),
-    });
-    if (!followRes.ok) {
-      throw new Error(`following/create failed ${followRes.status}: ${await followRes.text()}`);
-    }
+    await followUser(adminToken, MUTED_USERNAME);
 
     const runId = Date.now();
     controlNoteText = `tsumugi e2e user-mute control ${runId}`;
     targetNoteText = `tsumugi e2e user-mute target ${runId}`;
-    // ミュート設定より先に、対象ユーザーとは別の制御ノートも含めて投稿しておく。
+    // ミュート設定より先に、対象ユーザーの投稿(ミュート対象)を投稿しておく。
+    // 制御ノート(controlNoteText)はミュート対象外のユーザー=admin自身の投稿で、
+    // "adds an account and posts a control note" it()の中でUI経由(ComposeBar)で
+    // 投稿する。
     await createNote(token, targetNoteText);
 
     await new Promise((resolve) => setTimeout(resolve, 10000));

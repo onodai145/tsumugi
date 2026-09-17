@@ -137,8 +137,13 @@ describe("TQL column filter matches real data", () => {
     const liveMatchText = `tsumugi e2e tql live match ${runId} ${MARKER}`;
     const liveNoMatchText = `tsumugi e2e tql live no-match ${runId}`;
 
-    await createNote(token, liveMatchText);
+    // マッチしないノートを先に投稿し、その後にマッチするノートを投稿する(逆順だと、
+    // マッチノートの出現を確認した時点でまだマッチしないノートがストリーミングで
+    // 届いていない可能性があり、ネガティブアサーションのタイミングに穴ができる)。
+    // マッチノートの出現を待つことで、その時点までにマッチしないノートが届く機会が
+    // あったことを保証できる。
     await createNote(token, liveNoMatchText);
+    await createNote(token, liveMatchText);
 
     await browser.waitUntil(
       async () => {

@@ -9,8 +9,7 @@
 // ため、この環境変数がrun-app.shまで伝播する
 // (node_modules/@wdio/tauri-service確認済み: アプリプロセスは
 // `env: {...process.env, ...options.env}`で起動される)。
-import { join } from "node:path";
-import { dirname } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

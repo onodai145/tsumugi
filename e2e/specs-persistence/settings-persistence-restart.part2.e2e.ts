@@ -2,11 +2,15 @@
 // 検証するシナリオの後半(Issue #223)。part1が作ったTMP_HOMEを再利用して起動するため、
 // このプロセスはアカウント追加画面を経由せずいきなり以前のカラム構成が復元されるはず。
 //
-// このspecは"pnpm e2e"(既定の全spec実行)からは除外されている。理由は
-// part1.e2e.ts冒頭のコメントを参照。
+// このspecは"pnpm e2e"(既定の全spec実行)の対象外である`./specs-persistence/`
+// ディレクトリに置かれている。理由はpart1.e2e.ts冒頭のコメントを参照。
 import { readFileSync } from "node:fs";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
 import { PERSISTENCE_HOME_FILE } from "../helpers/persistenceHome";
+
+// part1で追加した2つ目のカラム(TQLエキスパートモード)に設定した明示的なタイトル。
+// part1.e2e.tsのNAMED_COLUMN_TITLEと一致させること。
+const NAMED_COLUMN_TITLE = "永続化確認用カラム";
 
 describe("settings persist across restart (part 2: verify after restart)", () => {
   before(function () {
@@ -47,10 +51,25 @@ describe("settings persist across restart (part 2: verify after restart)", () =>
     const composeTextarea = await $('[data-testid="compose-textarea"]');
     await composeTextarea.waitForDisplayed({ timeout: 15000 });
 
-    // part1で追加したHomeカラムが復元されていることを確認する(タイムラインの
-    // 表示領域が存在すること。REST初期ロード自体は別シナリオで検証済みのため
-    // ここではカラム構成の復元のみを見る)。
-    const columnRoot = await $('[data-group-id]');
-    await columnRoot.waitForDisplayed({ timeout: 15000 });
+    // part1で追加した2つのカラム(既定のHome + 名前付きTQLカラム)がどちらも
+    // 復元されていることを確認する。カラムが1つに減っていたり、種類・順序・
+    // タイトルが失われていても検知できるよう、グループ数とタブタイトルの両方を見る
+    // (設計書docs/superpowers/specs/2026-09-15-e2e-scenario-coverage-design.md
+    // シナリオ5参照。以前はグループ数1件のみの確認で、種類・順序・タイトルの
+    // 消失を検知できていなかった)。
+    await browser.waitUntil(
+      async () => {
+        const groups = await browser.execute(() => document.querySelectorAll<HTMLElement>("[data-group-id]").length);
+        return groups === 2;
+      },
+      { timeout: 15000, interval: 300, timeoutMsg: "expected 2 restored column groups" },
+    );
+
+    const tabNames = await $$('[data-testid="column-tab-name"]');
+    const tabTexts: string[] = [];
+    for (const el of tabNames) {
+      tabTexts.push(await el.getText().catch(() => ""));
+    }
+    expect(tabTexts.some((t) => t.includes(NAMED_COLUMN_TITLE))).toBe(true);
   });
 });

@@ -187,23 +187,38 @@ export SSL_CERT_FILE="$TMP_CERT_BUNDLE"
 # プロセス全てに確実にシグナルが届く(実機検証済み: SIGTERMを送って
 # `ps -ef`で残留プロセスが無いことを確認)。
 set -m
-Xvfb :88 -screen 0 1280x1024x24 -nolisten tcp &
+# 未使用のXディスプレイ番号を探す(/tmp/.X<N>-lockが存在しないものを探す)。
+# 固定番号(:88)だと、前回実行のXvfb/tsumugi/dbus-run-sessionプロセスツリーが
+# 正常終了せず残留していた場合、xdpyinfoによる生存確認が「孤立した前回のXvfb」に
+# 対して誤って成功してしまい、新規起動のつもりが孤立ディスプレイへ相乗りしてしまう
+# (Issue #223 Task 6で観測された3スペック目以降の不安定化の一因と推測される)。
+XVFB_DISPLAY=""
+for candidate in $(seq 88 150); do
+  if [ ! -e "/tmp/.X${candidate}-lock" ]; then
+    XVFB_DISPLAY="$candidate"
+    break
+  fi
+done
+if [ -z "$XVFB_DISPLAY" ]; then
+  echo "run-app.sh: no free Xvfb display number found in range 88-150." >&2
+  exit 1
+fi
+Xvfb ":$XVFB_DISPLAY" -screen 0 1280x1024x24 -nolisten tcp &
 XVFB_PID=$!
 XVFB_READY=0
 for _ in $(seq 1 30); do
-  if DISPLAY=:88 xdpyinfo >/dev/null 2>&1; then
+  if DISPLAY=":$XVFB_DISPLAY" xdpyinfo >/dev/null 2>&1; then
     XVFB_READY=1
     break
   fi
   sleep 0.2
 done
 if [ "$XVFB_READY" -ne 1 ]; then
-  echo "run-app.sh: Xvfb :88 did not become ready within 6s." >&2
-  echo "run-app.sh: this Xvfb invocation may have failed to start (check for a stale /tmp/.X88-lock from a prior killed run)." >&2
+  echo "run-app.sh: Xvfb :$XVFB_DISPLAY did not become ready within 6s." >&2
   kill -TERM "$XVFB_PID" 2>/dev/null || true
   exit 1
 fi
-export DISPLAY=:88
+export DISPLAY=":$XVFB_DISPLAY"
 
 dbus-run-session -- bash -c '
   eval "$(echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets)"
