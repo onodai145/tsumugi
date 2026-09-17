@@ -226,19 +226,25 @@ pub fn run() {
             // log::info!等が無音でどこにも出ないと調査しづらいため)。releaseビルドの挙動は
             // enable_file_logging設定通りで変更なし。
             if cfg!(debug_assertions) || settings.load_ui().unwrap_or_default().enable_file_logging {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        // フロントの"発火"系詳細ログ(commands::app::log_frontend_event)だけは
-                        // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
-                        // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
-                        .level_for("frontend", log::LevelFilter::Debug)
+                let mut log_builder = tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    // フロントの"発火"系詳細ログ(commands::app::log_frontend_event)だけは
+                    // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
+                    // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
+                    .level_for("frontend", log::LevelFilter::Debug);
+                if cfg!(debug_assertions) {
+                    // api/filterのDebugログはdevビルド限定。tauri-plugin-logの既定ローテーション
+                    // (RotationStrategy::KeepOne、上限40KB、アーカイブ無し)のもとでこれをreleaseでも
+                    // 有効にすると、REST呼び出しやStreaming受信のたびにDebugログが出て40KBの
+                    // ウィンドウを数分で使い切り、enable_file_loggingが本来残したいWS再接続/ping
+                    // タイムアウトの長期ログ(Issue #12)が上書き消滅してしまう。
+                    log_builder = log_builder
                         // Misskey APIアクセスログ(Issue #241、api/client.rs::post)
                         .level_for("api", log::LevelFilter::Debug)
                         // Streaming受信時のフィルタ/ミュートdropログ(Issue #241、stream/connection.rs)
-                        .level_for("filter", log::LevelFilter::Debug)
-                        .build(),
-                )?;
+                        .level_for("filter", log::LevelFilter::Debug);
+                }
+                app.handle().plugin(log_builder.build())?;
             }
 
             let cache_conn =
