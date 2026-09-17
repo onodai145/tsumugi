@@ -662,7 +662,7 @@ describe("Renote取り消しメニュー", () => {
       displayName: "Me",
       avatarUrl: null,
     });
-    const spy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
+    undoSpy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
     const note = makePureRenote({ renoterId: "u1", renoteId: "n-renote-3" });
     const { getByLabelText, getByText } = render(NoteCard, {
       props: { note, accountId: "acc1" },
@@ -672,6 +672,6 @@ describe("Renote取り消しメニュー", () => {
     await getByText("Renote取り消し").click();
     await getByText("キャンセル").click();
 
-    expect(spy).not.toHaveBeenCalled();
+    expect(undoSpy).not.toHaveBeenCalled();
   });
 });

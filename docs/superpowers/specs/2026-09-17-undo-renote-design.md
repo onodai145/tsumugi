@@ -29,7 +29,7 @@ Misskeyの「Renote」(引用なしの純粋なRenote)を取り消す手段がts
 ### フロントエンド
 
 **`frontend/src/ui/NoteCard.svelte`**
-- 純粋Renote(`isPureRenote`)かつ、そのRenoteノート自身の投稿者(`note.user.id`)が現在の操作アカウントのuserIdと一致する場合に限り、`NoteMenu` へ新しいprop `pureRenoteOf={note}` を渡す(それ以外は `undefined`)。既存の `note={inner}` prop はそのまま維持し、コピー/お気に入り/クリップ追加などは従来通りRenote先の中身に対して作用させる。
+- 純粋Renote(`isPureRenote`)であれば投稿者チェックを行わず、常に `NoteMenu` へ新しいprop `pureRenoteOf={note}` を渡す(それ以外は `undefined`)。既存の `note={inner}` prop はそのまま維持し、コピー/お気に入り/クリップ追加などは従来通りRenote先の中身に対して作用させる。投稿者(自分かどうか)の判定は `NoteMenu.svelte` 側の `canUndoRenote` が `pureRenoteOf.user.id` とアカウントのuserIdを比較して行う。
 
 **`frontend/src/ui/NoteMenu.svelte`**
 - 新しいprop `pureRenoteOf?: Note` を受け取る。
