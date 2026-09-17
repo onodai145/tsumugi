@@ -222,7 +222,10 @@ pub fn run() {
             // 通知が来る」の調査用に、リリースビルドでもWS再接続/pingタイムアウトのログを
             // 残せるようにする)。既定ターゲット(Stdout + LogDir)のうち LogDir 側がアプリの
             // ログディレクトリに永続化される。切替はプラグイン登録の性質上、次回起動から反映。
-            if settings.load_ui().unwrap_or_default().enable_file_logging {
+            // devビルドでは設定に関係なく常に登録する(Issue #241: cargo tauri dev中に
+            // log::info!等が無音でどこにも出ないと調査しづらいため)。releaseビルドの挙動は
+            // enable_file_logging設定通りで変更なし。
+            if cfg!(debug_assertions) || settings.load_ui().unwrap_or_default().enable_file_logging {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
@@ -230,6 +233,10 @@ pub fn run() {
                         // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
                         // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
                         .level_for("frontend", log::LevelFilter::Debug)
+                        // Misskey APIアクセスログ(Issue #241、api/client.rs::post)
+                        .level_for("api", log::LevelFilter::Debug)
+                        // Streaming受信時のフィルタ/ミュートdropログ(Issue #241、stream/connection.rs)
+                        .level_for("filter", log::LevelFilter::Debug)
                         .build(),
                 )?;
             }
