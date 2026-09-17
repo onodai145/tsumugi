@@ -171,7 +171,9 @@ if let Some(state) = app.try_state::<AppState>() {
 - 同一ノートの多重配信排除(`sub.dedup.accept`、745行目)はフィルタ/ミュートとは別の仕組みのため今回は対象外とする
 - レベルは`debug`。3節の変更でdevビルドでは既定表示、releaseビルドでは`enable_file_logging`時のみ表示
 
-## テスト
+## 検討したが採用しなかった案
+
+- **Rustアクセスログ(1節)とWebView DevTools NetworkタブのUI上での統合**: アバター画像・添付メディア・カスタム絵文字などのフロントエンドからの直接読み込み(`<img src>`)は、Rustのreqwest経由ではなくWebKitGTKが直接発行する通信で、既にDevTools Networkタブ(F12/`open_devtools`)で見える。フロントエンドはAPI呼び出しを全て`invoke`経由でTauriコマンドを叩いており(直接`fetch`する箇所は無し)、1節のアクセスログで既にカバーされる。両者を1箇所に統合するにはWebKitGTKのネットワークリクエストを横取りする独自実装が必要でコストが不釣り合いに大きく、かつ両者は「API削減効果の確認」「画像が読み込めない原因調査」という別の目的のため同時参照の必要性も薄い。将来困ったら別issueで検討する。
 
 - Rust:
   - `fetch_backfill`が`backfill_hit`/`backfill_fallback_boundary`/`backfill_fallback_other`を正しい条件でインクリメントすることを検証する単体テスト(境界未確定・範囲外・hit の3ケース)
