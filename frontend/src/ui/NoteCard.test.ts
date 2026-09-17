@@ -550,3 +550,128 @@ describe("リアクションユーザー一覧ポップオーバーのz-index", 
     expect(fixedWrapper!.className).toContain("z-[1010]");
   });
 });
+
+describe("Renote取り消しメニュー", () => {
+  let undoSpy: ReturnType<typeof vi.spyOn> | null = null;
+  afterEach(async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.length = 0;
+    undoSpy?.mockRestore();
+    undoSpy = null;
+  });
+
+  function makePureRenote(overrides: { renoterId: string; renoteId?: string }): Note {
+    return makeNote({
+      id: overrides.renoteId ?? "n-renote-1",
+      text: null,
+      user: makeUser({ id: overrides.renoterId }),
+      renote: makeNote({ id: "n0", user: makeUser({ id: "other-original-author" }) }),
+    });
+  }
+
+  it("自分のRenoteノートでは取り消し項目を表示する", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const note = makePureRenote({ renoterId: "u1" });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(getByText("Renote取り消し")).toBeTruthy();
+  });
+
+  it("他人のRenoteノートでは取り消し項目を表示しない", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const note = makePureRenote({ renoterId: "someone-else" });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("Renote取り消し")).toBeNull();
+  });
+
+  it("純粋Renoteでない自分の投稿では取り消し項目を表示しない", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const note = makeNote({ user: makeUser({ id: "u1" }) });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("Renote取り消し")).toBeNull();
+  });
+
+  it("取り消しボタン→確認ダイアログで確定するとdeleteNoteがRenoteノート自身のIDで呼ばれる", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    undoSpy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
+    const note = makePureRenote({ renoterId: "u1", renoteId: "n-renote-2" });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("Renote取り消し").click();
+    await getByText("取り消す").click();
+
+    expect(undoSpy).toHaveBeenCalledWith("acc1", "n-renote-2");
+  });
+
+  it("取り消しボタン→確認ダイアログをキャンセルするとdeleteNoteが呼ばれない", async () => {
+    const { app } = await import("../lib/store.svelte");
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    const spy = vi.spyOn(app, "deleteNote").mockResolvedValue(undefined);
+    const note = makePureRenote({ renoterId: "u1", renoteId: "n-renote-3" });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("Renote取り消し").click();
+    await getByText("キャンセル").click();
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
