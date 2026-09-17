@@ -749,16 +749,20 @@ async fn handle_text(
             let normalized: Note = (*note).into();
             // フィルタを通過しないノートは出さない（キャッシュ・キャプチャもしない）
             if !filter.matches(&normalized, ctx) {
+                log::debug!(target: "filter", "[{column_id}] note {id} dropped: TQL filter not matched");
                 return HandleResult::None;
             }
             if let Some(state) = app.try_state::<AppState>() {
                 if crate::filter::mute::is_muted(&normalized, &state.mute.lock().unwrap()) {
+                    log::debug!(target: "filter", "[{column_id}] note {id} dropped: local mute");
                     return HandleResult::None;
                 }
                 if is_server_muted_note(&state, account_id, &normalized) {
+                    log::debug!(target: "filter", "[{column_id}] note {id} dropped: server mute/block");
                     return HandleResult::None;
                 }
                 if state.is_word_muted(account_id, &normalized) {
+                    log::debug!(target: "filter", "[{column_id}] note {id} dropped: word mute");
                     return HandleResult::None;
                 }
                 let _ = state.cache.cache_note(&column_id, &normalized).await;
