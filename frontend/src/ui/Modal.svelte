@@ -50,7 +50,7 @@
   >
     <header class="mb-3 flex flex-none items-center justify-between font-semibold">
       <span>{title}</span>
-      <Button variant="ghost" size="icon-xs" onclick={onclose}><X size={16} /></Button>
+      <Button variant="ghost" size="icon-xs" onclick={onclose} data-testid="modal-close"><X size={16} /></Button>
     </header>
     {#if maxHeight}
       <div class="flex flex-1 flex-col min-h-0">

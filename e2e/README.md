@@ -48,7 +48,23 @@ docker compose down -v
 - `pnpm seed` — `scripts/seed-misskey.ts`。テスト用管理者アカウントを作成し、
   `certs/seeded-account.json` に `{username, password}`(初回作成時のみ`token`も)を書く。
 - `pnpm e2e` — `wdio run wdio.conf.ts`。`specs/**/*.e2e.ts` を実行する。
+  `settings-persistence-restart.*.e2e.ts` は別ディレクトリ `specs-persistence/` に
+  置かれているため、この実行には含まれない(WebdriverIOの`specs`配列は`!`による
+  除外パターンをサポートしないため、パターンではなくディレクトリ分けで除外している)。
   失敗時のログは `wdio-logs/` に出力される。
+- `pnpm e2e:persistence` — `specs-persistence/settings-persistence-restart.part1.e2e.ts` →
+  `part2.e2e.ts` を `E2E_REUSE_HOME_FILE` 経由で同じ一時HOMEを再利用しながら1回の
+  `wdio run` で連続実行し、設定・カラム構成がアプリ再起動後も復元されることを
+  検証する専用コマンド。
+
+## ローカルで同じspecを繰り返し実行する場合
+
+`signUp()`(セルフサインアップ)で使う2人目以降のユーザー名は固定文字列
+(`e2etestuser2`など)のため、`docker compose down -v` を挟まずに `pnpm e2e` を
+2回連続実行すると `DUPLICATED_USERNAME` で失敗する。ローカルで同じspecを
+繰り返し実行する場合は `docker compose down -v` → `docker compose up -d --wait` →
+`pnpm seed` でテスト用Misskeyインスタンスをリセットしてから再実行すること
+(CIは毎回使い捨てのコンテナで実行されるため影響しない)。
 
 ## アプリの起動方法について
 

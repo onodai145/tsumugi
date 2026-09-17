@@ -63,6 +63,7 @@
             class={active === item.id
               ? "rounded-md bg-primary px-2.5 py-2 text-left text-sm text-primary-foreground"
               : "rounded-md px-2.5 py-2 text-left text-sm text-foreground hover:bg-background"}
+            data-testid={`settings-tab-${item.id}`}
             onclick={() => (active = item.id)}
           >
             {item.label}

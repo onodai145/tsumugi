@@ -85,6 +85,7 @@
         type="button"
         role="menuitem"
         class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
+        data-testid="app-menu-open-settings"
         onclick={() => pick(onOpenSettings)}
       >
         <Settings size={16} /> 設定

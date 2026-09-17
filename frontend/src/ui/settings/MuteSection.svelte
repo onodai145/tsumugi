@@ -44,7 +44,7 @@
 </label>
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">NGユーザ(@user@host。@は省略可)</span>
-  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder={"@spammer@example.com"} bind:value={users}></textarea>
+  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder={"@spammer@example.com"} bind:value={users} data-testid="mute-ng-users-textarea"></textarea>
 </label>
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">NGインスタンス(host)</span>
@@ -53,6 +53,6 @@
 
 <div class="mt-1 flex items-center justify-end gap-3">
   {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}
-  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
+  <Button type="button" disabled={busy} onclick={save} data-testid="mute-save">{busy ? "保存中…" : "保存"}</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}

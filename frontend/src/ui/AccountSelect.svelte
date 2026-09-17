@@ -66,6 +66,7 @@
   {disabled}
   title={selected ? handle(selected) : "アカウントを選択"}
   bind:ref={trigger}
+  data-testid="account-select-trigger"
 >
   {#if selected}
     <Avatar
@@ -118,6 +119,7 @@
           class={a.id === value
             ? "active flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-[inherit] text-foreground hover:bg-muted"
             : "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-[inherit] text-foreground hover:bg-muted"}
+          data-testid={`account-select-option-${a.id}`}
           onclick={() => choose(a.id)}
         >
           <Avatar isCat={a.isCat} avatarBlurhash={a.avatarBlurhash} class="size-7 flex-none">

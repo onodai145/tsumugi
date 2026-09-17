@@ -384,7 +384,7 @@
     </div>
   </div>
 
-  <div class="mb-2.5 flex flex-col gap-1 text-sm">
+  <div class="mb-2.5 flex flex-col gap-1 text-sm" data-testid="add-column-account-select">
     <span class="text-muted-foreground">アカウント{isEdit ? "（変更不可）" : ""}</span>
     <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel disabled={isEdit} />
   </div>
@@ -395,6 +395,7 @@
       class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
       placeholder={edit?.title ?? "自動でつけます"}
       bind:value={name}
+      data-testid="add-column-name-input"
     />
   </label>
 
@@ -408,6 +409,7 @@
         placeholder={'from home, list("...") where has_files && !cw'}
         invalid={!!tqlErr}
         oninput={onTqlInput}
+        testid="add-column-tql-textarea"
         {lists}
         {antennas}
         {channels}
@@ -425,7 +427,7 @@
   {#if uiMode === "guided"}
   <div class="mb-2.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">ソース</span>
-    <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} />
+    <Dropdown bind:value={sourceType} options={srcOptions.map((s) => ({ value: s.v, label: s.label }))} testid="add-column-source-select" />
   </div>
 
   {#if sourceType === "list"}

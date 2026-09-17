@@ -105,3 +105,87 @@ export async function createNote(token: string, text: string): Promise<string> {
   const body = (await res.json()) as { createdNote: { id: string } };
   return body.createdNote.id;
 }
+
+/**
+ * `/api/signup` で新規の一般ユーザーを作成し、アクセストークンを返す。
+ * `seed-misskey.ts` が使う `/api/admin/accounts/create`(管理者作成)とは別の、
+ * 管理者権限不要のセルフサインアップ経路。複数アカウントを扱うE2Eシナリオの
+ * 2人目以降のユーザー作成に使う。
+ *
+ * 実機確認済み: レスポンスは`/api/i`同様のユーザーオブジェクト全体で、その中の
+ * `token`フィールドがアクセストークン(`signin-flow`の`i`とは別名)。また、この
+ * Misskeyインスタンスは`disableRegistration: true`がデフォルトのため、呼び出し側は
+ * 事前に`admin/update-meta`で`disableRegistration: false`にしておく必要がある
+ * (`seed-misskey.ts`はこれを行っていない)。
+ */
+export async function signUp(username: string, password: string): Promise<{ token: string }> {
+  const res = await fetch(`${BASE_URL}/api/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    throw new Error(`signUp: signup failed ${res.status}: ${await res.text()}`);
+  }
+  const body = (await res.json()) as { token: string };
+  return { token: body.token };
+}
+
+/** `/api/admin/update-meta` で自己サインアップ(disableRegistration)を有効化する。管理者トークンが必要。 */
+export async function allowRegistration(adminToken: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/admin/update-meta`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: adminToken, disableRegistration: false }),
+  });
+  if (!res.ok) {
+    throw new Error(`allowRegistration: admin/update-meta failed ${res.status}: ${await res.text()}`);
+  }
+}
+
+/** `/api/users/show` でusernameからuserIdを引き、`/api/following/create` でフォローする。 */
+export async function followUser(token: string, username: string): Promise<void> {
+  const showRes = await fetch(`${BASE_URL}/api/users/show`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, username }),
+  });
+  if (!showRes.ok) {
+    throw new Error(`followUser: users/show failed ${showRes.status}: ${await showRes.text()}`);
+  }
+  const user = (await showRes.json()) as { id: string };
+  const followRes = await fetch(`${BASE_URL}/api/following/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, userId: user.id }),
+  });
+  if (!followRes.ok) {
+    throw new Error(`followUser: following/create failed ${followRes.status}: ${await followRes.text()}`);
+  }
+}
+
+/** `notes/create` に `renoteId` を渡してリノートし、作成されたリノートのidを返す。 */
+export async function renoteNote(token: string, noteId: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/notes/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, renoteId: noteId }),
+  });
+  if (!res.ok) {
+    throw new Error(`renoteNote: notes/create(renote) failed ${res.status}: ${await res.text()}`);
+  }
+  const body = (await res.json()) as { createdNote: { id: string } };
+  return body.createdNote.id;
+}
+
+/** `notes/delete` でノートを削除する。 */
+export async function deleteNote(token: string, noteId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/notes/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, noteId }),
+  });
+  if (!res.ok) {
+    throw new Error(`deleteNote: notes/delete failed ${res.status}: ${await res.text()}`);
+  }
+}

@@ -6,10 +6,12 @@
     value = $bindable(),
     options,
     placeholder = "選択…",
+    testid,
   }: {
     value: T;
     options: { value: T; label: string }[];
     placeholder?: string;
+    testid?: string;
   } = $props();
 
   const current = $derived(options.find((o) => o.value === value));
@@ -45,7 +47,7 @@
   }
 </script>
 
-<Button type="button" variant="outline" size="sm" class="w-full justify-between" onclick={toggle} bind:ref={trigger}>
+<Button type="button" variant="outline" size="sm" class="w-full justify-between" onclick={toggle} bind:ref={trigger} data-testid={testid}>
   <span class={current ? "overflow-hidden text-ellipsis whitespace-nowrap" : "overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground"}>{current?.label ?? placeholder}</span>
   <!-- text-[0.7rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。小さめのシェブロンのため例外的に即値を維持。 -->
   <span class="flex-none text-[0.7rem] text-muted-foreground">▾</span>
@@ -70,6 +72,7 @@
           class={o.value === value
             ? "active block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"
             : "block w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md px-2.5 py-[7px] text-left font-[inherit] text-sm text-foreground hover:bg-muted"}
+          data-testid={testid ? `${testid}-option-${o.value}` : undefined}
           onclick={() => choose(o.value)}
         >
           {o.label}

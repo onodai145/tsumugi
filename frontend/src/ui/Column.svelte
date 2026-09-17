@@ -364,6 +364,7 @@
   class:opacity-55={app.draggingGroupId === group.id}
   class:focused={app.focusedGroupId === group.id}
   data-group-id={group.id}
+  data-account-id={activeTab?.accountId}
   style:scroll-snap-align={app.useMobileUi() ? "start" : undefined}
   style:scroll-snap-stop={app.useMobileUi() ? "always" : undefined}
   ondragover={(e) => {
@@ -448,6 +449,7 @@
             onclick={() => app.setActiveTab(group.id, t.id)}
             ondblclick={() => onEditTab(t)}
             title={`${tabName(t)}（ダブルクリックで編集）`}
+            data-testid="column-tab-name"
           >
             <span
               class="h-1.5 w-1.5 flex-none rounded-full bg-muted-foreground data-[state=connected]:bg-[var(--success)] data-[state=connecting]:bg-[var(--warning)] data-[state=reconnecting]:bg-[var(--warning)] data-[state=error]:bg-destructive"

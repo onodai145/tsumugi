@@ -6,124 +6,11 @@
 // data-testidが存在しなかった箇所は、表示に影響しない追加のみ行って新設した
 // (frontend/src/ui/AddAccount.svelte, ComposeBar.svelte, NoteCard.svelte,
 // AppMenu.svelte, AddColumnModal.svelte, input/ReactionPicker.svelte)。
-import { chromium, type Page } from "playwright";
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
+import { clickThroughAccountSelect } from "../helpers/accountSelect";
 
 const MISSKEY_HOST = "misskey.local:8443";
-
-/**
- * MiAuth同意フローには、単一アカウントしか無くても必ず「アカウントを選択してください」
- * 画面(MkAuthConfirm.vueのaccountSelectフェーズ)が先に出る。miauthBridge.tsの
- * approveNext()は「許可」ボタン(consentフェーズ)しか押さないため、先にこの画面を
- * 通過させないとapproveNext()はタイムアウトする(Task 6 report「Known follow-up for
- * Task 7」参照)。
- *
- * ここではminiauthBridge.ts自体は変更せず、bridgeが公開しているCDPポートに対して
- * 別のPlaywright CDPクライアントで接続し、同じブラウザコンテキスト上のMiAuthタブを
- * 見つけて「続ける」を押す小さなヘルパーをspec側に追加する形で対応した
- * (Task 6 reportが示した「第二のCDPクライアントをapproveNext()と並行して走らせる」
- * 方式そのもの)。approveNext()自体を書き換えるより影響範囲が小さく、Task 6の
- * 成果物に手を入れずに済む。
- */
-/**
- * デバッグ用: 診断に使うタグ。ページのconsole/pageerrorも同じログへ集約し、
- * CI失敗調査時に「MiAuthタブがそもそも来ていたか/来ていたなら何が起きたか」を
- * wdioログとは独立に追えるようにする(miauthBridge.tsのcontext.on("page",...)は
- * ブリッジ自身のCDP接続経由のイベントであり、こちらはconnectOverCDP()した
- * 別のCDP接続から見た同じページなので、念のため独立に貼っておく)。
- */
-function attachPageDiagnostics(page: Page, label: string): void {
-  page.on("console", (msg) => debugLog(`clickThroughAccountSelect:${label}:console`, `${msg.type()}: ${msg.text()}`));
-  page.on("pageerror", (err) => debugLog(`clickThroughAccountSelect:${label}:pageerror`, err.stack ?? err.message));
-}
-
-async function dumpFailureArtifacts(page: Page, stage: string): Promise<void> {
-  try {
-    const bodyText = await page.innerText("body").catch((e) => `<failed to read body: ${String(e)}>`);
-    debugLog("clickThroughAccountSelect:failure", `stage=${stage} url=${page.url()} bodyText(先頭2000文字)=${bodyText.slice(0, 2000)}`);
-  } catch (err) {
-    debugLog("clickThroughAccountSelect:failure", `stage=${stage} failed to dump body text: ${String(err)}`);
-  }
-  try {
-    const screenshotPath = debugLogPath(`account-select-failure-${stage}.png`);
-    await page.screenshot({ path: screenshotPath });
-    debugLog("clickThroughAccountSelect:failure", `screenshot saved: ${screenshotPath}`);
-  } catch (err) {
-    debugLog("clickThroughAccountSelect:failure", `stage=${stage} failed to save screenshot: ${String(err)}`);
-  }
-}
-
-async function clickThroughAccountSelect(cdpPort: number): Promise<void> {
-  debugLog("clickThroughAccountSelect", `connecting over CDP to 127.0.0.1:${cdpPort}`);
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
-  try {
-    // bridgeはlaunchPersistentContext()で単一コンテキストを起動済みなので、
-    // connectOverCDP()時点で既にそのコンテキストが1つ存在しているはず。
-    const context = browser.contexts()[0];
-    if (!context) throw new Error("clickThroughAccountSelect: no browser context found via CDP");
-    debugLog("clickThroughAccountSelect", `connected; existing pages=${context.pages().map((p) => p.url()).join(", ") || "(none)"}`);
-    const existing = context.pages().find((p) => p.url().includes("/miauth/"));
-    const page = existing ?? (await context.waitForEvent("page", { timeout: 30000 }));
-    attachPageDiagnostics(page, existing ? "existing" : "waited");
-    debugLog("clickThroughAccountSelect", `page acquired (${existing ? "was already open" : "via waitForEvent"}): ${page.url()}`);
-
-    await page.waitForLoadState("domcontentloaded");
-    debugLog(
-      "clickThroughAccountSelect",
-      `domcontentloaded: url=${page.url()} title=${await page.title().catch(() => "?")}`,
-    );
-
-    // 単一アカウントの場合デフォルトで選択済みのことが多いが、念のため明示的に
-    // アカウント項目もクリックしておく(未選択だと「続ける」が無効なままの可能性がある)。
-    // 以前はここを`.catch(() => {})`で握りつぶしていたため、このクリックが実際に
-    // 成功したかどうかがCIログから一切分からなかった(2026-08-19 CI失敗調査で判明)。
-    await page
-      .getByText("e2etestadmin", { exact: false })
-      .first()
-      .click({ timeout: 5000 })
-      .then(
-        () => debugLog("clickThroughAccountSelect", "account row click: succeeded"),
-        (err) => debugLog("clickThroughAccountSelect", `account row click: FAILED (continuing anyway): ${String(err)}`),
-      );
-
-    const continueButton = page.getByRole("button", { name: "続ける" });
-    // "続ける"がクリック不能(タイムアウト)になる原因を、存在しない/disabled/
-    // 覆われている、のどれかに切り分けるための事前チェック。タイムアウト値自体は
-    // 変えない(15000ms) — 2026-08-19の失敗ログから、ページ自体は1.5秒程度で
-    // レンダリング済みだったと推測されるため、これを「遅い」問題として timeout を
-    // 伸ばすのは誤った対処になりうる(詳細はci-debug-report.md参照)。
-    try {
-      await continueButton.waitFor({ state: "attached", timeout: 15000 });
-      const [count, visible, enabled] = await Promise.all([
-        continueButton.count(),
-        continueButton.isVisible().catch(() => "?"),
-        continueButton.isEnabled().catch(() => "?"),
-      ]);
-      debugLog(
-        "clickThroughAccountSelect",
-        `続ける button attached: count=${count} visible=${visible} enabled=${enabled}`,
-      );
-    } catch (err) {
-      debugLog("clickThroughAccountSelect", `続ける button never attached to DOM: ${String(err)}`);
-      await dumpFailureArtifacts(page, "button-not-attached");
-      throw err;
-    }
-
-    try {
-      await continueButton.click({ timeout: 15000 });
-      debugLog("clickThroughAccountSelect", "clicked 続ける button");
-    } catch (err) {
-      debugLog("clickThroughAccountSelect", `FAILED to click 続ける button: ${String(err)}`);
-      await dumpFailureArtifacts(page, "button-click-failed");
-      throw err;
-    }
-  } finally {
-    // connectOverCDP()で得たBrowserをclose()してもCDP接続を切るだけで、
-    // tsumugi/browser-open.shが開いた実ブラウザ自体は終了しない。
-    await browser.close();
-  }
-}
 
 describe("account → post → reaction", () => {
   let bridge: MiauthBridge;
@@ -179,7 +66,11 @@ describe("account → post → reaction", () => {
     // approveNext()内の「許可」ボタンクリックはPlaywrightのlocator.click()の
     // 暗黙のauto-wait(既定30秒)で、clickThroughAccountSelectが先に
     // 「続ける」をクリックしてconsentフェーズへ進めるのを自然に待つ。
-    await Promise.all([bridge.approveNext(), clickThroughAccountSelect(bridge.cdpPort), startButton.click()]);
+    await Promise.all([
+      bridge.approveNext(),
+      clickThroughAccountSelect(bridge.cdpPort, { logTag: "accountPostReaction", accountLabel: "e2etestadmin" }),
+      startButton.click(),
+    ]);
 
     const completeButton = await $('[data-testid="add-account-complete"]');
     await completeButton.waitForDisplayed({ timeout: 15000 });
