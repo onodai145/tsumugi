@@ -7,6 +7,7 @@ use crate::sound::SoundPlayer;
 use crate::store::{DraftStore, NoteCacheStore, SettingsStore};
 use crate::stream::ConnectionManager;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 /// REST/WebSocket 双方で送る User-Agent。
@@ -19,6 +20,79 @@ pub const USER_AGENT: &str = concat!(
 /// 認可待ちの MiAuth セッション（session_id -> 発行先 host）。
 pub struct PendingMiAuth {
     pub host: String,
+}
+
+/// `fetch_backfill`のキャッシュhit/fallback理由(Issue #241)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackfillOutcome {
+    Hit,
+    /// cache_eligibleだがbackfill境界(get_fetch_boundary)が未確定でAPIへ。
+    /// Issue #228のPR #237で残課題として記載された「実は機能が働いていない」ケースを可視化する。
+    FallbackBoundaryUnset,
+    /// cache_eligibleだが境界は確定済み、範囲外/件数不足でAPIへ。
+    FallbackOther,
+}
+
+/// キャッシュhit/fallback回数のプロセス内カウンタ(Issue #241)。DB永続化はせず、
+/// アプリ再起動でリセットされるセッション単位の統計という位置付け。
+#[derive(Default)]
+pub struct CacheMetrics {
+    backfill_hit: AtomicU64,
+    backfill_fallback_boundary: AtomicU64,
+    backfill_fallback_other: AtomicU64,
+    resume_hit: AtomicU64,
+    resume_fallback: AtomicU64,
+}
+
+impl CacheMetrics {
+    pub fn record_backfill(&self, outcome: BackfillOutcome) {
+        let counter = match outcome {
+            BackfillOutcome::Hit => &self.backfill_hit,
+            BackfillOutcome::FallbackBoundaryUnset => &self.backfill_fallback_boundary,
+            BackfillOutcome::FallbackOther => &self.backfill_fallback_other,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_resume(&self, hit: bool) {
+        let counter = if hit { &self.resume_hit } else { &self.resume_fallback };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn backfill_hit(&self) -> i32 {
+        self.backfill_hit
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
+    }
+
+    pub fn backfill_fallback_boundary(&self) -> i32 {
+        self.backfill_fallback_boundary
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
+    }
+
+    pub fn backfill_fallback_other(&self) -> i32 {
+        self.backfill_fallback_other
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
+    }
+
+    pub fn resume_hit(&self) -> i32 {
+        self.resume_hit
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
+    }
+
+    pub fn resume_fallback(&self) -> i32 {
+        self.resume_fallback
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
+    }
 }
 
 pub struct AppState {
@@ -48,6 +122,8 @@ pub struct AppState {
     pub gap_fill_in_flight: Mutex<HashSet<String>>,
     /// 通知音のネイティブ再生(Issue #12)。
     pub sound: SoundPlayer,
+    /// キャッシュhit/fallback回数の集計(Issue #241)。Backstageの「メトリクス」タブ用。
+    pub cache_metrics: CacheMetrics,
 }
 
 impl AppState {
@@ -97,6 +173,7 @@ impl AppState {
             cache_dir,
             gap_fill_in_flight: Mutex::new(HashSet::new()),
             sound,
+            cache_metrics: CacheMetrics::default(),
         }
     }
 
@@ -282,5 +359,29 @@ mod tests {
         state.set_server_word_mutes("acc1", vec![WordMuteRule::Words(vec!["spoiler".into()])]);
         assert!(state.is_word_muted("acc1", &note));
         assert!(!state.is_word_muted("other-acc", &note)); // 別アカウントには影響しない
+    }
+
+    #[test]
+    fn cache_metrics_record_backfill_increments_the_matching_counter() {
+        let m = CacheMetrics::default();
+        m.record_backfill(BackfillOutcome::Hit);
+        m.record_backfill(BackfillOutcome::Hit);
+        m.record_backfill(BackfillOutcome::FallbackBoundaryUnset);
+        m.record_backfill(BackfillOutcome::FallbackOther);
+
+        assert_eq!(m.backfill_hit(), 2);
+        assert_eq!(m.backfill_fallback_boundary(), 1);
+        assert_eq!(m.backfill_fallback_other(), 1);
+    }
+
+    #[test]
+    fn cache_metrics_record_resume_increments_hit_or_fallback() {
+        let m = CacheMetrics::default();
+        m.record_resume(true);
+        m.record_resume(true);
+        m.record_resume(false);
+
+        assert_eq!(m.resume_hit(), 2);
+        assert_eq!(m.resume_fallback(), 1);
     }
 }

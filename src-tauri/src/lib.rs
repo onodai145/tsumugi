@@ -49,6 +49,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::list_columns,
             commands::column::note_count,
             commands::column::notes_since,
+            commands::column::get_debug_metrics,
             commands::column::prune_note_cache,
             commands::column::fetch_backfill,
             commands::column::fetch_notifications_backfill,
@@ -221,7 +222,10 @@ pub fn run() {
             // 通知が来る」の調査用に、リリースビルドでもWS再接続/pingタイムアウトのログを
             // 残せるようにする)。既定ターゲット(Stdout + LogDir)のうち LogDir 側がアプリの
             // ログディレクトリに永続化される。切替はプラグイン登録の性質上、次回起動から反映。
-            if settings.load_ui().unwrap_or_default().enable_file_logging {
+            // devビルドでは設定に関係なく常に登録する(Issue #241: cargo tauri dev中に
+            // log::info!等が無音でどこにも出ないと調査しづらいため)。releaseビルドの挙動は
+            // enable_file_logging設定通りで変更なし。
+            if cfg!(debug_assertions) || settings.load_ui().unwrap_or_default().enable_file_logging {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
@@ -229,6 +233,21 @@ pub fn run() {
                         // Debugレベルで送っている(Backstage UIには出さずファイルにだけ残すため)。
                         // 全体をDebugにすると依存クレートのログまで大量に混ざるので target 限定で緩める。
                         .level_for("frontend", log::LevelFilter::Debug)
+                        // Misskey APIアクセスログ(Issue #241、api/client.rs::post)。debugビルド限定に
+                        // すると、enable_file_logging設定でreleaseビルドの本番動作を追いたい場面
+                        // (Issue #12)でこそ肝心のAPI呼び出しログが見えなくなり本末転倒なので、
+                        // devビルドに限らず常時有効にする。
+                        .level_for("api", log::LevelFilter::Debug)
+                        // Streaming受信時のフィルタ/ミュートdropログ(Issue #241、stream/connection.rs)。
+                        // 上記と同じ理由でdevビルド限定にはしない。
+                        .level_for("filter", log::LevelFilter::Debug)
+                        // 既定(RotationStrategy::KeepOne、上限40KB、アーカイブ無し)のままだと、
+                        // 上記2ターゲットのDebugログでファイルが数分で一巡し、enable_file_loggingが
+                        // 本来残したいWS再接続/pingタイムアウトの長期ログ(Issue #12)が消えてしまう。
+                        // 上限を広げ、アーカイブせず削除するKeepOneではなく複数世代を残すKeepSomeに
+                        // 変更することで、Debugログを流しつつ過去分も一定期間追えるようにする。
+                        .max_file_size(2_000_000) // 1ファイルあたり2MB
+                        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5)) // 直近5世代まで保持
                         .build(),
                 )?;
             }
