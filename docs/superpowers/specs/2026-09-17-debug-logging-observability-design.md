@@ -26,6 +26,7 @@ Rust側の`log::{info,warn,error}!`呼び出しは34箇所(`log::debug!`/`trace!
 1. `client.rs::post`にMisskey APIアクセスログ(エンドポイント名・ステータス・所要時間)を追加
 2. `fetch_backfill`/`resume_column`のキャッシュhit/fallback回数をカウントし、Backstageの新設「メトリクス」タブで可視化
 3. devビルドでは`enable_file_logging`設定に関係なく常にロガーを登録する
+4. Streaming受信時のフィルタ/ミュートによるノートdropをログ出力する
 
 ## 1. Misskey APIアクセスログ
 
@@ -124,14 +125,42 @@ if cfg!(debug_assertions) || settings.load_ui().unwrap_or_default().enable_file_
 - `app.handle().plugin(...)`の呼び出しは1箇所のまま(2箇所にすると`log::set_logger`が2回目で失敗する)
 - releaseビルドの挙動は変更なし(`enable_file_logging`設定通り)
 - devビルドでは設定に関係なく常に`Stdout` + `LogDir`ターゲットが有効になり、`cargo tauri dev`のターミナルにログが流れるようになる
-- `frontend`ターゲット(Debugレベル)・新設の`api`ターゲット(Debugレベル)を含め、既存のレベル設定(`.level(Info)` + `.level_for("frontend", Debug)`)に`.level_for("api", Debug)`を追加する
+- `frontend`ターゲット(Debugレベル)・新設の`api`/`filter`ターゲット(Debugレベル)を含め、既存のレベル設定(`.level(Info)` + `.level_for("frontend", Debug)`)に`.level_for("api", Debug)` / `.level_for("filter", Debug)`を追加する
+
+## 4. Streaming受信時のフィルタ/ミュートdropログ
+
+「なぜこのノートが表示されない」の調査用に、ライブStreaming受信の1件ずつの判定分岐(`src-tauri/src/stream/connection.rs:751-763`)にログを追加する。過去ページ一括取得側(`commands/column.rs`の複数箇所にある`retain()`ベースのフィルタ)は一度に大量のノートを処理するためログ量が跳ね上がる。よってログ追加対象はライブStreaming受信のみとし、一括取得側は対象外とする。
+
+```rust
+if !filter.matches(&normalized, ctx) {
+    log::debug!(target: "filter", "[{column_id}] note {id} dropped: TQL filter not matched");
+    return HandleResult::None;
+}
+if let Some(state) = app.try_state::<AppState>() {
+    if crate::filter::mute::is_muted(&normalized, &state.mute.lock().unwrap()) {
+        log::debug!(target: "filter", "[{column_id}] note {id} dropped: local mute");
+        return HandleResult::None;
+    }
+    if is_server_muted_note(&state, account_id, &normalized) {
+        log::debug!(target: "filter", "[{column_id}] note {id} dropped: server mute/block");
+        return HandleResult::None;
+    }
+    if state.is_word_muted(account_id, &normalized) {
+        log::debug!(target: "filter", "[{column_id}] note {id} dropped: word mute");
+        return HandleResult::None;
+    }
+    ...
+```
+
+- 同一ノートの多重配信排除(`sub.dedup.accept`、745行目)はフィルタ/ミュートとは別の仕組みのため今回は対象外とする
+- レベルは`debug`。3節の変更でdevビルドでは既定表示、releaseビルドでは`enable_file_logging`時のみ表示
 
 ## テスト
 
 - Rust:
   - `fetch_backfill`が`backfill_hit`/`backfill_fallback_boundary`/`backfill_fallback_other`を正しい条件でインクリメントすることを検証する単体テスト(境界未確定・範囲外・hit の3ケース)
   - `resume_column`が`resume_hit`/`resume_fallback`を正しくインクリメントすることを検証する単体テスト(キャッシュ有無の2ケース、通知カラムはインクリメントしないことも確認)
-  - `client.rs::post`のアクセスログはログ出力の単体テストは行わない(既存の`log::warn!`等と同様、出力内容の検証は割愛)
+  - `client.rs::post`のアクセスログ、`connection.rs`のフィルタ/ミュートdropログはログ出力自体の単体テストは行わない(既存の`log::warn!`等と同様、出力内容の検証は割愛。フィルタ/ミュート判定そのものの正しさは既存のフィルタ/ミュートテストが担保する)
 - フロントエンド:
   - Backstageメトリクスタブのhit率%表示・試行0件時の`—`表示のvitestテスト
 
