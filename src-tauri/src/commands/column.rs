@@ -33,6 +33,31 @@ pub struct OpenedColumn {
     pub notifications: Vec<Notification>,
 }
 
+/// キャッシュhit/fallback回数のスナップショット(Issue #241)。BackstageのメトリクスUI用。
+/// フィールドを増やせば他の指標(WS再接続回数など)も同じ場所に追加できる想定の汎用DTO。
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugMetrics {
+    pub backfill_cache_hit: i32,
+    pub backfill_cache_fallback_boundary: i32,
+    pub backfill_cache_fallback_other: i32,
+    pub resume_cache_hit: i32,
+    pub resume_cache_fallback: i32,
+}
+
+/// デバッグ用メトリクスのスナップショットを返す。Backstageの「メトリクス」タブがポーリングする。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_debug_metrics(state: State<'_, AppState>) -> Result<DebugMetrics> {
+    Ok(DebugMetrics {
+        backfill_cache_hit: state.cache_metrics.backfill_hit(),
+        backfill_cache_fallback_boundary: state.cache_metrics.backfill_fallback_boundary(),
+        backfill_cache_fallback_other: state.cache_metrics.backfill_fallback_other(),
+        resume_cache_hit: state.cache_metrics.resume_hit(),
+        resume_cache_fallback: state.cache_metrics.resume_fallback(),
+    })
+}
+
 /// タブを新規作成する。`group_id` が None なら新しい視覚カラム(グループ)を作る。
 #[tauri::command]
 #[specta::specta]

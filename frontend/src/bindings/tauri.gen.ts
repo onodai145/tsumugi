@@ -98,6 +98,8 @@ export const commands = {
 	noteCount: () => typedError<number, Error>(__TAURI_INVOKE("note_count")),
 	/**  投稿日時(epoch秒)が since_epoch_secs 以降のノート件数。Backstageの流速表示用。 */
 	notesSince: (sinceEpochSecs: number) => typedError<number, Error>(__TAURI_INVOKE("notes_since", { sinceEpochSecs })),
+	/**  デバッグ用メトリクスのスナップショットを返す。Backstageの「メトリクス」タブがポーリングする。 */
+	getDebugMetrics: () => typedError<DebugMetrics, Error>(__TAURI_INVOKE("get_debug_metrics")),
 	/**
 	 *  設定（表示→ノートキャッシュの上限）に従ってキャッシュから古いノートを削除する（Issue #6）。
 	 *  上限0なら無制限で何もしない。実際に削除した件数を返す。
@@ -503,6 +505,18 @@ export type CustomTheme = {
 	id: string,
 	name: string,
 	colors: ThemeColors,
+};
+
+/**
+ *  キャッシュhit/fallback回数のスナップショット(Issue #241)。BackstageのメトリクスUI用。
+ *  フィールドを増やせば他の指標(WS再接続回数など)も同じ場所に追加できる想定の汎用DTO。
+ */
+export type DebugMetrics = {
+	backfillCacheHit: number,
+	backfillCacheFallbackBoundary: number,
+	backfillCacheFallbackOther: number,
+	resumeCacheHit: number,
+	resumeCacheFallback: number,
 };
 
 export type Draft = {
