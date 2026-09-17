@@ -60,23 +60,38 @@ impl CacheMetrics {
     }
 
     pub fn backfill_hit(&self) -> i32 {
-        self.backfill_hit.load(Ordering::Relaxed) as i32
+        self.backfill_hit
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
     }
 
     pub fn backfill_fallback_boundary(&self) -> i32 {
-        self.backfill_fallback_boundary.load(Ordering::Relaxed) as i32
+        self.backfill_fallback_boundary
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
     }
 
     pub fn backfill_fallback_other(&self) -> i32 {
-        self.backfill_fallback_other.load(Ordering::Relaxed) as i32
+        self.backfill_fallback_other
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
     }
 
     pub fn resume_hit(&self) -> i32 {
-        self.resume_hit.load(Ordering::Relaxed) as i32
+        self.resume_hit
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
     }
 
     pub fn resume_fallback(&self) -> i32 {
-        self.resume_fallback.load(Ordering::Relaxed) as i32
+        self.resume_fallback
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
     }
 }
 
