@@ -5,10 +5,35 @@
   import type { Component } from "svelte";
   import { Circle, Check, TriangleAlert, X, ChevronUp, ChevronDown, Database, Activity, Clock } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
+  import { commands, unwrap } from "../lib/ipc";
+  import { formatHitRate } from "../lib/debugMetrics";
+  import type { DebugMetrics } from "../bindings/tauri.gen";
 
   let { onReauth }: { onReauth: (accountId: string) => void } = $props();
 
   let open = $state(false);
+  let panelView = $state<"log" | "metrics">("log");
+  let metrics = $state<DebugMetrics | null>(null);
+
+  // メトリクスタブを開いている間だけポーリングする(常時ポーリングはしない)
+  $effect(() => {
+    if (!open || panelView !== "metrics") return;
+    let cancelled = false;
+    async function poll() {
+      try {
+        const m = await unwrap(commands.getDebugMetrics());
+        if (!cancelled) metrics = m;
+      } catch {
+        // 補助情報なので失敗してもログには出さず静かに諦める
+      }
+    }
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  });
 
   const latest = $derived(app.logs[0] ?? null);
 
@@ -45,31 +70,56 @@
 
 <div class="flex flex-col flex-none border-t border-border bg-card">
   {#if open}
+    <div class="flex gap-1 border-b border-border bg-card px-2.5 pt-1.5">
+      <Button
+        variant={panelView === "log" ? "secondary" : "ghost"}
+        size="xs"
+        onclick={() => (panelView = "log")}
+      >ログ</Button>
+      <Button
+        variant={panelView === "metrics" ? "secondary" : "ghost"}
+        size="xs"
+        onclick={() => (panelView = "metrics")}
+      >メトリクス</Button>
+    </div>
     <div class="h-[min(38vh,320px)] overflow-y-auto border-b border-border bg-background font-mono text-xs">
-      {#if app.logs.length === 0}
-        <div class="p-3.5 text-center text-muted-foreground">ログはまだありません</div>
+      {#if panelView === "log"}
+        {#if app.logs.length === 0}
+          <div class="p-3.5 text-center text-muted-foreground">ログはまだありません</div>
+        {:else}
+          {#each app.logs as l (l.id)}
+            {@const Ic = icon[l.level]}
+            <div class="flex items-baseline gap-2 px-2.5 py-0.5 hover:bg-card" data-level={l.level}>
+              <span
+                class={[
+                  "inline-flex flex-none",
+                  {
+                    "text-[var(--success)]": l.level === "success",
+                    "text-[var(--warning)]": l.level === "warn",
+                    "text-destructive": l.level === "error",
+                    "text-muted-foreground": l.level === "info",
+                  },
+                ]}
+              ><Ic size={12} /></span>
+              <span class="flex-none text-muted-foreground">{hhmmss(l.at)}</span>
+              <span class="flex-1 break-words">{l.text}</span>
+              {#if l.reauthAccountId}
+                <Button variant="outline" size="xs" onclick={() => onReauth(l.reauthAccountId!)}>再認証</Button>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      {:else if !metrics}
+        <div class="p-3.5 text-center text-muted-foreground">読み込み中…</div>
       {:else}
-        {#each app.logs as l (l.id)}
-          {@const Ic = icon[l.level]}
-          <div class="flex items-baseline gap-2 px-2.5 py-0.5 hover:bg-card" data-level={l.level}>
-            <span
-              class={[
-                "inline-flex flex-none",
-                {
-                  "text-[var(--success)]": l.level === "success",
-                  "text-[var(--warning)]": l.level === "warn",
-                  "text-destructive": l.level === "error",
-                  "text-muted-foreground": l.level === "info",
-                },
-              ]}
-            ><Ic size={12} /></span>
-            <span class="flex-none text-muted-foreground">{hhmmss(l.at)}</span>
-            <span class="flex-1 break-words">{l.text}</span>
-            {#if l.reauthAccountId}
-              <Button variant="outline" size="xs" onclick={() => onReauth(l.reauthAccountId!)}>再認証</Button>
-            {/if}
-          </div>
-        {/each}
+        <div class="flex flex-col gap-1 p-2.5">
+          <div>backfill キャッシュhit率: {formatHitRate(metrics.backfillCacheHit, metrics.backfillCacheFallbackBoundary, metrics.backfillCacheFallbackOther)}</div>
+          <div>backfill hit: {metrics.backfillCacheHit}</div>
+          <div>backfill fallback(境界未確定): {metrics.backfillCacheFallbackBoundary}</div>
+          <div>backfill fallback(その他): {metrics.backfillCacheFallbackOther}</div>
+          <div>resume hit: {metrics.resumeCacheHit}</div>
+          <div>resume fallback: {metrics.resumeCacheFallback}</div>
+        </div>
       {/if}
     </div>
   {/if}
