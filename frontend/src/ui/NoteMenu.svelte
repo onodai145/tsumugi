@@ -1,13 +1,22 @@
 <script lang="ts">
   import type { Note, Clip } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
-  import { Star, Paperclip, ChevronRight, Trash2, Copy } from "@lucide/svelte";
+  import { Star, Paperclip, ChevronRight, Trash2, Copy, Repeat2 } from "@lucide/svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
-  let { accountId, note, onclose }: { accountId: string; note: Note; onclose: () => void } = $props();
+  let {
+    accountId,
+    note,
+    pureRenoteOf,
+    onclose,
+  }: { accountId: string; note: Note; pureRenoteOf?: Note; onclose: () => void } = $props();
 
   const isOwnNote = $derived(app.accounts.find((a) => a.id === accountId)?.userId === note.user.id);
+  const canUndoRenote = $derived(
+    pureRenoteOf != null && app.accounts.find((a) => a.id === accountId)?.userId === pureRenoteOf.user.id,
+  );
   let confirmDeleteOpen = $state(false);
+  let confirmUndoRenoteOpen = $state(false);
 
   let clipSubmenuOpen = $state(false);
   let clips = $state<Clip[] | null>(null);
@@ -38,6 +47,19 @@
     confirmDeleteOpen = false;
     try {
       await app.deleteNote(accountId, note.id);
+    } finally {
+      onclose();
+    }
+  }
+
+  function requestUndoRenote() {
+    confirmUndoRenoteOpen = true;
+  }
+
+  async function confirmUndoRenote() {
+    confirmUndoRenoteOpen = false;
+    try {
+      await app.deleteNote(accountId, pureRenoteOf!.id);
     } finally {
       onclose();
     }
@@ -152,6 +174,16 @@
       削除
     </button>
   {/if}
+  {#if canUndoRenote}
+    <button
+      type="button"
+      class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-muted"
+      onclick={requestUndoRenote}
+    >
+      <Repeat2 size={16} />
+      Renote取り消し
+    </button>
+  {/if}
 </div>
 
 {#if confirmDeleteOpen}
@@ -166,5 +198,16 @@
     z={1020}
     onConfirm={confirmDelete}
     onCancel={() => (confirmDeleteOpen = false)}
+  />
+{/if}
+{#if confirmUndoRenoteOpen}
+  <ConfirmDialog
+    title="Renoteの取り消し"
+    message="このRenoteを取り消しますか？"
+    confirmLabel="取り消す"
+    danger
+    z={1020}
+    onConfirm={confirmUndoRenote}
+    onCancel={() => (confirmUndoRenoteOpen = false)}
   />
 {/if}
