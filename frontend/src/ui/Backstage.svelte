@@ -32,6 +32,8 @@
     return () => {
       cancelled = true;
       clearInterval(id);
+      // タブを離れたら古い値を出しっぱなしにせず、再表示時に「読み込み中…」から始める
+      metrics = null;
     };
   });
 
