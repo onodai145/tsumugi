@@ -1010,6 +1010,12 @@ export type UiPrefs = {
 	avatarRadius?: number,
 	/**  ハプティクス(振動)を有効にするか（モバイル版のみ意味を持つ。Issue #26）。既定はON。 */
 	hapticsEnabled?: boolean,
+	/**
+	 *  隠し機能「開発者オプション」タブの解除状態（Issue #326）。
+	 *  「Tsumugiについて」タブのバージョン表示を7回タップすると true になり、以後タブを表示し続ける。
+	 *  一度trueになったら無効化する手段は用意しない（Androidの開発者向けオプション解除と同様）。
+	 */
+	developerOptionsEnabled?: boolean,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */
