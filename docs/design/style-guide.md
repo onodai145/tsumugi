@@ -99,7 +99,7 @@ lucideアイコン（`size={N}` prop）の指定値が `10/12/13/14/15/16/20` �
 
 ## 9. 設定画面（`ui/settings/*Section.svelte`）
 
-`Settings.svelte` はセクション分割済み（`AccountsSection` / `DisplaySection` / `NotifySection` / `MuteSection` / `ReactionSection` / `KeysSection` / `DataSection` / `AboutSection`）。新しい設定項目を追加する際は既存のいずれかのセクションに載せるか、性質が明確に異なる場合のみ新規セクションを切る。セクション内の見出し・説明文・コントロールの縦間隔は既存セクションの実装（例: `DisplaySection.svelte`）に揃える。
+`Settings.svelte` はセクション分割済み（`AccountsSection` / `LayoutSection` / `MobileSection` / `AppearanceSection` / `BackgroundSection` / `ReactionSection` / `ExternalIntegrationSection` / `DataSection` / `NotifySection` / `MuteSection` / `KeysSection` / `AboutSection` / `DeveloperSection`）。新しい設定項目を追加する際は既存のいずれかのセクションに載せるか、性質が明確に異なる場合のみ新規セクションを切る。セクション内の見出し・説明文・コントロールの縦間隔は既存セクションの実装（例: `MobileSection.svelte`）に揃える。
 
 ## 10. 色の意味づけ
 

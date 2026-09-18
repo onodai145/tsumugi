@@ -47,4 +47,13 @@ describe("Settings タブ構成(Issue #326)", () => {
     const { queryByTestId } = renderSettings();
     expect(queryByTestId("settings-tab-developer")).not.toBeNull();
   });
+
+  it("モーダルを開いたまま開発者オプションが解除されると開発者オプションタブが動的に現れる", async () => {
+    const { queryByTestId, findByTestId } = renderSettings();
+    expect(queryByTestId("settings-tab-developer")).toBeNull();
+
+    app.ui = { ...app.ui, developerOptionsEnabled: true };
+
+    expect(await findByTestId("settings-tab-developer")).not.toBeNull();
+  });
 });

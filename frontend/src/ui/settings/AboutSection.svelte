@@ -11,6 +11,8 @@
   let commitHash = $state<string | null>(null);
   let versionTapCount = $state(0);
   let developerOptionsJustUnlocked = $state(false);
+  let unlocking = $state(false);
+  let err = $state<string | null>(null);
 
   $effect(() => {
     void getVersion().then((v) => (appVersion = v));
@@ -21,11 +23,18 @@
   // Androidの「ビルド番号連打」を模した隠し機能(Issue #326)。バージョン表示を7回タップすると
   // 「開発者オプション」タブが恒久的に出現する(無効化する手段は用意しない)。
   async function onVersionTap() {
-    if (app.ui.developerOptionsEnabled) return;
+    if (app.ui.developerOptionsEnabled || unlocking) return;
     versionTapCount += 1;
     if (versionTapCount < DEVELOPER_OPTIONS_TAP_THRESHOLD) return;
-    await app.setUiPrefs({ ...app.ui, developerOptionsEnabled: true });
-    developerOptionsJustUnlocked = true;
+    unlocking = true;
+    try {
+      await app.setUiPrefs({ ...app.ui, developerOptionsEnabled: true });
+      developerOptionsJustUnlocked = true;
+    } catch (e) {
+      err = String(e);
+    } finally {
+      unlocking = false;
+    }
   }
 </script>
 
@@ -48,7 +57,7 @@
     <dd class="m-0 break-all text-sm">
       <button
         type="button"
-        class="border-0 bg-transparent p-0 text-left font-[inherit] text-sm text-foreground"
+        class="border-0 bg-transparent p-0 text-left font-[inherit] text-sm text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         data-testid="settings-version-tap-target"
         onclick={onVersionTap}
       >{appVersion ?? "…"}</button>
@@ -69,6 +78,7 @@
   {#if developerOptionsJustUnlocked}
     <p class="mt-3 mb-0 text-sm text-[var(--success)]">開発者オプションを有効にしました</p>
   {/if}
+  {#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
 </div>
 
 <style>
