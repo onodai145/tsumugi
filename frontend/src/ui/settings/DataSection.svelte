@@ -6,7 +6,6 @@
   let noteCacheMaxAgeDays = $state(app.ui.noteCacheMaxAgeDays ?? 0);
   let noteCacheMaxSizeMb = $state(app.ui.noteCacheMaxSizeMb ?? 0);
   let gapFillLimit = $state(app.ui.gapFillLimit ?? 200);
-  let enableFileLogging = $state(app.ui.enableFileLogging ?? false);
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -32,7 +31,6 @@
         noteCacheMaxAgeDays: cacheMaxAge,
         noteCacheMaxSizeMb: cacheMaxSize,
         gapFillLimit: gapLimit,
-        enableFileLogging,
       });
       saved = true;
     } catch (e) {
@@ -72,15 +70,6 @@
 <p class="mb-4 mt-0 text-xs text-muted-foreground">
   アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
   0にすると従来どおりキャッシュのみ表示します。
-</p>
-
-<h4 class="mb-2 mt-0 text-sm font-semibold text-muted-foreground">デバッグ</h4>
-
-<label class="mb-2 flex items-center gap-2 text-sm"><input type="checkbox" bind:checked={enableFileLogging} /> 動作ログをファイルに残す(デバッグ用)</label>
-<p class="mb-4 mt-0 text-xs text-muted-foreground">
-  WebSocket再接続やpingタイムアウトなどの内部ログを、アプリのログディレクトリにファイルとして
-  永続化します。通知が来るタイミングがおかしい等の不具合調査用で、既定はOFFです。
-  切り替えは次回起動から反映されます。
 </p>
 
 <div class="flex items-center justify-end gap-3">
