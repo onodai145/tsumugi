@@ -5,15 +5,37 @@
   import { app } from "../../lib/store.svelte";
 
   const REPO_URL = "https://github.com/onodai145/tsumugi";
+  const DEVELOPER_OPTIONS_TAP_THRESHOLD = 7;
 
   let appVersion = $state<string | null>(null);
   let commitHash = $state<string | null>(null);
+  let versionTapCount = $state(0);
+  let developerOptionsJustUnlocked = $state(false);
+  let unlocking = $state(false);
+  let err = $state<string | null>(null);
 
   $effect(() => {
     void getVersion().then((v) => (appVersion = v));
     void commands.gitCommitHash().then((v) => (commitHash = v));
     void app.checkForUpdate();
   });
+
+  // Androidの「ビルド番号連打」を模した隠し機能(Issue #326)。バージョン表示を7回タップすると
+  // 「開発者オプション」タブが恒久的に出現する(無効化する手段は用意しない)。
+  async function onVersionTap() {
+    if (app.ui.developerOptionsEnabled || unlocking) return;
+    versionTapCount += 1;
+    if (versionTapCount < DEVELOPER_OPTIONS_TAP_THRESHOLD) return;
+    unlocking = true;
+    try {
+      await app.setUiPrefs({ ...app.ui, developerOptionsEnabled: true });
+      developerOptionsJustUnlocked = true;
+    } catch (e) {
+      err = String(e);
+    } finally {
+      unlocking = false;
+    }
+  }
 </script>
 
 <div class="flex flex-col gap-1">
@@ -32,7 +54,14 @@
 
   <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
     <dt class="text-sm text-muted-foreground">バージョン</dt>
-    <dd class="m-0 break-all text-sm">{appVersion ?? "…"}</dd>
+    <dd class="m-0 break-all text-sm">
+      <button
+        type="button"
+        class="border-0 bg-transparent p-0 text-left font-[inherit] text-sm text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        data-testid="settings-version-tap-target"
+        onclick={onVersionTap}
+      >{appVersion ?? "…"}</button>
+    </dd>
 
     <dt class="text-sm text-muted-foreground">コミット</dt>
     <dd class="m-0 break-all text-sm">{commitHash ?? "…"}</dd>
@@ -45,6 +74,11 @@
       <button type="button" class="border-0 bg-transparent p-0 text-left text-sm text-primary hover:underline" onclick={() => openUrl(REPO_URL)}>{REPO_URL}</button>
     </dd>
   </dl>
+
+  {#if developerOptionsJustUnlocked}
+    <p class="mt-3 mb-0 text-sm text-[var(--success)]">開発者オプションを有効にしました</p>
+  {/if}
+  {#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
 </div>
 
 <style>

@@ -195,6 +195,11 @@ pub struct UiPrefs {
     /// ハプティクス(振動)を有効にするか（モバイル版のみ意味を持つ。Issue #26）。既定はON。
     #[serde(default = "default_haptics_enabled")]
     pub haptics_enabled: bool,
+    /// 隠し機能「開発者オプション」タブの解除状態（Issue #326）。
+    /// 「Tsumugiについて」タブのバージョン表示を7回タップすると true になり、以後タブを表示し続ける。
+    /// 一度trueになったら無効化する手段は用意しない（Androidの開発者向けオプション解除と同様）。
+    #[serde(default)]
+    pub developer_options_enabled: bool,
 }
 
 fn default_column_opacity() -> i32 {
@@ -298,6 +303,7 @@ impl Default for UiPrefs {
             instance_ticker: default_instance_ticker(),
             avatar_radius: default_avatar_radius(),
             haptics_enabled: default_haptics_enabled(),
+            developer_options_enabled: false,
         }
     }
 }
@@ -351,6 +357,9 @@ mod tests {
         assert_eq!(v.avatar_radius, 20);
         // haptics_enabled も同様に既定値(true, 追加前は常にON相当の挙動)へフォールバックすること。
         assert!(v.haptics_enabled);
+        // developer_options_enabled も同様に既定値(false, 追加前は開発者オプションタブ自体が
+        // 存在しなかった)へフォールバックすること。
+        assert_eq!(v.developer_options_enabled, false);
     }
 
     #[test]
@@ -433,6 +442,7 @@ mod tests {
             instance_ticker: "always".into(),
             avatar_radius: 65,
             haptics_enabled: true,
+            developer_options_enabled: true,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -468,6 +478,15 @@ mod tests {
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert!(v.url_preview_enabled);
         assert_eq!(v.summaly_proxy_url, "");
+    }
+
+    #[test]
+    fn developer_options_enabled_defaults_to_false_for_legacy_json() {
+        // developer_options_enabled 追加前に保存されたJSONも読めること（#[serde(default)]）。
+        // 既定はOFF(追加前は開発者オプションタブが存在しなかった挙動を維持)。
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.developer_options_enabled, false);
     }
 
     #[test]
