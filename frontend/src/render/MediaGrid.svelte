@@ -3,8 +3,7 @@
   import Viewer from "viewerjs";
   import "viewerjs/dist/viewer.css";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { commands, unwrap } from "../lib/ipc";
+  import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
   let { files }: { files: DriveFile[] } = $props();
@@ -17,16 +16,6 @@
 
   let gridEl = $state<HTMLDivElement | undefined>();
   let viewer: Viewer | undefined;
-
-  async function saveToDisk(url: string, suggestedName: string) {
-    try {
-      const path = await saveDialog({ defaultPath: suggestedName });
-      if (!path) return;
-      await unwrap(commands.saveUrlToFile(url, path));
-    } catch (e) {
-      app.reportError(e);
-    }
-  }
 
   // 画像のクリック→拡大表示(ズーム/ドラッグ/ホイールズーム含む)は自前実装せず
   // viewerjs(https://github.com/fengyuanchen/viewerjs)に委譲する。コンテナ内の
@@ -55,7 +44,8 @@
           download: {
             click: () => {
               const img = (viewer as unknown as { image?: HTMLImageElement } | undefined)?.image;
-              if (img) void saveToDisk(img.src, img.alt || "image");
+              if (img)
+                void saveMediaToDisk(img.src, img.alt || "image", (e) => app.reportError(e));
             },
           },
         },
@@ -100,7 +90,7 @@
           ></video>
           <button
             class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
-            onclick={() => saveToDisk(f.url, fileName(f))}
+            onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
             aria-label="保存"
           >
             💾
@@ -110,7 +100,7 @@
           <audio src={f.url} controls preload="metadata" class="w-[calc(100%-16px)]"></audio>
           <button
             class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
-            onclick={() => saveToDisk(f.url, fileName(f))}
+            onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
             aria-label="保存"
           >
             💾
