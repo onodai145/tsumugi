@@ -115,6 +115,23 @@ describe("streaming events reflect in real time", () => {
 
     const composeTextarea = await $('[data-testid="compose-textarea"]');
     await composeTextarea.waitForDisplayed({ timeout: 15000 });
+
+    // 通知カラムのUIが表示されただけでは、そのWebSocket購読がサーバーへ実際に
+    // 到達しているとは限らない(open_stream_and_fetchはAddChannelをtry_sendするのみで
+    // 待たず、ConnectionState::ConnectedはWebSocketへのconnect送信直後、サーバーからの
+    // ack無しにemitされる。Issue #365)。tab.stateの初期値は"connecting"なので、
+    // data-state="connected"を待つことでtry_send→アクタースケジューリング→WSハンドシェイク
+    // という(CI負荷で伸びやすい)区間は閉じられるが、connectフレーム送信からサーバーの
+    // 購読処理完了までのわずかな区間は依然カバーされない点に留意。
+    await browser.waitUntil(
+      async () => {
+        const state = await $('[data-column-kind="notifications"] [data-state]')
+          .getAttribute("data-state")
+          .catch(() => null);
+        return state === "connected";
+      },
+      { timeout: 15000, interval: 200, timeoutMsg: "notifications column did not reach connected state" },
+    );
   });
 
   it("shows a mention notification live", async () => {
