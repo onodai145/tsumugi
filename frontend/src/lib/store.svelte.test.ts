@@ -100,6 +100,7 @@ function makeNotificationOnlyTab(note: Note): TabView {
     gapMarker: null,
     fillingGap: false,
     selectedNoteId: null,
+    selectionMoveSeq: 0,
   };
 }
 
@@ -373,6 +374,7 @@ function makeNormalTab(overrides: Partial<TabView> = {}): TabView {
     gapMarker: null,
     fillingGap: false,
     selectedNoteId: null,
+    selectionMoveSeq: 0,
     ...overrides,
   };
 }
@@ -460,6 +462,7 @@ function makeNoteTab(notes: Note[], overrides: Partial<TabView> = {}): TabView {
     gapMarker: null,
     fillingGap: false,
     selectedNoteId: null,
+    selectionMoveSeq: 0,
     ...overrides,
   };
 }
@@ -696,5 +699,49 @@ describe("#applyAvatarRadius (Issue #94: アイコンの丸みカスタマイズ
     mockPrefersColorSchemeDark(false);
     await app.setUiPrefs({ ...app.ui, avatarRadius: -10 });
     expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("0%");
+  });
+});
+
+describe("矢印キー選択移動とselectionMoveSeq(Issue #363)", () => {
+  beforeEach(() => {
+    app.groups = [];
+    app.focusedGroupId = "";
+  });
+
+  it("runKeyAction(\"note.next\")はselectedNoteIdを進め、selectionMoveSeqをインクリメントする", () => {
+    const notes = [makeNote({ id: "n1" }), makeNote({ id: "n2" })];
+    app.groups = [makeGroup([makeNoteTab(notes, { selectedNoteId: "n1" })])];
+    app.focusedGroupId = "group1";
+    const tab = app.groups[0].tabs[0];
+
+    expect(tab.selectionMoveSeq).toBe(0);
+    app.runKeyAction("note.next");
+
+    expect(tab.selectedNoteId).toBe("n2");
+    expect(tab.selectionMoveSeq).toBe(1);
+  });
+
+  it("runKeyAction(\"note.prev\")もselectionMoveSeqをインクリメントする", () => {
+    const notes = [makeNote({ id: "n1" }), makeNote({ id: "n2" })];
+    app.groups = [makeGroup([makeNoteTab(notes, { selectedNoteId: "n2" })])];
+    app.focusedGroupId = "group1";
+    const tab = app.groups[0].tabs[0];
+
+    app.runKeyAction("note.prev");
+
+    expect(tab.selectedNoteId).toBe("n1");
+    expect(tab.selectionMoveSeq).toBe(1);
+  });
+
+  it("selectNote(クリック/タップ選択)ではselectionMoveSeqが変化しない", () => {
+    const notes = [makeNote({ id: "n1" }), makeNote({ id: "n2" })];
+    app.groups = [makeGroup([makeNoteTab(notes)])];
+    app.focusedGroupId = "group1";
+    const tab = app.groups[0].tabs[0];
+
+    app.selectNote("tab1", "n2");
+
+    expect(tab.selectedNoteId).toBe("n2");
+    expect(tab.selectionMoveSeq).toBe(0);
   });
 });
