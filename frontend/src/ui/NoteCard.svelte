@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import type { Note } from "../bindings/tauri.gen";
   import Mfm from "../render/Mfm.svelte";
   import MediaGrid from "../render/MediaGrid.svelte";
@@ -273,7 +273,7 @@
   // 発火させる(タブ切替の再マウント/モバイルのrole変化ではselectionMoveSeqが
   // 変わらないため、意図しない自動スクロールを起こさない／Issue #363)。
   let el = $state<HTMLElement | null>(null);
-  let lastSeenSelectionMoveSeq = selectionMoveSeq;
+  let lastSeenSelectionMoveSeq = untrack(() => selectionMoveSeq);
   $effect(() => {
     if (selected && el && selectionMoveSeq !== lastSeenSelectionMoveSeq) {
       el.scrollIntoView({ block: "nearest" });
