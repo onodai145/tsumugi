@@ -76,6 +76,12 @@ export interface TabView {
   /// ボタンの二重クリックだけは防ぎたいため)。
   fillingGap: boolean;
   selectedNoteId: string | null;
+  /// 矢印キー(note.next/note.prev)で選択を動かすたびに増える世代カウンタ。
+  /// NoteCard はこれが変化した時だけ scrollIntoView する(タブの再マウントや
+  /// モバイルのrole変化(prev/next→active)では変化しないため、意図しない
+  /// 自動スクロールを防ぐ／Issue #363)。selectNote(クリック/タップ選択)では
+  /// 増やさない。
+  selectionMoveSeq: number;
 }
 
 /// タブに表示する名前（カスタム名優先）。
@@ -363,6 +369,7 @@ class AppStore {
       gapMarker: null,
       fillingGap: false,
       selectedNoteId: null,
+      selectionMoveSeq: 0,
     };
   }
 
@@ -567,6 +574,7 @@ class AppStore {
     let next = cur < 0 ? 0 : cur + delta;
     next = Math.max(0, Math.min(t.notes.length - 1, next));
     t.selectedNoteId = t.notes[next].id;
+    t.selectionMoveSeq++;
   }
 
   /// フォーカスを隣のカラムへ。
@@ -587,6 +595,7 @@ class AppStore {
       note = t.notes[0];
       if (!note) return null;
       t.selectedNoteId = note.id;
+      t.selectionMoveSeq++;
     }
     return { tab: t, note };
   }
