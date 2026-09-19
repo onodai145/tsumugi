@@ -1,6 +1,10 @@
 // 背景画像の配置方法（Issue #45）。Rust 側 UiPrefs.backgroundFitMode の文字列値と対応する。
-//
 export type BackgroundFitMode = "cover" | "contain" | "fill" | "tile";
+
+// Codecovコメント検証用の一時関数（未テスト、後で削除）。
+export function isBackgroundFitMode(value: string): value is BackgroundFitMode {
+  return value === "cover" || value === "contain" || value === "fill" || value === "tile";
+}
 
 export const BACKGROUND_FIT_MODE_CSS: Record<string, [size: string, repeat: string]> = {
   cover: ["cover", "no-repeat"],
