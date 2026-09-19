@@ -116,7 +116,7 @@
   onclick={onclose}
   role="presentation"
 >
-  <div class="flex flex-none items-center justify-end p-[max(0.5rem,env(safe-area-inset-top))_max(0.5rem,env(safe-area-inset-right))_0.5rem_0.5rem]">
+  <div class="relative z-10 flex flex-none items-center justify-end p-[max(0.5rem,env(safe-area-inset-top))_max(0.5rem,env(safe-area-inset-right))_0.5rem_0.5rem]">
     <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={(e) => { e.stopPropagation(); onclose(); }} aria-label="閉じる">
       <X size={16} />
     </Button>
@@ -201,7 +201,7 @@
   {#if isRevealed(revealed, current) && isImage(current)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
-      class="flex flex-none items-center justify-center gap-1 p-[0.5rem_0.5rem_max(0.5rem,env(safe-area-inset-bottom))]"
+      class="relative z-10 flex flex-none items-center justify-center gap-1 p-[0.5rem_0.5rem_max(0.5rem,env(safe-area-inset-bottom))]"
       onclick={(e) => e.stopPropagation()}
       role="toolbar"
       aria-label="画像ツールバー"
