@@ -1,6 +1,6 @@
 <script lang="ts">
   import "cropperjs";
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { ChevronLeft, ChevronRight, Download, FlipHorizontal, FlipVertical, RotateCcw, RotateCw, X, ZoomIn, ZoomOut } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { portal } from "../lib/portal";
@@ -51,6 +51,13 @@
     imageTransform = initialImageTransform;
     scrollEl?.children[index]?.scrollIntoView({ behavior, inline: "start", block: "nearest" });
   }
+
+  // マウント時、scrollEl(横スクロールコンテナ)の初期表示位置がstartIndexとズレないよう
+  // アニメーションなしで即座に同期させる(goTo()はgoNext/goPrev/矢印キーからしか呼ばれず、
+  // マウント時には何もスクロールしないため、非ゼロstartIndexだと常に1枚目が表示されてしまう)。
+  onMount(() => {
+    scrollEl?.children[currentIndex]?.scrollIntoView({ behavior: "auto", inline: "start", block: "nearest" });
+  });
 
   function goNext() {
     goTo(nextIndex(currentIndex, viewItems.length));

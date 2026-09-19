@@ -17,6 +17,11 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() =
 
 const { default: MediaViewer } = await import("./MediaViewer.svelte");
 
+// jsdomはscrollIntoViewを実装していないため、マウント時のスクロール同期(onMount)を含む
+// すべてのテストで安全にレンダリングできるよう既定でno-opスタブを用意しておく。
+// 挙動を検証したいテストは各itの冒頭でこの参照を上書きする。
+Element.prototype.scrollIntoView = vi.fn();
+
 function file(overrides: Partial<DriveFile>): DriveFile {
   return {
     id: "f1",
@@ -76,6 +81,23 @@ describe("MediaViewer", () => {
     expect(scrollIntoView).toHaveBeenCalledOnce();
     const [, secondPage] = document.querySelectorAll('[data-testid="media-page"]');
     expect(scrollIntoView.mock.instances[0]).toBe(secondPage);
+  });
+
+  it("非ゼロstartIndexでマウントすると、その位置へ即座にscrollIntoViewする", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    render(MediaViewer, {
+      props: {
+        files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
+        startIndex: 1,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    const [, secondPage] = document.querySelectorAll('[data-testid="media-page"]');
+    expect(scrollIntoView.mock.instances[0]).toBe(secondPage);
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
   });
 
   it("閲覧注意ファイルは未表示ならカバーを表示し、クリックで表示状態になる", async () => {
