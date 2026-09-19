@@ -46,12 +46,37 @@ Issue #295 では移行先候補として Bigger Picture / lightGallery / pencer
 - [Cropper.js v2](https://fengyuanchen.github.io/cropperjs/)（`fengyuanchen/cropperjs`、MIT、Viewer.jsと同じ作者によるWeb Componentsベースの後継プロダクト）を採用する。クロップ枠（`<cropper-selection>`）は使わず、`<cropper-canvas>` + `<cropper-image>` のみを組み合わせた「ビューワー構成」で画像を表示する。
 - `<cropper-image>` の `$rotate(angle)` / `$scale(x, y)`（負値で反転） / `$zoom(scale, x, y)` / `$translate(x, y)` メソッドで、ズーム・パン・回転・反転を単一のAPIで完結させる。属性 `rotatable` / `scalable` / `translatable` で各操作を有効化する。panzoomのような別ライブラリとの transform 合成は不要になる。
 - ツールバー: ズームイン / ズームアウト / 等倍リセット（`$resetTransform()`） / 左回転 / 右回転 / 左右反転 / 上下反転 / ダウンロード / 閉じる。
-- ピンチズームの挙動は公式ドキュメント上で明記が確認できなかったため、実装時に実機（Android含む）で動作検証する。期待通り動作しない場合は `@panzoom/panzoom` へのフォールバックを検討する（本ドキュメント末尾の代替案参照）。
+- ピンチズームの挙動は公式ドキュメント上で明記が確認できなかったため、実装の最初に実機（Android含む）で動作検証する（詳細は3.9節）。期待通り動作しない場合は `@panzoom/panzoom` へのフォールバックを検討する（本ドキュメント末尾の代替案参照）。
 
 ### 3.5 動画のズーム・パン
 
 - 動画も `@panzoom/panzoom` の対象にするが、ネイティブ操作・Vidstackのコントロールバーとの誤操作競合を避けるため、**単一ポインタでのドラッグパンは `scale > 1`（ズーム済み）の時のみ有効化**し、等倍時は無効化する（`panzoom` の `disablePan` オプションを動的に切り替える）。ピンチズーム・ホイールズームは常時有効。
 - 回転・反転ボタンは動画には表示しない（Issue検討の結果、不要と判断）。
+
+### 3.9 パン/スワイプ操作の競合解決（重要）
+
+過去のIssue #296対応（[[touch-action-pan-y-pointercancel-native-scroll-conflict]]、PR #328）で、「JSでpointerdown/pointermoveを検知してpreventDefaultする自前ドラッグ方式の横スワイプ」は実機（Android）で`pointercancel`によりブラウザのネイティブジェスチャーに奪われ機能しないという教訓を得ている。今回のビューワーでも同種の競合が2箇所で起こりうるため、以下の方針で回避する。
+
+- **画像の等倍時パン と 前後送りスワイプの競合**: `<cropper-image>` の `translatable` 属性は **`scale > 1`（ズーム済み）の時のみ有効化**し、等倍時は無効化する（3.5節の動画と同じ方針に統一）。等倍時の横ドラッグは cropper-image に奪われず、前後送りスワイプ側に委ねられる。`scale` は cropper-image の `transform` イベント（`detail.matrix`）を購読して判定する。
+- **前後送りスワイプの実装方式**: JSのpointerドラッグ横取り方式は採用せず、**CSS Scroll Snap**（`scroll-snap-type: x mandatory` を持つ横スクロールコンテナに `viewItems` を1アイテム1ページとして並べ、各ページに `scroll-snap-align: start` を設定）で実装する。ブラウザのネイティブスクロールとして扱われるため、`pointercancel` によるジェスチャー横取り競合が原理的に起こらない。スクロール停止（`scrollend`イベント、非対応環境向けにdebounceされた`scroll`イベントでフォールバック）を検知して `currentIndex` を更新する。矢印ボタン・キーボード操作は対象ページへ `scrollTo({ behavior: "smooth" })` する。
+- 上記の「`scale > 1`でのみtranslatable」方針が実機で機能するか（等倍時にcropper-canvasがポインタイベントを完全に外側のScroll Snapコンテナへ透過させるか）は未検証のため、3.4節のピンチズーム検証と合わせて実装最初のスパイクで確認する。機能しない場合は、画像表示中のみ外側コンテナの `overflow-x` を一時的に無効化し前後送りを矢印ボタン/キーボードのみに制限するなどのフォールバックを検討する。
+
+### 3.10 Vidstackのテーマ連携
+
+`vidstack/player/styles/default/theme.css` はデフォルトパレット（例: `--video-brand`, `--audio-brand`, `--video-focus-ring-color`, `--video-border-radius` 等のCSS変数）を持つが、`docs/design/style-guide.md` の規約（色はCSS変数を直書きせず`app.css`のトークン経由、角丸はスケールに準拠）に従い、以下をアプリのトークンにマッピングする。
+
+```css
+media-player {
+  --video-brand: var(--accent);
+  --audio-brand: var(--accent);
+  --video-focus-ring-color: var(--accent);
+  --audio-focus-ring-color: var(--accent);
+  --video-border-radius: var(--radius-md); /* style-guide.md §2 のmdスケールに合わせる */
+  --audio-border-radius: var(--radius-md);
+}
+```
+
+ユーザーカスタムテーマ・プリセットが `--accent` 等を上書きする前提と矛盾しないよう、Vidstack側の色をハードコードせず必ずこのマッピング経由にする。
 
 ### 3.6 動画・音声プレーヤー: Vidstack
 
@@ -64,10 +89,10 @@ Issue #295 では移行先候補として Bigger Picture / lightGallery / pencer
 
 以下を並存させる（互いに排他ではない）:
 
-- 矢印ボタン（画面左右に固定表示）
-- 画面左右の透明クリックエリア（ホバー時に矢印アイコンを表示）
-- キーボード ← / →
-- 横スワイプ（タッチ操作）
+- 矢印ボタン（画面左右に固定表示、対象ページへ `scrollTo({ behavior: "smooth" })`）
+- 画面左右の透明クリックエリア（ホバー時に矢印アイコンを表示、クリックで同上）
+- キーボード ← / →（同上）
+- 横スワイプ（3.9節のCSS Scroll Snapによるネイティブスクロール。JSのpointerドラッグ横取りは使わない）
 
 ### 3.8 共通操作
 
@@ -84,12 +109,23 @@ MediaGrid.svelte
 
 MediaViewer.svelte
   - viewItems = files.filter(画像/動画/音声)
-  - currentIndex（$state）
+  - currentIndex（$state）、Scroll Snapコンテナのscroll位置と同期
   - revealed[viewItems[currentIndex].id] が false → カバー表示、クリックで revealed 更新（親に伝播）
-  - true → 画像: <img> + panzoom + rotation/flip transform
-           動画/音声: Vidstack <media-player> (+動画のみpanzoom)
-  - 前後送り操作 → currentIndex 更新 → rotation/flip/panzoom リセット
+  - true → 画像: <cropper-canvas> + <cropper-image>（scale>1でのみtranslatable）
+           動画/音声: Vidstack <media-player> (+動画のみpanzoom、scale>1でのみpan)
+  - 前後送り操作（矢印/クリックエリア/キーボード/Scroll Snapスワイプ） → currentIndex 更新 → rotation/flip/zoom リセット
 ```
+
+### 4.1 テスト可能なロジックの分離
+
+custom elements（`<cropper-image>` / `<media-player>`）はjsdom環境で意味のある初期化ができない（`ResizeObserver` / Web Animations API / shadow DOM挙動を欠く）ため、Vitestで検証可能な純粋ロジックは `lib/mediaViewer.svelte.ts` に切り出す（既存の `lib/profileModal.svelte.ts` + `lib/profileModal.svelte.test.ts` と同じ構成パターンを踏襲）。
+
+- `viewItems` の算出（`DriveFile[]` → 画像/動画/音声のみ抽出）
+- `currentIndex` の次/前/wrap挙動
+- 閲覧注意ゲーティング（`revealed[id]` 参照・更新）
+- 画像の rotation/flip 状態とアイテム切替時のリセット
+
+custom elementsに直接紐づく部分（Cropper.js/Vidstackの実際のズーム・回転・再生動作）はVitestでは検証せず、3.11節の実機確認に委ねる。
 
 ## 5. エラーハンドリング
 
@@ -99,12 +135,18 @@ MediaViewer.svelte
 
 ## 6. テスト方針
 
-- `frontend/src/render/MediaViewer.svelte` を `@testing-library/svelte` でコンポーネントテスト:
-  - 前後送り（矢印ボタン・クリックエリア・キーボード）でアイテムが切り替わること
-  - アイテム切替時に画像の rotation/flip がリセットされること
+- `frontend/src/lib/mediaViewer.svelte.ts`（4.1節）をVitestで単体テスト: `viewItems`算出、`currentIndex`の次/前/wrap、閲覧注意ゲーティング、rotation/flipのリセットロジックを実アサーションで検証する。
+- `frontend/src/render/MediaViewer.svelte` を `@testing-library/svelte` でコンポーネントテスト（custom elements内部の描画は検証対象外、DOM構造とイベント配線のみ）:
+  - 矢印ボタン・キーボード操作で `currentIndex` が変わること（Scroll Snapのネイティブスクロール自体はjsdomで検証できないため、`scrollTo`呼び出しの発生や`currentIndex`状態の更新までを確認）
   - 閲覧注意アイテムに到達した場合にカバーが表示され、クリックで `revealed` が更新され親に伝播すること
   - Esc / 背景クリックで `onclose` が呼ばれること
-- `cargo tauri dev`（`WEBKIT_DISABLE_DMABUF_RENDERER=1` 環境）での実機確認: 画像のズーム/パン/回転/反転、動画・音声のVidstackプレーヤー操作、閲覧注意ゲーティング、セーフエリア表示を目視確認する。
+- 実機確認（`cargo tauri dev`、詳細手順は3.11節）: 画像のピンチズーム・パン/スワイプ競合・回転・反転、動画・音声のVidstackプレーヤー操作、Misskeyホストの実動画/音声ファイルでの再生（GStreamerコーデック依存の確認）、閲覧注意ゲーティング、セーフエリア表示、Vidstackテーマ連携を目視確認する。
+
+### 3.11 実機確認手順
+
+- Linux/Xvfb環境: `Xvfb`を起動しつつ、実画面への描画漏れを防ぐため **`DISPLAY`をXvfbに向けるだけでなく`WAYLAND_DISPLAY`を明示的にunsetする**（Waylandセッション上ではDISPLAY設定だけでは不十分、[[dev-server-verification-must-use-virtual-display]]参照）。`WEBKIT_DISABLE_DMABUF_RENDERER=1`は`src-tauri/src/main.rs`が既定で設定済み。
+- 動画・音声の検証は `vidstack.io` のデモファイルだけでなく、**実際にMisskeyインスタンスへアップロードしたmp4/webm/mp3ファイル**で行う（WebKitGTKの`<video>`/`<audio>`再生は最終的にシステムのGStreamerプラグインに依存するため、デモファイルで動いてもインスタンス側のエンコード設定次第で実際は再生できないケースがありうる）。
+- 検証後、自分で起動した`cargo tauri dev`は正確なPIDを確認した上で終了する（`pkill`/`killall`は使わない）。
 
 ## 7. 依存関係の変更
 
