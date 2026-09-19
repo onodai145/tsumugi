@@ -718,4 +718,13 @@ describe("キーボード選択移動時のみスクロールする(Issue #363)"
 
     expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
+
+  it("selectedがfalse→trueかつselectionMoveSeqも変化した場合はscrollIntoViewが呼ばれる(矢印キーで別ノートへ移動)", async () => {
+    const note = makeNote();
+    const { rerender } = render(NoteCard, { props: { note, selected: false, selectionMoveSeq: 0 } });
+
+    await rerender({ note, selected: true, selectionMoveSeq: 1 });
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "nearest" });
+  });
 });

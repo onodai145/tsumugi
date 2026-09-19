@@ -595,6 +595,7 @@ class AppStore {
       note = t.notes[0];
       if (!note) return null;
       t.selectedNoteId = note.id;
+      t.selectionMoveSeq++;
     }
     return { tab: t, note };
   }

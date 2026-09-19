@@ -744,4 +744,17 @@ describe("矢印キー選択移動とselectionMoveSeq(Issue #363)", () => {
     expect(tab.selectedNoteId).toBe("n2");
     expect(tab.selectionMoveSeq).toBe(0);
   });
+
+  it("未選択状態でキーバインド操作(暗黙選択)するとselectionMoveSeqがインクリメントされる", () => {
+    const notes = [makeNote({ id: "n1" }), makeNote({ id: "n2" })];
+    const tab = makeNoteTab(notes); // selectedNoteId未指定=null
+    app.groups = [makeGroup([tab])];
+    app.focusedGroupId = "group1";
+
+    app.runKeyAction("note.react");
+
+    const t = app.groups[0].tabs[0];
+    expect(t.selectedNoteId).toBe("n1");
+    expect(t.selectionMoveSeq).toBe(1);
+  });
 });
