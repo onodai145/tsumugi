@@ -425,6 +425,7 @@
           ]}
           style:transform={touchDraggingTabId === t.id ? `translateX(${touchDragDeltaX}px)` : undefined}
           data-tab-id={t.id}
+          data-column-kind={t.kind.type}
           draggable={!app.useMobileUi()}
           ondragstart={(e) => {
             e.dataTransfer?.setData("text/plain", t.id);
