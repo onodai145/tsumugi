@@ -41,11 +41,12 @@ Issue #295 では移行先候補として Bigger Picture / lightGallery / pencer
 - **画像**: 現状通りクリックでビューワーを起動（起動時 `startIndex` はクリックした画像の `viewItems` 内でのインデックス）。
 - **動画・音声**: グリッド内では現状通りネイティブ `<video controls>` / `<audio controls>` でインライン再生を維持する。ネイティブコントロールとのクリック競合を避けるため、既存のダウンロードボタン（💾）と並べて「拡大」ボタンを追加し、そこから明示的にビューワーを起動する。
 
-### 3.4 画像のズーム・回転・反転
+### 3.4 画像のズーム・パン・回転・反転
 
-- `@panzoom/panzoom`（MIT、3.7KB gzip、依存ゼロ）を `<img>` 要素にSvelteアクションとしてアタッチする。ピンチ・ホイール・ダブルタップズーム、ドラッグパンをサポート。
-- ツールバー: ズームイン / ズームアウト / 等倍リセット（`panzoom.reset()`） / 左回転 / 右回転 / 左右反転 / 上下反転 / ダウンロード / 閉じる。
-- 回転・反転は panzoom が管理する transform とは別に、画像要素自身の CSS `transform: rotate(...) scaleX(...) scaleY(...)` として自前管理し、panzoom のズーム/パン transform と合成する（panzoom はラッパー要素、回転/反転は内側の `<img>` に適用するなど、レイヤーを分けて競合を避ける）。
+- [Cropper.js v2](https://fengyuanchen.github.io/cropperjs/)（`fengyuanchen/cropperjs`、MIT、Viewer.jsと同じ作者によるWeb Componentsベースの後継プロダクト）を採用する。クロップ枠（`<cropper-selection>`）は使わず、`<cropper-canvas>` + `<cropper-image>` のみを組み合わせた「ビューワー構成」で画像を表示する。
+- `<cropper-image>` の `$rotate(angle)` / `$scale(x, y)`（負値で反転） / `$zoom(scale, x, y)` / `$translate(x, y)` メソッドで、ズーム・パン・回転・反転を単一のAPIで完結させる。属性 `rotatable` / `scalable` / `translatable` で各操作を有効化する。panzoomのような別ライブラリとの transform 合成は不要になる。
+- ツールバー: ズームイン / ズームアウト / 等倍リセット（`$resetTransform()`） / 左回転 / 右回転 / 左右反転 / 上下反転 / ダウンロード / 閉じる。
+- ピンチズームの挙動は公式ドキュメント上で明記が確認できなかったため、実装時に実機（Android含む）で動作検証する。期待通り動作しない場合は `@panzoom/panzoom` へのフォールバックを検討する（本ドキュメント末尾の代替案参照）。
 
 ### 3.5 動画のズーム・パン
 
@@ -108,7 +109,7 @@ MediaViewer.svelte
 ## 7. 依存関係の変更
 
 - 削除: `viewerjs`
-- 追加: `@panzoom/panzoom`、Vidstack（`@vidstack/player` 系パッケージ、Svelte向け配布形態は実装時に最新ドキュメントで確認する）
+- 追加: `cropperjs`（v2、画像のズーム/パン/回転/反転）、Vidstack（`@vidstack/player` 系パッケージ、動画・音声プレーヤー、Svelte向け配布形態は実装時に最新ドキュメントで確認する）、動画のズーム/パンには引き続き `@panzoom/panzoom` を使用する（Cropper.js v2は画像専用で動画には非対応のため）
 
 ## 8. 検討した代替案
 
@@ -124,4 +125,6 @@ Issue本文の候補3つに加え、以下を調査した上で自前実装 + �
 | GLightbox | ○ | ○ | 未確認 | ✗ | MIT | 最終pushから9ヶ月、実績・機能ともに見劣り |
 | Fancybox | ○ | ○ | ○ | ○ | **GPLv3 or 商用有償** | 市場シェア最大級だがライセンス懸念は同上 |
 
-音声ネイティブ対応とrotate/flip標準搭載を両立し、かつ許諾ライセンスを満たすライブラリは存在しなかったため、UI・ツールバー・ライセンスは自前実装しつつ、ズーム/パンの座標計算（`@panzoom/panzoom`）とプレーヤーUI（Vidstack）のみ実績のある外部ライブラリに委譲する、本ドキュメントの方針に至った。
+音声ネイティブ対応とrotate/flip標準搭載を両立し、かつ許諾ライセンスを満たす単一ライブラリは存在しなかったため、UI・ツールバー・前後送り・閲覧注意ゲーティングは自前実装しつつ、パーツごとに実績のある外部ライブラリへ委譲する方針とした。
+
+画像のズーム/パン/回転/反転については当初 `@panzoom/panzoom`（ズーム/パン）+ 自前CSS transform（回転/反転）の組み合わせを想定していたが、Viewer.jsと同じ作者による [Cropper.js v2](https://fengyuanchen.github.io/cropperjs/) がクロップ枠なしの「ビューワー構成」でズーム・パン・回転・反転を単一APIで提供していることが判明したため、こちらに一本化した（詳細は3.4節）。動画のズーム/パンには画像専用のCropper.js v2が使えないため、引き続き `@panzoom/panzoom` を使用する。
