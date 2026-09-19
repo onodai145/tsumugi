@@ -117,7 +117,7 @@
   role="presentation"
 >
   <div class="flex flex-none items-center justify-end p-[max(0.5rem,env(safe-area-inset-top))_max(0.5rem,env(safe-area-inset-right))_0.5rem_0.5rem]">
-    <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={(e) => { e.stopPropagation(); onclose(); }} aria-label="閉じる">
+    <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={(e) => { e.stopPropagation(); onclose(); }} aria-label="閉じる">
       <X size={16} />
     </Button>
   </div>
@@ -207,13 +207,23 @@
       aria-label="画像ツールバー"
       tabindex="-1"
     >
-      <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={() => cropperImageEl?.$zoom(0.1)} aria-label="ズームイン"><ZoomIn size={16} /></Button>
-      <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={() => cropperImageEl?.$zoom(-0.1)} aria-label="ズームアウト"><ZoomOut size={16} /></Button>
-      <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={() => (imageTransform = rotateCCW(imageTransform))} aria-label="左回転"><RotateCcw size={16} /></Button>
-      <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={() => (imageTransform = rotateCW(imageTransform))} aria-label="右回転"><RotateCw size={16} /></Button>
-      <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={() => (imageTransform = toggleFlipH(imageTransform))} aria-label="左右反転"><FlipHorizontal size={16} /></Button>
-      <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={() => (imageTransform = toggleFlipV(imageTransform))} aria-label="上下反転"><FlipVertical size={16} /></Button>
-      <Button variant="ghost" size="icon" class="text-white hover:bg-white/10 hover:text-white" onclick={() => saveMediaToDisk(current.url, fileName(current), (e) => app.reportError(e))} aria-label="ダウンロード"><Download size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => cropperImageEl?.$zoom(0.1)} aria-label="ズームイン"><ZoomIn size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => cropperImageEl?.$zoom(-0.1)} aria-label="ズームアウト"><ZoomOut size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => (imageTransform = rotateCCW(imageTransform))} aria-label="左回転"><RotateCcw size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => (imageTransform = rotateCW(imageTransform))} aria-label="右回転"><RotateCw size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => (imageTransform = toggleFlipH(imageTransform))} aria-label="左右反転"><FlipHorizontal size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => (imageTransform = toggleFlipV(imageTransform))} aria-label="上下反転"><FlipVertical size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => saveMediaToDisk(current.url, fileName(current), (e) => app.reportError(e))} aria-label="ダウンロード"><Download size={16} /></Button>
     </div>
   {/if}
 </div>
+
+<style>
+  /* ホバー背景色は生のTailwindカラー(bg-white/10等)ではなく--accentトークン経由にする
+     (Dropdown.svelte/ReactionAcceptanceSelect.svelteの.active色と同じパターン)。
+     対象はButtonコンポーネント越しの実DOM要素なので:globalで指定し、Buttonのvariant側
+     デフォルトhoverクラス(hover:bg-muted等)より確実に優先させるためimportantを付ける。 */
+  :global(.viewer-icon-btn:hover) {
+    background-color: color-mix(in srgb, var(--accent) 20%, transparent) !important;
+  }
+</style>
