@@ -32,6 +32,8 @@
 
   // accountId があれば操作ボタンを出す（引用ネスト時は undefined = 表示のみ）
   // tabId/selected はトップレベル表示時のみ（キーボード選択のハイライト/スクロール用）
+  // selectionMoveSeq は矢印キー選択移動(TabView.selectionMoveSeq)専用の世代カウンタ。
+  // これが変化した時だけスクロールする(Issue #363: タブ再表示による意図しないスクロール防止)。
   // emojiAccountId は絵文字解決専用（操作性に影響しない）。未指定なら accountId を使う。
   let {
     note,
@@ -43,6 +45,7 @@
     emojiAccountId,
     tabId,
     selected = false,
+    selectionMoveSeq = 0,
   }: {
     note: Note;
     quoted?: boolean;
@@ -53,6 +56,7 @@
     emojiAccountId?: string;
     tabId?: string;
     selected?: boolean;
+    selectionMoveSeq?: number;
   } = $props();
 
   // 純粋Renote（本文なし＋renote先あり）は「誰が」を出して中身を委譲
@@ -265,10 +269,16 @@
     hoverPos = { left, top: r.bottom + 10 };
   });
 
-  // キーボード選択中はスクロールで見える位置へ
+  // キーボード選択中はスクロールで見える位置へ。selectionMoveSeqが変化した時だけ
+  // 発火させる(タブ切替の再マウント/モバイルのrole変化ではselectionMoveSeqが
+  // 変わらないため、意図しない自動スクロールを起こさない／Issue #363)。
   let el = $state<HTMLElement | null>(null);
+  let lastSeenSelectionMoveSeq = selectionMoveSeq;
   $effect(() => {
-    if (selected && el) el.scrollIntoView({ block: "nearest" });
+    if (selected && el && selectionMoveSeq !== lastSeenSelectionMoveSeq) {
+      el.scrollIntoView({ block: "nearest" });
+    }
+    lastSeenSelectionMoveSeq = selectionMoveSeq;
   });
 
   let cwOpen = $state(false);

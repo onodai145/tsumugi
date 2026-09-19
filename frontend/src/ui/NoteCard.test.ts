@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
 import { app } from "../lib/store.svelte";
@@ -673,5 +673,49 @@ describe("Renote取り消しメニュー", () => {
     await getByText("キャンセル").click();
 
     expect(undoSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("キーボード選択移動時のみスクロールする(Issue #363)", () => {
+  let scrollIntoViewMock: ReturnType<typeof vi.fn>;
+  const originalScrollIntoView = Element.prototype.scrollIntoView;
+
+  beforeEach(() => {
+    scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock as any;
+  });
+
+  afterEach(() => {
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+  });
+
+  it("selected=trueで初回マウントしてもscrollIntoViewは呼ばれない(タブ再表示時の再マウントを再現)", () => {
+    const note = makeNote();
+    render(NoteCard, { props: { note, selected: true, selectionMoveSeq: 3 } });
+
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+  });
+
+  it("マウント後にselectionMoveSeqが変化するとscrollIntoViewが呼ばれる(矢印キー選択移動を再現)", async () => {
+    const note = makeNote();
+    const { rerender } = render(NoteCard, {
+      props: { note, selected: true, selectionMoveSeq: 0 },
+    });
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+
+    await rerender({ note, selected: true, selectionMoveSeq: 1 });
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "nearest" });
+  });
+
+  it("selectionMoveSeqが変化せずselectedだけがfalse→trueになってもscrollIntoViewは呼ばれない(モバイルのrole変化: prev/next→activeを再現)", async () => {
+    const note = makeNote();
+    const { rerender } = render(NoteCard, {
+      props: { note, selected: false, selectionMoveSeq: 5 },
+    });
+
+    await rerender({ note, selected: true, selectionMoveSeq: 5 });
+
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
 });
