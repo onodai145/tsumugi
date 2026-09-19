@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import Viewer from "viewerjs";
-  import "viewerjs/dist/viewer.css";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
+  import MediaViewer from "./MediaViewer.svelte";
+  import { deriveViewItems } from "../lib/mediaViewer.svelte";
   let { files }: { files: DriveFile[] } = $props();
 
   let revealed = $state<Record<string, boolean>>({});
@@ -14,50 +13,7 @@
   const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
   const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
-  let gridEl = $state<HTMLDivElement | undefined>();
-  let viewer: Viewer | undefined;
-
-  // 画像のクリック→拡大表示(ズーム/ドラッグ/ホイールズーム含む)は自前実装せず
-  // viewerjs(https://github.com/fengyuanchen/viewerjs)に委譲する。コンテナ内の
-  // <img> を自動検出するので、閲覧注意で隠している間はそもそも <img> を描画しない
-  // ことで対象から除外し、表示切替(revealed変更)時は update() で再スキャンさせる。
-  onMount(() => {
-    if (gridEl) {
-      viewer = new Viewer(gridEl, {
-        url: "data-original",
-        toolbar: {
-          zoomIn: true,
-          zoomOut: true,
-          oneToOne: true,
-          reset: true,
-          prev: true,
-          play: true,
-          next: true,
-          rotateLeft: true,
-          rotateRight: true,
-          flipHorizontal: true,
-          flipVertical: true,
-          // viewerjs 組み込みキーではないカスタムボタン(公式の custom-toolbar 例と同じ作法)。
-          // `.image` は型定義に無いランタイムプロパティ(現在表示中の<img>のクローン)なのでキャストする。
-          // viewerjs 1.12.0 で ToolbarOption 型から裸の Function が外れ、
-          // ToolbarButtonOptions({ click }) 形式が必須になった。
-          download: {
-            click: () => {
-              const img = (viewer as unknown as { image?: HTMLImageElement } | undefined)?.image;
-              if (img)
-                void saveMediaToDisk(img.src, img.alt || "image", (e) => app.reportError(e));
-            },
-          },
-        },
-      });
-    }
-    return () => viewer?.destroy();
-  });
-
-  $effect(() => {
-    void revealed;
-    viewer?.update();
-  });
+  let viewerOpenIndex = $state<number | null>(null);
 </script>
 
 {#if files.length > 0}
@@ -65,7 +21,6 @@
     class={files.length === 1
       ? "mt-2 grid grid-cols-1 gap-1 overflow-hidden rounded-md"
       : "mt-2 grid grid-cols-2 gap-1 overflow-hidden rounded-md"}
-    bind:this={gridEl}
   >
     {#each files as f (f.id)}
       <div class="media-cell relative flex aspect-[16/10] items-center justify-center">
@@ -77,16 +32,18 @@
             閲覧注意（クリックで表示）
           </button>
         {:else if isImage(f)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
           <img
             src={f.thumbnailUrl ?? f.url}
-            data-original={f.url}
             alt={fileName(f)}
             loading="lazy"
             class="h-full w-full cursor-zoom-in object-cover"
+            onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
           />
         {:else if isVideo(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={f.url} controls preload="metadata" class="h-full w-full cursor-zoom-in object-cover"
+          <video src={f.url} controls preload="metadata" class="h-full w-full object-cover"
           ></video>
           <button
             class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
@@ -118,6 +75,15 @@
   </div>
 {/if}
 
+{#if viewerOpenIndex !== null}
+  <MediaViewer
+    {files}
+    startIndex={viewerOpenIndex}
+    bind:revealed
+    onclose={() => (viewerOpenIndex = null)}
+  />
+{/if}
+
 <style>
   .media-cell {
     /* 幅広カラムでは aspect-ratio のままだと高さも際限なく伸びてしまう
@@ -128,26 +94,5 @@
   }
   .sensitive-cover {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
-  }
-  :global(.viewer-download::before) {
-    content: "⬇";
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-size: 12px;
-    line-height: 1;
-    height: 100%;
-    margin: 0 !important;
-  }
-  /* viewerjs はノッチ/ホームインジケータのセーフエリアを考慮しないため、
-     閉じるボタン(画面右上隅)とフッター(ツールバー等、画面下端)を
-     env(safe-area-inset-*) 分だけ内側にずらす(Issue #331)。 */
-  :global(.viewer-container .viewer-close) {
-    top: calc(-40px + env(safe-area-inset-top));
-    right: calc(-40px + env(safe-area-inset-right));
-  }
-  :global(.viewer-container .viewer-footer) {
-    bottom: env(safe-area-inset-bottom);
   }
 </style>
