@@ -220,6 +220,16 @@ if [ "$XVFB_READY" -ne 1 ]; then
 fi
 export DISPLAY=":$XVFB_DISPLAY"
 
+# Wayland環境(Hyprland等)では、DISPLAYをこの隔離用Xvfbへ上書きするだけでは
+# 不十分: 実セッションのWAYLAND_DISPLAYが環境にそのまま残っていると、
+# GTK/WebKitGTKはWaylandバックエンドを優先し、隔離用Xvfbを素通りして
+# 実コンポジタ(=実画面)へ直接ウィンドウを出してしまう(実機確認済み:
+# Hyprlandセッション上でtsumugiのウィンドウが実デスクトップに表示された)。
+# GDK_BACKENDをx11に固定し、WAYLAND_DISPLAYをunsetして、GTKがこの
+# DISPLAY(隔離用Xvfb)以外へ接続する経路を断つ。
+unset WAYLAND_DISPLAY
+export GDK_BACKEND=x11
+
 dbus-run-session -- bash -c '
   eval "$(echo "" | gnome-keyring-daemon --unlock --daemonize --components=secrets)"
   export GNOME_KEYRING_CONTROL
