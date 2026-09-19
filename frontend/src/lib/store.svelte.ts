@@ -261,13 +261,20 @@ class AppStore {
       this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
       this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
+      (window as any).__bootAt = "syncServerMutes";
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
+      (window as any).__bootAt = "subscribe";
       await this.#subscribe();
+      (window as any).__bootAt = "listGroups";
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, auto: g.auto, tabs: [], activeTabId: "" }));
+      (window as any).__bootAt = "loadPaneLayout";
       this.paneRoot = await unwrap(commands.loadPaneLayout());
+      (window as any).__bootAt = "listColumns";
       const tabDefs = await unwrap(commands.listColumns());
+      (window as any).__bootOrder = tabDefs.map((t) => t.id);
       for (const tab of tabDefs) {
+        (window as any).__bootAt = `resumeColumn:${tab.id}`;
         try {
           const opened = await unwrap(commands.resumeColumn(tab.id));
           this.#insertTab(opened);
@@ -276,6 +283,7 @@ class AppStore {
           this.#logFailure(e);
         }
       }
+      (window as any).__bootAt = "done";
       this.#log("success", "起動完了");
     } catch (e) {
       this.#logFailure(e);
