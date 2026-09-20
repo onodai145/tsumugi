@@ -20,6 +20,35 @@
   let viewerOpenIndex = $state<number | null>(null);
 </script>
 
+{#snippet mediaControls(f: DriveFile)}
+  <media-controls>
+    <media-controls-group class="media-ctrl-group">
+      <media-play-button class="media-ctrl-btn" aria-label="再生/一時停止">
+        <Play size={14} class="media-icon-play" />
+        <Pause size={14} class="media-icon-pause" />
+      </media-play-button>
+      <media-mute-button class="media-ctrl-btn" aria-label="ミュート切替">
+        <Volume2 size={14} class="media-icon-volume" />
+        <VolumeX size={14} class="media-icon-mute" />
+      </media-mute-button>
+      <button
+        class="media-ctrl-btn"
+        onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
+        aria-label="拡大表示"
+      >
+        <Maximize2 size={14} />
+      </button>
+      <button
+        class="media-ctrl-btn"
+        onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
+        aria-label="保存"
+      >
+        <Download size={14} />
+      </button>
+    </media-controls-group>
+  </media-controls>
+{/snippet}
+
 {#if files.length > 0}
   <div
     class={files.length === 1
@@ -52,32 +81,7 @@
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="media-ctrl-bar" onclick={(e) => e.stopPropagation()}>
-              <media-controls>
-                <media-controls-group class="media-ctrl-group">
-                  <media-play-button class="media-ctrl-btn" aria-label="再生/一時停止">
-                    <Play size={14} class="media-icon-play" />
-                    <Pause size={14} class="media-icon-pause" />
-                  </media-play-button>
-                  <media-mute-button class="media-ctrl-btn" aria-label="ミュート切替">
-                    <Volume2 size={14} class="media-icon-volume" />
-                    <VolumeX size={14} class="media-icon-mute" />
-                  </media-mute-button>
-                  <button
-                    class="media-ctrl-btn"
-                    onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
-                    aria-label="拡大表示"
-                  >
-                    <Maximize2 size={14} />
-                  </button>
-                  <button
-                    class="media-ctrl-btn"
-                    onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
-                    aria-label="保存"
-                  >
-                    <Download size={14} />
-                  </button>
-                </media-controls-group>
-              </media-controls>
+              {@render mediaControls(f)}
             </div>
           </media-player>
         {:else if isAudio(f)}
@@ -87,32 +91,7 @@
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="media-ctrl-bar media-ctrl-bar-audio" onclick={(e) => e.stopPropagation()}>
-              <media-controls>
-                <media-controls-group class="media-ctrl-group">
-                  <media-play-button class="media-ctrl-btn" aria-label="再生/一時停止">
-                    <Play size={14} class="media-icon-play" />
-                    <Pause size={14} class="media-icon-pause" />
-                  </media-play-button>
-                  <media-mute-button class="media-ctrl-btn" aria-label="ミュート切替">
-                    <Volume2 size={14} class="media-icon-volume" />
-                    <VolumeX size={14} class="media-icon-mute" />
-                  </media-mute-button>
-                  <button
-                    class="media-ctrl-btn"
-                    onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
-                    aria-label="拡大表示"
-                  >
-                    <Maximize2 size={14} />
-                  </button>
-                  <button
-                    class="media-ctrl-btn"
-                    onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
-                    aria-label="保存"
-                  >
-                    <Download size={14} />
-                  </button>
-                </media-controls-group>
-              </media-controls>
+              {@render mediaControls(f)}
             </div>
           </media-player>
         {:else}
