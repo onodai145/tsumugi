@@ -1132,6 +1132,46 @@ git commit -m "feat: MediaViewerに読み込み失敗時のエラー表示を追
 
 ---
 
+### Task 11: グリッド内インライン再生をVidstack自前コントロールバー化（実機フィードバックによる追加タスク）
+
+**背景**: Task 8完了後、ユーザーが実機で動画・音声タイルを確認したところ、ネイティブ`<video controls>`/`<audio controls>`が独自に描画する右上のミュートアイコン等と、Tsumugi側の拡大・保存ボタンが同じ角に重なって衝突することが判明した。Vidstackのデフォルトレイアウト（`<media-video-layout>`/`<media-audio-layout>`）へのカスタムボタン追加はWeb Componentsでは現状公式未対応（[vidstack/player#1136](https://github.com/vidstack/player/discussions/1136)、Reactのみ対応）と判明したため、デフォルトレイアウトは使わず、Vidstackの個別プリミティブ部品（`<media-play-button>`, `<media-mute-button>`, `<media-time-slider>`等）を組み合わせて、グリッドサムネイル用の自前の最小コントロールバーを構築し、そこに拡大・保存ボタンも同じ行に並べる。
+
+**Files:**
+- Modify: `frontend/src/render/MediaGrid.svelte`
+
+**Interfaces:**
+- Consumes: `vidstack/player`, `vidstack/player/ui`（Task 6でMediaViewer.svelte向けに副作用importしたものと同じcustom elements定義。MediaGrid.svelte側でも同様のimportが必要）
+
+- [ ] **Step 1: Vidstackの個別ボタン部品のAPIを調査する**
+
+以下を実施すること:
+1. `vidstack@1.15.6`のexportsに含まれる`<media-play-button>`, `<media-mute-button>`, `<media-time-slider>`, `<media-controls>`, `<media-controls-group>`の実際の使い方を、`node_modules/vidstack`内の型定義（`.d.ts`）やGitHubの`vidstack/examples`リポジトリ（`player/svelte/tailwind-css/src/components/buttons/PlayButton.svelte`, `MuteButton.svelte`等）を参照して確認する。
+2. 再生/一時停止・ミュート状態に応じたアイコンの出し分けが、Vidstack独自のCSS属性セレクタ（例: `[data-paused]`, `[data-muted]`等、Vidstack Tailwindプラグインを使わない場合の素のCSS属性セレクタ）でどう実現できるか調査する。Tailwindプラグイン（`vidstack/tailwind.cjs`）の導入は、tsumugiがTailwind v4のゼロコンフィグ構成（`app.css`の`@theme`、`tailwind.config.js`なし）であるため、既存構成との整合性を優先し、**素のCSS属性セレクタで実現できないか先に検討すること**。どうしても必要な場合のみプラグイン導入を検討し、その判断根拠をレポートに残すこと。
+3. アイコンは`@lucide/svelte`の`Play`, `Pause`, `Volume2`, `VolumeX`を使い、Vidstack独自の`<media-icon>`（`vidstack/icons`の追加importが必要になる）は使わない方針とする（既存のMaximize2/Downloadアイコンとの統一のため）。
+
+- [ ] **Step 2: 動画タイルを自前コントロールバー付きVidstackプレイヤーに置き換える**
+
+現在の`<video src={f.url} controls preload="metadata" class="h-full w-full object-cover"></video>`を、`<media-player>` + `<media-provider>` + 自前の`<media-controls>`（再生/一時停止ボタン・ミュートボタン・拡大ボタン・保存ボタンを1行に並べる、時間表示やシークバーは最小限またはthumbnailの高さに収まる場合のみ）に置き換える。既存の拡大ボタン（`Maximize2`）・保存ボタン（`Download`）はこの新しいコントロールバー内に統合し、独立した`absolute`配置のボタンとしては配置しない（ネイティブコントロールとの衝突問題自体を構造的に解消するため）。
+
+- [ ] **Step 3: 音声タイルも同様に自前コントロールバー付きVidstackプレイヤーに置き換える**
+
+現在の`<audio src={f.url} controls preload="metadata" class="w-[calc(100%-16px)]"></audio>`を同様に置き換える。
+
+- [ ] **Step 4: 動作確認**
+
+Run: `cd frontend && pnpm check && pnpm vitest run`（終了コードも確認）
+Expected: エラーなし、全テストPASS、終了コード0
+
+既存の`MediaGrid.svelte`にテストファイルがあれば実行して問題ないことを確認する（Playタスク時点でテストファイルの有無を確認すること）。
+
+- [ ] **Step 5: 実機確認は不要**（ユーザーが自分の環境で確認する）
+
+- [ ] **Step 6: コミット**
+
+コミットメッセージは件名のみ（本文・箇条書きなし）。
+
+---
+
 ### Task 10: 最終確認とクリーンアップ
 
 **Files:** なし（確認のみ）
