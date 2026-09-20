@@ -22,6 +22,37 @@ const { default: MediaViewer } = await import("./MediaViewer.svelte");
 // 挙動を検証したいテストは各itの冒頭でこの参照を上書きする。
 Element.prototype.scrollIntoView = vi.fn();
 
+// jsdomはmatchMedia, ResizeObserver, IntersectionObserverを実装していないため、
+// Vidstackコンポーネント(media-player, media-audio-layout)をマウントするテストで
+// 必要になるno-opスタブを用意しておく。
+window.matchMedia = vi.fn().mockReturnValue({
+  matches: false,
+  media: "",
+  onchange: null,
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  dispatchEvent: vi.fn(),
+});
+
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+
+class IntersectionObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+}
+window.IntersectionObserver = IntersectionObserverStub as unknown as typeof IntersectionObserver;
+
 function file(overrides: Partial<DriveFile>): DriveFile {
   return {
     id: "f1",
@@ -112,5 +143,17 @@ describe("MediaViewer", () => {
     expect(getByText("閲覧注意（クリックで表示）")).toBeTruthy();
     await fireEvent.click(getByText("閲覧注意（クリックで表示）"));
     expect(queryByText("閲覧注意（クリックで表示）")).toBeNull();
+  });
+
+  it("音声ファイルはaudio-layoutで表示され、panzoom用のラッパーが付かない", () => {
+    render(MediaViewer, {
+      props: {
+        files: [file({ id: "a", mimeType: "audio/mpeg", name: "a.mp3", url: "https://example.com/a.mp3" })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    expect(document.querySelector("media-audio-layout")).toBeTruthy();
   });
 });
