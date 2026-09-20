@@ -21,6 +21,16 @@
 </script>
 
 {#snippet mediaControls(f: DriveFile)}
+  <!-- media-time-slider は独自要素だが、内部の track/fill/thumb はVidstackの型定義例
+       (types/elements/define/sliders/time-slider-element.d.ts)通りの素のdivで、
+       位置はVidstack本体がホスト要素に設定する--slider-fill/--slider-progress
+       CSS変数で決まる(下記styleブロック参照)。デフォルトテーマ(vds-slider*クラス)は
+       使わず、色は--accentトークンを直接使用(style-guide.md準拠)。 -->
+  <media-time-slider class="media-seek" aria-label="シーク">
+    <div class="media-seek-track"></div>
+    <div class="media-seek-fill"></div>
+    <div class="media-seek-thumb"></div>
+  </media-time-slider>
   <media-controls>
     <media-controls-group class="media-ctrl-group">
       <media-play-button class="media-ctrl-btn" aria-label="再生/一時停止">
@@ -158,7 +168,8 @@
   }
 
   /* 動画は右下にオーバーレイ、音声はセル内の通常フローに配置する
-     (音声はネイティブcontrols相当の表示領域自体を持たないため)。 */
+     (音声はネイティブcontrols相当の表示領域自体を持たないため)。
+     シークバー(1行目)とボタン行(2行目)を縦に並べる。 */
   .media-ctrl-bar {
     position: absolute;
     right: 0.25rem;
@@ -166,15 +177,68 @@
     left: 0.25rem;
     z-index: 1;
     display: flex;
-    justify-content: flex-end;
+    flex-direction: column;
+    gap: 0.125rem;
   }
   .media-ctrl-bar-audio {
     position: static;
-    justify-content: center;
   }
   :global(.media-ctrl-group) {
     display: flex;
+    justify-content: flex-end;
     gap: 0.25rem;
+  }
+  .media-ctrl-bar-audio :global(.media-ctrl-group) {
+    justify-content: center;
+  }
+
+  /* シークバー。デフォルトテーマ(vds-slider*クラス)は使わず、track/fill/thumbを
+     自前のdivで描画する(Vidstackの型定義例どおりの最小構成)。サムネイルの高さ制約
+     (--media-thumbnail-height, 既定200px)に合わせて極力薄くしている。 */
+  :global(.media-seek) {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 0.75rem;
+    cursor: pointer;
+    touch-action: none;
+  }
+  :global(.media-seek-track) {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    transform: translateY(-50%);
+    border-radius: 9999px;
+    background: rgb(255 255 255 / 30%);
+  }
+  :global(.media-seek-fill) {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 3px;
+    width: var(--slider-fill, 0%);
+    transform: translateY(-50%);
+    border-radius: 9999px;
+    background: var(--accent);
+  }
+  :global(.media-seek-thumb) {
+    position: absolute;
+    top: 50%;
+    left: var(--slider-fill, 0%);
+    width: 0.5rem;
+    height: 0.5rem;
+    transform: translate(-50%, -50%);
+    border-radius: 9999px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.15s ease-in;
+  }
+  :global(media-time-slider[data-dragging] .media-seek-thumb),
+  :global(media-time-slider[data-focus] .media-seek-thumb),
+  :global(media-time-slider:hover .media-seek-thumb) {
+    opacity: 1;
   }
   :global(.media-ctrl-btn) {
     display: flex;
