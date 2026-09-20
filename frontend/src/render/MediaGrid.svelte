@@ -211,7 +211,10 @@
     height: 3px;
     transform: translateY(-50%);
     border-radius: 9999px;
-    background: rgb(255 255 255 / 30%);
+    /* 生カラーの直書きは避け、--accentトークンベースの半透明色にする
+       (ReactionAcceptanceSelect.svelte等の color-mix(in srgb, var(--accent) N%, transparent) と同じパターン)。
+       fill(下記、var(--accent)を不透明で使用)と視覚的に区別できるよう薄めの濃度にしている。 */
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
   }
   :global(.media-seek-fill) {
     position: absolute;
