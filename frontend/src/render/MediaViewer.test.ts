@@ -20,38 +20,8 @@ const { default: MediaViewer } = await import("./MediaViewer.svelte");
 // jsdomはscrollIntoViewを実装していないため、マウント時のスクロール同期(onMount)を含む
 // すべてのテストで安全にレンダリングできるよう既定でno-opスタブを用意しておく。
 // 挙動を検証したいテストは各itの冒頭でこの参照を上書きする。
+// （その他のブラウザAPI補完は vite.config.ts の setupFiles で読み込まれる test-setup.ts にて一元管理）
 Element.prototype.scrollIntoView = vi.fn();
-
-// jsdomはmatchMedia, ResizeObserver, IntersectionObserverを実装していないため、
-// Vidstackコンポーネント(media-player, media-audio-layout)をマウントするテストで
-// 必要になるno-opスタブを用意しておく。
-window.matchMedia = vi.fn().mockReturnValue({
-  matches: false,
-  media: "",
-  onchange: null,
-  addListener: vi.fn(),
-  removeListener: vi.fn(),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  dispatchEvent: vi.fn(),
-});
-
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
-
-class IntersectionObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-  takeRecords() {
-    return [];
-  }
-}
-window.IntersectionObserver = IntersectionObserverStub as unknown as typeof IntersectionObserver;
 
 function file(overrides: Partial<DriveFile>): DriveFile {
   return {
