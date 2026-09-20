@@ -21,7 +21,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/svelte": "^5.4.2",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.5.1",
     "@vitest/coverage-v8": "^4.1.11",
     "jsdom": "^30.0.1",
     "shadcn-svelte": "^1.6.1",
@@ -34,7 +34,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@lucide/svelte": "^1.41.0",
+    "@lucide/svelte": "^1.45.0",
     "@misskey-dev/emoji-assets": "^17.0.6",
     "@misskey-dev/emoji-data": "^17.0.6",
     "@shikijs/engine-javascript": "^4.4.3",
@@ -47,8 +47,8 @@
     "flatpickr": "^4.6.13",
     "mfm-js": "^0.26.0",
     "shiki": "^4.4.3",
-    "tailwind-merge": "^3.6.0",
+    "tailwind-merge": "^3.7.0",
     "tailwind-variants": "^3.3.1",
-    "viewerjs": "^1.12.0"
+    "viewerjs": "^1.14.0"
   }
 }
