@@ -51,6 +51,8 @@
   const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
   const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
 
+  let mediaLoadError = $state<Record<string, boolean>>({});
+
   let scrollEl: HTMLDivElement | undefined;
   let cropperImageEl = $state<(HTMLElement & { $rotate: (a: number) => void; $scale: (x: number, y?: number) => void; $zoom: (s: number, x?: number, y?: number) => void; $resetTransform: () => void }) | undefined>(undefined);
 
@@ -181,36 +183,61 @@
             閲覧注意（クリックで表示）
           </button>
         {:else if isImage(item)}
-          <cropper-canvas class="h-full w-full" background="false">
-            <cropper-image
-              bind:this={
-                () => (item.id === current.id ? cropperImageEl : undefined),
-                (el) => {
-                  if (item.id === current.id) cropperImageEl = el;
+          {#if mediaLoadError[item.id]}
+            <p class="text-sm text-white">画像を読み込めませんでした</p>
+          {:else}
+            <cropper-canvas class="h-full w-full" background="false">
+              <cropper-image
+                bind:this={
+                  () => (item.id === current.id ? cropperImageEl : undefined),
+                  (el) => {
+                    if (item.id === current.id) cropperImageEl = el;
+                  }
                 }
-              }
-              src={item.url}
-              alt={fileName(item)}
-              rotatable
-              scalable
-              class="h-full w-full"
-              ontransform={onCropperImageTransform}
-            ></cropper-image>
-          </cropper-canvas>
+                src={item.url}
+                alt={fileName(item)}
+                rotatable
+                scalable
+                class="h-full w-full"
+                ontransform={onCropperImageTransform}
+                onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
+              ></cropper-image>
+            </cropper-canvas>
+          {/if}
         {:else if isVideo(item)}
-          <div class="flex h-full w-full items-center justify-center p-4" use:videoPanzoom>
-            <media-player src={item.url} title={fileName(item)} playsinline crossorigin class="max-h-full max-w-full">
-              <media-provider></media-provider>
-              <media-video-layout></media-video-layout>
-            </media-player>
-          </div>
+          {#if mediaLoadError[item.id]}
+            <p class="text-sm text-white">動画を読み込めませんでした</p>
+          {:else}
+            <div class="flex h-full w-full items-center justify-center p-4" use:videoPanzoom>
+              <media-player
+                src={item.url}
+                title={fileName(item)}
+                playsinline
+                crossorigin
+                class="max-h-full max-w-full"
+                onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
+              >
+                <media-provider></media-provider>
+                <media-video-layout></media-video-layout>
+              </media-player>
+            </div>
+          {/if}
         {:else}
-          <div class="w-full max-w-md px-4">
-            <media-player src={item.url} title={fileName(item)} crossorigin>
-              <media-provider></media-provider>
-              <media-audio-layout></media-audio-layout>
-            </media-player>
-          </div>
+          {#if mediaLoadError[item.id]}
+            <p class="text-sm text-white">音声を読み込めませんでした</p>
+          {:else}
+            <div class="w-full max-w-md px-4">
+              <media-player
+                src={item.url}
+                title={fileName(item)}
+                crossorigin
+                onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
+              >
+                <media-provider></media-provider>
+                <media-audio-layout></media-audio-layout>
+              </media-player>
+            </div>
+          {/if}
         {/if}
       </div>
     {/each}
