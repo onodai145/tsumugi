@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Maximize2 } from "@lucide/svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
@@ -46,6 +47,13 @@
           <video src={f.url} controls preload="metadata" class="h-full w-full object-cover"
           ></video>
           <button
+            class="absolute top-1.5 right-9 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
+            onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
+            aria-label="拡大表示"
+          >
+            <Maximize2 size={14} />
+          </button>
+          <button
             class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
             onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
             aria-label="保存"
@@ -55,6 +63,13 @@
         {:else if isAudio(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
           <audio src={f.url} controls preload="metadata" class="w-[calc(100%-16px)]"></audio>
+          <button
+            class="absolute top-1.5 right-9 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
+            onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
+            aria-label="拡大表示"
+          >
+            <Maximize2 size={14} />
+          </button>
           <button
             class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
             onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
