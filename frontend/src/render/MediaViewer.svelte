@@ -1,5 +1,12 @@
 <script lang="ts">
   import "cropperjs";
+  import "vidstack/player/styles/default/theme.css";
+  import "vidstack/player/styles/default/layouts/video.css";
+  import "vidstack/player/styles/default/layouts/audio.css";
+  import "vidstack/player";
+  import "vidstack/player/layouts";
+  import "vidstack/player/ui";
+  import Panzoom, { type PanzoomObject } from "@panzoom/panzoom";
   import { onMount, untrack } from "svelte";
   import { ChevronLeft, ChevronRight, Download, FlipHorizontal, FlipVertical, RotateCcw, RotateCw, X, ZoomIn, ZoomOut } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
@@ -42,6 +49,7 @@
   const current = $derived(viewItems[currentIndex]);
   const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
   const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
+  const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
 
   let scrollEl: HTMLDivElement | undefined;
   let cropperImageEl = $state<(HTMLElement & { $rotate: (a: number) => void; $scale: (x: number, y?: number) => void; $zoom: (s: number, x?: number, y?: number) => void; $resetTransform: () => void }) | undefined>(undefined);
@@ -113,6 +121,28 @@
     const scale = detail.matrix[0];
     cropperImageEl?.toggleAttribute("translatable", scale > 1 + 1e-6);
   }
+
+  // 動画はズーム時のみパンを有効化する(画像のCropper.jsと同じ方針)。videoPanzoomアクションは
+  // Scroll Snapの各ページごとに要素が個別マウントされる(#each item.id)ため、アイテム切替時に
+  // 別インスタンスとして再生成され、倍率リセットのための追加処理は不要。
+  function videoPanzoom(node: HTMLElement) {
+    const pz: PanzoomObject = Panzoom(node, { maxScale: 4, disablePan: true });
+    const onWheel = (e: WheelEvent) => pz.zoomWithWheel(e);
+    node.addEventListener("wheel", onWheel);
+
+    function syncDisablePan() {
+      pz.setOptions({ disablePan: pz.getScale() <= 1 + 1e-6 });
+    }
+    node.addEventListener("panzoomzoom", syncDisablePan);
+
+    return {
+      destroy() {
+        node.removeEventListener("wheel", onWheel);
+        node.removeEventListener("panzoomzoom", syncDisablePan);
+        pz.destroy();
+      },
+    };
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -167,8 +197,20 @@
               ontransform={onCropperImageTransform}
             ></cropper-image>
           </cropper-canvas>
+        {:else if isVideo(item)}
+          <div class="flex h-full w-full items-center justify-center p-4" use:videoPanzoom>
+            <media-player src={item.url} title={fileName(item)} playsinline crossorigin class="max-h-full max-w-full">
+              <media-provider></media-provider>
+              <media-video-layout></media-video-layout>
+            </media-player>
+          </div>
         {:else}
-          <span class="text-white">{fileName(item)}(動画・音声プレーヤーは別タスクで対応)</span>
+          <div class="w-full max-w-md px-4">
+            <media-player src={item.url} title={fileName(item)} crossorigin>
+              <media-provider></media-provider>
+              <media-audio-layout></media-audio-layout>
+            </media-player>
+          </div>
         {/if}
       </div>
     {/each}
@@ -232,5 +274,16 @@
      デフォルトhoverクラス(hover:bg-muted等)より確実に優先させるためimportantを付ける。 */
   :global(.viewer-icon-btn:hover) {
     background-color: color-mix(in srgb, var(--accent) 20%, transparent) !important;
+  }
+
+  /* VidstackのデフォルトレイアウトのテーマCSS変数をアプリのトークンにマッピングする。
+     style-guide.md §2のrounded-md(6px)相当。 */
+  :global(media-player) {
+    --video-brand: var(--accent);
+    --audio-brand: var(--accent);
+    --video-focus-ring-color: var(--accent);
+    --audio-focus-ring-color: var(--accent);
+    --video-border-radius: 6px;
+    --audio-border-radius: 6px;
   }
 </style>

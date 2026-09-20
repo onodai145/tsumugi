@@ -51,6 +51,6 @@
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.3.1",
-    "vidstack": "^0.6.15"
+    "vidstack": "^1.15.6"
   }
 }
