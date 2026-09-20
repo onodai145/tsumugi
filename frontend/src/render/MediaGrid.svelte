@@ -76,7 +76,11 @@
           />
         {:else if isVideo(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <media-player src={f.url} viewType="video" playsinline preload="metadata" class="h-full w-full">
+          <!-- src は文字列ではなく{src, type}オブジェクトで渡す(重要)。MisskeyのドライブファイルURLは
+               拡張子を含まない(例: /files/webpublic-<uuid>)ため、Vidstackがsrc文字列だけからMIMEタイプを
+               自動推定するinferType()が失敗し(常に"?"=unknown)、プロバイダ(<video>/<audio>要素)が
+               一切生成されない不具合があった。typeを明示することで回避する。 -->
+          <media-player src={{ src: f.url, type: f.mimeType }} viewType="video" playsinline preload="metadata" class="h-full w-full">
             <media-provider></media-provider>
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -86,7 +90,7 @@
           </media-player>
         {:else if isAudio(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <media-player src={f.url} viewType="audio" preload="metadata" class="w-[calc(100%-16px)]">
+          <media-player src={{ src: f.url, type: f.mimeType }} viewType="audio" preload="metadata" class="w-[calc(100%-16px)]">
             <media-provider></media-provider>
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->

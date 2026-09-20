@@ -210,7 +210,7 @@
           {:else}
             <div class="flex h-full w-full items-center justify-center p-4" use:videoPanzoom>
               <media-player
-                src={item.url}
+                src={{ src: item.url, type: item.mimeType }}
                 title={fileName(item)}
                 playsinline
                 crossorigin
@@ -228,7 +228,7 @@
           {:else}
             <div class="w-full max-w-md px-4">
               <media-player
-                src={item.url}
+                src={{ src: item.url, type: item.mimeType }}
                 title={fileName(item)}
                 crossorigin
                 onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
