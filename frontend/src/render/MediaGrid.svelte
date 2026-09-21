@@ -2,6 +2,7 @@
   import "vidstack/player/styles/base.css";
   import "vidstack/player";
   import "vidstack/player/ui";
+  import type { MediaPlayerElement } from "vidstack/elements";
   import { Download, Maximize2, Pause, Play, Volume2, VolumeX } from "@lucide/svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { saveMediaToDisk } from "../lib/mediaDownload";
@@ -18,43 +19,70 @@
   const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
   let viewerOpenIndex = $state<number | null>(null);
+
+  // 再生速度は1x/1.5x/2xを巡回させる自前トグル。Vidstackにはこの用途の既製部品
+  // (<media-speed-*>系)は無く、あってもラジオグループ形式でトグルボタンではないため、
+  // <media-player>のplaybackRateプロパティを直接読み書きする(公式APIどおり、
+  // https://www.vidstack.io/docs/player/api/media-player#playbackrate)。
+  const playbackRateSteps = [1, 1.5, 2] as const;
+  let playbackRates = $state<Record<string, number>>({});
+  const cyclePlaybackRate = (f: DriveFile, e: MouseEvent) => {
+    const player = (e.currentTarget as HTMLElement).closest("media-player") as MediaPlayerElement | null;
+    const current = playbackRates[f.id] ?? 1;
+    const idx = playbackRateSteps.indexOf(current as (typeof playbackRateSteps)[number]);
+    const next = playbackRateSteps[(idx + 1) % playbackRateSteps.length];
+    playbackRates = { ...playbackRates, [f.id]: next };
+    if (player) player.playbackRate = next;
+  };
 </script>
 
 {#snippet mediaControls(f: DriveFile)}
-  <!-- media-time-slider は独自要素だが、内部の track/fill/thumb はVidstackの型定義例
-       (types/elements/define/sliders/time-slider-element.d.ts)通りの素のdivで、
-       位置はVidstack本体がホスト要素に設定する--slider-fill/--slider-progress
-       CSS変数で決まる(下記styleブロック参照)。デフォルトテーマ(vds-slider*クラス)は
-       使わず、色は--accentトークンを直接使用(style-guide.md準拠)。 -->
-  <media-time-slider class="media-seek" aria-label="シーク">
-    <div class="media-seek-track"></div>
-    <div class="media-seek-fill"></div>
-    <div class="media-seek-thumb"></div>
-  </media-time-slider>
-  <media-controls>
-    <media-controls-group class="media-ctrl-group">
-      <media-play-button class="media-ctrl-btn" aria-label="再生/一時停止">
-        <Play size={14} class="media-icon-play" />
-        <Pause size={14} class="media-icon-pause" />
-      </media-play-button>
-      <media-mute-button class="media-ctrl-btn" aria-label="ミュート切替">
-        <Volume2 size={14} class="media-icon-volume" />
-        <VolumeX size={14} class="media-icon-mute" />
-      </media-mute-button>
-      <button
-        class="media-ctrl-btn"
-        onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
-        aria-label="拡大表示"
-      >
-        <Maximize2 size={14} />
-      </button>
-      <button
-        class="media-ctrl-btn"
-        onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
-        aria-label="保存"
-      >
-        <Download size={14} />
-      </button>
+  <!-- YouTube風に、シークバー(上段の細い帯)とボタン行(下段)を<media-controls>1個に
+       まとめて一体のオーバーレイにする。自動非表示はVidstack本体が<media-controls>に
+       付与するdata-visible属性(マウスの動き・ホバー・一時停止中かどうかに応じて
+       Vidstackが内部的にトグルする。types/core/controls.d.ts参照)をCSS属性セレクタで
+       拾う形で実現し、デフォルトテーマ(.vds-controls)は使わない(これまでの方針を踏襲)。 -->
+  <media-controls class="media-ctrl-bar">
+    <!-- media-time-slider は独自要素だが、内部の track/fill/thumb はVidstackの型定義例
+         (types/elements/define/sliders/time-slider-element.d.ts)通りの素のdivで、
+         位置はVidstack本体がホスト要素に設定する--slider-fill/--slider-progress
+         CSS変数で決まる(下記styleブロック参照)。デフォルトテーマ(vds-slider*クラス)は
+         使わず、色は--accentトークンを直接使用(style-guide.md準拠)。 -->
+    <media-time-slider class="media-seek" aria-label="シーク">
+      <div class="media-seek-track"></div>
+      <div class="media-seek-fill"></div>
+      <div class="media-seek-thumb"></div>
+    </media-time-slider>
+    <media-controls-group class="media-ctrl-row">
+      <div class="media-ctrl-group-left">
+        <media-play-button class="media-ctrl-btn" aria-label="再生/一時停止">
+          <Play size={14} class="media-icon-play" />
+          <Pause size={14} class="media-icon-pause" />
+        </media-play-button>
+        <media-mute-button class="media-ctrl-btn" aria-label="ミュート切替">
+          <Volume2 size={14} class="media-icon-volume" />
+          <VolumeX size={14} class="media-icon-mute" />
+        </media-mute-button>
+      </div>
+      <div class="media-ctrl-group-right">
+        <button class="media-ctrl-btn media-ctrl-btn-rate" onclick={(e) => cyclePlaybackRate(f, e)} aria-label="再生速度">
+          {playbackRates[f.id] ?? 1}x
+        </button>
+        <button
+          class="media-ctrl-btn"
+          onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
+          aria-label="拡大表示"
+        >
+          <Maximize2 size={14} />
+        </button>
+        <button
+          class="media-ctrl-btn"
+          onclick={() => saveMediaToDisk(f.url, fileName(f), (e) => app.reportError(e))}
+          aria-label="保存"
+        >
+          <Download size={14} />
+        </button>
+      </div>
     </media-controls-group>
   </media-controls>
 {/snippet}
@@ -94,7 +122,7 @@
             <media-provider></media-provider>
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="media-ctrl-bar" onclick={(e) => e.stopPropagation()}>
+            <div class="media-ctrl-overlay" onclick={(e) => e.stopPropagation()}>
               {@render mediaControls(f)}
             </div>
           </media-player>
@@ -104,7 +132,7 @@
             <media-provider></media-provider>
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="media-ctrl-bar media-ctrl-bar-audio" onclick={(e) => e.stopPropagation()}>
+            <div class="media-ctrl-overlay media-ctrl-overlay-audio" onclick={(e) => e.stopPropagation()}>
               {@render mediaControls(f)}
             </div>
           </media-player>
@@ -167,28 +195,61 @@
     cursor: auto;
   }
 
-  /* 動画は右下にオーバーレイ、音声はセル内の通常フローに配置する
-     (音声はネイティブcontrols相当の表示領域自体を持たないため)。
-     シークバー(1行目)とボタン行(2行目)を縦に並べる。 */
-  .media-ctrl-bar {
+  /* 動画は下端にYouTube風のオーバーレイ、音声はセル内の通常フローに配置する
+     (音声はネイティブcontrols相当の表示領域自体を持たないため、常時表示のまま)。 */
+  .media-ctrl-overlay {
     position: absolute;
-    right: 0.25rem;
-    bottom: 0.25rem;
-    left: 0.25rem;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: 1;
+  }
+  .media-ctrl-overlay-audio {
+    position: static;
+  }
+
+  /* シークバー(1段目、上部の細い帯)とボタン行(2段目)を縦に並べた一体のオーバーレイ。
+     背景に軽いグラデーションを敷き、動画の上でもボタンが視認できるようにする。 */
+  :global(.media-ctrl-bar) {
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
+    padding: 0.75rem 0.25rem 0.25rem;
+    background: linear-gradient(to top, rgb(0 0 0 / 45%), transparent);
+    /* 自動非表示: <media-controls>本体にVidstackが付与するdata-visible属性
+       (マウス移動・ホバー・一時停止中かどうかに応じて自動トグルされる。
+       node_modules配下のtypes/core/controls.d.tsに"@attr data-visible - Whether
+       controls should be visible."とある)をCSS属性セレクタで拾う。デフォルトテーマ
+       の.vds-controlsクラスは使わない(既存方針を踏襲)。 */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease-in;
   }
-  .media-ctrl-bar-audio {
-    position: static;
+  :global(.media-ctrl-bar[data-visible]) {
+    opacity: 1;
+    pointer-events: auto;
   }
-  :global(.media-ctrl-group) {
+  /* 音声プレイヤーはオーバーレイではなく常時表示領域なので、data-visibleの
+     自動非表示ロジックを無効化し常に見える状態にする。 */
+  .media-ctrl-overlay-audio :global(.media-ctrl-bar) {
+    opacity: 1;
+    pointer-events: auto;
+    background: none;
+    padding: 0;
+  }
+  :global(.media-ctrl-row) {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
     gap: 0.25rem;
   }
-  .media-ctrl-bar-audio :global(.media-ctrl-group) {
+  :global(.media-ctrl-group-left),
+  :global(.media-ctrl-group-right) {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .media-ctrl-overlay-audio :global(.media-ctrl-row) {
     justify-content: center;
   }
 
@@ -256,6 +317,17 @@
     font-size: 0.875rem;
     line-height: 1;
     cursor: pointer;
+  }
+
+  /* 再生速度ボタンはアイコンではなく倍率テキスト表示のため、円形ではなく
+     横幅可変の角丸ピルにする。 */
+  :global(.media-ctrl-btn-rate) {
+    width: auto;
+    min-width: 1.75rem;
+    padding: 0 0.375rem;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
   }
 
   /* 再生中/一時停止中で表示アイコンを出し分ける。Vidstackが<media-play-button>本体に
