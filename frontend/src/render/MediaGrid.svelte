@@ -28,11 +28,14 @@
   let playbackRates = $state<Record<string, number>>({});
   const cyclePlaybackRate = (f: DriveFile, e: MouseEvent) => {
     const player = (e.currentTarget as HTMLElement).closest("media-player") as MediaPlayerElement | null;
+    // 対象の<media-player>が見つからない(マークアップ変更等で親子関係が崩れた)場合は、
+    // 表示用stateだけ更新して実際の再生速度とズレるのを避けるため、何もせず抜ける。
+    if (!player) return;
     const current = playbackRates[f.id] ?? 1;
     const idx = playbackRateSteps.indexOf(current as (typeof playbackRateSteps)[number]);
     const next = playbackRateSteps[(idx + 1) % playbackRateSteps.length];
+    player.playbackRate = next;
     playbackRates = { ...playbackRates, [f.id]: next };
-    if (player) player.playbackRate = next;
   };
 </script>
 
@@ -222,18 +225,24 @@
        controls should be visible."とある)をCSS属性セレクタで拾う。デフォルトテーマ
        の.vds-controlsクラスは使わない(既存方針を踏襲)。 */
     opacity: 0;
-    pointer-events: none;
+    /* Vidstack本体のControls#onAttach(dev/chunks/vidstack-C7VnVlv2.js 122行目付近)が
+       <media-controls>要素(=このクラスがついたホスト要素)自身に常時インラインstyleで
+       pointer-events: noneを設定するため、非!importantの外部CSSルールでは上書きできない。
+       !importantが必須。 */
+    pointer-events: none !important;
     transition: opacity 0.15s ease-in;
   }
   :global(.media-ctrl-bar[data-visible]) {
     opacity: 1;
-    pointer-events: auto;
+    pointer-events: auto !important;
   }
-  /* 音声プレイヤーはオーバーレイではなく常時表示領域なので、data-visibleの
-     自動非表示ロジックを無効化し常に見える状態にする。 */
+  /* 音声プレイヤーはオーバーレイではなく常時表示領域なので、常に見える状態にする。
+     実際にはVidstackは音声タイルでも同じhide/show監視を行っており「常にdata-visible=trueに
+     固定される」わけではないが、ここではdata-visibleの値に関わらずopacity:1/pointer-events:autoを
+     強制することで、映像を持たないタイルで自動非表示が発生しないようにしている。 */
   .media-ctrl-overlay-audio :global(.media-ctrl-bar) {
-    opacity: 1;
-    pointer-events: auto;
+    opacity: 1 !important;
+    pointer-events: auto !important;
     background: none;
     padding: 0;
   }
@@ -263,6 +272,13 @@
     height: 0.75rem;
     cursor: pointer;
     touch-action: none;
+    /* <media-time-slider>は<media-controls-group>(ボタン行)の外に置いているため、
+       ControlsGroup#onAttach(同dev/chunks/vidstack-C7VnVlv2.js 168行目付近、
+       el.style.pointerEventsが未設定ならpointer-events: autoを付与するロジック)による
+       上書きの恩恵を受けられず、親<media-controls>のインラインpointer-events: noneを
+       そのまま継承してドラッグ/クリック操作が一切効かなくなる。ここで明示的に
+       !important付きでauto指定して上書きする。 */
+    pointer-events: auto !important;
   }
   :global(.media-seek-track) {
     position: absolute;
