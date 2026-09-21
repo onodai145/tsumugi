@@ -313,4 +313,24 @@
     --video-border-radius: 6px;
     --audio-border-radius: 6px;
   }
+
+  /* Vidstackのmedia-playerは既定でwidth:100%(横幅いっぱいに広がる仕様)。
+     [data-view-type='video']の既定aspect-ratio:16/9(vidstack/examplesのCSSパターンに
+     準拠、base.cssにも:where()で同ルールがあるが0-specificityなので明示的に上書きしておく)と
+     組み合わさると、videoPanzoomのラッパーdiv(高さ100%、横幅ほぼビューワー全体)の横幅を
+     そのまま埋めてしまい、画像ビューワー(Cropper.js、余白を持って中央表示)と違って
+     画面端から端まで巨大に広がって見えていた(不具合1)。
+     width:auto + height:100% + max-width:100%にすることで、表示領域の高さを基準に
+     アスペクト比を保った箱を計算し、横にはみ出す場合のみmax-widthでクランプする。
+     はみ出さない場合はラッパーdivのflex(items-center justify-center)により左右・上下に
+     余白を持って中央表示される。
+     コントロールのグラデーションオーバーレイ(media-video-layout)はmedia-player自身を
+     基準にposition:absoluteで重ねられているため、この箱のサイズを正しく合わせることで
+     オーバーレイのズレ(不具合2)も連動して解消する。 */
+  :global(media-player[data-view-type="video"]) {
+    aspect-ratio: 16 / 9;
+    width: auto;
+    height: 100%;
+    max-width: 100%;
+  }
 </style>
