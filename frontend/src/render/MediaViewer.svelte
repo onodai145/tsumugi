@@ -251,7 +251,7 @@
           {#if mediaLoadError[item.id]}
             <p class="text-sm text-white">動画を読み込めませんでした</p>
           {:else}
-            <div class="flex h-full w-full items-center justify-center p-4" use:videoPanzoom>
+            <div class="flex h-full w-full items-center justify-center p-4">
               <media-player
                 src={{ src: item.url, type: item.mimeType }}
                 title={fileName(item)}
@@ -262,8 +262,26 @@
                 use:trackVideoAspectRatio={item.id}
                 onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
               >
-                <media-provider></media-provider>
-                <media-video-layout></media-video-layout>
+                <!-- videoPanzoomは<media-player>全体ではなく<media-provider>(実際の映像が
+                     描画される要素)にだけ適用する。Panzoomは常時(操作していない時も)
+                     transform: scale(...) translate(...)をelemへインラインstyleで
+                     設定しており、transform:none以外の値は仕様上そのelemに新しい
+                     スタッキングコンテキストを作る。以前<media-player>ごと(=<media-video-
+                     layout>のコントロールバーも含めて)panzoomの対象にしていたときは、
+                     その新しいスタッキングコンテキストの中にコントロールバー(z-index:10)
+                     ごと閉じ込められてしまい、コンテナ外にある左右送りクリックエリア
+                     (前後送り、絶対配置)との重なり順比較にこのz-index:10が反映されず、
+                     DOM順で後に来る左右送りクリックエリアが動画+コントロールバーを
+                     まとめて覆ってクリックを奪っていた(前回の閉じるボタン問題と同根)。
+                     <media-provider>だけをpanzoom対象にすることで<media-video-layout>を
+                     このスタッキングコンテキストの外に出し、Vidstack既定の
+                     .vds-controlsのz-index:10がクリックエリアと正しく比較されるようにする。 -->
+                <media-provider use:videoPanzoom></media-provider>
+                <!-- panzoom-exclude: 上記の構造変更により<media-video-layout>は
+                     videoPanzoomの対象(<media-provider>)の子孫ではなくなったため、
+                     Panzoomのpointerdownハンドラは基本的にもう発火しないはずだが、
+                     念のため残しておく(害はなく、将来の構造変更に対する保険として機能する)。 -->
+                <media-video-layout class="panzoom-exclude"></media-video-layout>
               </media-player>
             </div>
           {/if}
@@ -382,5 +400,16 @@
     width: auto;
     height: 100%;
     max-width: 100%;
+  }
+
+  /* 主な修正は<script>側で行った(videoPanzoomの対象を<media-player>全体から
+     <media-provider>だけに変更し、<media-video-layout>をtransformによる
+     スタッキングコンテキストの外に出した)。ここではVidstack本体のz-index:10指定
+     (theme.css、:where()セレクタで0-specificity)が万一何かに上書きされても
+     左右送りクリックエリア(z-index未指定)より確実に手前に来るよう、実際に効く
+     specificityで念のため補強しておく(positionはVidstack既定のabsoluteのまま
+     変更しない。position:relativeにするとinset:0によるオーバーレイ配置が崩れる)。 */
+  :global([data-view-type="video"] .vds-controls) {
+    z-index: 10;
   }
 </style>
