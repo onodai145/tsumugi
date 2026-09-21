@@ -314,7 +314,7 @@
       onclick={(e) => { e.stopPropagation(); goPrev(); }}
     >
       <button
-        class="rounded-full bg-black/40 p-2 text-white opacity-0 transition-opacity group-hover:opacity-100"
+        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100"
         onclick={(e) => { e.stopPropagation(); goPrev(); }}
         aria-label="前へ"
       >
@@ -328,7 +328,7 @@
       onclick={(e) => { e.stopPropagation(); goNext(); }}
     >
       <button
-        class="rounded-full bg-black/40 p-2 text-white opacity-0 transition-opacity group-hover:opacity-100"
+        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100"
         onclick={(e) => { e.stopPropagation(); goNext(); }}
         aria-label="次へ"
       >
