@@ -62,10 +62,23 @@
           <Play size={14} class="media-icon-play" />
           <Pause size={14} class="media-icon-pause" />
         </media-play-button>
-        <media-mute-button class="media-ctrl-btn" aria-label="ミュート切替">
-          <Volume2 size={14} class="media-icon-volume" />
-          <VolumeX size={14} class="media-icon-mute" />
-        </media-mute-button>
+        <!-- YouTubeデスクトップ版のようにミュートボタンにホバーした時だけ隣に音量スライダーが
+             現れる形にする(常時横長スライダーを置くには幅の余裕がないため)。 -->
+        <div class="media-vol-wrap">
+          <media-mute-button class="media-ctrl-btn" aria-label="ミュート切替">
+            <Volume2 size={14} class="media-icon-volume" />
+            <VolumeX size={14} class="media-icon-mute" />
+          </media-mute-button>
+          <!-- media-volume-slider も media-time-slider と同じくtrack/track-fill/thumbの
+               素のdivで構成する(types/elements/define/sliders/volume-slider-element.d.ts
+               のdocコメント例どおり)。位置はホスト要素の--slider-fill CSS変数(0〜100%、
+               現在の音量)で決まる。 -->
+          <media-volume-slider class="media-vol-slider" aria-label="音量">
+            <div class="media-vol-track"></div>
+            <div class="media-vol-fill"></div>
+            <div class="media-vol-thumb"></div>
+          </media-volume-slider>
+        </div>
       </div>
       <div class="media-ctrl-group-right">
         <button class="media-ctrl-btn media-ctrl-btn-rate" onclick={(e) => cyclePlaybackRate(f, e)} aria-label="再生速度">
@@ -333,6 +346,72 @@
     font-size: 0.875rem;
     line-height: 1;
     cursor: pointer;
+  }
+
+  /* 音量スライダー: 普段はwidth:0で折り畳んでおき、.media-vol-wrap(ミュートボタンと
+     スライダーの共通の親)へのホバー、またはスライダー自体がドラッグ/フォーカス中の時だけ
+     展開する(YouTubeデスクトップ版と同様のスライド表示)。<media-volume-slider>は
+     <media-controls-group>(ミュートボタンと同じ.media-ctrl-group-left)の内側に置いているため、
+     ControlsGroup#onAttach(vidstack-C7VnVlv2.js 166行目付近)がグループ自身にインラインで
+     設定するpointer-events: autoをそのまま(pointer-eventsは継承プロパティのため)引き継ぐ。
+     media-time-sliderのようにControlsGroupの外にある場合と異なり、!important上書きは不要。 */
+  .media-vol-wrap {
+    display: flex;
+    align-items: center;
+  }
+  :global(.media-vol-slider) {
+    position: relative;
+    display: block;
+    width: 0;
+    height: 1.75rem;
+    margin-left: 0;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: none;
+    opacity: 0;
+    transition:
+      width 0.15s ease,
+      opacity 0.15s ease,
+      margin-left 0.15s ease;
+  }
+  .media-vol-wrap:hover :global(.media-vol-slider),
+  :global(.media-vol-slider[data-dragging]),
+  :global(.media-vol-slider[data-focus]) {
+    width: 3rem;
+    opacity: 1;
+    margin-left: 0.375rem;
+  }
+  :global(.media-vol-track) {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    transform: translateY(-50%);
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  :global(.media-vol-fill) {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 3px;
+    /* 音量の既定値はJSが--slider-fillを設定するまでの間、満音量(100%)を仮定しておく
+       (再生位置は0%開始が自然だが、音量は通常フル状態で始まるため)。 */
+    width: var(--slider-fill, 100%);
+    transform: translateY(-50%);
+    border-radius: 9999px;
+    background: var(--accent);
+  }
+  :global(.media-vol-thumb) {
+    position: absolute;
+    top: 50%;
+    left: var(--slider-fill, 100%);
+    width: 0.5rem;
+    height: 0.5rem;
+    transform: translate(-50%, -50%);
+    border-radius: 9999px;
+    background: var(--accent);
   }
 
   /* 再生速度ボタンはアイコンではなく倍率テキスト表示のため、円形ではなく
