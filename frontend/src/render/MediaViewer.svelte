@@ -53,6 +53,14 @@
 
   let mediaLoadError = $state<Record<string, boolean>>({});
 
+  // Vidstackはmedia-player自身のアスペクト比を実際の動画の内在解像度(videoWidth/videoHeight)
+  // から自動算出する仕組みを持たない(state.mediaWidth/mediaHeightはレンダリング後の箱の
+  // offsetWidth/offsetHeightであり、動画そのものの解像度ではない)。そのためtsumugi側で
+  // 実際の<video>要素のloadedmetadataを購読し、アスペクト比を読み取る必要がある。
+  // 読み込み中(まだ取得できていない)は16:9をフォールバックとして使う。
+  const DEFAULT_VIDEO_ASPECT_RATIO = 16 / 9;
+  let videoAspectRatios = $state<Record<string, number>>({});
+
   let scrollEl: HTMLDivElement | undefined;
   let cropperImageEl = $state<(HTMLElement & { $rotate: (a: number) => void; $scale: (x: number, y?: number) => void; $zoom: (s: number, x?: number, y?: number) => void; $resetTransform: () => void }) | undefined>(undefined);
 
@@ -145,6 +153,41 @@
       },
     };
   }
+
+  // <media-player>(node)配下に<media-provider>がレンダリングする実際の<video>要素は
+  // ロード処理が非同期のためマウント直後にはまだ存在しないことがある。MutationObserverで
+  // 出現を待ち、見つかり次第loadedmetadataを購読して実際のアスペクト比(videoWidth/videoHeight)
+  // をvideoAspectRatiosへ反映する。既にメタデータ読み込み済み(videoWidth/videoHeightが
+  // 取得可能)なケースにも対応するため、購読直後に一度読み取りを試みる。
+  function trackVideoAspectRatio(node: HTMLElement, itemId: string) {
+    let videoEl: HTMLVideoElement | null = null;
+
+    function onLoadedMetadata() {
+      if (videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+        videoAspectRatios = { ...videoAspectRatios, [itemId]: videoEl.videoWidth / videoEl.videoHeight };
+      }
+    }
+
+    function attach() {
+      const found = node.querySelector("video");
+      if (!found || found === videoEl) return;
+      videoEl?.removeEventListener("loadedmetadata", onLoadedMetadata);
+      videoEl = found;
+      videoEl.addEventListener("loadedmetadata", onLoadedMetadata);
+      onLoadedMetadata();
+    }
+
+    attach();
+    const observer = new MutationObserver(attach);
+    observer.observe(node, { childList: true, subtree: true });
+
+    return {
+      destroy() {
+        videoEl?.removeEventListener("loadedmetadata", onLoadedMetadata);
+        observer.disconnect();
+      },
+    };
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -215,6 +258,8 @@
                 playsinline
                 crossorigin
                 class="max-h-full max-w-full"
+                style={`aspect-ratio: ${videoAspectRatios[item.id] ?? DEFAULT_VIDEO_ASPECT_RATIO}`}
+                use:trackVideoAspectRatio={item.id}
                 onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
               >
                 <media-provider></media-provider>
@@ -314,21 +359,26 @@
     --audio-border-radius: 6px;
   }
 
-  /* Vidstackのmedia-playerは既定でwidth:100%(横幅いっぱいに広がる仕様)。
-     [data-view-type='video']の既定aspect-ratio:16/9(vidstack/examplesのCSSパターンに
-     準拠、base.cssにも:where()で同ルールがあるが0-specificityなので明示的に上書きしておく)と
-     組み合わさると、videoPanzoomのラッパーdiv(高さ100%、横幅ほぼビューワー全体)の横幅を
-     そのまま埋めてしまい、画像ビューワー(Cropper.js、余白を持って中央表示)と違って
-     画面端から端まで巨大に広がって見えていた(不具合1)。
+  /* Vidstackのmedia-playerは既定でwidth:100%(横幅いっぱいに広がる仕様)。これが
+     videoPanzoomのラッパーdiv(高さ100%、横幅ほぼビューワー全体)の横幅をそのまま
+     埋めてしまい、画像ビューワー(Cropper.js、余白を持って中央表示)と違って画面端から
+     端まで巨大に広がって見えていた(不具合1)。
+     aspect-ratio自体は各<media-player>のstyle属性(インラインstyle)で個別に指定する
+     ようにした。Vidstackは実際の動画の内在解像度(videoWidth/videoHeight)を自動で
+     CSSへ反映する仕組みを持たない(state.mediaWidth/mediaHeightはレンダリング後の箱の
+     offsetWidth/offsetHeightであり内在解像度ではない)ため、trackVideoAspectRatio
+     アクション(<script>参照)で実際の<video>要素のloadedmetadataを購読し、
+     videoAspectRatios[item.id]へ動的に反映している(読み込み中はDEFAULT_VIDEO_ASPECT_RATIO
+     =16:9をフォールバックとして使う)。インラインstyleは常にこのstylesheetのルールより
+     優先されるため、固定16:9指定はここでは行わない。
      width:auto + height:100% + max-width:100%にすることで、表示領域の高さを基準に
-     アスペクト比を保った箱を計算し、横にはみ出す場合のみmax-widthでクランプする。
-     はみ出さない場合はラッパーdivのflex(items-center justify-center)により左右・上下に
-     余白を持って中央表示される。
+     (インラインstyleで指定された)アスペクト比を保った箱を計算し、横にはみ出す場合のみ
+     max-widthでクランプする。はみ出さない場合はラッパーdivのflex(items-center
+     justify-center)により左右・上下に余白を持って中央表示される。
      コントロールのグラデーションオーバーレイ(media-video-layout)はmedia-player自身を
      基準にposition:absoluteで重ねられているため、この箱のサイズを正しく合わせることで
      オーバーレイのズレ(不具合2)も連動して解消する。 */
   :global(media-player[data-view-type="video"]) {
-    aspect-ratio: 16 / 9;
     width: auto;
     height: 100%;
     max-width: 100%;
