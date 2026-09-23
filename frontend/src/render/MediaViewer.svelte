@@ -62,9 +62,42 @@
   let scrollEl: HTMLDivElement | undefined;
   let cropperImageEl = $state<(HTMLElement & { $rotate: (a: number) => void; $scale: (x: number, y?: number) => void; $zoom: (s: number, x?: number, y?: number) => void; $resetTransform: () => void }) | undefined>(undefined);
 
+  // goTo()が発行したプログラム的スクロール(scrollIntoView)が進行中かどうか。trueの間は
+  // onScroll()の受動的なcurrentIndex再同期(手でスワイプした場合の追従用)を止める。
+  // 理由: ユーザーが前後送りボタンを連打すると、前のsmoothスクロールアニメーションが
+  // 完了しないうちに次のgoTo()が呼ばれることがある(ごく一般的な操作)。この間もscrollLeftは
+  // アニメーション途中の中間値を取り続けるため、onScroll()の120msデバウンスがその中間値から
+  // Math.roundで誤ったindexを計算し、currentIndexをgoTo()が設定した最終目的地とは違う値に
+  // 巻き戻してしまうことがある(実機のWebKitGTKで、next→prev→next→prevを短間隔で連打すると
+  // 元のindexに戻らず1つずれた位置に留まることを、src-tauri/src/debug_bridge.rs経由で
+  // 実際に再現・確認した)。スクロールが実際に完了するまでこの再同期を止めることで、
+  // 中間値をcurrentIndexに取り込むこと自体を防ぐ。
+  let programmaticScrollActive = false;
+  let programmaticScrollFallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  // 'scrollend'(スクロールが実際に静止したタイミングを教えてくれるイベント)が使えれば
+  // それを正としてフラグを解除する。未対応環境向けのフォールバックとして、1アイテム分の
+  // smoothスクロールが十分収まる余裕を持たせた固定時間でも解除する(下記onScrollEnd参照)。
+  const SCROLLEND_SUPPORTED = typeof window !== "undefined" && "onscrollend" in window;
+
+  function beginProgrammaticScroll() {
+    programmaticScrollActive = true;
+    clearTimeout(programmaticScrollFallbackTimer);
+    if (!SCROLLEND_SUPPORTED) {
+      programmaticScrollFallbackTimer = setTimeout(() => {
+        programmaticScrollActive = false;
+      }, 500);
+    }
+  }
+
+  function onScrollEnd() {
+    programmaticScrollActive = false;
+    clearTimeout(programmaticScrollFallbackTimer);
+  }
+
   function goTo(index: number, behavior: ScrollBehavior = "smooth") {
     currentIndex = index;
     imageTransform = initialImageTransform;
+    beginProgrammaticScroll();
     scrollEl?.children[index]?.scrollIntoView({ behavior, inline: "start", block: "nearest" });
   }
 
@@ -72,6 +105,7 @@
   // アニメーションなしで即座に同期させる(goTo()はgoNext/goPrev/矢印キーからしか呼ばれず、
   // マウント時には何もスクロールしないため、非ゼロstartIndexだと常に1枚目が表示されてしまう)。
   onMount(() => {
+    beginProgrammaticScroll();
     scrollEl?.children[currentIndex]?.scrollIntoView({ behavior: "auto", inline: "start", block: "nearest" });
   });
 
@@ -110,11 +144,14 @@
 
   // Scroll Snapコンテナのスクロールが落ち着いたら、実際に表示されている位置に
   // currentIndexを合わせる(矢印ボタン以外にスワイプでもcurrentIndexが正しく追従するように)。
+  // ただしgoTo()によるプログラム的スクロールが進行中(programmaticScrollActive)の間は、
+  // アニメーション途中の中間scrollLeftから誤ったindexを拾ってしまわないよう何もしない
+  // (beginProgrammaticScroll/onScrollEndのコメント参照)。
   let scrollEndTimer: ReturnType<typeof setTimeout> | undefined;
   function onScroll() {
     clearTimeout(scrollEndTimer);
     scrollEndTimer = setTimeout(() => {
-      if (!scrollEl) return;
+      if (!scrollEl || programmaticScrollActive) return;
       const width = scrollEl.clientWidth;
       const index = Math.round(scrollEl.scrollLeft / width);
       if (index !== currentIndex && index >= 0 && index < viewItems.length) {
@@ -222,6 +259,7 @@
   <div
     bind:this={scrollEl}
     onscroll={onScroll}
+    onscrollend={onScrollEnd}
     onclick={(e) => e.stopPropagation()}
     class="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
   >

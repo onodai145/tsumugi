@@ -14,8 +14,13 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+// currentIndexが実際にどのファイルを指しているかを検証するため(画像ツールバーの
+// ダウンロードボタンはcurrentのファイルURLをsaveMediaToDiskへそのまま渡す)、
+// この関数呼び出し引数を間接的なcurrentIndexの観測手段として使う。
+vi.mock("../lib/mediaDownload", () => ({ saveMediaToDisk: vi.fn() }));
 
 const { default: MediaViewer } = await import("./MediaViewer.svelte");
+const { saveMediaToDisk } = await import("../lib/mediaDownload");
 
 // jsdomはscrollIntoViewを実装していないため、マウント時のスクロール同期(onMount)を含む
 // すべてのテストで安全にレンダリングできるよう既定でno-opスタブを用意しておく。
@@ -133,6 +138,67 @@ describe("MediaViewer", () => {
     const [, , thirdPage] = document.querySelectorAll('[data-testid="media-page"]');
     expect(scrollIntoView.mock.instances[0]).toBe(thirdPage);
     expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
+  });
+
+  // 回帰テスト: 「B(2枚目)を開く→前後送りで他を見る→元のBに戻る」で表示位置がずれる不具合
+  // (ラップアラウンドとは無関係、通常の前後送りの連打で発生)。原因は、goTo()が開始した
+  // プログラム的スクロールのアニメーションが完了しないうちに、その途中の中間scrollLeftを
+  // 拾ったonScroll()の再同期(デバウンス)がcurrentIndexを誤った値に巻き戻してしまうこと。
+  // programmaticScrollActiveフラグを立て、scrollend(またはフォールバックタイマー)が
+  // 発火してスクロールの完了が確認できるまでonScroll()の再同期を止めることで修正した
+  // (goTo/beginProgrammaticScroll/onScrollEndのコメント参照)。
+  // 実機(WebKitGTK、cargo tauri dev + debug_bridge経由)で、B→C→Bへの前後送りを短間隔で
+  // 連打すると同様に表示位置がずれることを再現し、修正後は解消することを確認済み
+  // (task-4-report.mdに記録)。
+  //
+  // ここでは「goTo()によるスクロールが完了する(scrollendが発火する)前に、中間的な
+  // scrollLeftから計算された誤ったindexでonScroll()がcurrentIndexを巻き戻してはならない」
+  // というガード自体の契約を直接検証する。scrollend発火前に正解のscrollLeftを含む
+  // 後続イベントを与えてしまうとガードなしでも偶然パスしてしまうため、scrollend発火前は
+  // 意図的に誤ったscrollLeftのみを与えている。
+  it("goTo()によるスクロール完了前は、中間的なscrollLeftによる再同期でcurrentIndexが巻き戻らない", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.mocked(saveMediaToDisk).mockClear();
+
+    const { getByLabelText } = render(MediaViewer, {
+      props: {
+        files: [
+          file({ id: "a", name: "a.png", url: "https://example.com/a.png" }),
+          file({ id: "b", name: "b.png", url: "https://example.com/b.png" }),
+          file({ id: "c", name: "c.png", url: "https://example.com/c.png" }),
+        ],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+
+    const [firstPage] = document.querySelectorAll('[data-testid="media-page"]');
+    const scroller = firstPage.parentElement as HTMLDivElement;
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 1000 });
+
+    // 次へ(A→B)をクリック。goTo()がcurrentIndexを即座に1へ進め、
+    // プログラム的スクロールを開始する(programmaticScrollActive = true、
+    // scrollendはまだ発火していない)。
+    await fireEvent.click(getByLabelText("次へ"));
+
+    // アニメーションがまだ目的地(index1)に到達していない、誤ったscrollLeft(index0のまま)で
+    // scrollイベントが発火したと仮定する(連打・スロットリング等でこうしたタイミングのズレが
+    // 起こりうる)。
+    Object.defineProperty(scroller, "scrollLeft", { configurable: true, value: 0 });
+    await fireEvent.scroll(scroller);
+
+    // onScroll()の120msデバウンスを経過させる。scrollendがまだ発火していない
+    // (programmaticScrollActiveがtrueのまま)ので、このscrollLeft=0(index0)から
+    // 計算されたindexでcurrentIndexが巻き戻されてはならない(currentIndexはgoTo()が
+    // 設定した1のまま保たれるべき)。
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // 画像ツールバーのダウンロードボタンはcurrentのファイルURLを渡すため、
+    // currentIndexが誤って0(A)へ巻き戻っていないかをここで間接的に検証する。
+    await fireEvent.click(getByLabelText("ダウンロード"));
+    expect(saveMediaToDisk).toHaveBeenCalledWith("https://example.com/b.png", expect.anything(), expect.anything());
   });
 
   it("非ゼロstartIndexでマウントすると、その位置へ即座にscrollIntoViewする", () => {
