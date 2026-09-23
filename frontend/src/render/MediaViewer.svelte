@@ -60,7 +60,33 @@
   let videoAspectRatios = $state<Record<string, number>>({});
 
   let scrollEl: HTMLDivElement | undefined;
-  let cropperImageEl = $state<(HTMLElement & { $rotate: (a: number) => void; $scale: (x: number, y?: number) => void; $zoom: (s: number, x?: number, y?: number) => void; $resetTransform: () => void }) | undefined>(undefined);
+  type CropperImageEl = HTMLElement & {
+    $rotate: (a: number) => void;
+    $scale: (x: number, y?: number) => void;
+    $zoom: (s: number, x?: number, y?: number) => void;
+    $resetTransform: () => void;
+  };
+  // <cropper-image>へのbind:thisは、かつて`item.id === current.id`の時だけ単一の
+  // cropperImageEl変数へ代入するgetter/setterだった。しかしScroll Snap構造上、
+  // 全アイテムの<cropper-image>要素はビューワーの生存期間中ずっとマウントされたままで
+  // 破棄・再生成されない(非表示アイテムも常にDOM上に残る)。bind:thisのsetterは
+  // そのDOM要素自体が生成/破棄されたタイミングでしか発火しないため、あるアイテムの
+  // 要素が最初にマウントされた時点でたまたま`current`でなければ、そのアイテムの
+  // 要素は二度とcropperImageElに代入されない。結果として、cropperImageElは
+  // マウント時に最初からcurrentだったアイテム(通常はstartIndexの画像)に永久に
+  // 固定され、以降どの画像に切り替えてもまったく追従しなかった(実機のdebug_bridge
+  // 経由の実測で、currentIndexが変わってもcropperImageElが指す要素のdata-item-idが
+  // 一切変わらないことを確認・確定済み)。これにより回転/反転をリセットする
+  // applyImageTransform()が常に間違った(多くの場合非表示の)要素に対して実行され、
+  // 実際に表示中の画像側はCropper.jsが計算した初期フィット変形(scale≒0.8程度+
+  // 中心からのtranslate)のまま一切リセットされず、縮小・位置ズレして見えていた
+  // (task-4-report.mdの実測記録参照)。
+  // 対策として、単一変数ではなくアイテムのid→要素のマップを保持し、全アイテムの
+  // <cropper-image>に条件なしでbind:thisする(マウント時に登録、破棄時に削除)。
+  // 実際に操作対象とする要素は、current(=$derived)が変わるたびに正しく再計算される
+  // ようcurrentCropperImageElとして$derivedで導出する。
+  let cropperImageElsByItemId = $state<Record<string, CropperImageEl>>({});
+  const currentCropperImageEl = $derived(cropperImageElsByItemId[current.id]);
 
   // goTo()が発行したプログラム的スクロール(scrollIntoView)が進行中かどうか。trueの間は
   // onScroll()の受動的なcurrentIndex再同期(手でスワイプした場合の追従用)を止める。
@@ -172,25 +198,80 @@
     }, 120);
   }
 
+  // $resetTransform()は仕様上、変形行列を文字通りの単位行列(scale:1、原点)へ戻すだけで、
+  // Cropper.jsが画像読み込み完了時に自動で適用する「コンテナに収まるようフィットさせた上で
+  // 中央寄せする」変形(初期表示で見られるscale≒0.8程度+中心オフセットのtranslate)を
+  // 再現しない。cropper-image要素は読み込み完了時に一度だけ
+  // `this.$center(this.initialCenterSize || this.initialFit)`を内部的に呼んでこの
+  // フィット済み変形を計算する(node_modules/cropperjs/dist/cropper.esm.jsで確認済み、
+  // 既定のinitialFitは'contain')が、この読み込み完了イベントは画像ごとに1度しか発生しない。
+  // そのため、既に読み込み済みの画像に対してresetTransform()を呼んでしまうと、単位行列の
+  // まま(フィットも中央寄せもされない、コンテナ左上を基準にした等倍表示)になり、
+  // 二度とフィット済みの表示に戻らない(実機のdebug_bridge経由の実測で、既に表示済みの
+  // 画像へ前後送りで切り替えた際にこの状態=画像が本来より狭い/左寄りの領域に表示される、
+  // が再現することを確認した)。
+  //
+  // resetTransform()の直後にCropper.js自身の$center()を呼んでフィット済み変形を
+  // 再計算させる対策も試したが、scaleは復元できてもtranslate(中央寄せ)の位置計算が
+  // 期待値からずれる問題が残り、根本解決に至らなかった。
+  //
+  // 採用した方針: imageTransformが初期値(回転0、反転なし)ならresetTransform()以降を
+  // 呼ばない(=Cropper.js自身が計算したフィット変形に一切触れない)。ただし単純に
+  // 「imageTransformが初期値かどうか」だけを見ると別の不具合が生じる: imageTransformは
+  // ビューワー全体で共有する単一のstateで、goTo()が前後送りのたびに無条件で初期値へ
+  // リセットする。そのため「Aを回転→次へでBへ移動→前へでAに戻る」という操作をすると、
+  // Aに戻った時点で(goTo()が既にimageTransformを初期値に戻し終えているため)
+  // 「imageTransformが初期値かどうか」という条件だけでは「Aは一度も変形されていない」
+  // 状態と区別がつかず、Aの回転がリセットされないまま(実際のDOM上の変形は回転した
+  // ままなのに、ツールバーの表示上は未回転を示す)という状態になることを実機で確認した。
+  // これを避けるため、「実際にresetTransform()以降を適用した(=変形した)アイテムのid」を
+  // dirtiedItemIdsに記録しておき、imageTransformが初期値でも、そのアイテムがdirty
+  // (前回何らかの変形を適用済みで、まだ後始末していない)なら引き続きresetTransform()
+  // 以降を呼ぶ(=単位行列へ戻す。前述の通りフィットの再現はできないが、コーディネーター
+  // の判断により「実際に変形操作をした画像に対する妥当な代償」として許容する)。
+  // 後始末が済んだ(imageTransformが初期値の状態でresetTransform()を適用し終えた)時点で
+  // dirtiedItemIdsから除去し、以降は「単に画像を切り替えただけ」の経路に戻る。
+  const dirtiedCropperItemIds = new Set<string>();
   function applyImageTransform() {
-    if (!cropperImageEl) return;
-    cropperImageEl.$resetTransform();
-    cropperImageEl.$rotate(imageTransform.rotation);
-    cropperImageEl.$scale(imageTransform.flipH ? -1 : 1, imageTransform.flipV ? -1 : 1);
+    const el = currentCropperImageEl;
+    if (!el) return;
+    const isDefaultTransform =
+      imageTransform.rotation === initialImageTransform.rotation &&
+      imageTransform.flipH === initialImageTransform.flipH &&
+      imageTransform.flipV === initialImageTransform.flipV;
+    if (isDefaultTransform && !dirtiedCropperItemIds.has(current.id)) {
+      return;
+    }
+    el.$resetTransform();
+    el.$rotate(imageTransform.rotation);
+    el.$scale(imageTransform.flipH ? -1 : 1, imageTransform.flipV ? -1 : 1);
+    if (isDefaultTransform) {
+      dirtiedCropperItemIds.delete(current.id);
+    } else {
+      dirtiedCropperItemIds.add(current.id);
+    }
   }
 
+  // imageTransform(rotation/flipH/flipV)自体に加え、currentCropperImageEl(=current.idが
+  // 変わるたびに導出し直される、実際に表示中のアイテムのcropper-image要素)も依存に含める。
+  // これにより、前後送りで表示中のアイテムが切り替わったタイミングでも、常に「実際に
+  // 表示されている方の」要素に対してリセット/回転/反転が適用される。
   $effect(() => {
     void imageTransform;
+    void currentCropperImageEl;
     applyImageTransform();
   });
 
   // ズーム時のみパンを有効化する。translatable属性は既定でoffにしておき、
   // Cropper.jsのtransformイベント(detail.matrix、[a,b,c,d,e,f]のCSS行列でaがX方向スケール)を
   // 見てscale>1の間だけonにする(等倍時にドラッグがスワイプナビゲーションと競合しないように)。
+  // ontransformは各<cropper-image>要素自身に個別にバインドされているため、
+  // e.currentTargetは常にイベントを発火させた(=操作されている)その要素そのものであり、
+  // currentCropperImageElのような別変数の取り違えは原理上起こらない。
   function onCropperImageTransform(e: Event) {
     const detail = (e as CustomEvent<{ matrix: number[] }>).detail;
     const scale = detail.matrix[0];
-    cropperImageEl?.toggleAttribute("translatable", scale > 1 + 1e-6);
+    (e.currentTarget as CropperImageEl).toggleAttribute("translatable", scale > 1 + 1e-6);
   }
 
   // 動画はズーム時のみパンを有効化する(画像のCropper.jsと同じ方針)。videoPanzoomアクションは
@@ -294,9 +375,13 @@
             <cropper-canvas class="h-full w-full" background="false">
               <cropper-image
                 bind:this={
-                  () => (item.id === current.id ? cropperImageEl : undefined),
+                  () => cropperImageElsByItemId[item.id],
                   (el) => {
-                    if (item.id === current.id) cropperImageEl = el;
+                    if (el) {
+                      cropperImageElsByItemId[item.id] = el;
+                    } else {
+                      delete cropperImageElsByItemId[item.id];
+                    }
                   }
                 }
                 src={item.url}
@@ -427,8 +512,8 @@
       aria-label="画像ツールバー"
       tabindex="-1"
     >
-      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => cropperImageEl?.$zoom(0.1)} aria-label="ズームイン"><ZoomIn size={16} /></Button>
-      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => cropperImageEl?.$zoom(-0.1)} aria-label="ズームアウト"><ZoomOut size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => currentCropperImageEl?.$zoom(0.1)} aria-label="ズームイン"><ZoomIn size={16} /></Button>
+      <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => currentCropperImageEl?.$zoom(-0.1)} aria-label="ズームアウト"><ZoomOut size={16} /></Button>
       <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => (imageTransform = rotateCCW(imageTransform))} aria-label="左回転"><RotateCcw size={16} /></Button>
       <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => (imageTransform = rotateCW(imageTransform))} aria-label="右回転"><RotateCw size={16} /></Button>
       <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => (imageTransform = toggleFlipH(imageTransform))} aria-label="左右反転"><FlipHorizontal size={16} /></Button>

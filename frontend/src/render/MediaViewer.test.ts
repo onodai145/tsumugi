@@ -272,6 +272,105 @@ describe("MediaViewer", () => {
     expect(scrollTo).toHaveBeenCalledWith({ left: 1 * scroller.clientWidth, behavior: "auto" });
   });
 
+  // 回帰テスト: cropper-imageへのbind:thisが、他の画像を見てから元の画像に戻った後も
+  // 「実際に表示中の」要素を正しく指し続けるか(cropperImageElの取り違え不具合)を検証する。
+  // 不具合の実態: かつてはbind:thisが単一変数cropperImageElへ`item.id === current.id`の
+  // 時だけ代入するgetter/setterだったが、全アイテムの<cropper-image>要素はビューワーの
+  // 生存期間中ずっとマウントされたまま(Scroll Snap構造上、破棄・再生成されない)なので、
+  // あるアイテムの要素は最初にマウントされた時点(その時点でcurrentでなければ)以降
+  // 二度とcropperImageElに代入されなかった。修正後はアイテムのid→要素のマップ
+  // (cropperImageElsByItemId)を保持し、current.idから毎回正しく導出する。
+  function setupCropperImages() {
+    const cropperImages = document.querySelectorAll("cropper-image");
+    expect(cropperImages).toHaveLength(2);
+    const [imgA, imgB] = cropperImages as unknown as HTMLElement[];
+
+    function stubCropperMethods(el: HTMLElement) {
+      Object.assign(el, {
+        $resetTransform: vi.fn(),
+        $rotate: vi.fn(),
+        $scale: vi.fn(),
+        $zoom: vi.fn(),
+      });
+    }
+    stubCropperMethods(imgA);
+    stubCropperMethods(imgB);
+    type StubbedCropperImage = HTMLElement & {
+      $resetTransform: ReturnType<typeof vi.fn>;
+      $rotate: ReturnType<typeof vi.fn>;
+    };
+    const stubbedA = imgA as StubbedCropperImage;
+    const stubbedB = imgB as StubbedCropperImage;
+    // マウント時のapplyImageTransform()初回呼び出しはstub設定前に発生しているため、
+    // ここでは無視し、これ以降の呼び出しだけを見る。
+    stubbedA.$resetTransform.mockClear();
+    stubbedA.$rotate.mockClear();
+    stubbedB.$resetTransform.mockClear();
+    stubbedB.$rotate.mockClear();
+    return { stubbedA, stubbedB };
+  }
+
+  it("単に前後送りしただけ(回転/反転していない)なら、resetTransform()は一切呼ばれない(Cropper.js自身のフィット変形を壊さない)", async () => {
+    // $resetTransform()は変形行列を単位行列へ戻すだけで、Cropper.jsが画像読み込み完了時に
+    // 自動適用する「コンテナに収まるようフィット+中央寄せ」の変形を再現しない。かつ、
+    // その読み込み完了イベントは画像ごとに1度しか発生しないため、既に読み込み済みの
+    // 画像にresetTransform()を呼んでしまうと二度とフィットが復元されない
+    // (applyImageTransform()のコメント、およびtask-4-report.mdの実測記録参照)。
+    // そのため、imageTransformが初期値(回転もフリップもしていない)のまま前後送りする
+    // だけの、最も一般的な操作では、resetTransform()自体を一切呼んではならない。
+    const { getByLabelText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    const { stubbedA, stubbedB } = setupCropperImages();
+
+    await fireEvent.click(getByLabelText("次へ"));
+    await fireEvent.click(getByLabelText("前へ"));
+
+    expect(stubbedA.$resetTransform).not.toHaveBeenCalled();
+    expect(stubbedB.$resetTransform).not.toHaveBeenCalled();
+  });
+
+  it("回転してから他の画像を見て戻ると、実際に表示中のcropper-image要素に対してのみ変形がリセットされる", async () => {
+    const { getByLabelText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    const { stubbedA, stubbedB } = setupCropperImages();
+
+    // a(1枚目)を回転する。imageTransformが初期値でなくなるため、実際に表示中の
+    // a側にresetTransform()以降が適用される。
+    await fireEvent.click(getByLabelText("右回転"));
+    expect(stubbedA.$resetTransform).toHaveBeenCalled();
+    expect(stubbedB.$resetTransform).not.toHaveBeenCalled();
+    stubbedA.$resetTransform.mockClear();
+
+    // 「次へ」でb(2枚目)へ切り替える。goTo()がimageTransformを初期値へリセットするため、
+    // b自身は一度も変形されていない(pristineな)アイテムとして、resetTransform()は
+    // 呼ばれない(フィット変形を壊さない)。aは既に離れているため、この時点ではまだ
+    // 触れられない(回転したままDOM上に残る、これは前後送り時の仕様上の挙動)。
+    await fireEvent.click(getByLabelText("次へ"));
+    expect(stubbedB.$resetTransform).not.toHaveBeenCalled();
+    expect(stubbedA.$resetTransform).not.toHaveBeenCalled();
+
+    // 「前へ」で元のa(1枚目)に戻る。この時点でimageTransformは初期値だが、aは
+    // 「過去に変形を適用したことがあるアイテム(dirty)」として記録されているため、
+    // 実際に表示中のa側にのみresetTransform()が適用され(回転が正しく取り消される)、
+    // 既に表示されていないb側へは一切呼ばれないことを確認する(取り違えバグがあれば、
+    // ここでb側が呼ばれてしまう)。
+    await fireEvent.click(getByLabelText("前へ"));
+    expect(stubbedA.$resetTransform).toHaveBeenCalled();
+    expect(stubbedB.$resetTransform).not.toHaveBeenCalled();
+  });
+
   it("閲覧注意ファイルは未表示ならカバーを表示し、クリックで表示状態になる", async () => {
     const { getByText, queryByText } = render(MediaViewer, {
       props: {
