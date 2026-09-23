@@ -7,7 +7,7 @@
   import "vidstack/player";
   import "vidstack/player/ui";
   import type { MediaPlayerElement } from "vidstack/elements";
-  import { Download, Maximize2, Pause, Play, Volume2, VolumeX } from "@lucide/svelte";
+  import { Download, Maximize, Maximize2, Minimize, Pause, Play, Volume2, VolumeX } from "@lucide/svelte";
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
@@ -17,6 +17,7 @@
     variant,
     size = "compact",
     onExpand,
+    showFullscreenButton = false,
   }: {
     file: DriveFile;
     /** video: 映像の下端に重ねるオーバーレイ。audio: 常時表示の通常フロー配置。 */
@@ -25,6 +26,11 @@
     size?: "compact" | "large";
     /** 指定時のみ拡大表示ボタンを出す(MediaGrid専用。MediaViewer自体が拡大表示のため渡さない)。 */
     onExpand?: () => void;
+    /** OSレベルのFullscreen API切替ボタン(<media-fullscreen-button>)を出すかどうか。
+        MediaViewer(フルスクリーンビューワー)の動画にのみ渡す想定
+        (MediaGridのサムネイルには既存の拡大表示ボタンがあるため不要、
+        音声はフルスクリーンの概念が薄いため対象外)。 */
+    showFullscreenButton?: boolean;
   } = $props();
 
   const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
@@ -46,6 +52,28 @@
     player.playbackRate = next;
     playbackRate = next;
   };
+
+  // <media-fullscreen-button>はFullscreen API呼び出し失敗(環境によって拒否される
+  // ケースがある)を自前で捕捉し、ネイティブのunhandled rejectionにはせず<media-player>上で
+  // "fullscreen-error"イベント(detail: Error、node_modules/vidstack/types/
+  // vidstack-hVlf6lRD.d.ts の FullscreenErrorEvent)として通知する(vidstack本体の
+  // FullscreenController#enter/PlayerCore#["media-enter-fullscreen-request"]参照)。
+  // 設計ドキュメント(2026-09-19-media-viewer-migration-design.md §5)の方針どおり、
+  // 例外を握りつぶしUIをクラッシュさせず、app.reportErrorでログするに留める。
+  function reportFullscreenError(node: HTMLElement) {
+    const player = node.closest("media-player") as MediaPlayerElement | null;
+    if (!player) return {};
+    const onFullscreenError = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      app.reportError(detail instanceof Error ? detail : new Error(String(detail)));
+    };
+    player.addEventListener("fullscreen-error", onFullscreenError);
+    return {
+      destroy() {
+        player.removeEventListener("fullscreen-error", onFullscreenError);
+      },
+    };
+  }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -98,6 +126,17 @@
         <button class="media-ctrl-btn media-ctrl-btn-rate" onclick={cyclePlaybackRate} aria-label="再生速度">
           {playbackRate}x
         </button>
+        {#if showFullscreenButton}
+          <!-- OSレベルのFullscreen API(標準の<media-fullscreen-button>プリミティブ)。
+               既存の「拡大表示」ボタン(onExpand、MediaGrid→MediaViewerを開くボタン)とは別物。
+               data-active(フルスクリーン中か)・data-supported(環境でFullscreen APIが
+               使えるか、未サポートなら下記CSSでボタン自体を非表示にする)は
+               types/components/ui/buttons/fullscreen-button.d.ts参照。 -->
+          <media-fullscreen-button class="media-ctrl-btn" aria-label="フルスクリーン" use:reportFullscreenError>
+            <Maximize size={iconSize} class="media-icon-fullscreen-enter" />
+            <Minimize size={iconSize} class="media-icon-fullscreen-exit" />
+          </media-fullscreen-button>
+        {/if}
         {#if onExpand}
           <button class="media-ctrl-btn" onclick={onExpand} aria-label="拡大表示">
             <Maximize2 size={iconSize} />
@@ -344,6 +383,20 @@
     display: none;
   }
   :global(media-mute-button:not([data-muted]) .media-icon-mute) {
+    display: none;
+  }
+
+  /* フルスクリーン中/非フルスクリーン中で表示アイコンを出し分ける。<media-fullscreen-button>
+     本体のdata-active属性(フルスクリーン中かどうか)で切り替える。 */
+  :global(media-fullscreen-button:not([data-active]) .media-icon-fullscreen-exit) {
+    display: none;
+  }
+  :global(media-fullscreen-button[data-active] .media-icon-fullscreen-enter) {
+    display: none;
+  }
+  /* Fullscreen API自体が環境で使えない(data-supported属性が付かない)場合は、
+     押しても何も起きないボタンを出さないよう非表示にする。 */
+  :global(media-fullscreen-button:not([data-supported])) {
     display: none;
   }
 

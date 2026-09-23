@@ -284,7 +284,7 @@
                      使う。フルスクリーン表示なのでsize="large"、MediaViewer自体が既に
                      拡大表示なのでonExpandは渡さない(拡大表示ボタンは出さない)。 -->
                 <div class="panzoom-exclude">
-                  <MediaControlBar file={item} variant="video" size="large" />
+                  <MediaControlBar file={item} variant="video" size="large" showFullscreenButton />
                 </div>
               </media-player>
             </div>
