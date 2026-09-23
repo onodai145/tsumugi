@@ -328,9 +328,6 @@
     align-items: center;
     gap: 0.25rem;
   }
-  .media-ctrl-overlay-audio :global(.media-ctrl-row) {
-    justify-content: center;
-  }
 
   /* 現在時間/合計時間。size="compact"(MediaGrid)ではサムネイルが窮屈になるため既定で
      非表示にし、size="large"(MediaViewer、下記.media-ctrl-bar--lgブロック参照)でのみ
