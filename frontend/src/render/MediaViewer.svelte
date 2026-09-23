@@ -65,7 +65,7 @@
     $scale: (x: number, y?: number) => void;
     $zoom: (s: number, x?: number, y?: number) => void;
     $resetTransform: () => void;
-    $ready: () => Promise<CropperImageEl>;
+    $ready: (callback?: (image: HTMLImageElement) => unknown) => Promise<HTMLImageElement>;
   };
   // <cropper-image>へのbind:thisは、かつて`item.id === current.id`の時だけ単一の
   // cropperImageEl変数へ代入するgetter/setterだった。しかしScroll Snap構造上、
@@ -291,13 +291,18 @@
   // Scroll Snapの各ページごとに要素が個別マウントされる(#each item.id)ため、アイテム切替時に
   // 別インスタンスとして再生成され、倍率リセットのための追加処理は不要。
   //
-  // @panzoom/panzoomは初期化時にelem.parentNode(=<media-provider>の親である<media-player>)へ
-  // 無条件でtouchAction: 'none'をインラインstyle設定する(node_modules/@panzoom/panzoom
-  // 確認済み)。既定のtouchAction: 'none'のままだと、等倍(パン無効)時でもブラウザのネイティブな
-  // 横スワイプ(Scroll Snapによる前後送り)がタッチデバイス上で機能しなくなる。画像側
-  // (Cropper.jsのtranslatable、等倍時はネイティブスクロールに委ねる方針、§3.9参照)との
-  // 一貫性のため、ここではtouchAction: 'pan-x'を明示指定し、横方向のネイティブパンジェスチャーを
-  // ブラウザに残す(Panzoom自身の縦方向操作とは競合しないY方向はブラウザに委ねたままでよい)。
+  // @panzoom/panzoomは初期化時、elem(node、<media-provider>)とelem.parentNode(=<media-player>)
+  // の両方へ、渡したtouchActionオプションの値(既定は'none')をインラインstyleとして設定する
+  // (node_modules/@panzoom/panzoom/dist/panzoom.jsで確認済み)。touchAction: 'none'のままだと、
+  // 等倍(パン無効)時でもブラウザのネイティブな横スワイプ(Scroll Snapによる前後送り)が
+  // タッチデバイス上で機能しなくなる。setOptions()にtouchActionを渡すと同じ2要素へ
+  // 動的に再設定される仕様(同ファイルのsetOptions()実装で確認済み)なので、下の
+  // syncDisablePan()でdisablePanと連動させ、パン無効(等倍)時のみtouchAction: 'pan-x'
+  // (X方向はブラウザに渡し、Y方向は渡さない)にする。パン有効(ズーム済み)時は
+  // touchAction: 'none'に切り替え、Panzoom自身にジェスチャーを処理させる。ここで
+  // 'none'のままブラウザにも横方向のネイティブpan処理を渡してしまうと、JS側の
+  // ジェスチャー処理とブラウザのネイティブpan処理が競合してpointercancelで機能しなく
+  // なるIssue #296と同じ失敗パターンに陥るため、パン有効時は確実にPanzoom専有にする。
   function videoPanzoom(node: HTMLElement) {
     const pz: PanzoomObject = Panzoom(node, {
       maxScale: 4,
@@ -311,10 +316,16 @@
     // Panzoomは初期化時にelem(node、<media-provider>)へ無条件でcursor: 'move'を設定する。
     // しかし等倍(disablePan: true、実際にはドラッグでパンできない)状態でもこのカーソルが
     // 出続けるのは誤解を招くため、disablePanの切り替えに連動してcursorも同期する
-    // (パン可能な時だけmove、そうでない時はブラウザ既定に戻す)。
+    // (パン可能な時だけmove、そうでない時はブラウザ既定に戻す)。touchActionも同様に、
+    // パン無効時はpan-x(X方向をブラウザに渡す)、パン有効時はnone(ブラウザには渡さず
+    // Panzoom自身が処理する)へ連動させる(上のコメント参照)。
     function syncDisablePan() {
       const disablePan = pz.getScale() <= 1 + 1e-6;
-      pz.setOptions({ disablePan, cursor: disablePan ? "default" : "move" });
+      pz.setOptions({
+        disablePan,
+        cursor: disablePan ? "default" : "move",
+        touchAction: disablePan ? "pan-x" : "none",
+      });
     }
     node.addEventListener("panzoomzoom", syncDisablePan);
     syncDisablePan();
@@ -510,7 +521,7 @@
       onclick={(e) => { e.stopPropagation(); goPrev(); }}
     >
       <button
-        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        class="inline-flex size-9 items-center justify-center rounded-full border border-transparent bg-clip-padding bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:border-ring focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50"
         onclick={(e) => { e.stopPropagation(); goPrev(); }}
         aria-label="前へ"
       >
@@ -524,7 +535,7 @@
       onclick={(e) => { e.stopPropagation(); goNext(); }}
     >
       <button
-        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        class="inline-flex size-9 items-center justify-center rounded-full border border-transparent bg-clip-padding bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:border-ring focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50"
         onclick={(e) => { e.stopPropagation(); goNext(); }}
         aria-label="次へ"
       >
