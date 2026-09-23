@@ -132,7 +132,7 @@
         container: node,
         media: el,
         url: waveformUrl,
-        height: size === "large" ? 44 : 24,
+        height: size === "large" ? 66 : 36,
         barWidth: 2,
         barGap: 1,
         barRadius: 1,
@@ -185,16 +185,21 @@
        Vidstackが内部的にトグルする。types/core/controls.d.ts参照)をCSS属性セレクタで
        拾う形で実現し、デフォルトテーマ(.vds-controls)は使わない。 -->
   <media-controls class={size === "large" ? "media-ctrl-bar media-ctrl-bar--lg" : "media-ctrl-bar"}>
-    <!-- media-time-slider は独自要素だが、内部の track/fill/thumb はVidstackの型定義例
-         (types/elements/define/sliders/time-slider-element.d.ts)通りの素のdivで、
-         位置はVidstack本体がホスト要素に設定する--slider-fill/--slider-progress
-         CSS変数で決まる(下記styleブロック参照)。デフォルトテーマ(vds-slider*クラス)は
-         使わず、色は--accentトークンを直接使用(style-guide.md準拠)。 -->
-    <media-time-slider class="media-seek" aria-label="シーク">
-      <div class="media-seek-track"></div>
-      <div class="media-seek-fill"></div>
-      <div class="media-seek-thumb"></div>
-    </media-time-slider>
+    {#if variant === "video"}
+      <!-- media-time-slider は独自要素だが、内部の track/fill/thumb はVidstackの型定義例
+           (types/elements/define/sliders/time-slider-element.d.ts)通りの素のdivで、
+           位置はVidstack本体がホスト要素に設定する--slider-fill/--slider-progress
+           CSS変数で決まる(下記styleブロック参照)。デフォルトテーマ(vds-slider*クラス)は
+           使わず、色は--accentトークンを直接使用(style-guide.md準拠)。
+           音声(variant="audio")では波形自体がシークバーを兼ねる(クリックで再生位置が
+           飛ぶのはwavesurfer.js標準機能、上記attachWaveformのコメント参照)ため、
+           二重のシークUIになるここは出さない。 -->
+      <media-time-slider class="media-seek" aria-label="シーク">
+        <div class="media-seek-track"></div>
+        <div class="media-seek-fill"></div>
+        <div class="media-seek-thumb"></div>
+      </media-time-slider>
+    {/if}
     <media-controls-group class="media-ctrl-row">
       <div class="media-ctrl-group-left">
         <media-play-button class="media-ctrl-btn" aria-label="再生/一時停止">
