@@ -115,7 +115,7 @@ describe("MediaViewer", () => {
     expect(queryByText("閲覧注意（クリックで表示）")).toBeNull();
   });
 
-  it("音声ファイルはaudio-layoutで表示され、panzoom用のラッパーが付かない", () => {
+  it("音声ファイルは自前コントロールバーで表示され、panzoom用のラッパーが付かない", () => {
     render(MediaViewer, {
       props: {
         files: [file({ id: "a", mimeType: "audio/mpeg", name: "a.mp3", url: "https://example.com/a.mp3" })],
@@ -124,6 +124,6 @@ describe("MediaViewer", () => {
         onclose: () => {},
       },
     });
-    expect(document.querySelector("media-audio-layout")).toBeTruthy();
+    expect(document.querySelector("media-controls")).toBeTruthy();
   });
 });

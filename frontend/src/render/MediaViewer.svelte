@@ -1,10 +1,7 @@
 <script lang="ts">
   import "cropperjs";
-  import "vidstack/player/styles/default/theme.css";
-  import "vidstack/player/styles/default/layouts/video.css";
-  import "vidstack/player/styles/default/layouts/audio.css";
+  import "vidstack/player/styles/base.css";
   import "vidstack/player";
-  import "vidstack/player/layouts";
   import "vidstack/player/ui";
   import Panzoom, { type PanzoomObject } from "@panzoom/panzoom";
   import { onMount, untrack } from "svelte";
@@ -14,6 +11,7 @@
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
+  import MediaControlBar from "./MediaControlBar.svelte";
   import {
     deriveViewItems,
     initialImageTransform,
@@ -273,15 +271,21 @@
                      (前後送り、絶対配置)との重なり順比較にこのz-index:10が反映されず、
                      DOM順で後に来る左右送りクリックエリアが動画+コントロールバーを
                      まとめて覆ってクリックを奪っていた(前回の閉じるボタン問題と同根)。
-                     <media-provider>だけをpanzoom対象にすることで<media-video-layout>を
-                     このスタッキングコンテキストの外に出し、Vidstack既定の
-                     .vds-controlsのz-index:10がクリックエリアと正しく比較されるようにする。 -->
+                     <media-provider>だけをpanzoom対象にすることでコントロールバー
+                     (MediaControlBar、.media-ctrl-overlayでz-index:1)をこの
+                     スタッキングコンテキストの外に出し、クリックエリアと正しく
+                     比較されるようにする。 -->
                 <media-provider use:videoPanzoom></media-provider>
-                <!-- panzoom-exclude: 上記の構造変更により<media-video-layout>は
+                <!-- panzoom-exclude: 上記の構造変更によりMediaControlBarは
                      videoPanzoomの対象(<media-provider>)の子孫ではなくなったため、
                      Panzoomのpointerdownハンドラは基本的にもう発火しないはずだが、
-                     念のため残しておく(害はなく、将来の構造変更に対する保険として機能する)。 -->
-                <media-video-layout class="panzoom-exclude"></media-video-layout>
+                     念のため残しておく(害はなく、将来の構造変更に対する保険として機能する)。
+                     MediaGridのサムネイルと同じ自前コントロールバー(MediaControlBar)を
+                     使う。フルスクリーン表示なのでsize="large"、MediaViewer自体が既に
+                     拡大表示なのでonExpandは渡さない(拡大表示ボタンは出さない)。 -->
+                <div class="panzoom-exclude">
+                  <MediaControlBar file={item} variant="video" size="large" />
+                </div>
               </media-player>
             </div>
           {/if}
@@ -297,7 +301,7 @@
                 onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
               >
                 <media-provider></media-provider>
-                <media-audio-layout></media-audio-layout>
+                <MediaControlBar file={item} variant="audio" size="large" />
               </media-player>
             </div>
           {/if}
@@ -366,17 +370,6 @@
     background-color: color-mix(in srgb, var(--accent) 20%, transparent) !important;
   }
 
-  /* VidstackのデフォルトレイアウトのテーマCSS変数をアプリのトークンにマッピングする。
-     style-guide.md §2のrounded-md(6px)相当。 */
-  :global(media-player) {
-    --video-brand: var(--accent);
-    --audio-brand: var(--accent);
-    --video-focus-ring-color: var(--accent);
-    --audio-focus-ring-color: var(--accent);
-    --video-border-radius: 6px;
-    --audio-border-radius: 6px;
-  }
-
   /* Vidstackのmedia-playerは既定でwidth:100%(横幅いっぱいに広がる仕様)。これが
      videoPanzoomのラッパーdiv(高さ100%、横幅ほぼビューワー全体)の横幅をそのまま
      埋めてしまい、画像ビューワー(Cropper.js、余白を持って中央表示)と違って画面端から
@@ -393,9 +386,9 @@
      (インラインstyleで指定された)アスペクト比を保った箱を計算し、横にはみ出す場合のみ
      max-widthでクランプする。はみ出さない場合はラッパーdivのflex(items-center
      justify-center)により左右・上下に余白を持って中央表示される。
-     コントロールのグラデーションオーバーレイ(media-video-layout)はmedia-player自身を
-     基準にposition:absoluteで重ねられているため、この箱のサイズを正しく合わせることで
-     オーバーレイのズレ(不具合2)も連動して解消する。 */
+     コントロールのグラデーションオーバーレイ(MediaControlBarの.media-ctrl-overlay)は
+     media-player自身を基準にposition:absoluteで重ねられているため、この箱のサイズを
+     正しく合わせることでオーバーレイのズレ(不具合2)も連動して解消する。 */
   :global(media-player[data-view-type="video"]) {
     width: auto;
     height: 100%;
@@ -403,13 +396,8 @@
   }
 
   /* 主な修正は<script>側で行った(videoPanzoomの対象を<media-player>全体から
-     <media-provider>だけに変更し、<media-video-layout>をtransformによる
-     スタッキングコンテキストの外に出した)。ここではVidstack本体のz-index:10指定
-     (theme.css、:where()セレクタで0-specificity)が万一何かに上書きされても
-     左右送りクリックエリア(z-index未指定)より確実に手前に来るよう、実際に効く
-     specificityで念のため補強しておく(positionはVidstack既定のabsoluteのまま
-     変更しない。position:relativeにするとinset:0によるオーバーレイ配置が崩れる)。 */
-  :global([data-view-type="video"] .vds-controls) {
-    z-index: 10;
-  }
+     <media-provider>だけに変更し、コントロールバー(MediaControlBar)をtransformによる
+     スタッキングコンテキストの外に出した)。コントロールバー自体はMediaControlBar.svelteの
+     .media-ctrl-overlayでz-index:1を持っており、これが左右送りクリックエリア
+     (z-index未指定)より確実に手前に来る。 */
 </style>
