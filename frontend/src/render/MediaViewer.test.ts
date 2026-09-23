@@ -201,6 +201,54 @@ describe("MediaViewer", () => {
     expect(saveMediaToDisk).toHaveBeenCalledWith("https://example.com/b.png", expect.anything(), expect.anything());
   });
 
+  // 回帰テスト: 上のテストは「ガードが正しくかかる」ことしか検証していなかった(タスクレビュー
+  // 指摘)。startIndex: 0(1枚目を開く最も一般的なケース)では、onMount()のscrollIntoViewが
+  // 呼ばれてもscrollElは既にscrollLeft: 0のため実際には1pxも動かず、'scrollend'イベントは
+  // 一切発火しない。これにより、programmaticScrollActiveの解除を'scrollend'の発火のみに
+  // 頼っていると(かつては`if (!SCROLLEND_SUPPORTED)`でjsdom/対応ブラウザではフォールバック
+  // タイマー自体をarmしていなかったため)、フラグが永久にtrueのまま残ってしまい、
+  // マウント直後・最初のボタン操作前に行った最初のスワイプ操作がonScroll()の再同期に
+  // 一切反映されないというリグレッションが起きていた。この回帰テストは「ガードが
+  // (scrollendに頼らずフォールバックタイマー経由で)正しく解除される」ことを検証する。
+  it("startIndex: 0でマウント直後(scrollendが発火しない場合)でも、フォールバックタイマー経由でcurrentIndexがスワイプに追従する", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.mocked(saveMediaToDisk).mockClear();
+
+    const { getByLabelText } = render(MediaViewer, {
+      props: {
+        files: [
+          file({ id: "a", name: "a.png", url: "https://example.com/a.png" }),
+          file({ id: "b", name: "b.png", url: "https://example.com/b.png" }),
+          file({ id: "c", name: "c.png", url: "https://example.com/c.png" }),
+        ],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+
+    const [firstPage] = document.querySelectorAll('[data-testid="media-page"]');
+    const scroller = firstPage.parentElement as HTMLDivElement;
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 1000 });
+
+    // onMount()のscrollIntoView(startIndex: 0、既にscrollLeft: 0)は実際には何も動かさない
+    // ため、scrollendイベントは発火しない。beginProgrammaticScroll()の500msフォールバック
+    // タイマーだけがprogrammaticScrollActiveを解除する唯一の手段になる。
+    await new Promise((resolve) => setTimeout(resolve, 550));
+
+    // フォールバックタイマーで解除された後、ユーザーがスワイプで3枚目(index2)まで
+    // 手で送ったとする(goTo()を経由しない、ネイティブスクロールのみのケース)。
+    Object.defineProperty(scroller, "scrollLeft", { configurable: true, value: 2000 });
+    await fireEvent.scroll(scroller);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // 画像ツールバーのダウンロードボタンで、currentIndexが正しく2(C)まで
+    // 追従していることを間接的に検証する。
+    await fireEvent.click(getByLabelText("ダウンロード"));
+    expect(saveMediaToDisk).toHaveBeenCalledWith("https://example.com/c.png", expect.anything(), expect.anything());
+  });
+
   it("非ゼロstartIndexでマウントすると、その位置へ即座にscrollIntoViewする", () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;

@@ -74,19 +74,21 @@
   // 中間値をcurrentIndexに取り込むこと自体を防ぐ。
   let programmaticScrollActive = false;
   let programmaticScrollFallbackTimer: ReturnType<typeof setTimeout> | undefined;
-  // 'scrollend'(スクロールが実際に静止したタイミングを教えてくれるイベント)が使えれば
-  // それを正としてフラグを解除する。未対応環境向けのフォールバックとして、1アイテム分の
-  // smoothスクロールが十分収まる余裕を持たせた固定時間でも解除する(下記onScrollEnd参照)。
-  const SCROLLEND_SUPPORTED = typeof window !== "undefined" && "onscrollend" in window;
-
+  // 'scrollend'(スクロールが実際に静止したタイミングを教えてくれるイベント)が発火すれば
+  // それを正として早期にフラグを解除する(下記onScrollEnd参照)。ただし'onscrollend' in window
+  // が真であることは「発火することの保証」にはならない — 例えばgoTo(0)をstartIndex: 0の
+  // 状態(=マウント直後、既にscrollLeft: 0)で呼んだ場合のようにscrollIntoView自体が実際には
+  // 1pxも動かさないケースでは、対応環境でも'scrollend'イベントは発火しない(スクロール位置が
+  // 変化していないため)。そのため機能検出(SCROLLEND_SUPPORTED)による分岐はやめ、
+  // 常に500ms(1アイテム分のsmoothスクロールが十分収まる余裕を持たせた時間)の
+  // フォールバックタイマーもarmする。scrollendが先に発火すればそちらで早期解除され
+  // fallbackタイマーはclearされるため、二重解除にはならない。
   function beginProgrammaticScroll() {
     programmaticScrollActive = true;
     clearTimeout(programmaticScrollFallbackTimer);
-    if (!SCROLLEND_SUPPORTED) {
-      programmaticScrollFallbackTimer = setTimeout(() => {
-        programmaticScrollActive = false;
-      }, 500);
-    }
+    programmaticScrollFallbackTimer = setTimeout(() => {
+      programmaticScrollActive = false;
+    }, 500);
   }
 
   function onScrollEnd() {
