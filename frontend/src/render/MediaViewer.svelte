@@ -96,11 +96,25 @@
     clearTimeout(programmaticScrollFallbackTimer);
   }
 
+  // scrollIntoView(要素のgetBoundingClientRect()を見て「もう見えているか」を判定してから
+  // 目的地を決める仕組み)ではなく、常にscrollTo({left: index*clientWidth, ...})で目的の
+  // スクロール位置を直接計算して指定する。実機のWebKitGTKで、直前のscrollIntoView呼び出し
+  // (特にbehavior:"auto"の瞬間ジャンプ)から数十ms程度しか経っていない状態でもう一度
+  // scrollIntoViewを呼ぶと、レイアウトがまだ再計算されておらずgetBoundingClientRect()が
+  // 古い(スクロール前の)値を返すことがあり、その結果「目的の要素は既に表示範囲内」と
+  // 誤判定されてスクロールが一切発生しないまま呼び出しが握りつぶされる事象を、
+  // src-tauri/src/debug_bridge.rs経由でscrollLeftの実測値を追跡して確認した
+  // (連打ではなく、ビューワーを開いた直後に1回だけ矢印を押すだけでも、開いた際の
+  // マウント時スクロールと発生タイミングが近いと再現する)。scrollToは対象要素の
+  // 現在のレイアウト状態を経由せず目的のスクロール位置を直接指定するため、この
+  // 「古いレイアウト情報による誤判定」自体が起こり得ず、同じ条件で確実に目的位置まで
+  // 到達することを同じ計測方法で確認済み。
   function goTo(index: number, behavior: ScrollBehavior = "smooth") {
     currentIndex = index;
     imageTransform = initialImageTransform;
     beginProgrammaticScroll();
-    scrollEl?.children[index]?.scrollIntoView({ behavior, inline: "start", block: "nearest" });
+    if (!scrollEl) return;
+    scrollEl.scrollTo({ left: index * scrollEl.clientWidth, behavior });
   }
 
   // マウント時、scrollEl(横スクロールコンテナ)の初期表示位置がstartIndexとズレないよう
@@ -108,22 +122,15 @@
   // マウント時には何もスクロールしないため、非ゼロstartIndexだと常に1枚目が表示されてしまう)。
   onMount(() => {
     beginProgrammaticScroll();
-    scrollEl?.children[currentIndex]?.scrollIntoView({ behavior: "auto", inline: "start", block: "nearest" });
+    if (!scrollEl) return;
+    scrollEl.scrollTo({ left: currentIndex * scrollEl.clientWidth, behavior: "auto" });
   });
 
-  // 末尾→先頭、先頭→末尾のラップアラウンド送りは、Scroll Snapコンテナ上で複数の
-  // スナップポイントを一気に跨ぐ長距離のsmoothスクロールになる。WebKitGTK等の一部の
-  // ブラウザエンジンでは、scroll-snap-type: mandatoryが有効なコンテナに対する
-  // scrollIntoView({behavior:"smooth"})が、目的地に到達する前に途中のスナップ位置で
-  // アニメーションを打ち切ってしまうことがある(CSS Scroll SnapとProgrammatic Scrolling
-  // の相互作用に関する既知の実装差異)。この場合、goTo()内でcurrentIndexは即座に
-  // 目的のindexへ更新済みだが実際のスクロール位置は途中アイテムのまま止まってしまい、
-  // その後onScroll()の再同期(スクロール位置からindexを再計算するデバウンス処理)が
-  // currentIndexを実際に止まった途中アイテムのindexへ巻き戻してしまう
-  // (＝表示アイテムとcurrentIndexは一致するが、ユーザーが意図した「1枚目に戻る」操作が
-  // 完了しない)。ラップアラウンドの1ステップ分だけbehavior: "auto"(アニメーションなしの
-  // 瞬間スクロール)にすることで、複数スナップポイントを跨ぐsmoothスクロール自体を
-  // 発生させず、この競合を回避する。
+  // 末尾→先頭、先頭→末尾のラップアラウンド送りは、複数のスナップポイントを一気に
+  // 跨ぐ長距離のsmoothスクロールになる。goTo()をscrollTo()ベースにした後は
+  // (上記コメント参照)ラップアラウンドを狙ってbehavior: "auto"にする理由は無くなったが、
+  // 長距離のsmoothスクロールを避けたいというUX上の判断(一瞬で先頭/末尾へジャンプする方が
+  // 自然)自体は引き続き妥当なので、この分岐そのものは残す。
   function goNext() {
     const wrapping = currentIndex === viewItems.length - 1;
     goTo(nextIndex(currentIndex, viewItems.length), wrapping ? "auto" : "smooth");

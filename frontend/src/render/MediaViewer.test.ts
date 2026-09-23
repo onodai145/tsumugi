@@ -22,11 +22,11 @@ vi.mock("../lib/mediaDownload", () => ({ saveMediaToDisk: vi.fn() }));
 const { default: MediaViewer } = await import("./MediaViewer.svelte");
 const { saveMediaToDisk } = await import("../lib/mediaDownload");
 
-// jsdomはscrollIntoViewを実装していないため、マウント時のスクロール同期(onMount)を含む
+// jsdomはElement.scrollToを実装していないため、マウント時のスクロール同期(onMount)を含む
 // すべてのテストで安全にレンダリングできるよう既定でno-opスタブを用意しておく。
 // 挙動を検証したいテストは各itの冒頭でこの参照を上書きする。
 // （その他のブラウザAPI補完は vite.config.ts の setupFiles で読み込まれる test-setup.ts にて一元管理）
-Element.prototype.scrollIntoView = vi.fn();
+Element.prototype.scrollTo = vi.fn();
 
 function file(overrides: Partial<DriveFile>): DriveFile {
   return {
@@ -71,9 +71,9 @@ describe("MediaViewer", () => {
     expect(onclose).toHaveBeenCalledOnce();
   });
 
-  it("次へボタンで2件目のページへscrollIntoViewする", async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+  it("次へボタンで2件目のページへscrollToする", async () => {
+    const scrollTo = vi.fn();
+    Element.prototype.scrollTo = scrollTo;
     const { getByLabelText } = render(MediaViewer, {
       props: {
         files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
@@ -82,21 +82,21 @@ describe("MediaViewer", () => {
         onclose: () => {},
       },
     });
-    scrollIntoView.mockClear();
+    const [firstPage] = document.querySelectorAll('[data-testid="media-page"]');
+    const scroller = firstPage.parentElement as HTMLDivElement;
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 1000 });
+    scrollTo.mockClear();
     await fireEvent.click(getByLabelText("次へ"));
-    expect(scrollIntoView).toHaveBeenCalledOnce();
-    const [, secondPage] = document.querySelectorAll('[data-testid="media-page"]');
-    expect(scrollIntoView.mock.instances[0]).toBe(secondPage);
-    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(scrollTo.mock.instances[0]).toBe(scroller);
+    expect(scrollTo).toHaveBeenCalledWith({ left: 1000, behavior: "smooth" });
   });
 
-  // 回帰テスト: 末尾から次へ送ると先頭へラップアラウンドする。このステップは複数のScroll
-  // Snapポイントを跨ぐ長距離スクロールになり、一部のブラウザエンジンではsmoothスクロールが
-  // 意図した位置まで到達しないことがあるため、behavior: "auto"(アニメーションなし)で
-  // 瞬時に移動させる必要がある(goNext/goPrevのコメント参照)。
-  it("末尾から次へで先頭にラップアラウンドする際はbehavior: autoでscrollIntoViewする", async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+  // 回帰テスト: 末尾から次へ送ると先頭へラップアラウンドする。長距離のsmoothスクロールを
+  // 避け、behavior: "auto"(アニメーションなし)で瞬時に移動させる(goNext/goPrevのコメント参照)。
+  it("末尾から次へで先頭にラップアラウンドする際はbehavior: autoでscrollToする", async () => {
+    const scrollTo = vi.fn();
+    Element.prototype.scrollTo = scrollTo;
     const { getByLabelText } = render(MediaViewer, {
       props: {
         files: [
@@ -109,17 +109,19 @@ describe("MediaViewer", () => {
         onclose: () => {},
       },
     });
-    scrollIntoView.mockClear();
-    await fireEvent.click(getByLabelText("次へ"));
-    expect(scrollIntoView).toHaveBeenCalledOnce();
     const [firstPage] = document.querySelectorAll('[data-testid="media-page"]');
-    expect(scrollIntoView.mock.instances[0]).toBe(firstPage);
-    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
+    const scroller = firstPage.parentElement as HTMLDivElement;
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 1000 });
+    scrollTo.mockClear();
+    await fireEvent.click(getByLabelText("次へ"));
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(scrollTo.mock.instances[0]).toBe(scroller);
+    expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: "auto" });
   });
 
-  it("先頭から前へで末尾にラップアラウンドする際はbehavior: autoでscrollIntoViewする", async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+  it("先頭から前へで末尾にラップアラウンドする際はbehavior: autoでscrollToする", async () => {
+    const scrollTo = vi.fn();
+    Element.prototype.scrollTo = scrollTo;
     const { getByLabelText } = render(MediaViewer, {
       props: {
         files: [
@@ -132,33 +134,33 @@ describe("MediaViewer", () => {
         onclose: () => {},
       },
     });
-    scrollIntoView.mockClear();
+    const [firstPage] = document.querySelectorAll('[data-testid="media-page"]');
+    const scroller = firstPage.parentElement as HTMLDivElement;
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 1000 });
+    scrollTo.mockClear();
     await fireEvent.click(getByLabelText("前へ"));
-    expect(scrollIntoView).toHaveBeenCalledOnce();
-    const [, , thirdPage] = document.querySelectorAll('[data-testid="media-page"]');
-    expect(scrollIntoView.mock.instances[0]).toBe(thirdPage);
-    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(scrollTo.mock.instances[0]).toBe(scroller);
+    expect(scrollTo).toHaveBeenCalledWith({ left: 2000, behavior: "auto" });
   });
 
-  // 回帰テスト: 「B(2枚目)を開く→前後送りで他を見る→元のBに戻る」で表示位置がずれる不具合
-  // (ラップアラウンドとは無関係、通常の前後送りの連打で発生)。原因は、goTo()が開始した
-  // プログラム的スクロールのアニメーションが完了しないうちに、その途中の中間scrollLeftを
-  // 拾ったonScroll()の再同期(デバウンス)がcurrentIndexを誤った値に巻き戻してしまうこと。
-  // programmaticScrollActiveフラグを立て、scrollend(またはフォールバックタイマー)が
-  // 発火してスクロールの完了が確認できるまでonScroll()の再同期を止めることで修正した
-  // (goTo/beginProgrammaticScroll/onScrollEndのコメント参照)。
-  // 実機(WebKitGTK、cargo tauri dev + debug_bridge経由)で、B→C→Bへの前後送りを短間隔で
-  // 連打すると同様に表示位置がずれることを再現し、修正後は解消することを確認済み
-  // (task-4-report.mdに記録)。
+  // 「B(2枚目)を開く→前後送りで他を見る→元のBに戻る」で表示位置がずれる不具合の実際の原因は
+  // scrollIntoView()自体にあった(要素のgetBoundingClientRect()を見て「もう見えているか」を
+  // 判定してから目的地を決める仕組みが、直前のスクロールから間もない呼び出しで古いレイアウト
+  // 情報を掴んでしまいスクロールが握りつぶされる、実機WebKitGTKでのバグ)。goTo()を
+  // scrollTo({left: index*clientWidth, ...})による直接計算に切り替えたことがその修正であり、
+  // これは goTo() 自身のコメント参照(task-4-report.mdに実測データを記録)。
   //
-  // ここでは「goTo()によるスクロールが完了する(scrollendが発火する)前に、中間的な
-  // scrollLeftから計算された誤ったindexでonScroll()がcurrentIndexを巻き戻してはならない」
-  // というガード自体の契約を直接検証する。scrollend発火前に正解のscrollLeftを含む
-  // 後続イベントを与えてしまうとガードなしでも偶然パスしてしまうため、scrollend発火前は
-  // 意図的に誤ったscrollLeftのみを与えている。
+  // このprogrammaticScrollActiveフラグ自体は上記の不具合の原因ではなかったが、goTo()による
+  // プログラム的スクロールのアニメーションが完了しないうちに、その途中の中間scrollLeftを
+  // 拾ったonScroll()の再同期(デバウンス)がcurrentIndexを誤った値に巻き戻してしまうという、
+  // 別の理論的な競合を防ぐガードとして引き続き有効なため残している。ここでは「goTo()による
+  // スクロールが完了する(scrollendが発火する)前に、中間的なscrollLeftから計算された誤った
+  // indexでonScroll()がcurrentIndexを巻き戻してはならない」というガード自体の契約を直接
+  // 検証する。scrollend発火前に正解のscrollLeftを含む後続イベントを与えてしまうとガードなしでも
+  // 偶然パスしてしまうため、scrollend発火前は意図的に誤ったscrollLeftのみを与えている。
   it("goTo()によるスクロール完了前は、中間的なscrollLeftによる再同期でcurrentIndexが巻き戻らない", async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+    Element.prototype.scrollTo = vi.fn();
     vi.mocked(saveMediaToDisk).mockClear();
 
     const { getByLabelText } = render(MediaViewer, {
@@ -202,7 +204,7 @@ describe("MediaViewer", () => {
   });
 
   // 回帰テスト: 上のテストは「ガードが正しくかかる」ことしか検証していなかった(タスクレビュー
-  // 指摘)。startIndex: 0(1枚目を開く最も一般的なケース)では、onMount()のscrollIntoViewが
+  // 指摘)。startIndex: 0(1枚目を開く最も一般的なケース)では、onMount()のscrollToが
   // 呼ばれてもscrollElは既にscrollLeft: 0のため実際には1pxも動かず、'scrollend'イベントは
   // 一切発火しない。これにより、programmaticScrollActiveの解除を'scrollend'の発火のみに
   // 頼っていると(かつては`if (!SCROLLEND_SUPPORTED)`でjsdom/対応ブラウザではフォールバック
@@ -211,8 +213,7 @@ describe("MediaViewer", () => {
   // 一切反映されないというリグレッションが起きていた。この回帰テストは「ガードが
   // (scrollendに頼らずフォールバックタイマー経由で)正しく解除される」ことを検証する。
   it("startIndex: 0でマウント直後(scrollendが発火しない場合)でも、フォールバックタイマー経由でcurrentIndexがスワイプに追従する", async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+    Element.prototype.scrollTo = vi.fn();
     vi.mocked(saveMediaToDisk).mockClear();
 
     const { getByLabelText } = render(MediaViewer, {
@@ -232,7 +233,7 @@ describe("MediaViewer", () => {
     const scroller = firstPage.parentElement as HTMLDivElement;
     Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 1000 });
 
-    // onMount()のscrollIntoView(startIndex: 0、既にscrollLeft: 0)は実際には何も動かさない
+    // onMount()のscrollTo(startIndex: 0、既にscrollLeft: 0)は実際には何も動かさない
     // ため、scrollendイベントは発火しない。beginProgrammaticScroll()の500msフォールバック
     // タイマーだけがprogrammaticScrollActiveを解除する唯一の手段になる。
     await new Promise((resolve) => setTimeout(resolve, 550));
@@ -249,9 +250,9 @@ describe("MediaViewer", () => {
     expect(saveMediaToDisk).toHaveBeenCalledWith("https://example.com/c.png", expect.anything(), expect.anything());
   });
 
-  it("非ゼロstartIndexでマウントすると、その位置へ即座にscrollIntoViewする", () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+  it("非ゼロstartIndexでマウントすると、その位置へ即座にscrollToする", () => {
+    const scrollTo = vi.fn();
+    Element.prototype.scrollTo = scrollTo;
     render(MediaViewer, {
       props: {
         files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
@@ -260,10 +261,11 @@ describe("MediaViewer", () => {
         onclose: () => {},
       },
     });
-    expect(scrollIntoView).toHaveBeenCalledOnce();
-    const [, secondPage] = document.querySelectorAll('[data-testid="media-page"]');
-    expect(scrollIntoView.mock.instances[0]).toBe(secondPage);
-    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
+    const [firstPage] = document.querySelectorAll('[data-testid="media-page"]');
+    const scroller = firstPage.parentElement as HTMLDivElement;
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(scrollTo.mock.instances[0]).toBe(scroller);
+    expect(scrollTo).toHaveBeenCalledWith({ left: 1 * scroller.clientWidth, behavior: "auto" });
   });
 
   it("閲覧注意ファイルは未表示ならカバーを表示し、クリックで表示状態になる", async () => {
