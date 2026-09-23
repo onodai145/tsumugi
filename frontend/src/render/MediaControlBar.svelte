@@ -11,6 +11,7 @@
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
+  import { fileName } from "../lib/mediaViewer.svelte";
 
   let {
     file,
@@ -33,8 +34,9 @@
     showFullscreenButton?: boolean;
   } = $props();
 
-  const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
-  const iconSize = $derived(size === "large" ? 20 : 14);
+  // style-guide.md §6: アイコンサイズはsize={12}(sm)/size={16}(default)/size={20}(例外的に大きめ)
+  // の3段階のみで、13/14/15pxのような1px刻みの中間値は使わない。
+  const iconSize = $derived(size === "large" ? 20 : 12);
 
   // 再生速度は1x/1.5x/2xを巡回させる自前トグル。Vidstackにはこの用途の既製部品
   // (<media-speed-*>系)は無く、あってもラジオグループ形式でトグルボタンではないため、
@@ -300,6 +302,9 @@
   :global(media-time-slider:hover .media-seek-thumb) {
     opacity: 1;
   }
+  /* 生カラー(rgb(0 0 0 / 50%)背景・white文字)の直書きは、映像/音声という多様な背景の上に
+     載るオーバーレイでテーマトークン(--accent等)に依存しない一定の視認性を確保する必要が
+     あるための意図的な例外(.media-time-groupの同種コメント参照)。 */
   :global(.media-ctrl-btn) {
     display: flex;
     height: 1.75rem;
@@ -313,6 +318,15 @@
     font-size: 0.875rem;
     line-height: 1;
     cursor: pointer;
+  }
+  /* style-guide.md §7: Buttonプリミティブを経由しない素の<button>(再生速度・拡大表示・
+     保存ボタン)には focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
+     相当のキーボードフォーカス視覚表示を明示的に持たせる必要がある。Tailwindクラスが
+     使えない:globalなCSSコンテキストのため、同等のCSSプロパティで再現する。 */
+  :global(.media-ctrl-btn:focus-visible) {
+    outline: none;
+    border: 1px solid var(--color-ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ring) 50%, transparent);
   }
 
   /* 音量スライダー: 普段はwidth:0で折り畳んでおき、.media-vol-wrap(ミュートボタンと
@@ -388,7 +402,9 @@
     min-width: 1.75rem;
     padding: 0 0.375rem;
     border-radius: 9999px;
-    font-size: 0.6875rem;
+    /* style-guide.md §5の4段階(xs=0.75rem/sm=0.875rem/base=1rem/lg=1.125rem)に該当する
+       値がないため、最も近いxs(0.75rem)に寄せる。 */
+    font-size: 0.75rem;
     font-weight: 600;
   }
 

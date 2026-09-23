@@ -1,8 +1,9 @@
 import type { DriveFile } from "../bindings/tauri.gen";
 
-const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
-const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
-const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
+export const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
+export const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
+export const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
+export const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
 /// MediaViewerで前後送りする対象（画像・動画・音声）だけを残す。
 /// その他のファイル（📄表示のもの）はMediaGrid側で従来通りopenUrlするためここでは除外する。

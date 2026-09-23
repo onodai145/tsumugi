@@ -6,16 +6,15 @@
   import type { DriveFile } from "../bindings/tauri.gen";
   import MediaControlBar from "./MediaControlBar.svelte";
   import MediaViewer from "./MediaViewer.svelte";
-  import { deriveViewItems } from "../lib/mediaViewer.svelte";
+  import { deriveViewItems, fileName, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
   let { files }: { files: DriveFile[] } = $props();
 
   let revealed = $state<Record<string, boolean>>({});
-  const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
-  const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
-  const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
-  const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
   let viewerOpenIndex = $state<number | null>(null);
+  const openViewer = (f: DriveFile) => {
+    viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id);
+  };
 </script>
 
 {#if files.length > 0}
@@ -26,10 +25,10 @@
   >
     {#each files as f (f.id)}
       <div class="media-cell relative flex aspect-[16/10] items-center justify-center">
-        {#if f.isSensitive && !revealed[f.id]}
+        {#if !isRevealed(revealed, f)}
           <button
             class="sensitive-cover h-full w-full border-0 text-sm text-muted-foreground"
-            onclick={() => (revealed = { ...revealed, [f.id]: true })}
+            onclick={() => (revealed = reveal(revealed, f))}
           >
             閲覧注意（クリックで表示）
           </button>
@@ -41,7 +40,7 @@
             alt={fileName(f)}
             loading="lazy"
             class="h-full w-full cursor-zoom-in object-cover"
-            onclick={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
+            onclick={() => openViewer(f)}
           />
         {:else if isVideo(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
@@ -61,21 +60,13 @@
                    付与される(クリック判定領域=自身のgetBoundingClientRect()を提供するだけ)。 -->
               <media-gesture event="pointerup" action="toggle:paused"></media-gesture>
             </media-provider>
-            <MediaControlBar
-              file={f}
-              variant="video"
-              onExpand={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
-            />
+            <MediaControlBar file={f} variant="video" onExpand={() => openViewer(f)} />
           </media-player>
         {:else if isAudio(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
           <media-player src={{ src: f.url, type: f.mimeType }} viewType="audio" preload="metadata" class="w-[calc(100%-16px)]">
             <media-provider></media-provider>
-            <MediaControlBar
-              file={f}
-              variant="audio"
-              onExpand={() => (viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id))}
-            />
+            <MediaControlBar file={f} variant="audio" onExpand={() => openViewer(f)} />
           </media-player>
         {:else}
           <button

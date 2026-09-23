@@ -47,7 +47,7 @@ Issue #295 では移行先候補として Bigger Picture / lightGallery / pencer
 
 - [Cropper.js v2](https://fengyuanchen.github.io/cropperjs/)（`fengyuanchen/cropperjs`、MIT、Viewer.jsと同じ作者によるWeb Componentsベースの後継プロダクト）を採用する。クロップ枠（`<cropper-selection>`）は使わず、`<cropper-canvas>` + `<cropper-image>` のみを組み合わせた「ビューワー構成」で画像を表示する。
 - `<cropper-image>` の `$rotate(angle)` / `$scale(x, y)`（負値で反転） / `$zoom(scale, x, y)` / `$translate(x, y)` メソッドで、ズーム・パン・回転・反転を単一のAPIで完結させる。属性 `rotatable` / `scalable` / `translatable` で各操作を有効化する。panzoomのような別ライブラリとの transform 合成は不要になる。
-- ツールバー: ズームイン / ズームアウト / 等倍リセット（`$resetTransform()`） / 左回転 / 右回転 / 左右反転 / 上下反転 / ダウンロード / 閉じる。
+- ツールバー: ズームイン / ズームアウト / 左回転 / 右回転 / 左右反転 / 上下反転 / ダウンロード / 閉じる。実装時に等倍リセット単独のボタンは見送った（`$resetTransform()` はCropper.jsの初期フィット変形を再現しないため単純な追加ボタンにできず、回転/反転操作時の内部リセット処理には引き続き使われている。詳細は次項の実装上の教訓を参照）。
 - ピンチズームは実機で問題なく機能することを確認済み（`@panzoom/panzoom` へのフォールバックは不要だった）。
 - **重要な実装上の教訓**: `{#each viewItems as item (item.id)}` でレンダリングする各アイテムの `<cropper-image>` 要素への参照（`bind:this`）を、単一の変数ではなく `Record<string, HTMLElement>`（アイテムのid→要素）で保持し、`current`（現在表示中のアイテム）が変わるたびに `$derived` で正しい要素を導出すること。単一変数に対する条件付き `bind:this`（`item.id === current.id ? el : undefined` のようなgetter/setterペア）は、Scroll Snap構造上全アイテムのDOM要素がビューワーの生存期間中ずっとマウントされたままであるため、各要素の生成タイミング（＝`current`と一致した最初の一瞬）でしか発火せず、以降どのアイテムに切り替えても最初に紐づいた要素に固定されたままになる実機不具合が発生した。また `$resetTransform()` は画像読み込み完了時にCropper.jsが一度だけ内部計算する初期フィット変形（`$center(initialFit)` 相当）を再現しないため、既に読み込み済みの画像に対して不要に呼ぶとフィットが崩れる。実際に変形操作を適用したアイテムのみを追跡（dirty tracking）し、未変形のアイテムには `$resetTransform()` 以降を一切呼ばない設計にしている。
 
@@ -126,7 +126,7 @@ custom elementsに直接紐づく部分（Cropper.js/Vidstackの実際のズー�
 
 ## 5. エラーハンドリング
 
-- メディア読み込み失敗時（画像 `onerror` / Vidstackのエラーイベント）は、インラインでエラーメッセージを表示し、閉じる・次へ送るための導線を残す（現状の `viewerjs` にはなかった明示的なエラーUI）。
+- メディア読み込み失敗時（画像は `<cropper-image>` の `$ready()` が返すPromiseのreject / 動画・音声はVidstackのエラーイベント）は、インラインでエラーメッセージを表示し、閉じる・次へ送るための導線を残す（現状の `viewerjs` にはなかった明示的なエラーUI）。画像側は当初 `onerror` 属性のフックを想定していたが、Cropper.jsが実際の `<img>` をshadow root配下にappendする構造上、そのerrorイベントは `bubbles: false` / `composed: false` のためホスト要素（`<cropper-image>`）まで届かず、実装は `$ready().catch(...)` に変更した（4.2節参照）。
 - Fullscreen API の呼び出し失敗（環境によって拒否されるケースがある）は例外を握りつぶし、`app.reportError` でログするに留め、UIをクラッシュさせない。
 - `panzoom` インスタンスは `onMount` のクリーンアップ、およびアイテム切替時に確実に破棄・再生成し、リスナーのリークを防ぐ（現状の `viewer?.destroy()` パターンを踏襲）。
 

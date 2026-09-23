@@ -14,8 +14,11 @@
   import MediaControlBar from "./MediaControlBar.svelte";
   import {
     deriveViewItems,
+    fileName,
     initialImageTransform,
+    isImage,
     isRevealed,
+    isVideo,
     nextIndex,
     prevIndex,
     reveal,
@@ -45,9 +48,6 @@
   let imageTransform = $state<ImageTransform>(initialImageTransform);
 
   const current = $derived(viewItems[currentIndex]);
-  const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
-  const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
-  const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
 
   let mediaLoadError = $state<Record<string, boolean>>({});
 
@@ -65,6 +65,7 @@
     $scale: (x: number, y?: number) => void;
     $zoom: (s: number, x?: number, y?: number) => void;
     $resetTransform: () => void;
+    $ready: () => Promise<CropperImageEl>;
   };
   // <cropper-image>へのbind:thisは、かつて`item.id === current.id`の時だけ単一の
   // cropperImageEl変数へ代入するgetter/setterだった。しかしScroll Snap構造上、
@@ -88,7 +89,7 @@
   let cropperImageElsByItemId = $state<Record<string, CropperImageEl>>({});
   const currentCropperImageEl = $derived(cropperImageElsByItemId[current.id]);
 
-  // goTo()が発行したプログラム的スクロール(scrollIntoView)が進行中かどうか。trueの間は
+  // goTo()が発行したプログラム的スクロール(scrollTo)が進行中かどうか。trueの間は
   // onScroll()の受動的なcurrentIndex再同期(手でスワイプした場合の追従用)を止める。
   // 理由: ユーザーが前後送りボタンを連打すると、前のsmoothスクロールアニメーションが
   // 完了しないうちに次のgoTo()が呼ばれることがある(ごく一般的な操作)。この間もscrollLeftは
@@ -103,7 +104,7 @@
   // 'scrollend'(スクロールが実際に静止したタイミングを教えてくれるイベント)が発火すれば
   // それを正として早期にフラグを解除する(下記onScrollEnd参照)。ただし'onscrollend' in window
   // が真であることは「発火することの保証」にはならない — 例えばgoTo(0)をstartIndex: 0の
-  // 状態(=マウント直後、既にscrollLeft: 0)で呼んだ場合のようにscrollIntoView自体が実際には
+  // 状態(=マウント直後、既にscrollLeft: 0)で呼んだ場合のようにscrollTo自体が実際には
   // 1pxも動かさないケースでは、対応環境でも'scrollend'イベントは発火しない(スクロール位置が
   // 変化していないため)。そのため機能検出(SCROLLEND_SUPPORTED)による分岐はやめ、
   // 常に500ms(1アイテム分のsmoothスクロールが十分収まる余裕を持たせた時間)の
@@ -274,18 +275,49 @@
     (e.currentTarget as CropperImageEl).toggleAttribute("translatable", scale > 1 + 1e-6);
   }
 
+  // <cropper-image>のonerror属性は原理上発火しない: Cropper.jsは実際の<img>要素を自身の
+  // shadow root配下にappendしており、そのimgのerrorイベントはbubbles: false/composed: false
+  // (DOM標準のErrorEvent仕様どおり)のためshadow rootの外(ホスト要素である<cropper-image>
+  // 自身)まで届かない。代わりにCropper.jsが公開する$ready()(画像の読み込み完了を待つ
+  // Promiseを返し、読み込み失敗時はrejectする仕様、node_modules/cropperjs/dist/
+  // cropper.esm.jsで確認済み)をフックする。
+  function hookImageLoadError(el: CropperImageEl, itemId: string) {
+    el.$ready().catch(() => {
+      mediaLoadError = { ...mediaLoadError, [itemId]: true };
+    });
+  }
+
   // 動画はズーム時のみパンを有効化する(画像のCropper.jsと同じ方針)。videoPanzoomアクションは
   // Scroll Snapの各ページごとに要素が個別マウントされる(#each item.id)ため、アイテム切替時に
   // 別インスタンスとして再生成され、倍率リセットのための追加処理は不要。
+  //
+  // @panzoom/panzoomは初期化時にelem.parentNode(=<media-provider>の親である<media-player>)へ
+  // 無条件でtouchAction: 'none'をインラインstyle設定する(node_modules/@panzoom/panzoom
+  // 確認済み)。既定のtouchAction: 'none'のままだと、等倍(パン無効)時でもブラウザのネイティブな
+  // 横スワイプ(Scroll Snapによる前後送り)がタッチデバイス上で機能しなくなる。画像側
+  // (Cropper.jsのtranslatable、等倍時はネイティブスクロールに委ねる方針、§3.9参照)との
+  // 一貫性のため、ここではtouchAction: 'pan-x'を明示指定し、横方向のネイティブパンジェスチャーを
+  // ブラウザに残す(Panzoom自身の縦方向操作とは競合しないY方向はブラウザに委ねたままでよい)。
   function videoPanzoom(node: HTMLElement) {
-    const pz: PanzoomObject = Panzoom(node, { maxScale: 4, disablePan: true });
+    const pz: PanzoomObject = Panzoom(node, {
+      maxScale: 4,
+      disablePan: true,
+      touchAction: "pan-x",
+      cursor: "default",
+    });
     const onWheel = (e: WheelEvent) => pz.zoomWithWheel(e);
     node.addEventListener("wheel", onWheel);
 
+    // Panzoomは初期化時にelem(node、<media-provider>)へ無条件でcursor: 'move'を設定する。
+    // しかし等倍(disablePan: true、実際にはドラッグでパンできない)状態でもこのカーソルが
+    // 出続けるのは誤解を招くため、disablePanの切り替えに連動してcursorも同期する
+    // (パン可能な時だけmove、そうでない時はブラウザ既定に戻す)。
     function syncDisablePan() {
-      pz.setOptions({ disablePan: pz.getScale() <= 1 + 1e-6 });
+      const disablePan = pz.getScale() <= 1 + 1e-6;
+      pz.setOptions({ disablePan, cursor: disablePan ? "default" : "move" });
     }
     node.addEventListener("panzoomzoom", syncDisablePan);
+    syncDisablePan();
 
     return {
       destroy() {
@@ -379,6 +411,7 @@
                   (el) => {
                     if (el) {
                       cropperImageElsByItemId[item.id] = el;
+                      hookImageLoadError(el, item.id);
                     } else {
                       delete cropperImageElsByItemId[item.id];
                     }
@@ -390,7 +423,6 @@
                 scalable
                 class="h-full w-full"
                 ontransform={onCropperImageTransform}
-                onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
               ></cropper-image>
             </cropper-canvas>
           {/if}
@@ -438,16 +470,14 @@
                        十分という要件どおり)。 -->
                   <media-gesture event="pointerup" action="toggle:paused"></media-gesture>
                 </media-provider>
-                <!-- panzoom-exclude: 上記の構造変更によりMediaControlBarは
-                     videoPanzoomの対象(<media-provider>)の子孫ではなくなったため、
-                     Panzoomのpointerdownハンドラは基本的にもう発火しないはずだが、
-                     念のため残しておく(害はなく、将来の構造変更に対する保険として機能する)。
-                     MediaGridのサムネイルと同じ自前コントロールバー(MediaControlBar)を
-                     使う。フルスクリーン表示なのでsize="large"、MediaViewer自体が既に
-                     拡大表示なのでonExpandは渡さない(拡大表示ボタンは出さない)。 -->
-                <div class="panzoom-exclude">
-                  <MediaControlBar file={item} variant="video" size="large" showFullscreenButton />
-                </div>
+                <!-- MediaGridのサムネイルと同じ自前コントロールバー(MediaControlBar)を使う。
+                     フルスクリーン表示なのでsize="large"、MediaViewer自体が既に拡大表示なので
+                     onExpandは渡さない(拡大表示ボタンは出さない)。
+                     旧実装はここに`panzoom-exclude`クラス付きのラッパーdivを持っていたが、
+                     Panzoomの`isExcluded()`判定は対象要素(<media-provider>)からDOM祖先方向にのみ
+                     遡る仕組みで、その兄弟であるこのdivをラップしても判定に一切関与しないため
+                     (node_modules/@panzoom/panzoom確認済み)、実効性のないコードとして削除した。 -->
+                <MediaControlBar file={item} variant="video" size="large" showFullscreenButton />
               </media-player>
             </div>
           {/if}
@@ -480,7 +510,7 @@
       onclick={(e) => { e.stopPropagation(); goPrev(); }}
     >
       <button
-        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100"
+        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         onclick={(e) => { e.stopPropagation(); goPrev(); }}
         aria-label="前へ"
       >
@@ -494,7 +524,7 @@
       onclick={(e) => { e.stopPropagation(); goNext(); }}
     >
       <button
-        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100"
+        class="inline-flex size-9 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         onclick={(e) => { e.stopPropagation(); goNext(); }}
         aria-label="次へ"
       >
@@ -505,12 +535,18 @@
 
   {#if isRevealed(revealed, current) && isImage(current)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- role="toolbar"はツールバー内の矢印キーによるフォーカス移動(roving tabindex)を
+         期待する属性だが、このコンポーネントは各ボタンを個別にTab移動可能な素の
+         <Button>として並べているだけで、それを実装していない。加えて矢印キーは
+         svelte:window onkeydown(onKeydown、前後送り)がグローバルに処理しているため、
+         role="toolbar"のまま実装すると両者が意味的に競合する。実装コストの低い方として
+         role="toolbar"自体を外し、単なるボタングループ(role="group")として扱う。 -->
     <div
       class="relative z-10 flex flex-none items-center justify-center gap-1 p-[0.5rem_0.5rem_max(0.5rem,env(safe-area-inset-bottom))]"
       onclick={(e) => e.stopPropagation()}
-      role="toolbar"
+      role="group"
       aria-label="画像ツールバー"
-      tabindex="-1"
     >
       <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => currentCropperImageEl?.$zoom(0.1)} aria-label="ズームイン"><ZoomIn size={16} /></Button>
       <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={() => currentCropperImageEl?.$zoom(-0.1)} aria-label="ズームアウト"><ZoomOut size={16} /></Button>
@@ -556,12 +592,6 @@
     height: 100%;
     max-width: 100%;
   }
-
-  /* 主な修正は<script>側で行った(videoPanzoomの対象を<media-player>全体から
-     <media-provider>だけに変更し、コントロールバー(MediaControlBar)をtransformによる
-     スタッキングコンテキストの外に出した)。コントロールバー自体はMediaControlBar.svelteの
-     .media-ctrl-overlayでz-index:1を持っており、これが左右送りクリックエリア
-     (z-index未指定)より確実に手前に来る。 */
 
   /* <media-gesture>(映像クリックで再生/一時停止)の判定領域サイズ・位置。MediaGrid.svelteと
      同じ理由(デフォルトテーマ未使用のためbase.cssにサイズ指定が無い)で、<media-provider>
