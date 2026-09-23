@@ -75,12 +75,27 @@
     scrollEl?.children[currentIndex]?.scrollIntoView({ behavior: "auto", inline: "start", block: "nearest" });
   });
 
+  // 末尾→先頭、先頭→末尾のラップアラウンド送りは、Scroll Snapコンテナ上で複数の
+  // スナップポイントを一気に跨ぐ長距離のsmoothスクロールになる。WebKitGTK等の一部の
+  // ブラウザエンジンでは、scroll-snap-type: mandatoryが有効なコンテナに対する
+  // scrollIntoView({behavior:"smooth"})が、目的地に到達する前に途中のスナップ位置で
+  // アニメーションを打ち切ってしまうことがある(CSS Scroll SnapとProgrammatic Scrolling
+  // の相互作用に関する既知の実装差異)。この場合、goTo()内でcurrentIndexは即座に
+  // 目的のindexへ更新済みだが実際のスクロール位置は途中アイテムのまま止まってしまい、
+  // その後onScroll()の再同期(スクロール位置からindexを再計算するデバウンス処理)が
+  // currentIndexを実際に止まった途中アイテムのindexへ巻き戻してしまう
+  // (＝表示アイテムとcurrentIndexは一致するが、ユーザーが意図した「1枚目に戻る」操作が
+  // 完了しない)。ラップアラウンドの1ステップ分だけbehavior: "auto"(アニメーションなしの
+  // 瞬間スクロール)にすることで、複数スナップポイントを跨ぐsmoothスクロール自体を
+  // 発生させず、この競合を回避する。
   function goNext() {
-    goTo(nextIndex(currentIndex, viewItems.length));
+    const wrapping = currentIndex === viewItems.length - 1;
+    goTo(nextIndex(currentIndex, viewItems.length), wrapping ? "auto" : "smooth");
   }
 
   function goPrev() {
-    goTo(prevIndex(currentIndex, viewItems.length));
+    const wrapping = currentIndex === 0;
+    goTo(prevIndex(currentIndex, viewItems.length), wrapping ? "auto" : "smooth");
   }
 
   function onKeydown(e: KeyboardEvent) {

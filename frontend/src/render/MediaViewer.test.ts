@@ -82,6 +82,57 @@ describe("MediaViewer", () => {
     expect(scrollIntoView).toHaveBeenCalledOnce();
     const [, secondPage] = document.querySelectorAll('[data-testid="media-page"]');
     expect(scrollIntoView.mock.instances[0]).toBe(secondPage);
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+  });
+
+  // 回帰テスト: 末尾から次へ送ると先頭へラップアラウンドする。このステップは複数のScroll
+  // Snapポイントを跨ぐ長距離スクロールになり、一部のブラウザエンジンではsmoothスクロールが
+  // 意図した位置まで到達しないことがあるため、behavior: "auto"(アニメーションなし)で
+  // 瞬時に移動させる必要がある(goNext/goPrevのコメント参照)。
+  it("末尾から次へで先頭にラップアラウンドする際はbehavior: autoでscrollIntoViewする", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const { getByLabelText } = render(MediaViewer, {
+      props: {
+        files: [
+          file({ id: "a", name: "a.png" }),
+          file({ id: "b", name: "b.png" }),
+          file({ id: "c", name: "c.png" }),
+        ],
+        startIndex: 2,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    scrollIntoView.mockClear();
+    await fireEvent.click(getByLabelText("次へ"));
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    const [firstPage] = document.querySelectorAll('[data-testid="media-page"]');
+    expect(scrollIntoView.mock.instances[0]).toBe(firstPage);
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
+  });
+
+  it("先頭から前へで末尾にラップアラウンドする際はbehavior: autoでscrollIntoViewする", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const { getByLabelText } = render(MediaViewer, {
+      props: {
+        files: [
+          file({ id: "a", name: "a.png" }),
+          file({ id: "b", name: "b.png" }),
+          file({ id: "c", name: "c.png" }),
+        ],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    scrollIntoView.mockClear();
+    await fireEvent.click(getByLabelText("前へ"));
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    const [, , thirdPage] = document.querySelectorAll('[data-testid="media-page"]');
+    expect(scrollIntoView.mock.instances[0]).toBe(thirdPage);
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
   });
 
   it("非ゼロstartIndexでマウントすると、その位置へ即座にscrollIntoViewする", () => {
