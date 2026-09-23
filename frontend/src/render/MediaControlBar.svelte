@@ -121,6 +121,17 @@
             <div class="media-vol-thumb"></div>
           </media-volume-slider>
         </div>
+        <!-- 現在時間/合計時間。<media-time>はtype属性で追跡対象を切り替える自己完結の
+             表示専用プリミティブで、track/fill/thumb等の子要素は不要(テキストは
+             Vidstack本体が自動的にtextContentへ書き込む。types/components/ui/time.d.ts
+             のJSDoc例どおり子要素なしの単体タグで使う)。size="compact"(MediaGrid)では
+             サムネイルが窮屈になるため非表示にし、size="large"(MediaViewer)でのみ
+             表示する(下記CSS参照)。 -->
+        <div class="media-time-group" aria-label="再生時間">
+          <media-time type="current"></media-time>
+          <span aria-hidden="true">/</span>
+          <media-time type="duration"></media-time>
+        </div>
       </div>
       <div class="media-ctrl-group-right">
         <button class="media-ctrl-btn media-ctrl-btn-rate" onclick={cyclePlaybackRate} aria-label="再生速度">
@@ -217,6 +228,19 @@
   }
   .media-ctrl-overlay-audio :global(.media-ctrl-row) {
     justify-content: center;
+  }
+
+  /* 現在時間/合計時間。size="compact"(MediaGrid)ではサムネイルが窮屈になるため既定で
+     非表示にし、size="large"(MediaViewer、下記.media-ctrl-bar--lgブロック参照)でのみ
+     表示する。色は--accentではなく他のコントロール(.media-ctrl-btn)と同じ固定の白
+     (視認性確保のための慣習、指示どおり)。 */
+  .media-time-group {
+    display: none;
+    align-items: baseline;
+    gap: 0.125rem;
+    color: white;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   /* シークバー。デフォルトテーマ(vds-slider*クラス)は使わず、track/fill/thumbを
@@ -451,5 +475,9 @@
   :global(.media-ctrl-bar--lg .media-vol-thumb) {
     width: 0.75rem;
     height: 0.75rem;
+  }
+  :global(.media-ctrl-bar--lg) .media-time-group {
+    display: flex;
+    font-size: 0.875rem;
   }
 </style>
