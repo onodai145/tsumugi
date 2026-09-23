@@ -274,6 +274,11 @@
   }
   .media-ctrl-overlay-audio {
     position: static;
+    /* <media-player>はdisplay:flex(既定row方向、MediaGrid.svelte/MediaViewer.svelte側で
+       指定)のflexコンテナなので、flex-grow指定のないこの子要素はコンテンツ分の幅
+       (ボタン列+波形の実測サイズ)にshrink-to-fitしてしまい、プレイヤー幅いっぱいに
+       広がらない(左寄せで右側が余白になる不具合の原因だった)。widthを明示して埋める。 */
+    width: 100%;
   }
 
   /* シークバー(1段目、上部の細い帯)とボタン行(2段目)を縦に並べた一体のオーバーレイ。
