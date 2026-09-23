@@ -8,6 +8,7 @@
   import "vidstack/player/ui";
   import type { MediaPlayerElement } from "vidstack/elements";
   import { Download, Maximize, Maximize2, Minimize, Pause, Play, Volume2, VolumeX } from "@lucide/svelte";
+  import WaveSurfer from "wavesurfer.js";
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
@@ -76,6 +77,68 @@
       },
     };
   }
+
+  // SoundCloud風の波形表示(音声のみ)。wavesurfer.jsを、Vidstackが内部生成する
+  // 実際の<audio>要素(<media-player>の子孫の<media-provider>配下、trackVideoAspectRatio
+  // アクションと同じ理由で非同期にレンダリングされうる)にmediaオプションでアタッチする
+  // ことで、波形の描画のみを担当させつつ再生制御自体は既存のMediaControlBar/Vidstack側に
+  // 委ねる(WaveSurfer側は別途独自の<audio>を生成しない)。
+  //
+  // 既知の不具合(wavesurfer.js GitHub Issues): mediaオプション使用時、WaveSurferの
+  // コンストラクタはthis.getSrc()(media.currentSrc || media.src)を同期的に一度だけ
+  // 読み取ってロード対象URLを決める(node_modules/wavesurfer.js/dist/wavesurfer.js内
+  // initialUrl = this.options.url || this.getSrc() || '')。Vidstackのsrc設定は
+  // 非同期(<audio>要素の生成自体がMutationObserverで待つ必要があるほど遅れる)ため、
+  // mediaのみ渡すとgetSrc()が空文字を返し、load()が一度も呼ばれず"ready"が
+  // 永久に発火しない(=波形が描画されない)ケースがある。file.url(Vidstackに渡している
+  // のと同じURL)をurlオプションとしても明示的に渡すことで、getSrc()のタイミングに
+  // 依存せず確実にロードされるようにする。
+  function attachWaveform(node: HTMLElement, mediaFile: DriveFile) {
+    let audioEl: HTMLAudioElement | null = null;
+    let ws: WaveSurfer | null = null;
+
+    function createWaveSurfer(el: HTMLAudioElement) {
+      // 波形の色は--accentトークン経由にする(.media-seek-track/.media-seek-fillと
+      // 同じ考え方)。ただしcanvasのfillStyleはCSSカスケードの外で解決されるため
+      // var(--accent)をそのまま渡しても解決されない。getComputedStyleで実際の値を
+      // 読み取ってからcolor-mix()に埋め込む。
+      const accentColor = getComputedStyle(node).getPropertyValue("--accent").trim() || "currentColor";
+      ws = WaveSurfer.create({
+        container: node,
+        media: el,
+        url: mediaFile.url,
+        height: size === "large" ? 44 : 24,
+        barWidth: 2,
+        barGap: 1,
+        barRadius: 1,
+        cursorWidth: 0,
+        waveColor: `color-mix(in srgb, ${accentColor} 30%, transparent)`,
+        progressColor: accentColor,
+      });
+      ws.on("error", (e) => app.reportError(e));
+    }
+
+    function attach() {
+      const player = node.closest("media-player");
+      const found = (player?.querySelector("audio") as HTMLAudioElement | null) ?? null;
+      if (!found || found === audioEl) return;
+      audioEl = found;
+      ws?.destroy();
+      createWaveSurfer(found);
+    }
+
+    attach();
+    const player = node.closest("media-player");
+    const observer = player ? new MutationObserver(attach) : null;
+    if (player) observer?.observe(player, { childList: true, subtree: true });
+
+    return {
+      destroy() {
+        observer?.disconnect();
+        ws?.destroy();
+      },
+    };
+  }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -84,6 +147,11 @@
   class={variant === "video" ? "media-ctrl-overlay" : "media-ctrl-overlay-audio"}
   onclick={(e) => e.stopPropagation()}
 >
+  {#if variant === "audio"}
+    <!-- SoundCloud風の波形表示。クリックでのシークはwavesurfer.js標準機能(mediaオプション
+         使用時、クリック位置に応じて接続した<audio>要素のcurrentTimeを更新する)をそのまま使う。 -->
+    <div class={size === "large" ? "media-waveform media-waveform--lg" : "media-waveform"} use:attachWaveform={file}></div>
+  {/if}
   <!-- YouTube風に、シークバー(上段の細い帯)とボタン行(下段)を<media-controls>1個に
        まとめて一体のオーバーレイにする。自動非表示はVidstack本体が<media-controls>に
        付与するdata-visible属性(マウスの動き・ホバー・一時停止中かどうかに応じて
@@ -495,5 +563,18 @@
   :global(.media-ctrl-bar--lg) .media-time-group {
     display: flex;
     font-size: 0.875rem;
+  }
+
+  /* 波形表示コンテナ。wavesurfer.jsが内部にcanvasを生成する。クリックでのシークは
+     wavesurfer.js標準機能。size="compact"(MediaGrid)/size="large"(MediaViewer)で
+     高さを切り替える(実際の高さ指定はattachWaveformアクション内のheightオプション、
+     ここではレイアウト上の余白のみ)。 */
+  .media-waveform {
+    width: 100%;
+    cursor: pointer;
+    margin-bottom: 0.25rem;
+  }
+  .media-waveform--lg {
+    margin-bottom: 0.5rem;
   }
 </style>

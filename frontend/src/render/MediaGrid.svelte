@@ -24,7 +24,11 @@
       : "mt-2 grid grid-cols-2 gap-1 overflow-hidden rounded-md"}
   >
     {#each files as f (f.id)}
-      <div class="media-cell relative flex aspect-[16/10] items-center justify-center">
+      <div
+        class={isAudio(f)
+          ? "media-cell media-cell-audio relative flex items-center justify-center"
+          : "media-cell relative flex aspect-[16/10] items-center justify-center"}
+      >
         {#if !isRevealed(revealed, f)}
           <button
             class="sensitive-cover h-full w-full border-0 text-sm text-muted-foreground"
@@ -97,6 +101,13 @@
        設定→表示 で調整可能（--media-thumbnail-height, 既定200px）。 */
     max-height: var(--media-thumbnail-height, 200px);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
+  }
+  /* 音声のみのタイルは画像・動画と違って表示すべき映像がなく、aspect-[16/10]の
+     縦長ボックスをそのまま適用するとコントロールバー以外が無駄な暗い空白になる
+     (実機フィードバックで指摘)。波形+コントロールバーのコンテンツの高さに
+     フィットするコンパクトなボックスにする。 */
+  .media-cell-audio {
+    padding: 0.5rem 0;
   }
   .sensitive-cover {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
