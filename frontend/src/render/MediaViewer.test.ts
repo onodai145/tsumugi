@@ -92,9 +92,13 @@ describe("MediaViewer", () => {
     expect(scrollTo).toHaveBeenCalledWith({ left: 1000, behavior: "smooth" });
   });
 
-  // 回帰テスト: 末尾から次へ送ると先頭へラップアラウンドする。長距離のsmoothスクロールを
-  // 避け、behavior: "auto"(アニメーションなし)で瞬時に移動させる(goNext/goPrevのコメント参照)。
-  it("末尾から次へで先頭にラップアラウンドする際はbehavior: autoでscrollToする", async () => {
+  // 回帰テスト: 末尾から次へ送ると先頭へラップアラウンドする。かつてはこのラップアラウンド
+  // 時だけbehavior: "auto"(瞬時ジャンプ)にする特別扱いがあった(158c750)が、その仮説
+  // (WebKitGTKでの長距離smoothスクロール打ち切り)は実測調査(69b28a0)で誤りと判明しており、
+  // むしろこの特別扱いこそが2枚組ノート等で「前後送りが常にラップアラウンドになり、
+  // 瞬時にカクッと切り替わってスムーズに見えない」というユーザー体感上の不具合の原因
+  // だった。通常送りと同じくbehavior: "smooth"で統一する(goNext/goPrevのコメント参照)。
+  it("末尾から次へで先頭にラップアラウンドする際もbehavior: smoothでscrollToする", async () => {
     const scrollTo = vi.fn();
     Element.prototype.scrollTo = scrollTo;
     const { getByLabelText } = render(MediaViewer, {
@@ -116,10 +120,10 @@ describe("MediaViewer", () => {
     await fireEvent.click(getByLabelText("次へ"));
     expect(scrollTo).toHaveBeenCalledOnce();
     expect(scrollTo.mock.instances[0]).toBe(scroller);
-    expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: "auto" });
+    expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: "smooth" });
   });
 
-  it("先頭から前へで末尾にラップアラウンドする際はbehavior: autoでscrollToする", async () => {
+  it("先頭から前へで末尾にラップアラウンドする際もbehavior: smoothでscrollToする", async () => {
     const scrollTo = vi.fn();
     Element.prototype.scrollTo = scrollTo;
     const { getByLabelText } = render(MediaViewer, {
@@ -141,7 +145,7 @@ describe("MediaViewer", () => {
     await fireEvent.click(getByLabelText("前へ"));
     expect(scrollTo).toHaveBeenCalledOnce();
     expect(scrollTo.mock.instances[0]).toBe(scroller);
-    expect(scrollTo).toHaveBeenCalledWith({ left: 2000, behavior: "auto" });
+    expect(scrollTo).toHaveBeenCalledWith({ left: 2000, behavior: "smooth" });
   });
 
   // 「B(2枚目)を開く→前後送りで他を見る→元のBに戻る」で表示位置がずれる不具合の実際の原因は

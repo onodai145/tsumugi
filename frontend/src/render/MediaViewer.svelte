@@ -126,19 +126,21 @@
     scrollEl.scrollTo({ left: currentIndex * scrollEl.clientWidth, behavior: "auto" });
   });
 
-  // 末尾→先頭、先頭→末尾のラップアラウンド送りは、複数のスナップポイントを一気に
-  // 跨ぐ長距離のsmoothスクロールになる。goTo()をscrollTo()ベースにした後は
-  // (上記コメント参照)ラップアラウンドを狙ってbehavior: "auto"にする理由は無くなったが、
-  // 長距離のsmoothスクロールを避けたいというUX上の判断(一瞬で先頭/末尾へジャンプする方が
-  // 自然)自体は引き続き妥当なので、この分岐そのものは残す。
+  // 末尾→先頭、先頭→末尾のラップアラウンド送りも含め、常にbehavior: "smooth"(goTo()の
+  // デフォルト)で統一する。かつてはラップアラウンド時のみbehavior: "auto"(瞬時ジャンプ)に
+  // する分岐があった(158c750)。これは「複数のScroll Snapポイントを跨ぐ長距離のsmooth
+  // スクロールがWebKitGTK上で途中のスナップ位置で打ち切られる」という仮説に基づく修正
+  // だったが、その後の実測調査(69b28a0、実際の原因はscrollIntoView()の古いレイアウト
+  // 情報による誤判定だった)でこの仮説自体が誤りだったと判明している。むしろこの
+  // 特別扱いこそが「2枚組ノートで前後送りが常にラップアラウンドになり、瞬時にカクッと
+  // 切り替わってスムーズに見えない」というユーザー体感上の不具合の直接の原因だった
+  // (goTo/beginProgrammaticScroll付近のコメント、およびtask-4-report.mdの実測記録参照)。
   function goNext() {
-    const wrapping = currentIndex === viewItems.length - 1;
-    goTo(nextIndex(currentIndex, viewItems.length), wrapping ? "auto" : "smooth");
+    goTo(nextIndex(currentIndex, viewItems.length));
   }
 
   function goPrev() {
-    const wrapping = currentIndex === 0;
-    goTo(prevIndex(currentIndex, viewItems.length), wrapping ? "auto" : "smooth");
+    goTo(prevIndex(currentIndex, viewItems.length));
   }
 
   function onKeydown(e: KeyboardEvent) {
