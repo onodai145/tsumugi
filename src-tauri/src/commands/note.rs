@@ -16,6 +16,7 @@ use crate::api::users::search_users as api_search_users;
 use crate::domain::{DriveFile, EmojiDef, Note, ReactionUser, SourceItem, UrlPreview, User};
 use crate::error::{Error, Result};
 use crate::state::AppState;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
@@ -331,6 +332,33 @@ pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: Str
         .await
         .map_err(|e| Error::Invalid(format!("cannot write file {path}: {e}")))?;
     Ok(())
+}
+
+/// 添付ファイルをbase64エンコードした状態で取得する（音声波形表示用）。
+/// ドライブの添付URLはMisskey側がCORSヘッダを返さないため、フロントエンドの
+/// fetch()で直接バイト列をデコードできない（<audio>再生自体はCORS制約を受けないため
+/// 別問題）。Rust側でCORSに縛られずダウンロードし、Blob化できる形で渡す。
+#[tauri::command]
+#[specta::specta]
+pub async fn fetch_url_as_base64(state: State<'_, AppState>, url: String) -> Result<String> {
+    let resp = state.http.get(&url).send().await?;
+    if !resp.status().is_success() {
+        return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
+    }
+    if resp.content_length().is_some_and(|len| len > MAX_SAVE_FILE_BYTES) {
+        return Err(Error::Invalid(format!(
+            "ファイルが大きすぎます（{}MB超）",
+            MAX_SAVE_FILE_BYTES / 1024 / 1024
+        )));
+    }
+    let bytes = resp.bytes().await?;
+    if bytes.len() as u64 > MAX_SAVE_FILE_BYTES {
+        return Err(Error::Invalid(format!(
+            "ファイルが大きすぎます（{}MB超）",
+            MAX_SAVE_FILE_BYTES / 1024 / 1024
+        )));
+    }
+    Ok(STANDARD.encode(&bytes))
 }
 
 /// プレビュー用途に許容する最大サイズ(base64化してフロントに保持するため、実アップロード上限より小さく抑える)。

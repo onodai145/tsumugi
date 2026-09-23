@@ -9,6 +9,7 @@
   import type { MediaPlayerElement } from "vidstack/elements";
   import { Download, Maximize, Maximize2, Minimize, Pause, Play, Volume2, VolumeX } from "@lucide/svelte";
   import WaveSurfer from "wavesurfer.js";
+  import { commands, unwrap } from "../lib/ipc";
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
@@ -84,20 +85,44 @@
   // ことで、波形の描画のみを担当させつつ再生制御自体は既存のMediaControlBar/Vidstack側に
   // 委ねる(WaveSurfer側は別途独自の<audio>を生成しない)。
   //
-  // 既知の不具合(wavesurfer.js GitHub Issues): mediaオプション使用時、WaveSurferの
-  // コンストラクタはthis.getSrc()(media.currentSrc || media.src)を同期的に一度だけ
-  // 読み取ってロード対象URLを決める(node_modules/wavesurfer.js/dist/wavesurfer.js内
-  // initialUrl = this.options.url || this.getSrc() || '')。Vidstackのsrc設定は
-  // 非同期(<audio>要素の生成自体がMutationObserverで待つ必要があるほど遅れる)ため、
-  // mediaのみ渡すとgetSrc()が空文字を返し、load()が一度も呼ばれず"ready"が
-  // 永久に発火しない(=波形が描画されない)ケースがある。file.url(Vidstackに渡している
-  // のと同じURL)をurlオプションとしても明示的に渡すことで、getSrc()のタイミングに
-  // 依存せず確実にロードされるようにする。
+  // WaveSurferは波形描画のため自前でfetch()して音声データをデコードするが、Misskeyの
+  // ドライブファイル配信はAccess-Control-Allow-Originを返さないため、file.urlをそのまま
+  // urlオプションに渡すと常にCORSで失敗する(<audio>要素自体の再生はCORS制約を受けない
+  // ため、再生だけは正常に動いてしまい、波形だけ描画されないという形で気づきにくい)。
+  // Rust側(fetch_url_as_base64、src-tauri/src/commands/note.rs)はブラウザのCORSに
+  // 縛られないので、そちらでバイト列を取得してBlob化し、blob: URLとしてurlオプションに
+  // 渡すことでCORSを回避する(blob: URLへのfetchはCORS対象外)。
   function attachWaveform(node: HTMLElement, mediaFile: DriveFile) {
     let audioEl: HTMLAudioElement | null = null;
     let ws: WaveSurfer | null = null;
+    let blobUrl: string | null = null;
+    let generation = 0;
 
-    function createWaveSurfer(el: HTMLAudioElement) {
+    async function createWaveSurfer(el: HTMLAudioElement) {
+      const myGeneration = ++generation;
+      let waveformUrl = mediaFile.url;
+      try {
+        const base64 = await unwrap(commands.fetchUrlAsBase64(mediaFile.url));
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        // BlobのtypeにmediaFile.mimeType(例: "audio/mpeg")を明示的に指定すると、
+        // WebKitGTKでこのBlobを<audio>要素のsrcとして再生しようとした際に
+        // MediaError(code=4, SRC_NOT_SUPPORTED)になる既知の癖がある(audio/mp3や
+        // type未指定なら正常に再生できることを実機で確認済み)。型推定を
+        // ブラウザに任せるためtypeを指定しない。
+        const newBlobUrl = URL.createObjectURL(new Blob([bytes]));
+        if (myGeneration !== generation) {
+          // 取得中に別のcreateWaveSurfer呼び出しへ切り替わっていたら破棄する
+          URL.revokeObjectURL(newBlobUrl);
+          return;
+        }
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        blobUrl = newBlobUrl;
+        waveformUrl = newBlobUrl;
+      } catch (e) {
+        app.reportError(e);
+      }
+      if (myGeneration !== generation) return;
+
       // 波形の色は--accentトークン経由にする(.media-seek-track/.media-seek-fillと
       // 同じ考え方)。ただしcanvasのfillStyleはCSSカスケードの外で解決されるため
       // var(--accent)をそのまま渡しても解決されない。getComputedStyleで実際の値を
@@ -106,7 +131,7 @@
       ws = WaveSurfer.create({
         container: node,
         media: el,
-        url: mediaFile.url,
+        url: waveformUrl,
         height: size === "large" ? 44 : 24,
         barWidth: 2,
         barGap: 1,
@@ -124,7 +149,7 @@
       if (!found || found === audioEl) return;
       audioEl = found;
       ws?.destroy();
-      createWaveSurfer(found);
+      void createWaveSurfer(found);
     }
 
     attach();
@@ -134,8 +159,10 @@
 
     return {
       destroy() {
+        generation++;
         observer?.disconnect();
         ws?.destroy();
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
       },
     };
   }

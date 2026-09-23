@@ -26,7 +26,7 @@
     {#each files as f (f.id)}
       <div
         class={isAudio(f)
-          ? "media-cell media-cell-audio relative flex items-center justify-center"
+          ? "media-cell media-cell-audio relative flex items-center justify-center self-start"
           : "media-cell relative flex aspect-[16/10] items-center justify-center"}
       >
         {#if !isRevealed(revealed, f)}
