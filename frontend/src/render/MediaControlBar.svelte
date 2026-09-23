@@ -128,6 +128,16 @@
       // var(--accent)をそのまま渡しても解決されない。getComputedStyleで実際の値を
       // 読み取ってからcolor-mix()に埋め込む。
       const accentColor = getComputedStyle(node).getPropertyValue("--accent").trim() || "currentColor";
+      const surfaceColor = getComputedStyle(node).getPropertyValue("--surface-2").trim() || "black";
+      // waveColorをtransparentとのcolor-mixで作ると、その分だけ描画された波形canvas自体の
+      // アルファ値が下がる。wavesurfer.jsの進捗レイヤーは波形canvasを複製しsource-in合成で
+      // 色だけ差し替える実装(node_modules/wavesurfer.js/dist/renderer.js
+      // renderSingleCanvas参照)のため、進捗色(progressColor)の不透明度は複製元である
+      // waveColorのアルファ値にそのまま引きずられ、progressColorに完全不透明な色を渡しても
+      // 再生済み部分が薄いままになり未再生部分と見分けがつかなくなる不具合があった
+      // (実機のcanvasピクセルサンプリングで両者が同一の約30%アルファになることを確認済み)。
+      // transparentではなく背景色(不透明)とのcolor-mixにすることで、波形canvas自体は
+      // アルファ1のまま色だけ薄くし、進捗色が正しく完全不透明で乗るようにする。
       ws = WaveSurfer.create({
         container: node,
         media: el,
@@ -137,7 +147,7 @@
         barGap: 1,
         barRadius: 1,
         cursorWidth: 0,
-        waveColor: `color-mix(in srgb, ${accentColor} 30%, transparent)`,
+        waveColor: `color-mix(in srgb, ${accentColor} 35%, ${surfaceColor})`,
         progressColor: accentColor,
       });
       ws.on("error", (e) => app.reportError(e));
