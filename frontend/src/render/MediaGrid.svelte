@@ -50,7 +50,17 @@
                自動推定するinferType()が失敗し(常に"?"=unknown)、プロバイダ(<video>/<audio>要素)が
                一切生成されない不具合があった。typeを明示することで回避する。 -->
           <media-player src={{ src: f.url, type: f.mimeType }} viewType="video" playsinline preload="metadata" class="h-full w-full">
-            <media-provider></media-provider>
+            <media-provider>
+              <!-- 映像クリックで再生/一時停止をトグルする。Vidstack公式の<media-gesture>
+                   プリミティブを使う(自前のclickハンドラは書かない、既存方針の踏襲)。
+                   event="pointerup"/action="toggle:paused"はnode_modules/vidstack/types/
+                   vidstack-DrJHXsLT.d.tsのJSDoc例そのまま。実際のイベント購読は<media-gesture>
+                   自身ではなく<media-provider>(Gesture#onConnectがdata-media-providerを
+                   querySelectorして直接listenEventする、dev/chunks/vidstack-C7VnVlv2.js参照)
+                   に対して行われ、<media-gesture>要素自体はonAttachでpointer-events:noneが
+                   付与される(クリック判定領域=自身のgetBoundingClientRect()を提供するだけ)。 -->
+              <media-gesture event="pointerup" action="toggle:paused"></media-gesture>
+            </media-provider>
             <MediaControlBar
               file={f}
               variant="video"
@@ -124,6 +134,16 @@
      再生中は常にカーソルが消えてしまう。サムネイル上では不要な挙動なので元に戻す。 */
   :global(.media-cell [data-media-player][data-view-type="video"][data-started]:not([data-controls])) {
     cursor: auto;
+  }
+
+  /* <media-gesture>はデフォルトテーマ(vds-gesture等)のCSSを使わないため、判定領域の
+     サイズ・位置を自前で指定する必要がある(base.cssはdata-media-gesture属性に対する
+     サイズ指定を持たない)。<media-provider>(position: relativeがbase.css既定)いっぱいに
+     広げることで、実際に表示されている映像の範囲とクリック判定領域を一致させる。
+     pointer-events: noneはVidstack本体がonAttachで付与済み(<script>コメント参照)。 */
+  :global(.media-cell [data-media-gesture]) {
+    position: absolute;
+    inset: 0;
   }
 
   /* コントロールバー(シークバー・再生/ミュート/音量/再生速度/拡大表示/ダウンロード)の

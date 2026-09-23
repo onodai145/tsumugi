@@ -275,7 +275,20 @@
                      (MediaControlBar、.media-ctrl-overlayでz-index:1)をこの
                      スタッキングコンテキストの外に出し、クリックエリアと正しく
                      比較されるようにする。 -->
-                <media-provider use:videoPanzoom></media-provider>
+                <media-provider use:videoPanzoom>
+                  <!-- 映像クリックで再生/一時停止をトグルする。MediaGrid.svelteと同じく
+                       Vidstack公式の<media-gesture>プリミティブを使う(自前clickハンドラは
+                       書かない)。videoPanzoomは<media-provider>にpointerdown/wheelしか
+                       listenしない(node_modules/@panzoom/panzoom)のに対し、<media-gesture>は
+                       pointerupで購読する(Gesture#attachListener、dev/chunks/
+                       vidstack-C7VnVlv2.js参照)ため競合しない。左右送りクリックエリア
+                       (画面端15%幅)は<media-player>の外側(モーダル直下)にあり、同一
+                       スタッキングコンテキスト内でDOM順が<media-gesture>の対象
+                       (<media-provider>)より後に来るため、その範囲では引き続き
+                       クリックエリアが優先される(中央70%でのみジェスチャーが機能すれば
+                       十分という要件どおり)。 -->
+                  <media-gesture event="pointerup" action="toggle:paused"></media-gesture>
+                </media-provider>
                 <!-- panzoom-exclude: 上記の構造変更によりMediaControlBarは
                      videoPanzoomの対象(<media-provider>)の子孫ではなくなったため、
                      Panzoomのpointerdownハンドラは基本的にもう発火しないはずだが、
@@ -400,4 +413,12 @@
      スタッキングコンテキストの外に出した)。コントロールバー自体はMediaControlBar.svelteの
      .media-ctrl-overlayでz-index:1を持っており、これが左右送りクリックエリア
      (z-index未指定)より確実に手前に来る。 */
+
+  /* <media-gesture>(映像クリックで再生/一時停止)の判定領域サイズ・位置。MediaGrid.svelteと
+     同じ理由(デフォルトテーマ未使用のためbase.cssにサイズ指定が無い)で、<media-provider>
+     いっぱいに広げる。pointer-events: noneはVidstack本体がonAttachで付与済み。 */
+  :global([data-media-gesture]) {
+    position: absolute;
+    inset: 0;
+  }
 </style>
