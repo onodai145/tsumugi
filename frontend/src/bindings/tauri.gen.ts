@@ -227,13 +227,6 @@ export const commands = {
 	listDriveFolders: (accountId: string, folderId: string | null) => typedError<SourceItem[], Error>(__TAURI_INVOKE("list_drive_folders", { accountId, folderId })),
 	saveUrlToFile: (url: string, path: string) => typedError<null, Error>(__TAURI_INVOKE("save_url_to_file", { url, path })),
 	/**
-	 *  添付ファイルをbase64エンコードした状態で取得する（音声波形表示用）。
-	 *  ドライブの添付URLはMisskey側がCORSヘッダを返さないため、フロントエンドの
-	 *  fetch()で直接バイト列をデコードできない（<audio>再生自体はCORS制約を受けないため
-	 *  別問題）。Rust側でCORSに縛られずダウンロードし、Blob化できる形で渡す。
-	 */
-	fetchUrlAsBase64: (url: string) => typedError<string, Error>(__TAURI_INVOKE("fetch_url_as_base64", { url })),
-	/**
 	 *  投稿添付の未アップロードローカル画像を data URL(base64) に変換する(投稿前プレビュー用)。
 	 *  動画や未知拡張子は `application/octet-stream` を返す(呼び出し側でバッジ表示にフォールバックする想定)。
 	 */

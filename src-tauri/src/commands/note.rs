@@ -16,7 +16,6 @@ use crate::api::users::search_users as api_search_users;
 use crate::domain::{DriveFile, EmojiDef, Note, ReactionUser, SourceItem, UrlPreview, User};
 use crate::error::{Error, Result};
 use crate::state::AppState;
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
@@ -334,13 +333,14 @@ pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: Str
     Ok(())
 }
 
-/// 添付ファイルをbase64エンコードした状態で取得する（音声波形表示用）。
+/// 添付ファイルの生バイト列を取得する（音声波形のデコード用）。
+/// 戻り値が `tauri::ipc::Response` で specta が型を扱えないため、`specta_builder()` には
+/// 載せず `lib.rs` の `invoke_handler` で個別に振り分ける(フロントは `invoke` を直接呼ぶ)。
 /// ドライブの添付URLはMisskey側がCORSヘッダを返さないため、フロントエンドの
-/// fetch()で直接バイト列をデコードできない（<audio>再生自体はCORS制約を受けないため
-/// 別問題）。Rust側でCORSに縛られずダウンロードし、Blob化できる形で渡す。
+/// fetch()で直接バイト列を読めない（<audio>再生自体はCORS制約を受けないため
+/// 別問題）。Rust側でCORSに縛られずダウンロードし、ArrayBufferとしてそのまま渡す。
 #[tauri::command]
-#[specta::specta]
-pub async fn fetch_url_as_base64(state: State<'_, AppState>, url: String) -> Result<String> {
+pub async fn fetch_url_bytes(state: State<'_, AppState>, url: String) -> Result<tauri::ipc::Response> {
     let resp = state.http.get(&url).send().await?;
     if !resp.status().is_success() {
         return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
@@ -358,7 +358,7 @@ pub async fn fetch_url_as_base64(state: State<'_, AppState>, url: String) -> Res
             MAX_SAVE_FILE_BYTES / 1024 / 1024
         )));
     }
-    Ok(STANDARD.encode(&bytes))
+    Ok(tauri::ipc::Response::new(bytes.to_vec()))
 }
 
 /// プレビュー用途に許容する最大サイズ(base64化してフロントに保持するため、実アップロード上限より小さく抑える)。

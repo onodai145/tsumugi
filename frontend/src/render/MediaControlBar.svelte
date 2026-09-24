@@ -9,7 +9,7 @@
   import type { MediaPlayerElement } from "vidstack/elements";
   import { Download, Maximize, Maximize2, Minimize, Pause, Play, Volume2, VolumeX } from "@lucide/svelte";
   import WaveSurfer from "wavesurfer.js";
-  import { commands, unwrap } from "../lib/ipc";
+  import { invoke } from "@tauri-apps/api/core";
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
@@ -85,41 +85,39 @@
   // ことで、波形の描画のみを担当させつつ再生制御自体は既存のMediaControlBar/Vidstack側に
   // 委ねる(WaveSurfer側は別途独自の<audio>を生成しない)。
   //
-  // WaveSurferは波形描画のため自前でfetch()して音声データをデコードするが、Misskeyの
-  // ドライブファイル配信はAccess-Control-Allow-Originを返さないため、file.urlをそのまま
-  // urlオプションに渡すと常にCORSで失敗する(<audio>要素自体の再生はCORS制約を受けない
-  // ため、再生だけは正常に動いてしまい、波形だけ描画されないという形で気づきにくい)。
-  // Rust側(fetch_url_as_base64、src-tauri/src/commands/note.rs)はブラウザのCORSに
-  // 縛られないので、そちらでバイト列を取得してBlob化し、blob: URLとしてurlオプションに
-  // 渡すことでCORSを回避する(blob: URLへのfetchはCORS対象外)。
+  // 波形はRust側(fetch_url_bytes、src-tauri/src/commands/note.rs)で取得したバイト列を
+  // Web Audio APIで自前デコードし、ピークデータとしてWaveSurferへ渡す。理由:
+  // (1) Misskeyのドライブ配信はCORSヘッダを返さずWaveSurfer内部のfetch()が失敗する。
+  // (2) WaveSurferにmediaオプションでVidstack管理の<audio>を渡すと、内部のPlayer#setSrcが
+  //     その要素の.srcを書き換えVidstackのUI(再生ボタン等)が反応しなくなる。
+  // (3) mediaなし+urlだと、WaveSurfer自前の<audio>がblobを読めずMediaErrorになる環境がある。
+  // peaks+durationを渡せば<audio>要素を一切介さず描画できる。実際の再生は常にVidstack側で、
+  // 進捗カーソル・クリックシークはtimeupdate購読/interactionイベントで手動同期する。
   function attachWaveform(node: HTMLElement, mediaFile: DriveFile) {
     let audioEl: HTMLAudioElement | null = null;
     let ws: WaveSurfer | null = null;
-    let blobUrl: string | null = null;
     let generation = 0;
+    let onTimeUpdate: (() => void) | null = null;
 
     async function createWaveSurfer(el: HTMLAudioElement) {
       const myGeneration = ++generation;
-      let waveformUrl = mediaFile.url;
+      let peaks: Float32Array[];
+      let duration: number;
       try {
-        const base64 = await unwrap(commands.fetchUrlAsBase64(mediaFile.url));
-        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-        // BlobのtypeにmediaFile.mimeType(例: "audio/mpeg")を明示的に指定すると、
-        // WebKitGTKでこのBlobを<audio>要素のsrcとして再生しようとした際に
-        // MediaError(code=4, SRC_NOT_SUPPORTED)になる既知の癖がある(audio/mp3や
-        // type未指定なら正常に再生できることを実機で確認済み)。型推定を
-        // ブラウザに任せるためtypeを指定しない。
-        const newBlobUrl = URL.createObjectURL(new Blob([bytes]));
-        if (myGeneration !== generation) {
-          // 取得中に別のcreateWaveSurfer呼び出しへ切り替わっていたら破棄する
-          URL.revokeObjectURL(newBlobUrl);
-          return;
+        // 生バイト列(ArrayBuffer)を返すコマンドは specta の型生成に載らないため invoke 直呼び
+        // (src-tauri/src/lib.rs の invoke_handler 参照)。
+        const bytes = await invoke<ArrayBuffer>("fetch_url_bytes", { url: mediaFile.url });
+        const ctx = new AudioContext();
+        try {
+          const decoded = await ctx.decodeAudioData(bytes);
+          peaks = [decoded.getChannelData(0)];
+          duration = decoded.duration;
+        } finally {
+          void ctx.close();
         }
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
-        blobUrl = newBlobUrl;
-        waveformUrl = newBlobUrl;
       } catch (e) {
         app.reportError(e);
+        return;
       }
       if (myGeneration !== generation) return;
 
@@ -138,10 +136,19 @@
       // (実機のcanvasピクセルサンプリングで両者が同一の約30%アルファになることを確認済み)。
       // transparentではなく背景色(不透明)とのcolor-mixにすることで、波形canvas自体は
       // アルファ1のまま色だけ薄くし、進捗色が正しく完全不透明で乗るようにする。
+      // mediaにVidstack管理の<audio>要素(el)をそのまま渡すと、WaveSurferの内部実装
+      // (Player#setSrc、node_modules/wavesurfer.js/dist/player.js)がロード時に必ず
+      // その要素の.srcを自前のblob URLへ書き換えてしまう。これによりVidstack自身の
+      // src管理・再生可能状態のトラッキングが混乱し、<media-play-button>等のVidstack
+      // 標準UIが反応しなくなる不具合が実機で確認された(要素の.play()自体は動くが、
+      // UI経由の再生操作が効かなくなる)。そのためmediaは渡さず、WaveSurferには
+      // 自前の(非表示・再生しない)内部audio要素で波形デコードのみさせ、実際の再生は
+      // 常にVidstack側のelに対して行う。進捗カーソル・クリックシークはそれぞれ
+      // timeupdate購読/interactionイベントで手動同期する。
       ws = WaveSurfer.create({
         container: node,
-        media: el,
-        url: waveformUrl,
+        peaks,
+        duration,
         height: size === "large" ? 66 : 36,
         barWidth: 2,
         barGap: 1,
@@ -151,12 +158,23 @@
         progressColor: accentColor,
       });
       ws.on("error", (e) => app.reportError(e));
+      ws.on("interaction", (time) => {
+        el.currentTime = time;
+      });
+      onTimeUpdate = () => ws?.setTime(el.currentTime);
+      el.addEventListener("timeupdate", onTimeUpdate);
+    }
+
+    function detachTimeUpdate() {
+      if (audioEl && onTimeUpdate) audioEl.removeEventListener("timeupdate", onTimeUpdate);
+      onTimeUpdate = null;
     }
 
     function attach() {
       const player = node.closest("media-player");
       const found = (player?.querySelector("audio") as HTMLAudioElement | null) ?? null;
       if (!found || found === audioEl) return;
+      detachTimeUpdate();
       audioEl = found;
       ws?.destroy();
       void createWaveSurfer(found);
@@ -171,8 +189,8 @@
       destroy() {
         generation++;
         observer?.disconnect();
+        detachTimeUpdate();
         ws?.destroy();
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
       },
     };
   }
