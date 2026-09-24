@@ -446,7 +446,6 @@
                 src={{ src: item.url, type: item.mimeType }}
                 title={fileName(item)}
                 playsinline
-                crossorigin
                 class="max-h-full max-w-full"
                 style={`aspect-ratio: ${videoAspectRatios[item.id] ?? DEFAULT_VIDEO_ASPECT_RATIO}`}
                 use:trackVideoAspectRatio={item.id}
@@ -500,7 +499,6 @@
               <media-player
                 src={{ src: item.url, type: item.mimeType }}
                 title={fileName(item)}
-                crossorigin
                 onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
               >
                 <media-provider></media-provider>
