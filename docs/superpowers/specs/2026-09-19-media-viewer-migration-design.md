@@ -145,10 +145,25 @@ custom elementsに直接紐づく部分（Cropper.js/Vidstackの実際のズー�
 - 動画・音声の検証は `vidstack.io` のデモファイルだけでなく、**実際にMisskeyインスタンスへアップロードしたmp4/webm/mp3ファイル**で行う（WebKitGTKの`<video>`/`<audio>`再生は最終的にシステムのGStreamerプラグインに依存するため、デモファイルで動いてもインスタンス側のエンコード設定次第で実際は再生できないケースがありうる）。
 - 検証後、自分で起動した`cargo tauri dev`は正確なPIDを確認した上で終了する（`pkill`/`killall`は使わない）。
 
+### 3.12 音声の波形表示（SoundCloud風）
+
+音声（`variant="audio"`）のコントロールバーでは、シークバー（`<media-time-slider>`）の代わりに波形（`wavesurfer.js`、BSD-3-Clause）を表示し、波形自体をシークバーとして使う。動画は従来のシークバーのまま。実装は `MediaControlBar.svelte` の `attachWaveform` アクション。以下は実機で踏んだ制約に基づく設計判断。
+
+- **WaveSurfer に `media` として Vidstack の `<audio>` を渡さない**: WaveSurfer は読み込み時に必ず対象要素の `.src` を自前の値へ書き換える（`Player#setSrc`）。Vidstack管理の要素で行うとVidstack側の状態管理が食い違い、`<media-play-button>` 等の標準UIが反応しなくなる（要素の `.play()` 直呼びは動くので気づきにくい）。`media` なしで `url` を渡す構成も、WaveSurfer自前の `<audio>` がblobを読めず MediaError になる環境があった。
+- **`peaks` + `duration` で描画する**: 取得したバイト列を Web Audio API（`decodeAudioData`）で自前デコードし、`peaks`（チャンネル0）と `duration` を渡す。`<audio>` を一切介さない。実際の再生は常にVidstack側。
+- **進捗とシークは手動同期**: 進捗カーソルは `<audio>` の `timeupdate` で `ws.setTime()`、波形クリックは `interaction` イベントで Vidstack 側の `currentTime` を設定する。
+- **CORS回避のバイト取得**: MisskeyのドライブファイルはCORSヘッダを返さないため、WaveSurfer内部の `fetch()` やフロントの `fetch()` ではバイト列を読めない（`<audio>` 再生自体はCORS不要なので、再生だけ動いて波形だけ出ない形になる）。Rust側の `fetch_url_bytes`（`src-tauri/src/commands/note.rs`）で取得し、`tauri::ipc::Response` で生バイト列（`ArrayBuffer`）として返す。base64化はしない。戻り値が specta の型生成に載らないため `specta_builder()` には登録せず、`lib.rs` の `invoke_handler` で個別に振り分け、フロントは `invoke` を直接呼ぶ。取得先URLの検証（SSRF対策）と `plugin-http` 採用の是非は #377 で別途検討する。
+- **波形色**: `waveColor` を `transparent` とのcolor-mixで薄くしない。WaveSurferの進捗レイヤーは波形canvasを複製して `source-in` 合成で色だけ差し替える実装のため、元canvasのアルファが進捗色にも引き継がれ、再生済み部分が薄いままになる。背景色（`--surface-2`）とのcolor-mixで不透明のまま薄くする。canvasの `fillStyle` はCSSカスケード外で解決されるため `var(--accent)` は使えず、`getComputedStyle` で実値を読んでから渡す。
+- **レイアウト**: 音声セルはグリッド行の高さに引き伸ばされないよう `self-center`（縦中央）。`<media-player>` は `display:flex`（row）なので、コントロールバー本体（`.media-ctrl-overlay-audio`）に `width:100%` を付けないと内容幅に縮む。
+
+### 3.13 フルスクリーンビューワーの `crossorigin`
+
+`MediaViewer.svelte` の動画・音声の `<media-player>` に `crossorigin` 属性を付けない。付けるとメディアがCORSモードで読み込まれ、CORSヘッダを返さないMisskey配信では読み込みに失敗して再生できない（`readyState=0` / `networkState=3`）。再生専用でピクセルを読む処理は無いのでCORSは不要。
+
 ## 7. 依存関係の変更
 
 - 削除: `viewerjs`
-- 追加: `cropperjs@^2.2.0`（画像のズーム/パン/回転/反転）、`vidstack@^1.15.6`（動画・音声の個別プリミティブ部品、§3.6参照。`latest`タグの`0.6.15`はpre-1.0 Betaで非互換のため使わないこと）、`@panzoom/panzoom@^4.6.2`（動画のズーム/パン。`<media-provider>`要素のみに適用すること、§3.5参照）
+- 追加: `cropperjs@^2.2.0`（画像のズーム/パン/回転/反転）、`vidstack@^1.15.6`（動画・音声の個別プリミティブ部品、§3.6参照。`latest`タグの`0.6.15`はpre-1.0 Betaで非互換のため使わないこと）、`@panzoom/panzoom@^4.6.2`（動画のズーム/パン。`<media-provider>`要素のみに適用すること、§3.5参照）、`wavesurfer.js`（音声の波形表示、§3.12参照）
 
 ## 9. ファイル構成（実装結果）
 
@@ -157,6 +172,7 @@ custom elementsに直接紐づく部分（Cropper.js/Vidstackの実際のズー�
 - `frontend/src/render/MediaControlBar.svelte` — 動画・音声の共有コントロールバー（§3.6）。MediaGrid/MediaViewer両方から使う
 - `frontend/src/lib/mediaViewer.svelte.ts` — テスト可能な純粋ロジック（§4.1）
 - `frontend/src/lib/mediaDownload.ts` — ダウンロード処理の共通化（`saveMediaToDisk`）
+- `src-tauri/src/commands/note.rs` の `fetch_url_bytes` — 波形用のCORS回避バイト取得（§3.12。`lib.rs` の `invoke_handler` で個別登録）
 
 ## 8. 検討した代替案
 
