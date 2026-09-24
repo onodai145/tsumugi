@@ -213,7 +213,9 @@
   const SWIPE_CLOSE_LOCK_PX = 8;
   const SWIPE_CLOSE_DISTANCE_PX = 100;
   const SWIPE_CLOSE_FADE_PX = 400;
-  let swipe: { x: number; y: number; lock: "v" | "h" | null; page: HTMLElement } | null = null;
+  let swipe: { id: number; x: number; y: number; lock: "v" | "h" | null; page: HTMLElement } | null = null;
+  // 画面に触れているタッチの数。2本以上(ピンチズーム)の間は縦スワイプを一切扱わない。
+  const activeTouchIds = new Set<number>();
 
   function isCurrentPageZoomed(page: HTMLElement) {
     return page.querySelector("cropper-image[translatable], [data-zoomed]") !== null;
@@ -224,15 +226,18 @@
     page.style.opacity = "";
   }
   function onSwipePointerDown(e: PointerEvent) {
-    swipe = null;
     if (e.pointerType !== "touch") return;
+    activeTouchIds.add(e.pointerId);
+    if (swipe) resetSwipeStyle(swipe.page, false);
+    swipe = null;
+    if (activeTouchIds.size > 1) return;
     if ((e.target as Element).closest("media-controls, button, a")) return;
     const page = scrollEl?.children[currentIndex] as HTMLElement | undefined;
     if (!page || isCurrentPageZoomed(page)) return;
-    swipe = { x: e.clientX, y: e.clientY, lock: null, page };
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, lock: null, page };
   }
   function onSwipePointerMove(e: PointerEvent) {
-    if (!swipe) return;
+    if (!swipe || e.pointerId !== swipe.id) return;
     const dx = e.clientX - swipe.x;
     const dy = e.clientY - swipe.y;
     if (!swipe.lock) {
@@ -245,7 +250,8 @@
     swipe.page.style.opacity = String(1 - Math.min(Math.abs(dy) / SWIPE_CLOSE_FADE_PX, 0.6));
   }
   function onSwipePointerEnd(e: PointerEvent) {
-    if (!swipe) return;
+    activeTouchIds.delete(e.pointerId);
+    if (!swipe || e.pointerId !== swipe.id) return;
     const { lock, page, y } = swipe;
     swipe = null;
     if (lock !== "v") return;
