@@ -205,6 +205,57 @@
     onclose();
   }
 
+  // タッチの縦スワイプで閉じる(Twitter風)。等倍(ズームしていない)時のみ有効。
+  // ズーム中のドラッグはパンと競合するため対象外。水平スワイプ(前後送り)はCSS Scroll Snapが
+  // 処理しブラウザがpointercancelを送るので、縦方向に確定した時だけ追従する。
+  // 画像はズーム時のみ<cropper-image>にtranslatable属性が付き、動画は<media-provider>に
+  // data-zoomed属性が付く(videoPanzoom参照)ので、それで判定する。
+  const SWIPE_CLOSE_LOCK_PX = 8;
+  const SWIPE_CLOSE_DISTANCE_PX = 100;
+  const SWIPE_CLOSE_FADE_PX = 400;
+  let swipe: { x: number; y: number; lock: "v" | "h" | null; page: HTMLElement } | null = null;
+
+  function isCurrentPageZoomed(page: HTMLElement) {
+    return page.querySelector("cropper-image[translatable], [data-zoomed]") !== null;
+  }
+  function resetSwipeStyle(page: HTMLElement, animate: boolean) {
+    page.style.transition = animate ? "transform 150ms ease-out, opacity 150ms ease-out" : "";
+    page.style.transform = "";
+    page.style.opacity = "";
+  }
+  function onSwipePointerDown(e: PointerEvent) {
+    swipe = null;
+    if (e.pointerType !== "touch") return;
+    if ((e.target as Element).closest("media-controls, button, a")) return;
+    const page = scrollEl?.children[currentIndex] as HTMLElement | undefined;
+    if (!page || isCurrentPageZoomed(page)) return;
+    swipe = { x: e.clientX, y: e.clientY, lock: null, page };
+  }
+  function onSwipePointerMove(e: PointerEvent) {
+    if (!swipe) return;
+    const dx = e.clientX - swipe.x;
+    const dy = e.clientY - swipe.y;
+    if (!swipe.lock) {
+      if (Math.hypot(dx, dy) < SWIPE_CLOSE_LOCK_PX) return;
+      swipe.lock = Math.abs(dy) > Math.abs(dx) * 1.2 ? "v" : "h";
+    }
+    if (swipe.lock !== "v") return;
+    swipe.page.style.transition = "";
+    swipe.page.style.transform = `translateY(${dy}px)`;
+    swipe.page.style.opacity = String(1 - Math.min(Math.abs(dy) / SWIPE_CLOSE_FADE_PX, 0.6));
+  }
+  function onSwipePointerEnd(e: PointerEvent) {
+    if (!swipe) return;
+    const { lock, page, y } = swipe;
+    swipe = null;
+    if (lock !== "v") return;
+    if (e.type === "pointerup" && Math.abs(e.clientY - y) > SWIPE_CLOSE_DISTANCE_PX) {
+      onclose();
+      return;
+    }
+    resetSwipeStyle(page, true);
+  }
+
   function onScroll() {
     clearTimeout(scrollEndTimer);
     scrollEndTimer = setTimeout(() => {
@@ -340,6 +391,7 @@
     // Panzoom自身が処理する)へ連動させる(上のコメント参照)。
     function syncDisablePan() {
       const disablePan = pz.getScale() <= 1 + 1e-6;
+      node.toggleAttribute("data-zoomed", !disablePan);
       pz.setOptions({
         disablePan,
         cursor: disablePan ? "default" : "move",
@@ -415,7 +467,10 @@
     onscroll={onScroll}
     onscrollend={onScrollEnd}
     onclick={(e) => e.stopPropagation()}
-    onpointerdowncapture={onPagePointerDown}
+    onpointerdowncapture={(e) => { onPagePointerDown(e); onSwipePointerDown(e); }}
+    onpointermovecapture={onSwipePointerMove}
+    onpointerupcapture={onSwipePointerEnd}
+    onpointercancelcapture={onSwipePointerEnd}
     class="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
   >
     {#each viewItems as item (item.id)}
