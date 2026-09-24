@@ -186,6 +186,25 @@
   // アニメーション途中の中間scrollLeftから誤ったindexを拾ってしまわないよう何もしない
   // (beginProgrammaticScroll/onScrollEndのコメント参照)。
   let scrollEndTimer: ReturnType<typeof setTimeout> | undefined;
+  // 余白(メディア本体以外)クリックで閉じる。画像のパン/ズームやシークバー操作の終わりにも
+  // clickが発火するため、押下位置から一定以上動いていたらドラッグ操作とみなして閉じない。
+  const BACKDROP_CLICK_MAX_MOVE_PX = 6;
+  let pressStart: { x: number; y: number } | null = null;
+  function onPagePointerDown(e: PointerEvent) {
+    pressStart = { x: e.clientX, y: e.clientY };
+  }
+  function onPageClick(e: MouseEvent, item: (typeof viewItems)[number]) {
+    if (pressStart && Math.hypot(e.clientX - pressStart.x, e.clientY - pressStart.y) > BACKDROP_CLICK_MAX_MOVE_PX) return;
+    const target = e.target as Element;
+    if (target.closest("media-player, button, a")) return;
+    if (isImage(item)) {
+      // <cropper-canvas>はページ全面を覆うため、画像本体の範囲内かどうかは矩形で判定する。
+      const rect = cropperImageElsByItemId[item.id]?.getBoundingClientRect();
+      if (rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) return;
+    }
+    onclose();
+  }
+
   function onScroll() {
     clearTimeout(scrollEndTimer);
     scrollEndTimer = setTimeout(() => {
@@ -396,12 +415,15 @@
     onscroll={onScroll}
     onscrollend={onScrollEnd}
     onclick={(e) => e.stopPropagation()}
+    onpointerdowncapture={onPagePointerDown}
     class="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
   >
     {#each viewItems as item (item.id)}
       <div
         class="flex h-full w-full flex-none snap-start items-center justify-center"
         data-testid="media-page"
+        onclick={(e) => onPageClick(e, item)}
+        role="presentation"
         aria-label={isRevealed(revealed, item) ? `${fileName(item)}を表示中` : undefined}
       >
         {#if !isRevealed(revealed, item)}
