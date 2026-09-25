@@ -480,11 +480,12 @@
     class="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
   >
     {#each viewItems as item (item.id)}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="flex h-full w-full flex-none snap-start items-center justify-center"
         data-testid="media-page"
         onclick={(e) => onPageClick(e, item)}
-        role="presentation"
         aria-label={isRevealed(revealed, item) ? `${fileName(item)}を表示中` : undefined}
       >
         {#if !isRevealed(revealed, item)}

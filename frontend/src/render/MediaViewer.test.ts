@@ -71,6 +71,36 @@ describe("MediaViewer", () => {
     expect(onclose).toHaveBeenCalledOnce();
   });
 
+  it("ページの余白(メディア本体以外)クリックでoncloseが呼ばれる", async () => {
+    const onclose = vi.fn();
+    const { getByTestId } = render(MediaViewer, {
+      props: { files: [file({ id: "a", mimeType: "audio/mpeg", url: "https://example.com/a.mp3" })], startIndex: 0, revealed: {}, onclose },
+    });
+    await fireEvent.click(getByTestId("media-page"));
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it("プレイヤー内のクリックではoncloseが呼ばれない", async () => {
+    const onclose = vi.fn();
+    const { getByTestId } = render(MediaViewer, {
+      props: { files: [file({ id: "a", mimeType: "audio/mpeg", url: "https://example.com/a.mp3" })], startIndex: 0, revealed: {}, onclose },
+    });
+    const player = getByTestId("media-page").querySelector("media-player")!;
+    await fireEvent.click(player);
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it("押下位置から大きく動かした後のクリック(ドラッグ操作の終わり)ではoncloseが呼ばれない", async () => {
+    const onclose = vi.fn();
+    const { getByTestId } = render(MediaViewer, {
+      props: { files: [file({ id: "a", mimeType: "audio/mpeg", url: "https://example.com/a.mp3" })], startIndex: 0, revealed: {}, onclose },
+    });
+    const page = getByTestId("media-page");
+    await fireEvent.pointerDown(page, { clientX: 10, clientY: 10 });
+    await fireEvent.click(page, { clientX: 200, clientY: 10 });
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
   it("次へボタンで2件目のページへscrollToする", async () => {
     const scrollTo = vi.fn();
     Element.prototype.scrollTo = scrollTo;
