@@ -37,6 +37,7 @@
     "@lucide/svelte": "^1.41.0",
     "@misskey-dev/emoji-assets": "^17.0.6",
     "@misskey-dev/emoji-data": "^17.0.6",
+    "@panzoom/panzoom": "^4.6.2",
     "@shikijs/engine-javascript": "^4.4.3",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
@@ -44,11 +45,13 @@
     "@tauri-apps/plugin-opener": "^2.5.5",
     "@tauri-apps/plugin-os": "^2.3.2",
     "clsx": "^2.1.1",
+    "cropperjs": "^2.2.0",
     "flatpickr": "^4.6.13",
     "mfm-js": "^0.26.0",
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.3.1",
-    "viewerjs": "^1.12.0"
+    "vidstack": "^1.15.6",
+    "wavesurfer.js": "^7.12.12"
   }
 }

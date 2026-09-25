@@ -1,73 +1,20 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import Viewer from "viewerjs";
-  import "viewerjs/dist/viewer.css";
+  import "vidstack/player/styles/base.css";
+  import "vidstack/player";
+  import "vidstack/player/ui";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { commands, unwrap } from "../lib/ipc";
-  import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
+  import MediaControlBar from "./MediaControlBar.svelte";
+  import MediaViewer from "./MediaViewer.svelte";
+  import { deriveViewItems, fileName, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
   let { files }: { files: DriveFile[] } = $props();
 
   let revealed = $state<Record<string, boolean>>({});
-  const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
-  const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
-  const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
-  const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
-  let gridEl = $state<HTMLDivElement | undefined>();
-  let viewer: Viewer | undefined;
-
-  async function saveToDisk(url: string, suggestedName: string) {
-    try {
-      const path = await saveDialog({ defaultPath: suggestedName });
-      if (!path) return;
-      await unwrap(commands.saveUrlToFile(url, path));
-    } catch (e) {
-      app.reportError(e);
-    }
-  }
-
-  // 画像のクリック→拡大表示(ズーム/ドラッグ/ホイールズーム含む)は自前実装せず
-  // viewerjs(https://github.com/fengyuanchen/viewerjs)に委譲する。コンテナ内の
-  // <img> を自動検出するので、閲覧注意で隠している間はそもそも <img> を描画しない
-  // ことで対象から除外し、表示切替(revealed変更)時は update() で再スキャンさせる。
-  onMount(() => {
-    if (gridEl) {
-      viewer = new Viewer(gridEl, {
-        url: "data-original",
-        toolbar: {
-          zoomIn: true,
-          zoomOut: true,
-          oneToOne: true,
-          reset: true,
-          prev: true,
-          play: true,
-          next: true,
-          rotateLeft: true,
-          rotateRight: true,
-          flipHorizontal: true,
-          flipVertical: true,
-          // viewerjs 組み込みキーではないカスタムボタン(公式の custom-toolbar 例と同じ作法)。
-          // `.image` は型定義に無いランタイムプロパティ(現在表示中の<img>のクローン)なのでキャストする。
-          // viewerjs 1.12.0 で ToolbarOption 型から裸の Function が外れ、
-          // ToolbarButtonOptions({ click }) 形式が必須になった。
-          download: {
-            click: () => {
-              const img = (viewer as unknown as { image?: HTMLImageElement } | undefined)?.image;
-              if (img) void saveToDisk(img.src, img.alt || "image");
-            },
-          },
-        },
-      });
-    }
-    return () => viewer?.destroy();
-  });
-
-  $effect(() => {
-    void revealed;
-    viewer?.update();
-  });
+  let viewerOpenIndex = $state<number | null>(null);
+  const openViewer = (f: DriveFile) => {
+    viewerOpenIndex = deriveViewItems(files).findIndex((x) => x.id === f.id);
+  };
 </script>
 
 {#if files.length > 0}
@@ -75,46 +22,56 @@
     class={files.length === 1
       ? "mt-2 grid grid-cols-1 gap-1 overflow-hidden rounded-md"
       : "mt-2 grid grid-cols-2 gap-1 overflow-hidden rounded-md"}
-    bind:this={gridEl}
   >
     {#each files as f (f.id)}
-      <div class="media-cell relative flex aspect-[16/10] items-center justify-center">
-        {#if f.isSensitive && !revealed[f.id]}
+      <div
+        class={isAudio(f)
+          ? "media-cell media-cell-audio relative flex items-center justify-center self-center"
+          : "media-cell relative flex aspect-[16/10] items-center justify-center"}
+      >
+        {#if !isRevealed(revealed, f)}
           <button
             class="sensitive-cover h-full w-full border-0 text-sm text-muted-foreground"
-            onclick={() => (revealed = { ...revealed, [f.id]: true })}
+            onclick={() => (revealed = reveal(revealed, f))}
           >
             閲覧注意（クリックで表示）
           </button>
         {:else if isImage(f)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
           <img
             src={f.thumbnailUrl ?? f.url}
-            data-original={f.url}
             alt={fileName(f)}
             loading="lazy"
             class="h-full w-full cursor-zoom-in object-cover"
+            onclick={() => openViewer(f)}
           />
         {:else if isVideo(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={f.url} controls preload="metadata" class="h-full w-full cursor-zoom-in object-cover"
-          ></video>
-          <button
-            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
-            onclick={() => saveToDisk(f.url, fileName(f))}
-            aria-label="保存"
-          >
-            💾
-          </button>
+          <!-- src は文字列ではなく{src, type}オブジェクトで渡す(重要)。MisskeyのドライブファイルURLは
+               拡張子を含まない(例: /files/webpublic-<uuid>)ため、Vidstackがsrc文字列だけからMIMEタイプを
+               自動推定するinferType()が失敗し(常に"?"=unknown)、プロバイダ(<video>/<audio>要素)が
+               一切生成されない不具合があった。typeを明示することで回避する。 -->
+          <media-player src={{ src: f.url, type: f.mimeType }} viewType="video" playsinline preload="metadata" class="h-full w-full">
+            <media-provider>
+              <!-- 映像クリックで再生/一時停止をトグルする。Vidstack公式の<media-gesture>
+                   プリミティブを使う(自前のclickハンドラは書かない、既存方針の踏襲)。
+                   event="pointerup"/action="toggle:paused"はnode_modules/vidstack/types/
+                   vidstack-DrJHXsLT.d.tsのJSDoc例そのまま。実際のイベント購読は<media-gesture>
+                   自身ではなく<media-provider>(Gesture#onConnectがdata-media-providerを
+                   querySelectorして直接listenEventする、dev/chunks/vidstack-C7VnVlv2.js参照)
+                   に対して行われ、<media-gesture>要素自体はonAttachでpointer-events:noneが
+                   付与される(クリック判定領域=自身のgetBoundingClientRect()を提供するだけ)。 -->
+              <media-gesture event="pointerup" action="toggle:paused"></media-gesture>
+            </media-provider>
+            <MediaControlBar file={f} variant="video" onExpand={() => openViewer(f)} />
+          </media-player>
         {:else if isAudio(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <audio src={f.url} controls preload="metadata" class="w-[calc(100%-16px)]"></audio>
-          <button
-            class="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-full bg-black/50 text-sm leading-none text-white"
-            onclick={() => saveToDisk(f.url, fileName(f))}
-            aria-label="保存"
-          >
-            💾
-          </button>
+          <media-player src={{ src: f.url, type: f.mimeType }} viewType="audio" preload="metadata" class="w-[calc(100%-16px)]">
+            <media-provider></media-provider>
+            <MediaControlBar file={f} variant="audio" onExpand={() => openViewer(f)} />
+          </media-player>
         {:else}
           <button
             class="max-w-full overflow-hidden text-ellipsis whitespace-nowrap border-0 bg-none p-2 font-[inherit] text-sm text-primary"
@@ -128,6 +85,15 @@
   </div>
 {/if}
 
+{#if viewerOpenIndex !== null}
+  <MediaViewer
+    {files}
+    startIndex={viewerOpenIndex}
+    bind:revealed
+    onclose={() => (viewerOpenIndex = null)}
+  />
+{/if}
+
 <style>
   .media-cell {
     /* 幅広カラムでは aspect-ratio のままだと高さも際限なく伸びてしまう
@@ -136,28 +102,53 @@
     max-height: var(--media-thumbnail-height, 200px);
     background: color-mix(in srgb, var(--surface-2) var(--column-opacity, 100%), transparent);
   }
+  /* 音声のみのタイルは画像・動画と違って表示すべき映像がなく、aspect-[16/10]の
+     縦長ボックスをそのまま適用するとコントロールバー以外が無駄な暗い空白になる
+     (実機フィードバックで指摘)。波形+コントロールバーのコンテンツの高さに
+     フィットするコンパクトなボックスにする。 */
+  .media-cell-audio {
+    padding: 0.5rem 0;
+  }
   .sensitive-cover {
     background: color-mix(in srgb, var(--surface-3) var(--column-opacity, 100%), transparent);
   }
-  :global(.viewer-download::before) {
-    content: "⬇";
+
+  /* Vidstackの<media-player>はbase.cssの既定でdisplay:inline-flex; width:100%までしか
+     持たないため、グリッドセル(.media-cell)を埋めるレイアウトはここで補う。
+     動画はセルの高さいっぱいに敷き詰め(object-fit: coverで従来の<video controls>と同じ見た目)、
+     音声はプレイヤー本体を隠して(data-view-type="audio")コントロールバーだけ表示する。 */
+  :global(.media-cell media-player) {
+    position: relative;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-size: 12px;
-    line-height: 1;
     height: 100%;
-    margin: 0 !important;
+    border-radius: inherit;
   }
-  /* viewerjs はノッチ/ホームインジケータのセーフエリアを考慮しないため、
-     閉じるボタン(画面右上隅)とフッター(ツールバー等、画面下端)を
-     env(safe-area-inset-*) 分だけ内側にずらす(Issue #331)。 */
-  :global(.viewer-container .viewer-close) {
-    top: calc(-40px + env(safe-area-inset-top));
-    right: calc(-40px + env(safe-area-inset-right));
+  :global(.media-cell media-player[data-view-type="video"] video) {
+    height: 100%;
+    object-fit: cover;
   }
-  :global(.viewer-container .viewer-footer) {
-    bottom: env(safe-area-inset-bottom);
+  :global(.media-cell media-player[data-view-type="audio"]) {
+    height: auto;
   }
+  /* base.css/theme.css既定の[data-media-player][data-view-type='video'][data-started]:not([data-controls])
+     はcursor: noneを付与する(全画面プレイヤーでの再生中マウスカーソル自動非表示用)。
+     グリッドサムネイルではネイティブcontrols属性を使わない(=[data-controls]が常に外れた状態になる)ため、
+     再生中は常にカーソルが消えてしまう。サムネイル上では不要な挙動なので元に戻す。 */
+  :global(.media-cell [data-media-player][data-view-type="video"][data-started]:not([data-controls])) {
+    cursor: auto;
+  }
+
+  /* <media-gesture>はデフォルトテーマ(vds-gesture等)のCSSを使わないため、判定領域の
+     サイズ・位置を自前で指定する必要がある(base.cssはdata-media-gesture属性に対する
+     サイズ指定を持たない)。<media-provider>(position: relativeがbase.css既定)いっぱいに
+     広げることで、実際に表示されている映像の範囲とクリック判定領域を一致させる。
+     pointer-events: noneはVidstack本体がonAttachで付与済み(<script>コメント参照)。 */
+  :global(.media-cell [data-media-gesture]) {
+    position: absolute;
+    inset: 0;
+  }
+
+  /* コントロールバー(シークバー・再生/ミュート/音量/再生速度/拡大表示/ダウンロード)の
+     マークアップ・スタイルはMediaViewer.svelteと共有のMediaControlBar.svelteに
+     切り出した(:global()ルールのためバンドル時にそちらのCSSがそのまま効く)。 */
 </style>

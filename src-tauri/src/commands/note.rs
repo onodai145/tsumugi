@@ -333,6 +333,34 @@ pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: Str
     Ok(())
 }
 
+/// 添付ファイルの生バイト列を取得する（音声波形のデコード用）。
+/// 戻り値が `tauri::ipc::Response` で specta が型を扱えないため、`specta_builder()` には
+/// 載せず `lib.rs` の `invoke_handler` で個別に振り分ける(フロントは `invoke` を直接呼ぶ)。
+/// ドライブの添付URLはMisskey側がCORSヘッダを返さないため、フロントエンドの
+/// fetch()で直接バイト列を読めない（<audio>再生自体はCORS制約を受けないため
+/// 別問題）。Rust側でCORSに縛られずダウンロードし、ArrayBufferとしてそのまま渡す。
+#[tauri::command]
+pub async fn fetch_url_bytes(state: State<'_, AppState>, url: String) -> Result<tauri::ipc::Response> {
+    let resp = state.http.get(&url).send().await?;
+    if !resp.status().is_success() {
+        return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
+    }
+    if resp.content_length().is_some_and(|len| len > MAX_SAVE_FILE_BYTES) {
+        return Err(Error::Invalid(format!(
+            "ファイルが大きすぎます（{}MB超）",
+            MAX_SAVE_FILE_BYTES / 1024 / 1024
+        )));
+    }
+    let bytes = resp.bytes().await?;
+    if bytes.len() as u64 > MAX_SAVE_FILE_BYTES {
+        return Err(Error::Invalid(format!(
+            "ファイルが大きすぎます（{}MB超）",
+            MAX_SAVE_FILE_BYTES / 1024 / 1024
+        )));
+    }
+    Ok(tauri::ipc::Response::new(bytes.to_vec()))
+}
+
 /// プレビュー用途に許容する最大サイズ(base64化してフロントに保持するため、実アップロード上限より小さく抑える)。
 const MAX_ATTACHMENT_PREVIEW_BYTES: usize = 20 * 1024 * 1024;
 

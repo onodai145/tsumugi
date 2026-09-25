@@ -173,7 +173,20 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_haptics::init())
-        .invoke_handler(builder.invoke_handler())
+        .invoke_handler({
+            // fetch_url_bytes は生バイト列(tauri::ipc::Response)を返すため specta の型生成に
+            // 載せられない。それ以外は従来どおり specta 側の handler に委譲する。
+            let specta_handler = builder.invoke_handler();
+            let raw_handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
+                Box::new(tauri::generate_handler![commands::note::fetch_url_bytes]);
+            move |invoke| {
+                if invoke.message.command() == "fetch_url_bytes" {
+                    raw_handler(invoke)
+                } else {
+                    specta_handler(invoke)
+                }
+            }
+        })
         .setup(move |app| {
             builder.mount_events(app);
 
