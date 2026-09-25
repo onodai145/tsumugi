@@ -557,10 +557,10 @@
                        listenしない(node_modules/@panzoom/panzoom)のに対し、<media-gesture>は
                        pointerupで購読する(Gesture#attachListener、dev/chunks/
                        vidstack-C7VnVlv2.js参照)ため競合しない。左右送りクリックエリア
-                       (画面端15%幅)は<media-player>の外側(モーダル直下)にあり、同一
+                       (画面左右端の縦中央にある幅64px×高さ112pxの領域)は<media-player>の外側(モーダル直下)にあり、同一
                        スタッキングコンテキスト内でDOM順が<media-gesture>の対象
                        (<media-provider>)より後に来るため、その範囲では引き続き
-                       クリックエリアが優先される(中央70%でのみジェスチャーが機能すれば
+                       クリックエリアが優先される(それ以外の範囲でジェスチャーが機能すれば
                        十分という要件どおり)。 -->
                   <media-gesture event="pointerup" action="toggle:paused"></media-gesture>
                 </media-provider>
@@ -599,7 +599,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="group absolute top-0 left-0 flex h-full w-[15%] min-w-10 cursor-w-resize items-center justify-start pl-2"
+      class="group absolute top-1/2 left-0 flex h-28 w-16 -translate-y-1/2 cursor-w-resize items-center justify-start pl-2"
       onclick={(e) => { e.stopPropagation(); goPrev(); }}
     >
       <button
@@ -613,7 +613,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="group absolute top-0 right-0 flex h-full w-[15%] min-w-10 cursor-e-resize items-center justify-end pr-2"
+      class="group absolute top-1/2 right-0 flex h-28 w-16 -translate-y-1/2 cursor-e-resize items-center justify-end pr-2"
       onclick={(e) => { e.stopPropagation(); goNext(); }}
     >
       <button
