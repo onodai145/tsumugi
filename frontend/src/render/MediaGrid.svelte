@@ -20,14 +20,14 @@
 {#if files.length > 0}
   <div
     class={files.length === 1
-      ? "mt-2 grid grid-cols-1 gap-1 overflow-hidden rounded-md"
-      : "mt-2 grid grid-cols-2 gap-1 overflow-hidden rounded-md"}
+      ? "mt-2 grid grid-cols-1 gap-1"
+      : "mt-2 grid grid-cols-2 gap-1"}
   >
     {#each files as f (f.id)}
       <div
         class={isAudio(f)
-          ? "media-cell media-cell-audio relative flex items-center justify-center self-center"
-          : "media-cell relative flex aspect-[16/10] items-center justify-center"}
+          ? "media-cell media-cell-audio relative flex overflow-hidden rounded-md items-center justify-center self-center"
+          : "media-cell relative flex overflow-hidden rounded-md aspect-[16/10] items-center justify-center"}
       >
         {#if !isRevealed(revealed, f)}
           <button
