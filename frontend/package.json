@@ -21,10 +21,10 @@
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/svelte": "^5.4.2",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.6.1",
     "@vitest/coverage-v8": "^4.1.11",
-    "jsdom": "^30.0.1",
-    "shadcn-svelte": "^1.6.1",
+    "jsdom": "^30.1.0",
+    "shadcn-svelte": "^1.7.0",
     "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.3",
@@ -34,7 +34,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@lucide/svelte": "^1.41.0",
+    "@lucide/svelte": "^1.47.0",
     "@misskey-dev/emoji-assets": "^17.0.6",
     "@misskey-dev/emoji-data": "^17.0.6",
     "@panzoom/panzoom": "^4.6.2",
@@ -49,7 +49,7 @@
     "flatpickr": "^4.6.13",
     "mfm-js": "^0.26.0",
     "shiki": "^4.4.3",
-    "tailwind-merge": "^3.6.0",
+    "tailwind-merge": "^3.7.0",
     "tailwind-variants": "^3.3.1",
     "vidstack": "^1.15.6",
     "wavesurfer.js": "^7.12.12"
