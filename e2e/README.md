@@ -73,3 +73,28 @@ docker compose down -v
 入れ子のXvfb、gnome-keyring-daemonの起動など、単純ではない仕組みがいくつも入っているが、
 それぞれの「なぜ」は `scripts/run-app.sh` 内のコメントに実機検証の経緯込みで詳しく書いてある
 ので、そちらを参照。ここでは重複させない。
+
+## モバイルUI E2E（`pnpm e2e:mobile`）
+
+モバイルUI（Issue #259）のレイアウト・セーフエリア・横はみ出しを検証する専用スイート。
+`specs-mobile/` を対象とし、デスクトップ用 `specs/` とは別config（`wdio.mobile.conf.ts`）で実行する。
+
+```sh
+cd e2e && xvfb-run -a pnpm e2e:mobile
+```
+
+`uiMode=mobile` を設定し、ウィンドウを390x844にリサイズしたうえで、`--safe-*` CSS変数を
+注入してセーフエリアを再現する（`helpers/mobile.ts`）。検証は `getBoundingClientRect()` の比較で、
+スクリーンショット比較は使わない。
+
+- `layout.e2e.ts`: FAB表示、投稿欄が常時表示でないこと、カラムが100%幅で横スナップすること
+- `safe-area.e2e.ts`: 注入inset（6vh/8vhより大きい値。モーダルはtop 120、FABは非ゼロのright）分だけ
+  FAB・投稿モーダル・下部メニューバーが内側に収まること
+- `overflow.e2e.ts`: `[data-columns-scroll]` の外側の各要素が `right <= innerWidth + 1` を満たすこと。
+  ルートが overflow-hidden のため `documentElement.scrollWidth` では検出できず、要素ごとに比較している
+
+限界: デスクトップWebKitGTK上の近似のため、Android WebView固有の挙動（Edge-to-Edgeの実inset値、
+IME、ジェスチャー）は対象外で、実機確認は手動。メディアビューワーのセーフエリアも、
+アップロードhelperが無いため未検証。
+
+CIでは `e2e` ジョブ内で `pnpm e2e` の直後に実行する（所要時間は約1分で、45分のtimeoutに十分収まる）。

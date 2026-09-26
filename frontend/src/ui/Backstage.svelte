@@ -127,7 +127,7 @@
   {/if}
 
   <div
-    class="flex min-h-6 items-center gap-2 pt-[3px] pr-[max(8px,env(safe-area-inset-right))] pb-[max(3px,env(safe-area-inset-bottom))] pl-[max(8px,env(safe-area-inset-left))] text-xs"
+    class="flex min-h-6 items-center gap-2 pt-[3px] pr-[max(8px,var(--safe-right))] pb-[max(3px,var(--safe-bottom))] pl-[max(8px,var(--safe-left))] text-xs"
   >
     <Button variant="outline" size="xs" onclick={() => (open = !open)} title="操作ログ (Backstage)">
       {#if open}<ChevronDown size={12} />{:else}<ChevronUp size={12} />{/if} ログ

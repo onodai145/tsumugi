@@ -35,7 +35,7 @@
 </script>
 
 <div
-  class="fixed inset-0 grid items-start justify-items-center bg-black/45 pt-[max(8vh,env(safe-area-inset-top))]"
+  class="fixed inset-0 grid items-start justify-items-center bg-black/45 pt-[max(8vh,var(--safe-top))]"
   style={`z-index:${z}`}
   use:portal
   onclick={onCancel}
