@@ -1,6 +1,6 @@
 // メディアビューワーのセーフエリアは未カバー(画像アップロード用のE2Eヘルパーが無いため)。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
-import { addAccountAndEnableMobile, rect, SAFE_AREA } from "../helpers/mobile";
+import { addAccountAndEnableMobile, rect, SAFE_AREA, setSafeArea } from "../helpers/mobile";
 
 describe("mobile safe-area", () => {
   let bridge: MiauthBridge;
@@ -16,21 +16,36 @@ describe("mobile safe-area", () => {
   });
 
   it("keeps the compose FAB inside the bottom/right safe area", async () => {
-    const fab = await rect('button[title="投稿"]');
-    expect(fab).not.toBeNull();
-    const vh = await browser.execute(() => window.innerHeight);
-    const vw = await browser.execute(() => window.innerWidth);
-    expect(fab!.bottom).toBeLessThanOrEqual(vh - SAFE_AREA.bottom);
-    expect(fab!.right).toBeLessThanOrEqual(vw - SAFE_AREA.right);
+    // right は既定 0 だと検証が空振りするため、非ゼロのinsetを与える。
+    const RIGHT = 24;
+    await setSafeArea({ ...SAFE_AREA, right: RIGHT });
+    try {
+      const fab = await rect('button[title="投稿"]');
+      expect(fab).not.toBeNull();
+      const vh = await browser.execute(() => window.innerHeight);
+      const vw = await browser.execute(() => window.innerWidth);
+      expect(fab!.bottom).toBeLessThanOrEqual(vh - SAFE_AREA.bottom);
+      expect(fab!.right).toBeLessThanOrEqual(vw - RIGHT);
+    } finally {
+      await setSafeArea(SAFE_AREA);
+    }
   });
 
   it("keeps the compose modal content below the top safe area", async () => {
-    await $('button[title="投稿"]').click();
-    const textarea = await $('[data-testid="compose-textarea"]');
-    await textarea.waitForDisplayed({ timeout: 15000 });
-    const r = await rect('[data-testid="compose-textarea"]');
-    expect(r!.top).toBeGreaterThanOrEqual(SAFE_AREA.top);
-    await browser.keys("Escape");
+    // 6vh(約50px)より十分大きいinsetにして var(--safe-top) の効きを検出する。
+    const TOP = 120;
+    await setSafeArea({ ...SAFE_AREA, top: TOP });
+    try {
+      await $('button[title="投稿"]').click();
+      const textarea = await $('[data-testid="compose-textarea"]');
+      await textarea.waitForDisplayed({ timeout: 15000 });
+      const r = await rect('[data-testid="compose-textarea"]');
+      expect(r!.top).toBeGreaterThanOrEqual(TOP);
+      await browser.keys("Escape");
+      await textarea.waitForDisplayed({ reverse: true, timeout: 15000 });
+    } finally {
+      await setSafeArea(SAFE_AREA);
+    }
   });
 
   it("keeps the bottom menu bar above the bottom safe area padding", async () => {
