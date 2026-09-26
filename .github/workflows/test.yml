@@ -396,6 +396,11 @@ jobs:
         working-directory: e2e
         run: xvfb-run -a pnpm e2e
 
+      - name: Run mobile E2E tests
+        if: needs.changes.outputs.code == 'true'
+        working-directory: e2e
+        run: xvfb-run -a pnpm e2e:mobile
+
       - name: Dump Misskey stack logs on failure
         if: needs.changes.outputs.code == 'true' && failure()
         working-directory: e2e

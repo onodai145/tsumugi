@@ -45,8 +45,8 @@ e2e/
 ├─ wdio.mobile.conf.ts      # specs-mobile/ を対象にする専用config
 └─ specs-mobile/
     ├─ layout.e2e.ts        # FAB表示、投稿欄が常時表示でないこと、カラムが100%幅で横スナップすること
-    ├─ safe-area.e2e.ts     # 注入したinset分だけ、ヘッダー・FAB・モーダル・メディアビューワーの操作要素が内側に収まること
-    └─ overflow.e2e.ts      # 意図しない横はみ出し（scrollWidth > clientWidth）が無いこと
+    ├─ safe-area.e2e.ts     # 注入したinset分だけ、FAB・投稿モーダル・下部メニューバーが内側に収まること。6vh/8vh（約51/67px）より大きいinset（モーダル用にtop 120、FABは非ゼロのright inset）を注入し、safe-areaが効いていなければ失敗するようにしている。メディアビューワーは投稿用のアップロードhelperが無いため未検証
+    └─ overflow.e2e.ts      # `[data-columns-scroll]` の外側の各要素について `right <= innerWidth + 1` を確認する。ルートが overflow-hidden のため `documentElement.scrollWidth` では検出できないので、要素ごとの右端比較にしている
 ```
 
 - 検証手法: `getBoundingClientRect()` を注入inset・ビューポート境界と比較する。スクリーンショット比較は使わない。
@@ -59,6 +59,7 @@ e2e/
 
 デスクトップWebKitGTK上の近似であり、以下は対象外（引き続き実機確認）:
 
+- メディアビューワーのセーフエリア（アップロードhelperが無く未検証）
 - Android WebView固有の挙動（Edge-to-Edgeの実inset値、IME、ジェスチャー）
 - タッチ操作の実機での感触
 
