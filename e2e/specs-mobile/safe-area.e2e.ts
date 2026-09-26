@@ -1,4 +1,4 @@
-// メディアビューワーのセーフエリアは未カバー(画像アップロード用のE2Eヘルパーが無いため)。
+// メディアビューワーのセーフエリアは safe-area-media.e2e.ts で検証する。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { addAccountAndEnableMobile, addHomeColumn, rect, SAFE_AREA, setSafeArea } from "../helpers/mobile";
 

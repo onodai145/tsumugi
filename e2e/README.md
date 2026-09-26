@@ -89,7 +89,7 @@ cd e2e && xvfb-run -a pnpm e2e:mobile
 
 - `layout.e2e.ts`: FAB表示、投稿欄が常時表示でないこと、カラムが100%幅で横スナップすること
 - `safe-area.e2e.ts`: 注入inset（6vh/8vhより大きい値。モーダルはtop 120、FABは非ゼロのright）分だけ
-  FAB・投稿モーダル・下部メニューバー・カラム領域の上端と左insetが内側に収まること
+  FAB・投稿モーダル・下部メニューバー・カラム領域の上端、および下部メニューボタンの左inset（30px注入）が内側に収まること
 - `safe-area-media.e2e.ts`: 画像付きノートを事前投稿（`uploadImage`/`createNote`）してメディアビューワーを開き、
   閉じるボタンの上端・右insetとツールバー（ズームイン）の下端が内側に収まること
 - `overflow.e2e.ts`: `[data-columns-scroll]` の外側の各要素が `right <= innerWidth + 1` を満たすこと。
