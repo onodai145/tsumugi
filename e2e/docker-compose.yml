@@ -18,6 +18,8 @@ services:
 
   # 名前付きボリュームはroot所有で作られるが、Misskeyは非root(uid/gid 991)で動くため、
   # 初期化しないとdriveアップロードがEACCESで失敗する。一度だけchownして終了する。
+  # 991:991 は固定タグのwebイメージのmisskeyユーザーと一致させる必要がある(イメージ更新時は要再確認)。
+  # imageにpostgresを流用するのは、dbが既にpullしており追加pullが不要なため。
   files-init:
     image: postgres:18-alpine
     restart: "no"

@@ -23,7 +23,7 @@ PR #382（Issue #259）で追加した `e2e/specs-mobile/safe-area.e2e.ts` は�
 
 - `before` で `addHomeColumn()` を呼ぶ（既存3テストへの影響が無いことを実行で確認する）。
 - **上端**: `.column-root` の `top >= SAFE_AREA.top`（47）。`pt-[var(--safe-top)]` を外すと top が0になり失敗する。
-- **左右**: `left=30, right=30` を注入し、`app-menu-trigger` の left が30以上であることを確認する。既存パディング（`max(8px, var(--safe-left))`）より大きい値のため、変数が効いていなければ失敗する。
+- **左**: `{...SAFE_AREA, left: 30}` のみを注入し（rightは0のまま）、`app-menu-trigger` の left が30以上であることを確認する。右insetは既存のFAB test（right=24）と `safe-area-media.e2e.ts` のビューワー閉じるボタン test（right=24）で検証する。既存パディング（`max(8px, var(--safe-left))`）より大きい値のため、変数が効いていなければ失敗する。
 - 注入したinsetは既存テスト同様、try/finallyで必ず `SAFE_AREA` に戻す。
 
 ## 4. 新規 `safe-area-media.e2e.ts`
@@ -31,7 +31,7 @@ PR #382（Issue #259）で追加した `e2e/specs-mobile/safe-area.e2e.ts` は�
 - `before`: シード管理者トークンで `uploadImage` → `createNote(token, text, [fileId])` → アカウント追加 → `addHomeColumn()` → 画像セルをクリックしてビューワーを開く。
 - **上端**: 閉じるボタン（`aria-label="閉じる"`）の top が `SAFE_AREA.top` 以上。
 - **右端**: 右insetを非ゼロ（例24）で注入し、閉じるボタンの right が `vw - 24` 以下。
-- **下端**: 画像ツールバー（`aria-label="画像ツールバー"`）の bottom が `vh - SAFE_AREA.bottom` 以下。
+- **下端**: ズームインボタン（`button[aria-label="ズームイン"]`）の bottom が `vh - SAFE_AREA.bottom` 以下。ツールバー要素自体はpaddingを含めて画面下端まで届くため、内側のボタンで測る。
 - 別ファイルにするのは、画像準備の失敗リスクを既存specから切り離すため。
 
 ## 5. 検出力の担保

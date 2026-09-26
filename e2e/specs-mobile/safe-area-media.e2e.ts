@@ -25,7 +25,7 @@ describe("mobile safe-area: media viewer", () => {
   });
 
   after(async () => {
-    await bridge.teardown();
+    await bridge?.teardown();
   });
 
   it("keeps the close button below the top safe area", async () => {
