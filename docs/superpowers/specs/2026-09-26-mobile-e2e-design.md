@@ -53,7 +53,7 @@ e2e/
 - 既存のテスト用Misskey（docker-compose）とseedを流用する。
 - `specs/`（デスクトップ）とは別configにし、ウィンドウサイズ前提の干渉を避ける。`maxInstances: 1` は維持。
 - `pnpm e2e:mobile` で実行する。
-- CIへの追加は、実装時に所要時間を見て判断する。
+- CIでは `e2e` ジョブ内で `pnpm e2e` の直後に `pnpm e2e:mobile` を実行する（所要時間は約1分）。
 
 ## 3. 限界
 

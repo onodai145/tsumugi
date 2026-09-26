@@ -25,6 +25,7 @@ describe("mobile layout", () => {
     const textarea = await $('[data-testid="compose-textarea"]');
     await textarea.waitForDisplayed({ timeout: 15000 });
     await browser.keys("Escape");
+    await textarea.waitForDisplayed({ reverse: true, timeout: 15000 });
   });
 
   it("keeps a column at full viewport width", async () => {
