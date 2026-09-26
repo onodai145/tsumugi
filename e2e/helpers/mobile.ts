@@ -69,3 +69,13 @@ export async function addAccountAndEnableMobile(bridge: MiauthBridge, logTag: st
   });
   await setSafeArea(SAFE_AREA);
 }
+
+export async function addHomeColumn(): Promise<void> {
+  await $('[data-testid="app-menu-trigger"]').click();
+  await $('[data-testid="app-menu-add-column"]').click();
+  const submit = await $('[data-testid="add-column-submit"]');
+  await submit.scrollIntoView();
+  await submit.waitForClickable({ timeout: 15000 });
+  await submit.click();
+  await $(".column-root").waitForDisplayed({ timeout: 15000 });
+}
