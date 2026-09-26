@@ -155,7 +155,7 @@
        スマホUIでは投稿欄自体を表示しないため、headerはPC版でのみ表示する。 -->
   {#if !useMobileUi}
     <header
-      class="flex flex-none items-start gap-2.5 border-b border-border bg-muted p-[max(6px,env(safe-area-inset-top))_max(10px,env(safe-area-inset-right))_6px_max(10px,env(safe-area-inset-left))]"
+      class="flex flex-none items-start gap-2.5 border-b border-border bg-muted p-[max(6px,var(--safe-top))_max(10px,var(--safe-right))_6px_max(10px,var(--safe-left))]"
     >
       {#if app.accounts.length > 0}
         <ComposeBar />
@@ -167,7 +167,7 @@
 
   <!-- スマホUIではheaderが無いため、main自身がステータスバー分のセーフエリアを確保しないと
        カラムのタブバーがステータスバーに被る(Issue #257)。PC版はheaderが既に確保している。 -->
-  <main class="min-h-0 min-w-0 flex-1" class:pt-[env(safe-area-inset-top)]={useMobileUi}>
+  <main class="min-h-0 min-w-0 flex-1" class:pt-[var(--safe-top)]={useMobileUi}>
     {#if app.booting}
       <div class="grid h-full place-items-center p-6 text-center text-muted-foreground">起動中…</div>
     {:else if showAdd || reauthAccount || app.accounts.length === 0}
@@ -229,7 +229,7 @@
 
   {#if useMobileUi && app.accounts.length > 0 && !app.booting}
     <button
-      class="fixed right-[calc(20px+env(safe-area-inset-right))] bottom-[calc(20px+env(safe-area-inset-bottom))] z-40 grid size-14 place-items-center rounded-full bg-primary text-white shadow-[0_3px_10px_rgba(0,0,0,0.3)]"
+      class="fixed right-[calc(20px+var(--safe-right))] bottom-[calc(20px+var(--safe-bottom))] z-40 grid size-14 place-items-center rounded-full bg-primary text-white shadow-[0_3px_10px_rgba(0,0,0,0.3)]"
       onclick={() => app.openCompose(app.defaultAccountId())}
       title="投稿"
     >
@@ -239,7 +239,7 @@
 
   {#if app.showComposeModal}
     <div
-      class="fixed inset-0 z-50 grid content-start justify-items-stretch bg-black/45 pt-[max(6vh,env(safe-area-inset-top))]"
+      class="fixed inset-0 z-50 grid content-start justify-items-stretch bg-black/45 pt-[max(6vh,var(--safe-top))]"
       onclick={() => (app.showComposeModal = false)}
       onkeydown={(e) => e.key === "Escape" && (app.showComposeModal = false)}
       role="presentation"

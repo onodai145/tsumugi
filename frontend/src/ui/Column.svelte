@@ -632,7 +632,7 @@
   {/if}
 
   {#if columnDragArmed}
-    <div class="pointer-events-none fixed inset-x-0 top-[max(4px,env(safe-area-inset-top))] z-30 flex justify-center" use:portal>
+    <div class="pointer-events-none fixed inset-x-0 top-[max(4px,var(--safe-top))] z-30 flex justify-center" use:portal>
       <div class="flex items-center gap-3 rounded-lg bg-background px-3 py-1.5 text-sm shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
         <span class:text-foreground={columnDragHint === "prev"} class:text-muted-foreground={columnDragHint !== "prev"}>
           <ChevronLeft size={16} class="inline" /> 前へ
