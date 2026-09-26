@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["node", "@wdio/mocha-framework"]
   },
-  "include": ["wdio.conf.ts", "specs/**/*.ts", "specs-persistence/**/*.ts", "helpers/**/*.ts", "scripts/**/*.ts"]
+  "include": ["wdio.conf.ts", "wdio.mobile.conf.ts", "specs/**/*.ts", "specs-mobile/**/*.ts", "specs-persistence/**/*.ts", "helpers/**/*.ts", "scripts/**/*.ts"]
 }
