@@ -32,7 +32,7 @@ Linux(WebKitGTK)前提。以下が必要:
 
 ```sh
 ./scripts/gen-ca.sh          # E2E用の自己署名テストCA(certs/ca.pem)を生成
-docker compose up -d --wait  # テスト用Misskeyインスタンス一式を起動
+docker compose up -d --wait  # テスト用Misskeyインスタンス一式を起動(`files-init` がファイルボリュームの所有者を直すため、画像アップロードも動く)
 pnpm seed                    # 管理者アカウントを1件だけ作成(2回目以降は冪等スキップ)
 xvfb-run -a pnpm e2e         # 実際のE2Eテストを実行
 ```
@@ -89,12 +89,14 @@ cd e2e && xvfb-run -a pnpm e2e:mobile
 
 - `layout.e2e.ts`: FAB表示、投稿欄が常時表示でないこと、カラムが100%幅で横スナップすること
 - `safe-area.e2e.ts`: 注入inset（6vh/8vhより大きい値。モーダルはtop 120、FABは非ゼロのright）分だけ
-  FAB・投稿モーダル・下部メニューバーが内側に収まること
+  FAB・投稿モーダル・下部メニューバー・カラム領域の上端と左insetが内側に収まること
+- `safe-area-media.e2e.ts`: 画像付きノートを事前投稿（`uploadImage`/`createNote`）してメディアビューワーを開き、
+  閉じるボタンの上端・右insetとツールバー（ズームイン）の下端が内側に収まること
 - `overflow.e2e.ts`: `[data-columns-scroll]` の外側の各要素が `right <= innerWidth + 1` を満たすこと。
   ルートが overflow-hidden のため `documentElement.scrollWidth` では検出できず、要素ごとに比較している
 
 限界: デスクトップWebKitGTK上の近似のため、Android WebView固有の挙動（Edge-to-Edgeの実inset値、
-IME、ジェスチャー）は対象外で、実機確認は手動。メディアビューワーのセーフエリアも、
-アップロードhelperが無いため未検証。
+IME、ジェスチャー）は対象外で、実機確認は手動。
+下部バー右端の右insetは未検証（右insetはFABとビューワーの閉じるボタンで確認している）。
 
 CIでは `e2e` ジョブ内で `pnpm e2e` の直後に実行する（所要時間は約1分で、45分のtimeoutに十分収まる）。
