@@ -1,6 +1,6 @@
 // メディアビューワーのセーフエリアは未カバー(画像アップロード用のE2Eヘルパーが無いため)。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
-import { addAccountAndEnableMobile, rect, SAFE_AREA, setSafeArea } from "../helpers/mobile";
+import { addAccountAndEnableMobile, addHomeColumn, rect, SAFE_AREA, setSafeArea } from "../helpers/mobile";
 
 describe("mobile safe-area", () => {
   let bridge: MiauthBridge;
@@ -9,6 +9,7 @@ describe("mobile safe-area", () => {
     this.timeout(120000);
     bridge = await startMiauthBridge();
     await addAccountAndEnableMobile(bridge, "mobileSafeArea");
+    await addHomeColumn();
   });
 
   after(async () => {
@@ -53,5 +54,25 @@ describe("mobile safe-area", () => {
     const trigger = await rect('[data-testid="app-menu-trigger"]');
     const vh = await browser.execute(() => window.innerHeight);
     expect(trigger!.bottom).toBeLessThanOrEqual(vh - SAFE_AREA.bottom);
+  });
+
+  it("keeps the column area below the top safe area", async () => {
+    // モバイルUIにはheaderが無く、main自身が pt-[var(--safe-top)] でステータスバー分を確保する(Issue #257)。
+    const col = await rect(".column-root");
+    expect(col).not.toBeNull();
+    expect(col!.top).toBeGreaterThanOrEqual(SAFE_AREA.top);
+  });
+
+  it("keeps the bottom menu button inside the left safe area", async () => {
+    // 既存パディング(max(8px, var(--safe-left)))より十分大きいinsetで var(--safe-left) の効きを検出する。
+    const LEFT = 30;
+    await setSafeArea({ ...SAFE_AREA, left: LEFT });
+    try {
+      const trigger = await rect('[data-testid="app-menu-trigger"]');
+      expect(trigger).not.toBeNull();
+      expect(trigger!.left).toBeGreaterThanOrEqual(LEFT);
+    } finally {
+      await setSafeArea(SAFE_AREA);
+    }
   });
 });
