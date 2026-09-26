@@ -11,14 +11,16 @@ import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { createNote, signInAsSeededUser, uploadImage } from "../helpers/misskeyApi";
 import { addAccountAndEnableMobile, addHomeColumn } from "../helpers/mobile";
 
+// 先頭のslot(`> div`)を選ぶ。単一タブのカラム(Column.svelte の computeTabSlots が1 slotを返す)でのみ正しく、
+// 複数タブのカラムでは先に prev slot を測ってしまう。
 const SLOT = ".column-root .mobile-scroll-snap > div";
 // NoteCard は本文が300文字(TEXT_COLLAPSE_THRESHOLD)を超えると折りたたみ(overflow-hidden)で
-// はみ出しを隠してしまうため、折りたたまれない長さに収めつつカラム幅(~320px)を十分超える長さにする。
+// はみ出しを隠してしまうため、折りたたまれない長さに収めつつカラム幅(~379px)を十分超える長さにする。
 const LEN = 200;
 const MARKERS = ["E2E-OVF-URL", "E2E-OVF-WORD", "E2E-OVF-CODE", "E2E-OVF-IMG"];
 
 const measureSlot = () =>
-  browser.execute((sel) => {
+  browser.execute((sel, MARKERS_IN) => {
     const slot = document.querySelector(sel) as HTMLElement | null;
     if (!slot) return null;
     const slotRect = slot.getBoundingClientRect();
@@ -40,7 +42,18 @@ const measureSlot = () =>
         clippedNotes.add(`${marker} article scrollWidth=${a.scrollWidth} clientWidth=${a.clientWidth}`);
       }
     }
+    // 4件のマーカーノートが実際に測定され(found/height>0)、折りたたまれていない(collapsed=false)ことを返す。
+    const markers = MARKERS_IN.map((m) => {
+      const a = Array.from(slot.querySelectorAll("article")).find((x) => (x.textContent ?? "").includes(m));
+      return {
+        marker: m,
+        found: !!a,
+        height: a ? a.getBoundingClientRect().height : 0,
+        collapsed: a ? !!a.querySelector(".note-text-collapsed") : false,
+      };
+    });
     return {
+      markers,
       clippedNotes: Array.from(clippedNotes),
       scrollWidth: slot.scrollWidth,
       clientWidth: slot.clientWidth,
@@ -48,7 +61,36 @@ const measureSlot = () =>
       vw: window.innerWidth,
       offenders: offenders.slice(0, 10),
     };
-  }, SLOT);
+  }, SLOT, MARKERS);
+
+// content-visibility:auto の画面外articleはプレースホルダ寸法になり得るため、各マーカーを表示域に入れ、高さが安定するまで待つ。
+const settle = async () => {
+  const heights = () =>
+    browser.execute(
+      (sel, ms) => {
+        const slot = document.querySelector(sel)!;
+        return ms.map((m) => {
+          const a = Array.from(slot.querySelectorAll("article")).find((x) => (x.textContent ?? "").includes(m));
+          if (!a) return -1;
+          a.scrollIntoView({ block: "center" });
+          return a.getBoundingClientRect().height;
+        });
+      },
+      SLOT,
+      MARKERS,
+    );
+  let prev = JSON.stringify(await heights());
+  await browser.waitUntil(
+    async () => {
+      await browser.pause(300);
+      const cur = JSON.stringify(await heights());
+      const same = cur === prev;
+      prev = cur;
+      return same;
+    },
+    { timeout: 10000, interval: 100, timeoutMsg: "marker note heights did not stabilise" },
+  );
+};
 
 describe("mobile horizontal overflow: column content", () => {
   let bridge: MiauthBridge;
@@ -81,8 +123,18 @@ describe("mobile horizontal overflow: column content", () => {
   });
 
   it("has no unintended horizontal scroll in the column note list", async () => {
+    await settle();
     const m = await measureSlot();
     expect(m).not.toBeNull();
+    const problems: string[] = [];
+    for (const k of m!.markers) {
+      if (!k.found) problems.push(`${k.marker}: not found`);
+      else {
+        if (!(k.height > 0)) problems.push(`${k.marker}: height=${k.height}`);
+        if (k.collapsed) problems.push(`${k.marker}: collapsed`);
+      }
+    }
+    expect(problems).toEqual([]);
     const over = m!.scrollWidth - m!.clientWidth > 1;
     // 失敗時に原因ノートを特定できるよう、幅を超えている要素/ノートの一覧をメッセージに含める。
     expect({ over, clippedNotes: m!.clippedNotes, offenders: over || m!.clippedNotes.length > 0 ? m!.offenders : [] }).toEqual({
