@@ -16,6 +16,16 @@ services:
       web:
         condition: service_healthy
 
+  # 名前付きボリュームはroot所有で作られるが、Misskeyは非root(uid/gid 991)で動くため、
+  # 初期化しないとdriveアップロードがEACCESで失敗する。一度だけchownして終了する。
+  files-init:
+    image: postgres:18-alpine
+    restart: "no"
+    user: "0:0"
+    command: ["chown", "-R", "991:991", "/misskey/files"]
+    volumes:
+      - misskey_files:/misskey/files
+
   web:
     image: misskey/misskey:2026.7.0
     restart: "no"
@@ -25,6 +35,8 @@ services:
       - ./misskey-config/default.yml:/misskey/.config/default.yml:ro
       - misskey_files:/misskey/files
     depends_on:
+      files-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
