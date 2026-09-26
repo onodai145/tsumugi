@@ -477,7 +477,7 @@
     onpointermovecapture={onSwipePointerMove}
     onpointerupcapture={onSwipePointerEnd}
     onpointercancelcapture={onSwipePointerEnd}
-    class="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
+    class="flex flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
   >
     {#each viewItems as item (item.id)}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -499,7 +499,7 @@
           {#if mediaLoadError[item.id]}
             <p class="text-sm text-white">画像を読み込めませんでした</p>
           {:else}
-            <cropper-canvas class="h-full w-full" background="false">
+            <cropper-canvas class="h-full w-full touch-pan-x has-[cropper-image[translatable]]:touch-none" background="false">
               <cropper-image
                 bind:this={
                   () => cropperImageElsByItemId[item.id],
@@ -603,7 +603,7 @@
       onclick={(e) => { e.stopPropagation(); goPrev(); }}
     >
       <button
-        class="inline-flex size-9 items-center justify-center rounded-full border border-transparent bg-clip-padding bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:border-ring focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50"
+        class="inline-flex size-9 items-center justify-center rounded-full border border-transparent bg-clip-padding bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100 focus-visible:border-ring focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50"
         onclick={(e) => { e.stopPropagation(); goPrev(); }}
         aria-label="前へ"
       >
@@ -617,7 +617,7 @@
       onclick={(e) => { e.stopPropagation(); goNext(); }}
     >
       <button
-        class="inline-flex size-9 items-center justify-center rounded-full border border-transparent bg-clip-padding bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:border-ring focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50"
+        class="inline-flex size-9 items-center justify-center rounded-full border border-transparent bg-clip-padding bg-black/40 text-white opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100 focus-visible:border-ring focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50"
         onclick={(e) => { e.stopPropagation(); goNext(); }}
         aria-label="次へ"
       >

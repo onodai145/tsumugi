@@ -43,6 +43,31 @@ function file(overrides: Partial<DriveFile>): DriveFile {
 afterEach(() => cleanup());
 
 describe("MediaViewer", () => {
+  // 回帰テスト(Issue #380): スマホ版での不具合。
+  // 1) <cropper-canvas>は既定でtouch-action:noneでページ全面を覆うため、ブラウザ標準の
+  //    横スクロール(Scroll Snap)によるスワイプ送りが効かなかった。等倍時はpan-xにし、
+  //    ズーム(cropper-imageにtranslatable)中だけnoneに戻してパンをCropper.jsに任せる。
+  // 2) scrollbar-width:noneだけではWebKit/古いWebViewで横スクロールバーが出るため、
+  //    ::-webkit-scrollbarも隠す。
+  // 3) 前後送りボタンはhover専用表示だとタッチ端末では常に不可視になる。
+  it("スマホ対応: cropper-canvasは等倍時pan-x・ズーム時noneで、スクロールバーは隠し、送りボタンはhover非対応端末で常時表示", () => {
+    const { getByLabelText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    const canvas = document.querySelector("cropper-canvas") as HTMLElement;
+    expect(canvas.classList.contains("touch-pan-x")).toBe(true);
+    expect(canvas.className).toContain("has-[cropper-image[translatable]]:touch-none");
+    const scroller = document.querySelector('[data-testid="media-page"]')!.parentElement as HTMLElement;
+    expect(scroller.className).toContain("[&::-webkit-scrollbar]:hidden");
+    expect(getByLabelText("前へ").className).toContain("[@media(hover:none)]:opacity-100");
+    expect(getByLabelText("次へ").className).toContain("[@media(hover:none)]:opacity-100");
+  });
+
   it("Escapeキーでoncloseが呼ばれる", async () => {
     const onclose = vi.fn();
     render(MediaViewer, {
