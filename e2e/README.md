@@ -94,6 +94,9 @@ cd e2e && xvfb-run -a pnpm e2e:mobile
   閉じるボタンの上端・右insetとツールバー（ズームイン）の下端が内側に収まること
 - `overflow.e2e.ts`: `[data-columns-scroll]` の外側の各要素が `right <= innerWidth + 1` を満たすこと。
   ルートが overflow-hidden のため `documentElement.scrollWidth` では検出できず、要素ごとに比較している
+- `overflow-column.e2e.ts`: カラム内容（長いURL・長い単語・コードブロック・画像）を含むノートを事前投稿し、
+  ノート一覧（slot）とその中の各ノート（article）が意図しない横はみ出し（`scrollWidth > clientWidth`）を
+  起こしていないこと、slotが viewport 内に収まること。コードブロック等の自前overflow要素は除外される
 
 限界: デスクトップWebKitGTK上の近似のため、Android WebView固有の挙動（Edge-to-Edgeの実inset値、
 IME、ジェスチャー）は対象外で、実機確認は手動。

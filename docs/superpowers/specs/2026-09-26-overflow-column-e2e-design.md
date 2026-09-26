@@ -15,6 +15,7 @@
   - 改行の無い長い単語
   - 長い1行を含むコードブロック（MFMのコードフェンス）
   - 画像付きノート（`uploadImage` + `createNote(token, text, [fileId])`、#385で追加済み）
+  - 長いURL・単語・コード行の長さは `LEN=200`。`NoteCard` は本文が300文字を超えると折りたたみ（overflow-hidden）ではみ出しを隠すため、閾値未満に収めつつカラム幅（約320px）を十分超える長さにしている。
 - そのあとアカウントを追加してモバイルモードにし（`addAccountAndEnableMobile`）、`addHomeColumn()` を呼ぶ。
 - 4件のノートがカラムに描画されるまで待つ（ノートが無いと検査が空振りするため）。
 
@@ -25,15 +26,17 @@
 - アクティブslot（`.column-root .mobile-scroll-snap > div`。本番コード変更は不要）について次を確認する。
   - `scrollWidth <= clientWidth + 1`（中身が幅を超えて横スクロールが生じていない）
   - slot自身の右端が viewport 内
-- 失敗時は、slot の `clientWidth` を超えている要素の一覧（タグ・class・right）をメッセージに出し、どのノートが原因か特定できるようにする。
+- slotに加えて、slot内の各ノート（`article`）自身も `scrollWidth <= clientWidth + 1` を確認する（必須）。`NoteCard` の article は `content-visibility:auto`（paint containment）で、はみ出しを自身でクリップするため slot の `scrollWidth` が増えず、slotだけの検査ではGREENのままになる。
+- 失敗時は、幅を超えている要素の一覧（タグ・class・right）と、クリップしているノート（`E2E-OVF-*` マーカー付き）をメッセージに出し、どのノートが原因か特定できるようにする。
 - コードブロックなど、自身で `overflow` を持つ要素は slot の `scrollWidth` に影響しないため、意図したスクロールは自然に除外される。
 
 ## 3. 検出力の担保
 
 各ケースについて、対応する本番CSSを一時的に外して RED を確認し、戻して GREEN を確認する（本番ファイルの変更はコミットしない）。
 
-- `NoteCard.svelte` のノート本文の `break-words` を外す → 長い単語・URLのケース
-- `MediaGrid.svelte` のセルサイズ指定を外す → 画像ケース
+- `NoteCard.svelte` の本文コンテナの `min-w-0 flex-1` を `flex-1` にする → 長い単語・URL・コードのケース
+- `app.css` のコードブロック `pre` を `overflow: visible` にする → コードのケース（`overflow-x: visible` だけでは `overflow-y:hidden` により auto になり効かない）
+- `MediaGrid.svelte` のセルの `overflow-hidden` を外し、`img` を `w-[600px] max-w-none` にして壊しを強める → 画像のケース
 
 ## 4. 実際のバグが見つかった場合
 

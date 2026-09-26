@@ -3,6 +3,10 @@
 // 各カラムのノート一覧は Column.svelte のslot(h-full w-full overflow-y-auto)で、overflow-yを指定すると
 // overflow-xもautoになるため、中身が幅を超えると意図しない横スクロール(scrollWidth > clientWidth)として現れる。
 // コードブロック等、自身でoverflowを持つ要素は slot の scrollWidth に影響しないので、意図したスクロールは除外される。
+// 各ノート(article)自身の検査は必須(slotの検査だけでは冗長に見えても消さないこと): articleが content-visibility:auto で
+// はみ出しをクリップすると slot の scrollWidth は増えず、slotだけの検査ではGREENのままになる。
+// 検出力は本番を一時的に壊して確認済み(NoteCard の min-w-0 除去 / app.css の code-block を overflow: visible /
+// MediaGrid のセルの overflow-hidden 除去)。LEN=200 は NoteCard の300文字折りたたみ閾値未満に収めるための値。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { createNote, signInAsSeededUser, uploadImage } from "../helpers/misskeyApi";
 import { addAccountAndEnableMobile, addHomeColumn } from "../helpers/mobile";
