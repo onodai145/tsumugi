@@ -92,12 +92,29 @@ export async function setMutedWords(token: string, mutedWords: (string | string[
   }
 }
 
-/** `notes/create` でノートを投稿し、投稿したノートのidを返す。 */
-export async function createNote(token: string, text: string): Promise<string> {
+// 1x1 PNG。E2Eでメディア付きノートを作るための最小の画像。
+const PNG_1X1_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+/** `drive/files/create` (multipart/form-data) で1x1 PNGをアップロードし、ファイルidを返す。 */
+export async function uploadImage(token: string): Promise<string> {
+  const form = new FormData();
+  form.append("i", token);
+  form.append("file", new Blob([Buffer.from(PNG_1X1_BASE64, "base64")], { type: "image/png" }), "e2e.png");
+  const res = await fetch(`${BASE_URL}/api/drive/files/create`, { method: "POST", body: form });
+  if (!res.ok) {
+    throw new Error(`uploadImage: drive/files/create failed ${res.status}: ${await res.text()}`);
+  }
+  const body = (await res.json()) as { id: string };
+  return body.id;
+}
+
+/** `notes/create` でノートを投稿し、投稿したノートのidを返す。`fileIds`指定時のみ添付する。 */
+export async function createNote(token: string, text: string, fileIds?: string[]): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/notes/create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ i: token, text }),
+    body: JSON.stringify(fileIds ? { i: token, text, fileIds } : { i: token, text }),
   });
   if (!res.ok) {
     throw new Error(`createNote: notes/create failed ${res.status}: ${await res.text()}`);
