@@ -46,7 +46,7 @@ e2e/
 └─ specs-mobile/
     ├─ layout.e2e.ts        # FAB表示、投稿欄が常時表示でないこと、カラムが100%幅で横スナップすること
     ├─ safe-area.e2e.ts     # 注入したinset分だけ、FAB・投稿モーダル・下部メニューバーに加え、カラム領域の上端と下部メニューボタンの左inset（30px注入、Issue #384で追加）が内側に収まること。6vh/8vh（約51/67px）より大きいinset（モーダル用にtop 120、FABは非ゼロのright inset）を注入し、safe-areaが効いていなければ失敗するようにしている。メディアビューワーは Issue #384 で `safe-area-media.e2e.ts` として追加
-    └─ overflow.e2e.ts      # `[data-columns-scroll]` の外側の各要素について `right <= innerWidth + 1` を確認する。ルートが overflow-hidden のため `documentElement.scrollWidth` では検出できないので、要素ごとの右端比較にしている
+    └─ overflow.e2e.ts      # `[data-columns-scroll]` の外側の各要素について `right <= innerWidth + 1` を確認する。ルートが overflow-hidden のため `documentElement.scrollWidth` では検出できないので、要素ごとの右端比較にしている。カラム内容（ノート内の長いURL・単語・コードブロック・画像）は対象外で、Issue #383 で `overflow-column.e2e.ts` として追加した（slotと各ノートの `scrollWidth` を検査）
 ```
 
 - 検証手法: `getBoundingClientRect()` を注入inset・ビューポート境界と比較する。スクリーンショット比較は使わない。
