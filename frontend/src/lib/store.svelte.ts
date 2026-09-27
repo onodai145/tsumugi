@@ -198,6 +198,12 @@ class AppStore {
   // 背景が動画の間だけ生成し、document.body に固定配置する <video> 要素。
   // #applyBackground が呼ばれるたびに再利用し、種類が変わったら display を切り替える。
   #bgVideoEl: HTMLVideoElement | null = null;
+  // #bgVideoEl.src に設定済みの背景動画の元パス(UiPrefs.backgroundPath)。フェッチ済みかどうかの
+  // 判定に使う(WebKitGTKのvideo要素はasset://を直接読めないため、asset://ではなくblob: URLを
+  // src に使う。#loadBackgroundVideoBlob 参照)。
+  #bgVideoSourcePath: string | null = null;
+  // #bgVideoSourcePath に対応する blob: URL。切り替え時に確実に revoke してメモリリークを防ぐ。
+  #bgVideoBlobUrl: string | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -231,6 +237,12 @@ class AppStore {
     if (this.#updateCheckTimer !== null) {
       clearInterval(this.#updateCheckTimer);
       this.#updateCheckTimer = null;
+    }
+    // devのHMRで古いインスタンスが破棄される際、背景動画用のblob: URLを解放する
+    // (#loadBackgroundVideoBlob参照)。放置するとリロードごとにメモリが積み上がる。
+    if (this.#bgVideoBlobUrl) {
+      URL.revokeObjectURL(this.#bgVideoBlobUrl);
+      this.#bgVideoBlobUrl = null;
     }
   }
 
@@ -1539,7 +1551,7 @@ class AppStore {
     const rawFitMode = prefs.backgroundFitMode ?? "cover";
     const fitMode = kind === "video" && rawFitMode === "tile" ? "cover" : rawFitMode;
 
-    if (kind === "video" && assetUrl) {
+    if (kind === "video" && path) {
       root.style.removeProperty("--bg-image");
       if (!this.#bgVideoEl) {
         const v = document.createElement("video");
@@ -1551,7 +1563,7 @@ class AppStore {
         document.body.prepend(v);
         this.#bgVideoEl = v;
       }
-      if (this.#bgVideoEl.src !== assetUrl) this.#bgVideoEl.src = assetUrl;
+      if (this.#bgVideoSourcePath !== path) void this.#loadBackgroundVideoBlob(path);
       this.#bgVideoEl.style.display = "";
       this.#bgVideoEl.play().catch(() => {});
       const objectFit =
@@ -1580,6 +1592,31 @@ class AppStore {
       BACKGROUND_POSITION_CSS.center;
     root.style.setProperty("--bg-position", bgPosition);
     if (this.#bgVideoEl) this.#bgVideoEl.style.objectPosition = bgPosition;
+  }
+
+  /// 背景動画のsrcをasset://ではなくblob: URLで設定する。
+  /// WebKitGTK(GStreamerバックエンド)の<video>要素はTauriのasset://カスタムURIスキームを
+  /// 直接解釈できず、`MEDIA_ERR_SRC_NOT_SUPPORTED`で読み込みに失敗する
+  /// (fetch()等のページ側リソースローダー経由では正常に取得できるにもかかわらず)。
+  /// そのため一度fetch()でBlobとして取得し、URL.createObjectURL()のblob: URLを<video src>に
+  /// 使う。#applyBackgroundは同期関数なので、この非同期処理はfire-and-forgetで呼ばれる。
+  async #loadBackgroundVideoBlob(path: string) {
+    try {
+      const res = await fetch(convertFileSrc(path));
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const blob = await res.blob();
+      // fetch中に別の背景に切り替えられていたら、古いレスポンスの反映は捨てる。
+      if (this.ui.backgroundPath !== path || this.ui.backgroundKind !== "video" || !this.#bgVideoEl) {
+        return;
+      }
+      const blobUrl = URL.createObjectURL(blob);
+      if (this.#bgVideoBlobUrl) URL.revokeObjectURL(this.#bgVideoBlobUrl);
+      this.#bgVideoBlobUrl = blobUrl;
+      this.#bgVideoSourcePath = path;
+      this.#bgVideoEl.src = blobUrl;
+    } catch (e) {
+      this.#log("warn", `背景動画の読み込みに失敗しました: ${String(e)}`);
+    }
   }
 
   /// メディアサムネイルの高さ上限を <html> に反映する（ノートを詰めたい人は小さく、
