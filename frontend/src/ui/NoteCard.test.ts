@@ -22,7 +22,7 @@ const { openProfile } = await import("../lib/profileModal.svelte");
 
 afterEach(() => {
   cleanup();
-  app.ui = { ...app.ui, instanceTicker: "remote" };
+  app.ui = { ...app.ui, instanceTicker: "remote", catMode: "respect" };
 });
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -528,6 +528,23 @@ describe("猫耳アバター", () => {
     const note = makeNote({ user: makeUser({ isCat: false }) });
     const { container } = render(NoteCard, { props: { note, accountId: "a1" } });
     expect(container.querySelector(".ears")).toBeNull();
+  });
+});
+
+describe("catMode によるnyaize切替", () => {
+  it("cat: isCatでない投稿者の本文もにゃん語化される", () => {
+    app.ui = { ...app.ui, catMode: "cat" };
+    const note = makeNote({ text: "こんな", user: makeUser({ isCat: false }) });
+    const { container } = render(NoteCard, { props: { note, accountId: "a1" } });
+    expect(container.textContent).toContain("こんにゃ");
+  });
+
+  it("human: isCatの投稿者の本文もにゃん語化されない", () => {
+    app.ui = { ...app.ui, catMode: "human" };
+    const note = makeNote({ text: "こんな", user: makeUser({ isCat: true }) });
+    const { container } = render(NoteCard, { props: { note, accountId: "a1" } });
+    expect(container.textContent).toContain("こんな");
+    expect(container.textContent).not.toContain("こんにゃ");
   });
 });
 

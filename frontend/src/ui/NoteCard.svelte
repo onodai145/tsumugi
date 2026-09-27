@@ -20,6 +20,7 @@
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
   import { handleNyaizeCopy } from "../lib/nyaizeCopy";
+  import { effectiveIsCat } from "../lib/catMode";
   import { Reply, Repeat2, Quote, SmilePlus, Globe, House, Lock, Mail, MoreHorizontal } from "@lucide/svelte";
   import { openProfile } from "../lib/profileModal.svelte";
 
@@ -402,7 +403,7 @@
 
       {#if inner.cw}
         <div class="mt-0.5">
-          <span class="text-sm [-webkit-user-select:text] select-text" oncopy={handleNyaizeCopy}><Mfm text={inner.cw} emojis={emojiMap} nyaize={inner.user.isCat} /></span>
+          <span class="text-sm [-webkit-user-select:text] select-text" oncopy={handleNyaizeCopy}><Mfm text={inner.cw} emojis={emojiMap} nyaize={effectiveIsCat(inner.user.isCat)} /></span>
           <button type="button" class="cw-toggle ml-2 rounded-md border border-border px-2 py-px text-sm text-foreground" onclick={() => (cwOpen = !cwOpen)}>
             {cwOpen ? "隠す" : `続きを見る${inner.text ? "" : ""}`}
           </button>
@@ -418,7 +419,7 @@
                 : "mt-px whitespace-pre-wrap break-words text-sm leading-[1.42] [-webkit-user-select:text] select-text"}
               data-testid="note-text"
               oncopy={handleNyaizeCopy}
-            ><Mfm text={inner.text} emojis={emojiMap} nyaize={inner.user.isCat} /></div>
+            ><Mfm text={inner.text} emojis={emojiMap} nyaize={effectiveIsCat(inner.user.isCat)} /></div>
             {#if isLongText && !textExpanded}
               <div class="note-text-fade pointer-events-none absolute inset-x-0 bottom-0 h-10"></div>
               <div class="absolute inset-x-0 bottom-0 flex justify-center pb-0.5">
