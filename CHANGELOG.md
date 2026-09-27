@@ -2,6 +2,213 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-09-27
+
+### 🚀 Features
+
+- Domain::Note に reply_user_id を追加
+- RawNote から reply_user_id を抽出する
+- TQL の reply_to_me 述語を実装する
+- Note_cache に reply_user_id の実値を保存する
+- 長押しドラッグ検知の状態機械を追加
+- カラムドラッグの前後ヒント判定を追加
+- カラム隣接swapの純粋関数を追加
+- AppStoreにmoveColumnAdjacent/canMoveColumnAdjacentを追加
+- モバイル版でタブの長押しドラッグ並び替えに対応
+- モバイル版でカラムの長押しドラッグ並び替えに対応
+- カラムメニューに左右移動ボタンを追加
+- Misskey APIアクセスログをclient.rs::postに追加
+- キャッシュhit/fallbackカウンタCacheMetricsを追加
+- Resume_column/fetch_backfillにキャッシュ計装を追加
+- Get_debug_metricsコマンドを追加
+- Devビルドでは設定に関係なく常にロガーを登録する
+- Streaming受信時のフィルタ/ミュートdropログを追加
+- BackstageにキャッシュメトリクスのUIを追加
+- 純粋Renoteの取り消しメニューを追加
+- UiPrefsに開発者オプション解除フラグを追加
+- 外部連携タブを新設しMFM検索エンジン/URLプレビュー設定を移動
+- デバッグ設定を開発者オプションセクションへ分離
+- バージョン表示7回タップで開発者オプションを解除する
+- 設定タブを性質軸で再構成する(外部連携新設・データ統合・開発者オプション追加)
+- 矢印キー選択移動専用のselectionMoveSeqをTabViewに追加
+- MediaViewer用の純粋ロジックを追加
+- 画像の拡大表示をviewerjsからMediaViewerへ移行
+- MediaViewerに動画・音声表示(Vidstack + panzoom)を追加
+- 動画・音声タイルに拡大ビューワー起動ボタンを追加
+- MediaViewerに読み込み失敗時のエラー表示を追加
+- MediaGridの動画・音声タイルをVidstack自前コントロールバー化
+- MediaGridのインラインプレイヤーにシークバーを追加
+- MediaGridにホバー展開する音量スライダーを追加
+- MediaViewerの動画コントロールバーにフルスクリーンボタンを追加
+- 動画クリックで再生/一時停止をトグルできるようにする
+- コントロールバーに再生時間/合計時間を表示
+- フルスクリーンビューワーの余白クリックで閉じられるようにする
+- ビューワーを等倍時の縦スワイプで閉じられるようにする
+- DriveFileにファイルサイズを追加する
+- ファイルサイズ整形関数を追加する
+- 非メディア添付ファイルをリスト表示して保存ダイアログで開く
+- UiPrefsにcatModeを追加 (#42)
+- CatModeに応じてnyaizeと猫耳を強制切替する (#42)
+- 外観設定に猫化モードの選択を追加 (#42)
+
+### 🐛 Bug Fixes
+
+- Tauri-plugin-hapticsのCargo.tomlからlinksキーを削除しDependabotのcargo更新失敗を修正
+- Linksを維持しつつbuild.rsを明示してDependabotのcargo更新失敗を修正
+- Viewerjs/@lucide-svelteの破壊的型変更に追従してfrontend-checkを修正
+- Jni 0.22 の Env/EnvUnowned 分離に mobile_intent.rs を追従
+- Sqlx 0.9 の SqlSafeStr 監査要求に MySQL/Postgres バックエンドを追従
+- Local/Hybridカラムで withReplies:true を送るようにする
+- MySQL/Postgresバックエンドでreply_user_idを実値保存する
+- Tauri-plugin-notificationをnpm側と同じ2.4系に更新
+- タブ長押しドラッグのarmed判定順序とpointer capture漏れを修正
+- タブ長押しドラッグのpointer captureを長押し成立後に遅延
+- カラム並び替えをpaneRoot(movePane)経由に修正
+- モバイル長押しドラッグのtouch-action・判定範囲・ヒント表示を修正
+- 縦分割rootで左右移動が可能に見えるのを修正
+- 実機確認で判明したセーフエリア無視とタブ長押し横スクロール競合を修正
+- 実機報告を受けタッチターゲット拡大・長押し閾値緩和・文字列選択抑制
+- 長押しドラッグ中にノート本文が誤って文字列選択されるのを修正
+- モバイル版でnative HTML5ドラッグが長押しジェスチャーを横取りする問題を修正
+- *(仮説検証)* タブのpointer captureを移動しないタブバーコンテナへ変更
+- タブ長押しドラッグが途中で固着する問題を修正、診断ログを除去
+- PKGBUILD自動更新ワークフローがdetached HEADで失敗する問題を修正
+- Vitestカバレッジのinclude設定漏れとコメント欠落を修正
+- E2E用MisskeyのIPベースsignin回数制限を無効化
+- Api/filterログをrelease版でも有効にしログローテーションを緩める
+- 最終レビュー指摘(開発者オプション解除の堅牢化・スタイルガイド更新)を反映
+- タブ切替時に選択ノート位置へ自動スクロールしないようにする
+- NoteCardのselectionMoveSeq初期値捕捉をuntrackで明示する
+- キーバインドによる暗黙選択でもselectionMoveSeqを増やす
+- Codecov.ymlのcomment設定をオブジェクト形式で明示する
+- E2e run-app.shでWAYLAND_DISPLAYをunsetし実画面への漏れを防ぐ
+- 通知カラムのWS接続完了を待ってからメンションE2Eを検証する
+- Jsdom unhandled rejection対応(test-setupで VTTCue及び Observers をスタブ化)
+- MediaGridの拡大・保存ボタンの重なりと絵文字アイコンを修正
+- MediaPlayerのsrcにtypeを明示し拡張子なしURLでの読み込み不能を修正
+- シークバーtrackの色をaccentトークン経由に修正
+- シークバーのpointer-eventsをVidstackインラインstyleより優先させる
+- MediaViewerのラップアラウンド送りで表示位置がずれる不具合を修正
+- MediaViewerの前後送り連打で表示位置がずれる不具合を修正
+- StartIndex:0でscrollendが発火せずフラグが解除されない不具合を修正
+- MediaViewerのページ送りでscrollIntoViewの目的地誤判定によりズレる不具合を修正
+- MediaViewerのラップアラウンド送りが常に瞬時ジャンプになる不具合を修正
+- MediaViewerのcropperImageEl取り違えによる画像変形の不具合を修正
+- メディアビューワー全体コードレビュー指摘(I-1〜I-3、M-2〜M-6)を修正
+- 動画ビューワーのtouch-actionをパン有効状態に連動させる
+- 音声タイルのグリッド行ストレッチと波形CORS/MIME不具合を修正
+- 音声コントロールバーが幅を使い切らず縦上寄せになる不具合を修正
+- 音声コントロールバーのボタン配置を動画側と統一
+- 音声プレイヤーの波形を1.5倍に拡大しシークバーを非表示化
+- 波形の再生済み部分の色が反映されない不具合を修正
+- 音声波形をVidstackのaudioに干渉しない方式にしbase64をやめ生バイト取得へ変更
+- フルスクリーンビューワーの動画・音声がCORSで再生できない不具合を修正
+- ピンチズーム中に縦スワイプ判定が誤発動して薄くなる・閉じる不具合を修正
+- ページのroleを外して既存テストを通し余白クリックのテストを追加
+- 前後送りクリック領域を矢印ボタン周りに絞り左右の余白で閉じられるようにする
+- メディアグリッドの各セルを個別に角丸にする
+- スマホ版メディアビューワーのスワイプ・スクロールバー・送りボタン表示を修正する
+- レビュー指摘(モーダル閉鎖待ち・設計書のCI記述・style-guide節番号)を反映する
+- E2E用Misskeyのファイルボリューム権限を初期化して画像アップロードを可能にする
+- ファイルリストの箇条書きマーカーとインデントを消す
+- Vidstack未対応MIMEの動画(video/quicktime等)をvideo/mp4として渡して再生可能にする
+
+### 💼 Other
+
+- カラムグリップのポインターイベントに一時診断ログを追加
+- タブのポインターイベントに一時診断ログを追加
+- Viewerjsをcropperjs/vidstack/panzoomに入れ替え
+
+### 🚜 Refactor
+
+- メディアのダウンロード処理をlib/mediaDownload.tsへ共通化
+- MediaGridのコントロールバーマークアップをsnippetで共通化
+- セーフエリアのenv()をCSS変数経由にしE2Eから上書き可能にする
+
+### 📚 Documentation
+
+- Sqlx AssertSqlSafe 使用箇所に監査根拠のコメントを追記
+- タイムライン返信可視性修正の設計書を追加
+- タイムライン返信可視性修正の実装プランを追加
+- Local/Hybridの返信全表示化をユーザーガイドに追記
+- ユーザーガイドのreply_to_me例を修正
+- CLAUDE.mdのstore/session/commands記述を実装に合わせて更新
+- モバイル版タブ/カラム並び替え(Issue #354)のdesign docを追加
+- モバイル版タブ/カラム並び替え(Issue #354)の実装計画を追加
+- モバイル版タブ/カラム並び替えの操作方法を追記
+- テストカバレッジ可視化の設計ドキュメントを追加
+- テストカバレッジ可視化の実装計画を追加
+- READMEにCodecovバッジを追加
+- E2Eシナリオ網羅拡充の設計を追加
+- E2Eシナリオ網羅拡充の実装計画を追加
+- Issue #241デバッグログ・可観測性改善のspecを追加
+- Specにフィルタ/ミュートdropログの節を追加
+- SpecにAPIアクセスログのレスポンスサイズ記録を追記
+- Specにログ統合を見送った理由を追記
+- Specの欠落していたテスト節見出しを復元
+- Issue #241の実装計画を追加
+- 設定タブ分類見直し(Issue #326)の設計計画を追加
+- 設定タブ分類見直し(Issue #326)の実装計画を追加
+- 設定画面タブ構成の変更をユーザーガイドに反映
+- タブ切替時スクロール修正(Issue #363)の設計を追加
+- タブ切替時スクロール修正の設計をselectionMoveSeq方式に更新
+- タブ切替時スクロール修正の実装計画を追加
+- メディアビューワー移行(Issue #295)の設計ドキュメントを追加
+- 画像ビューワーをCropper.js v2に一本化する設計に更新
+- パン/スワイプ競合解決・Vidstackテーマ連携・実機確認手順を設計に追記
+- メディアビューワー移行の実装計画を追加
+- 実機フィードバックに基づきTask 11(グリッドVidstack化)を計画に追加
+- 実装結果に合わせて設計ドキュメントを更新
+- 音声波形表示とビューワーのcrossorigin方針を設計ドキュメントに追記
+- モバイルUI E2Eの設計ドキュメントを追加する
+- モバイルUI E2Eの実装計画を追加する
+- モバイルE2Eの実行方法を追記する
+- モバイルE2Eセーフエリア検証拡充の設計ドキュメントを追加する
+- モバイルE2Eセーフエリア検証拡充の実装計画を追加する
+- モバイルE2Eのセーフエリア検証範囲の記述を更新する
+- セーフエリアE2Eの説明を実装に合わせて修正する
+- 最終レビュー指摘(設計書の記述・compose注記・teardownガード)を反映する
+- Overflow検査のカラム内容対応の設計ドキュメントを追加する
+- Overflow検査のカラム内容対応の実装計画を追加する
+- モバイルE2Eのoverflow検査範囲の記述を更新する
+- 非メディア添付ファイルのリスト表示の設計を追加する
+- 非メディア添付ファイルのリスト表示の実装計画を追加する
+- Spec のsize型を実装に合わせる
+- 強制猫化/強制人間化のdesign specを追加 (#42)
+- 強制猫化/強制人間化の実装計画を追加 (#42)
+
+### 🧪 Testing
+
+- ReplyUserId フィールド追加に伴うNoteフィクスチャ修正
+- MiAuthアカウント選択画面通過処理を共通ヘルパーに抽出
+- StartMiauthBridgeに任意の認証情報を渡せるようにする
+- MisskeyApiヘルパーにsignUp/renoteNote/deleteNoteを追加
+- E2E新規シナリオ向けにdata-testid/data-account-idを追加
+- Run-app.shにHOME再利用による再起動サポートを追加
+- TQLフィルタカラムのE2Eシナリオを追加
+- 複数アカウント同時使用のE2Eシナリオを追加
+- 最終レビュー指摘事項を修正
+- 音声アイテムがaudio-layoutで表示されることを確認するテストを追加
+- モバイルE2Eの基盤(helper・config・script)を追加する
+- モバイルレイアウト(FAB・投稿モーダル・カラム幅)のE2Eを追加する
+- モバイルのセーフエリア被りを検出するE2Eを追加する
+- セーフエリアE2Eのモーダル上端・右inset検証の検出力を修正する
+- モバイルの意図しない横はみ出しを検出するE2Eを追加する
+- モバイルのカラム領域上端と左insetのセーフエリアE2Eを追加する
+- メディアビューワーのセーフエリアE2Eを追加する
+- モバイルのカラム内容による横はみ出しを検出するE2Eを追加する
+- Overflow-columnのマーカーノートが測定・非折りたたみであることを検証する
+- MediaGridのメディア/非メディア振り分けと閲覧注意の開示を検証する
+
+### ⚙️ Miscellaneous Tasks
+
+- Rust側のテストカバレッジ計測(cargo-llvm-cov)を追加
+- フロントエンド側のテストカバレッジ計測(Vitest v8)を追加
+- Codecovへのカバレッジアップロードを統合
+
+### ◀️ Revert
+
+- タブバー高さ・グリップ幅・タブpaddingを元のサイズに戻す
 ## [0.11.0] - 2026-09-12
 
 ### 🚀 Features
