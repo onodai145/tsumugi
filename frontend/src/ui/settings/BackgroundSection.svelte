@@ -30,6 +30,34 @@
     backgroundKind === "video" ? BACKGROUND_FIT_MODE_OPTIONS_FOR_VIDEO : BACKGROUND_FIT_MODE_OPTIONS,
   );
 
+  // 動画プレビュー用のblob: URL。WebKitGTK(GStreamerバックエンド)の<video>要素は
+  // Tauriのasset://カスタムURIスキームを直接読めない(store.svelte.tsの#applyBackground /
+  // #loadBackgroundVideoBlobと同じ理由)ため、fetch()で取得したBlobから作ったblob: URLを使う。
+  let videoPreviewUrl = $state("");
+  $effect(() => {
+    if (backgroundKind !== "video" || !backgroundPath) {
+      videoPreviewUrl = "";
+      return;
+    }
+    let blobUrl = "";
+    let cancelled = false;
+    fetch(convertFileSrc(backgroundPath))
+      .then((r) => r.blob())
+      .then((blob) => {
+        if (cancelled) return;
+        blobUrl = URL.createObjectURL(blob);
+        videoPreviewUrl = blobUrl;
+      })
+      .catch(() => {
+        if (!cancelled) videoPreviewUrl = "";
+      });
+    // backgroundPath が変わった/このコンポーネントが破棄された際に、前のblob: URLを解放する。
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  });
+
   // 背景メディアの基準点（9点グリッド、Issue #76）。position→アクセシブルラベル。
   const positionLabels: Record<BackgroundPosition, string> = {
     "top-left": "左上",
@@ -99,9 +127,9 @@
   <div class="flex items-center gap-2.5">
     {#if backgroundKind === "image" && previewUrl}
       <img class="h-9 w-14 rounded-md border border-border object-cover" src={previewUrl} alt="背景プレビュー" />
-    {:else if backgroundKind === "video" && previewUrl}
+    {:else if backgroundKind === "video" && videoPreviewUrl}
       <!-- svelte-ignore a11y_media_has_caption -->
-      <video class="h-9 w-14 rounded-md border border-border object-cover" src={previewUrl} muted autoplay loop playsinline></video>
+      <video class="h-9 w-14 rounded-md border border-border object-cover" src={videoPreviewUrl} muted autoplay loop playsinline></video>
     {/if}
     <Button type="button" variant="outline" size="sm" disabled={pickingImage} onclick={pickMedia}>
       {pickingImage ? "読み込み中…" : backgroundKind ? "メディアを変更" : "画像/動画を選択"}
