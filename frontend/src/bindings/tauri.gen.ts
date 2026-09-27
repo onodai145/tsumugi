@@ -1008,6 +1008,12 @@ export type UiPrefs = {
 	 *  "always" = ローカルユーザー（自分と同一インスタンス）の投稿にも表示。
 	 */
 	instanceTicker?: string,
+	/**
+	 *  猫化モード（Issue #42）。"respect" = ユーザーの isCat に従う(既定) /
+	 *  "cat" = 全ユーザーを猫扱い / "human" = 全ユーザーを人間扱い。
+	 *  nyaize と アバターの猫耳の両方に影響する。
+	 */
+	catMode?: string,
 	/**  アバター画像の角丸（0=直角 〜 100=真円、%）。既定は20（Issue #94）。 */
 	avatarRadius?: number,
 	/**  ハプティクス(振動)を有効にするか（モバイル版のみ意味を持つ。Issue #26）。既定はON。 */
