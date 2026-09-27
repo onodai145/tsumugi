@@ -20,7 +20,7 @@
 </script>
 
 {#if files.length > 0}
-  <ul class="mt-2 flex flex-col gap-1">
+  <ul class="m-0 mt-2 flex list-none flex-col gap-1 p-0">
     {#each files as f (f.id)}
       <li>
         {#if !isRevealed(revealed, f)}
