@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 
+/// 背景メディアの種類。ファイル拡張子から判定して保持する。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum BackgroundKind {
+    Image,
+    Video,
+}
+
 /// テーマ1個分の配色（app.css の CSS変数11個に対応）。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -89,9 +97,13 @@ pub struct UiPrefs {
     /// 空文字なら既定フォントスタックを使う。
     #[serde(default)]
     pub font_family: String,
-    /// 背景画像を data URL(base64)でそのまま保持。空文字なら背景画像なし。
+    /// 背景メディアの種類。None なら背景メディア未設定。
     #[serde(default)]
-    pub background_image: String,
+    pub background_kind: Option<BackgroundKind>,
+    /// 背景メディアのファイルパス（app_data_dir()/backgrounds/ 配下にコピーした絶対パス）。
+    /// None なら背景メディア未設定。
+    #[serde(default)]
+    pub background_path: Option<String>,
     /// 背景に乗せる黒オーバーレイの濃さ（0〜100%）。可読性確保用。
     #[serde(default)]
     pub background_dim: i32,
@@ -285,7 +297,8 @@ impl Default for UiPrefs {
             default_column_width: 300,
             keymap: HashMap::new(),
             font_family: String::new(),
-            background_image: String::new(),
+            background_kind: None,
+            background_path: None,
             background_dim: 0,
             background_blur: 0,
             column_opacity: default_column_opacity(),
@@ -331,7 +344,8 @@ mod tests {
         assert_eq!(v.default_column_width, 320);
         assert!(v.keymap.is_empty());
         assert_eq!(v.font_family, "");
-        assert_eq!(v.background_image, "");
+        assert_eq!(v.background_kind, None);
+        assert_eq!(v.background_path, None);
         assert_eq!(v.background_dim, 0);
         assert_eq!(v.background_blur, 0);
         // column_opacity は #[serde(default = ...)] で 0 ではなく 100（不透明）にフォールバックすること。
@@ -395,7 +409,8 @@ mod tests {
             default_column_width: 300,
             keymap: km,
             font_family: "\"Cascadia Code\", monospace".into(),
-            background_image: "data:image/png;base64,AAAA".into(),
+            background_kind: Some(BackgroundKind::Video),
+            background_path: Some("/tmp/backgrounds/a.mp4".into()),
             background_dim: 40,
             background_blur: 8,
             column_opacity: 85,
@@ -458,6 +473,33 @@ mod tests {
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn background_kind_and_path_roundtrip() {
+        let mut p = UiPrefs::default();
+        p.background_kind = Some(BackgroundKind::Video);
+        p.background_path = Some("/home/user/.local/share/tsumugi/backgrounds/a.mp4".into());
+        let s = serde_json::to_string(&p).unwrap();
+        assert!(s.contains("\"backgroundKind\":\"video\""));
+        let back: UiPrefs = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.background_kind, Some(BackgroundKind::Video));
+        assert_eq!(
+            back.background_path,
+            Some("/home/user/.local/share/tsumugi/backgrounds/a.mp4".to_string())
+        );
+    }
+
+    #[test]
+    fn background_kind_and_path_default_to_none_for_legacy_json() {
+        // background_image(Base64)時代のJSONにも background_kind/background_path 追加後の
+        // UiPrefs でそのまま読める(移行処理自体は settings.rs の責務、ここではデフォルト値のみ確認)。
+        let v: UiPrefs = serde_json::from_str(
+            r#"{"theme":"dark","defaultColumnWidth":320,"backgroundImage":"data:image/png;base64,AAAA"}"#,
+        )
+        .unwrap();
+        assert_eq!(v.background_kind, None);
+        assert_eq!(v.background_path, None);
     }
 
     #[test]
