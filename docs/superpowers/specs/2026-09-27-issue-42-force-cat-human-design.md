@@ -14,13 +14,13 @@
 
 ### 設定値
 
-`UiPrefs`（`src-tauri/src/domain/ui.rs`）に `cat_mode: Option<String>` を追加する（camelCase で `catMode`）。
+`UiPrefs`（`src-tauri/src/domain/ui.rs`）に `cat_mode: String` を追加する（camelCase で `catMode`、`#[serde(default = "default_cat_mode")]` で既定 `"respect"`。`instance_ticker` と同じ流儀）。
 
 - `"respect"`: 既定。従来どおり `isCat` に従う。
 - `"cat"`: 全ユーザーを猫扱い。
 - `"human"`: 全ユーザーを人間扱い。
 
-`None` は `"respect"` と同義。`catMode` を持たない既存の設定JSONもそのまま読める。
+`catMode` を持たない既存の設定JSONは `"respect"` として読める。
 `instanceTicker` と同様、TS側は specta 生成の `UiPrefs` 型と `app.ui.catMode` 経由で扱う。
 
 ### 判定ロジック
