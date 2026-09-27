@@ -199,9 +199,11 @@ pub fn run() {
             let cache_dir = app.path().app_cache_dir().expect("no app cache dir");
             std::fs::create_dir_all(&cache_dir).expect("failed to create app cache dir");
 
+            let backgrounds_dir = config_dir.join("backgrounds");
             let settings_path = config_dir.join("settings.json");
             let settings = if settings_path.exists() {
-                SettingsStore::new(settings_path).expect("failed to open settings file")
+                SettingsStore::new(settings_path, backgrounds_dir.clone())
+                    .expect("failed to open settings file")
             } else {
                 // 旧バージョン(設定+キャッシュがSQLite一体型 tsumugi.db)からの一回限りの移行。
                 // 新設定ファイルがまだ無く、旧 app_data_dir/tsumugi.db が存在する場合のみ実行する。
@@ -210,9 +212,12 @@ pub fn run() {
                     Some(legacy_path) => {
                         let legacy_conn = db::open_settings(&legacy_path)
                             .expect("failed to open legacy settings db");
-                        let settings =
-                            store::settings::migrate_from_legacy_sqlite(&settings_path, &legacy_conn)
-                                .expect("failed to migrate legacy settings");
+                        let settings = store::settings::migrate_from_legacy_sqlite(
+                            &settings_path,
+                            &legacy_conn,
+                            &backgrounds_dir,
+                        )
+                        .expect("failed to migrate legacy settings");
                         drop(legacy_conn);
                         let backup_path = legacy_path.with_extension("db.bak");
                         std::fs::rename(&legacy_path, &backup_path)
@@ -225,7 +230,8 @@ pub fn run() {
                         );
                         settings
                     }
-                    None => SettingsStore::new(settings_path).expect("failed to create settings file"),
+                    None => SettingsStore::new(settings_path, backgrounds_dir.clone())
+                        .expect("failed to create settings file"),
                 }
             };
 
