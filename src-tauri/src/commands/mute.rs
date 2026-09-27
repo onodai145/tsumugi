@@ -14,15 +14,74 @@ use tauri_plugin_fs::FsExt;
 /// 通知音として許容する最大サイズ（短い効果音程度を想定）。
 const MAX_NOTIFY_SOUND_BYTES: usize = 5 * 1024 * 1024;
 
-/// 背景メディアとして許容する拡張子から種類を判定する。未知の拡張子は None。
-fn classify_background_kind(path: &str) -> Option<BackgroundKind> {
+/// 拡張子から背景メディアの種類を判定する。戻り値の2つ目は保存時に使う正規化済み拡張子
+/// (例: "jpeg"も"jpg"に揃える)。拡張子が無い/未知の場合は None
+/// (Androidのフォトピッカーが返す`content://`URIのように拡張子を持たないパスはここでは
+/// 判定できない。呼び出し側で`classify_by_magic_bytes`にフォールバックすること。Issue #400)。
+fn classify_by_extension(path: &str) -> Option<(BackgroundKind, &'static str)> {
     match extension_lower(path).as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "svg" => {
-            Some(BackgroundKind::Image)
-        }
-        "mp4" | "webm" | "mov" | "m4v" | "mkv" | "avi" | "ogv" => Some(BackgroundKind::Video),
+        "png" => Some((BackgroundKind::Image, "png")),
+        "jpg" | "jpeg" => Some((BackgroundKind::Image, "jpg")),
+        "gif" => Some((BackgroundKind::Image, "gif")),
+        "webp" => Some((BackgroundKind::Image, "webp")),
+        "avif" => Some((BackgroundKind::Image, "avif")),
+        "bmp" => Some((BackgroundKind::Image, "bmp")),
+        "svg" => Some((BackgroundKind::Image, "svg")),
+        "mp4" => Some((BackgroundKind::Video, "mp4")),
+        "webm" => Some((BackgroundKind::Video, "webm")),
+        "mov" => Some((BackgroundKind::Video, "mov")),
+        "m4v" => Some((BackgroundKind::Video, "m4v")),
+        "mkv" => Some((BackgroundKind::Video, "mkv")),
+        "avi" => Some((BackgroundKind::Video, "avi")),
+        "ogv" => Some((BackgroundKind::Video, "ogv")),
         _ => None,
     }
+}
+
+/// 拡張子で判定できなかった場合のフォールバック。ファイル先頭のマジックバイトから
+/// 画像/動画を判定する。ISO base media形式(ftypボックス)はmp4/movだけでなくAVIF/HEICも
+/// 使うため、ブランド文字列まで見て画像/動画を区別する。SVGはテキスト形式でマジックバイトが
+/// 一定しないため、ここでは判定しない(拡張子判定のみ対応、Androidのフォトピッカーは
+/// 通常SVGを扱わないため実用上問題ない)。
+fn classify_by_magic_bytes(bytes: &[u8]) -> Option<(BackgroundKind, &'static str)> {
+    if bytes.len() < 12 {
+        return None;
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Some((BackgroundKind::Image, "png"));
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some((BackgroundKind::Image, "jpg"));
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some((BackgroundKind::Image, "gif"));
+    }
+    if bytes.starts_with(b"BM") {
+        return Some((BackgroundKind::Image, "bmp"));
+    }
+    if &bytes[0..4] == b"RIFF" {
+        match &bytes[8..12] {
+            b"WEBP" => return Some((BackgroundKind::Image, "webp")),
+            b"AVI " => return Some((BackgroundKind::Video, "avi")),
+            _ => {}
+        }
+    }
+    if &bytes[4..8] == b"ftyp" {
+        return match &bytes[8..12] {
+            b"avif" | b"avis" | b"mif1" | b"heic" | b"heix" | b"hevc" | b"heim" | b"heis" => {
+                Some((BackgroundKind::Image, "avif"))
+            }
+            b"qt  " => Some((BackgroundKind::Video, "mov")),
+            _ => Some((BackgroundKind::Video, "mp4")),
+        };
+    }
+    if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        return Some((BackgroundKind::Video, "webm"));
+    }
+    if bytes.starts_with(b"OggS") {
+        return Some((BackgroundKind::Video, "ogv"));
+    }
+    None
 }
 
 /// `import_background_media` の戻り値。
@@ -42,8 +101,14 @@ pub struct BackgroundMedia {
 #[tauri::command]
 #[specta::specta]
 pub async fn import_background_media(app: AppHandle, path: String) -> Result<BackgroundMedia> {
-    let kind = classify_background_kind(&path)
-        .ok_or_else(|| Error::Invalid(format!("対応していないファイル形式です: {path}")))?;
+    let (kind, ext) = match classify_by_extension(&path) {
+        Some(v) => v,
+        None => {
+            let header = peek_file_header(&app, &path).await?;
+            classify_by_magic_bytes(&header)
+                .ok_or_else(|| Error::Invalid(format!("対応していないファイル形式です: {path}")))?
+        }
+    };
 
     let backgrounds_dir = app
         .path()
@@ -52,7 +117,6 @@ pub async fn import_background_media(app: AppHandle, path: String) -> Result<Bac
         .join("backgrounds");
     tokio::fs::create_dir_all(&backgrounds_dir).await?;
 
-    let ext = extension_lower(&path);
     let file_name = format!("{}.{ext}", uuid::Uuid::new_v4());
     let dest_path = backgrounds_dir.join(&file_name);
 
@@ -111,6 +175,33 @@ pub(crate) fn gc_unused_background_files(
 /// `read_file_bytes`(ContentResolverブリッジ)経由でメモリを介してコピーするが、
 /// それ以外の環境では動画のような大きなファイルでもメモリを圧迫しないよう
 /// ストリーミングコピー(`tokio::fs::copy`)を使う。
+/// 拡張子で種類判定できなかった場合のフォールバック用に、ファイル先頭の数十バイトを覗き見る。
+/// 非Android環境ではファイル全体を読まず先頭のみ部分読み込みする(大きな動画でもメモリを
+/// 圧迫しない)。Androidの`content://` URIは部分読み込みに対応する手段が無いため
+/// `read_file_bytes`でファイル全体を読む(直後の`copy_media_file`でもう一度全体を読むため
+/// 二重読み込みにはなるが、拡張子が無い=Androidのフォトピッカー経由の場合にのみ発生する
+/// 稀なパスなので許容する。Issue #400)。
+async fn peek_file_header(
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: &AppHandle,
+    path: &str,
+) -> Result<Vec<u8>> {
+    #[cfg(target_os = "android")]
+    {
+        read_file_bytes(app, path).await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        use tokio::io::AsyncReadExt;
+        let mut file = tokio::fs::File::open(path)
+            .await
+            .map_err(|e| Error::Invalid(format!("cannot open file {path}: {e}")))?;
+        let mut buf = vec![0u8; 16];
+        let n = file.read(&mut buf).await.unwrap_or(0);
+        buf.truncate(n);
+        Ok(buf)
+    }
+}
+
 async fn copy_media_file(
     #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: &AppHandle,
     src: &str,
@@ -405,24 +496,115 @@ mod background_media_tests {
     use super::*;
 
     #[test]
-    fn classify_background_kind_recognizes_common_extensions() {
+    fn classify_by_extension_recognizes_common_extensions() {
         assert_eq!(
-            classify_background_kind("a.png"),
-            Some(BackgroundKind::Image)
+            classify_by_extension("a.png"),
+            Some((BackgroundKind::Image, "png"))
         );
         assert_eq!(
-            classify_background_kind("a.GIF"),
-            Some(BackgroundKind::Image)
+            classify_by_extension("a.GIF"),
+            Some((BackgroundKind::Image, "gif"))
         );
         assert_eq!(
-            classify_background_kind("a.mp4"),
-            Some(BackgroundKind::Video)
+            classify_by_extension("a.mp4"),
+            Some((BackgroundKind::Video, "mp4"))
         );
         assert_eq!(
-            classify_background_kind("a.webm"),
-            Some(BackgroundKind::Video)
+            classify_by_extension("a.webm"),
+            Some((BackgroundKind::Video, "webm"))
         );
-        assert_eq!(classify_background_kind("a.txt"), None);
+        assert_eq!(classify_by_extension("a.txt"), None);
+    }
+
+    /// Androidのフォトピッカーが返す`content://`URIには拡張子が無いため、拡張子判定が
+    /// 失敗した場合はファイル先頭のマジックバイトから種類を判定する(Issue #400)。
+    #[test]
+    fn classify_by_extension_returns_none_for_extensionless_path() {
+        // content://media/picker/0/... のような拡張子の無いパスは拡張子判定できない。
+        assert_eq!(
+            classify_by_extension("content://media/picker/0/com.android.providers.media.photopicker/media/1000000123"),
+            None
+        );
+    }
+
+    #[test]
+    fn classify_by_magic_bytes_recognizes_png() {
+        let png_header = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+        assert_eq!(
+            classify_by_magic_bytes(&png_header),
+            Some((BackgroundKind::Image, "png"))
+        );
+    }
+
+    #[test]
+    fn classify_by_magic_bytes_recognizes_jpeg() {
+        let jpeg_header = [0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify_by_magic_bytes(&jpeg_header),
+            Some((BackgroundKind::Image, "jpg"))
+        );
+    }
+
+    #[test]
+    fn classify_by_magic_bytes_recognizes_webp() {
+        let mut webp = b"RIFF".to_vec();
+        webp.extend_from_slice(&[0, 0, 0, 0]); // ファイルサイズ(検証対象外)
+        webp.extend_from_slice(b"WEBP");
+        assert_eq!(
+            classify_by_magic_bytes(&webp),
+            Some((BackgroundKind::Image, "webp"))
+        );
+    }
+
+    #[test]
+    fn classify_by_magic_bytes_recognizes_avi() {
+        let mut avi = b"RIFF".to_vec();
+        avi.extend_from_slice(&[0, 0, 0, 0]);
+        avi.extend_from_slice(b"AVI ");
+        assert_eq!(
+            classify_by_magic_bytes(&avi),
+            Some((BackgroundKind::Video, "avi"))
+        );
+    }
+
+    #[test]
+    fn classify_by_magic_bytes_recognizes_mp4_ftyp_box() {
+        let mut mp4 = vec![0, 0, 0, 0x18];
+        mp4.extend_from_slice(b"ftyp");
+        mp4.extend_from_slice(b"isom");
+        assert_eq!(
+            classify_by_magic_bytes(&mp4),
+            Some((BackgroundKind::Video, "mp4"))
+        );
+    }
+
+    /// AVIF/HEICもISO base media形式(ftypボックス)を使うため、ブランド文字列まで見て
+    /// 動画と誤判定しないことを確認する。
+    #[test]
+    fn classify_by_magic_bytes_distinguishes_avif_from_mp4_by_brand() {
+        let mut avif = vec![0, 0, 0, 0x1C];
+        avif.extend_from_slice(b"ftyp");
+        avif.extend_from_slice(b"avif");
+        assert_eq!(
+            classify_by_magic_bytes(&avif),
+            Some((BackgroundKind::Image, "avif"))
+        );
+    }
+
+    #[test]
+    fn classify_by_magic_bytes_recognizes_webm() {
+        let webm_header = [0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            classify_by_magic_bytes(&webm_header),
+            Some((BackgroundKind::Video, "webm"))
+        );
+    }
+
+    #[test]
+    fn classify_by_magic_bytes_returns_none_for_unrecognized_bytes() {
+        assert_eq!(classify_by_magic_bytes(b"not a media file!!"), None);
+        // 短すぎるバイト列も判定不能として扱う。
+        assert_eq!(classify_by_magic_bytes(&[0x89, b'P']), None);
     }
 
     fn make_tmp_backgrounds_dir() -> std::path::PathBuf {
