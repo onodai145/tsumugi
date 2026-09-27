@@ -244,6 +244,15 @@ class AppStore {
       URL.revokeObjectURL(this.#bgVideoBlobUrl);
       this.#bgVideoBlobUrl = null;
     }
+    // #applyBackgroundがdocument.bodyにprependした<video>要素も併せて取り除く。
+    // これを怠ると、次のインスタンス(HMR後の新しいAppStore)が新しい<video>を追加するたびに
+    // 古い要素がDOMに孤立して残り、同じz-indexのpaint順で古い方が手前に残り続けてしまう
+    // (前に設定していた背景動画が消えず表示され続ける不具合の原因になっていた)。
+    if (this.#bgVideoEl) {
+      this.#bgVideoEl.remove();
+      this.#bgVideoEl = null;
+    }
+    this.#bgVideoSourcePath = null;
   }
 
   async boot() {
