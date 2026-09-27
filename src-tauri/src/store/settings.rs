@@ -429,9 +429,15 @@ fn migrate_legacy_background_image(
             return Ok(true);
         }
     };
-    std::fs::create_dir_all(backgrounds_dir)?;
+    if let Err(e) = std::fs::create_dir_all(backgrounds_dir) {
+        log::warn!("legacy backgroundImage migration: failed to create backgrounds dir, dropping: {e}");
+        return Ok(true);
+    }
     let file_path = backgrounds_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
-    std::fs::write(&file_path, bytes)?;
+    if let Err(e) = std::fs::write(&file_path, bytes) {
+        log::warn!("legacy backgroundImage migration: failed to write file, dropping: {e}");
+        return Ok(true);
+    }
 
     map.insert("backgroundKind".into(), serde_json::json!("image"));
     map.insert(

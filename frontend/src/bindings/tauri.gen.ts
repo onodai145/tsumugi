@@ -285,23 +285,17 @@ export const commands = {
 	getUiPrefs: () => typedError<UiPrefs, Error>(__TAURI_INVOKE("get_ui_prefs")),
 	/**  表示設定を更新（永続化）。 */
 	setUiPrefs: (prefs: UiPrefs) => typedError<null, Error>(__TAURI_INVOKE("set_ui_prefs", { prefs })),
-	/**
-	 *  ローカル画像ファイルを data URL(base64)へ変換する（背景画像設定用）。
-	 *  背景メディアは `UiPrefs.background_kind`/`background_path` でファイル参照する方式
-	 *  (`import_background_media` 経由)に移行中で、フロント側が切り替わるまでの間、
-	 *  現行の背景画像ピッカー(`pickBackgroundImage`)が引き続き本関数で data URL 化して
-	 *  いる。拡張子から MIME を推定する。
-	 */
-	readImageDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_image_data_url", { path })),
 	/**  ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。 */
 	readAudioDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_audio_data_url", { path })),
 	/**
 	 *  背景画像/動画として選んだファイルを `app_data_dir()/backgrounds/` にコピーし、
-	 *  種類判定した上でコピー後の絶対パスを返す。`previous_path` が指定されていれば、
-	 *  コピー成功後に削除して backgrounds/ にゴミが溜まらないようにする。
+	 *  種類判定した上でコピー後の絶対パスを返す。`backgroundKind`/`backgroundPath` の永続化は
+	 *  フロント側の「保存」(`setUiPrefs`)まで行われないため、ここでは旧ファイルの削除は行わない
+	 *  (未保存のまま閉じられた場合に備えて残しておく)。使われなくなった旧ファイルは起動時の
+	 *  `gc_unused_background_files` でまとめて掃除する。
 	 *  サイズ上限は設けない（コピーは非同期コマンドなのでUIをブロックしない）。
 	 */
-	importBackgroundMedia: (path: string, previousPath: string | null) => typedError<BackgroundMedia, Error>(__TAURI_INVOKE("import_background_media", { path, previousPath })),
+	importBackgroundMedia: (path: string) => typedError<BackgroundMedia, Error>(__TAURI_INVOKE("import_background_media", { path })),
 	/**
 	 *  通知音を鳴らす。choice は プリセットID / data URL(カスタム音声)。
 	 *  失敗しても通知フロー全体を止めないため、常に Ok を返す(失敗はログのみ)。

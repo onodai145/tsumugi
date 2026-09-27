@@ -106,7 +106,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::set_notify,
             commands::mute::get_ui_prefs,
             commands::mute::set_ui_prefs,
-            commands::mute::read_image_data_url,
             commands::mute::read_audio_data_url,
             commands::mute::import_background_media,
             commands::sound::play_notify_sound,
@@ -201,7 +200,7 @@ pub fn run() {
 
             // Task 2 (import_background_media, commands/mute.rs) は app_data_dir()/backgrounds を
             // 使っているため、ここも同じディレクトリに揃える(config_dir にすると2つのタスクが
-            // 別々のディレクトリを見てしまい、is_within_dir による削除保護が機能しなくなる)。
+            // 別々のディレクトリを見てしまい、起動時の gc_unused_background_files が機能しなくなる)。
             let backgrounds_dir =
                 app.path().app_data_dir().expect("no app data dir").join("backgrounds");
             let settings_path = config_dir.join("settings.json");
@@ -238,6 +237,22 @@ pub fn run() {
                         .expect("failed to create settings file"),
                 }
             };
+
+            // 未保存で設定を閉じた/落ちた場合に backgrounds/ に残る使われなくなったファイルを
+            // 起動時にまとめて掃除する(I1)。失敗しても起動をブロックしない。
+            match settings.load_ui() {
+                Ok(ui) => {
+                    if let Err(e) = commands::mute::gc_unused_background_files(
+                        &backgrounds_dir,
+                        ui.background_path.as_deref(),
+                    ) {
+                        log::warn!("failed to gc unused background files: {e}");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("failed to load ui prefs for background gc: {e}");
+                }
+            }
 
             let drafts_path = config_dir.join("drafts.json");
             let drafts = DraftStore::new(drafts_path).expect("failed to open drafts file");

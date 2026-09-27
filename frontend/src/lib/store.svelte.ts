@@ -1407,8 +1407,9 @@ class AppStore {
   }
 
   /// 画像/動画ファイルを選んで backgrounds/ へコピーする（保存は setUiPrefs で）。
-  /// 戻り値は種類とコピー後の絶対パス。previousPath を渡すと旧ファイルを削除する。
-  async pickBackgroundMedia(previousPath: string | null): Promise<{ kind: "image" | "video"; absolutePath: string } | null> {
+  /// 戻り値は種類とコピー後の絶対パス。旧ファイルの削除は行わない(未保存で閉じた場合に
+  /// 備えて残しておき、起動時のGCでまとめて掃除する。Issue #46 I1)。
+  async pickBackgroundMedia(): Promise<{ kind: "image" | "video"; absolutePath: string } | null> {
     const path = await openDialog({
       multiple: false,
       filters: [
@@ -1417,7 +1418,7 @@ class AppStore {
       ],
     });
     if (!path || Array.isArray(path)) return null;
-    const media = await unwrap(commands.importBackgroundMedia(path, previousPath ?? null));
+    const media = await unwrap(commands.importBackgroundMedia(path));
     return { kind: media.kind, absolutePath: media.absolutePath };
   }
 

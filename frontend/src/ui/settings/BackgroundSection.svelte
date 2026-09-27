@@ -47,7 +47,7 @@
     err = null;
     pickingImage = true;
     try {
-      const media = await app.pickBackgroundMedia(backgroundPath);
+      const media = await app.pickBackgroundMedia();
       if (media) {
         backgroundKind = media.kind;
         backgroundPath = media.absolutePath;

@@ -11,8 +11,6 @@ use tauri::{AppHandle, Manager, State};
 #[cfg(target_os = "android")]
 use tauri_plugin_fs::FsExt;
 
-/// 背景画像として許容する最大サイズ（DB肥大化を防ぐ）。
-const MAX_BACKGROUND_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 /// 通知音として許容する最大サイズ（短い効果音程度を想定）。
 const MAX_NOTIFY_SOUND_BYTES: usize = 5 * 1024 * 1024;
 
@@ -36,16 +34,14 @@ pub struct BackgroundMedia {
 }
 
 /// 背景画像/動画として選んだファイルを `app_data_dir()/backgrounds/` にコピーし、
-/// 種類判定した上でコピー後の絶対パスを返す。`previous_path` が指定されていれば、
-/// コピー成功後に削除して backgrounds/ にゴミが溜まらないようにする。
+/// 種類判定した上でコピー後の絶対パスを返す。`backgroundKind`/`backgroundPath` の永続化は
+/// フロント側の「保存」(`setUiPrefs`)まで行われないため、ここでは旧ファイルの削除は行わない
+/// (未保存のまま閉じられた場合に備えて残しておく)。使われなくなった旧ファイルは起動時の
+/// `gc_unused_background_files` でまとめて掃除する。
 /// サイズ上限は設けない（コピーは非同期コマンドなのでUIをブロックしない）。
 #[tauri::command]
 #[specta::specta]
-pub async fn import_background_media(
-    app: AppHandle,
-    path: String,
-    previous_path: Option<String>,
-) -> Result<BackgroundMedia> {
+pub async fn import_background_media(app: AppHandle, path: String) -> Result<BackgroundMedia> {
     let kind = classify_background_kind(&path)
         .ok_or_else(|| Error::Invalid(format!("対応していないファイル形式です: {path}")))?;
 
@@ -62,16 +58,53 @@ pub async fn import_background_media(
 
     copy_media_file(&app, &path, &dest_path).await?;
 
-    if let Some(prev) = previous_path {
-        if is_within_dir(std::path::Path::new(&prev), &backgrounds_dir) {
-            let _ = tokio::fs::remove_file(&prev).await;
-        }
-    }
-
     Ok(BackgroundMedia {
         kind,
         absolute_path: dest_path.to_string_lossy().into_owned(),
     })
+}
+
+/// `backgrounds_dir` 配下のうち、現在の設定(`keep_path`)から参照されていないファイルを
+/// 起動時に削除する。`import_background_media` は新ファイルをコピーするだけで旧ファイルを
+/// 即削除しないため(未保存で閉じた場合に備える。I1)、ここでまとめてゴミ掃除する。
+///
+/// `keep_path` との一致判定は `canonicalize()` した実体パスで比較する。`keep_path` が
+/// 存在しない/不正なパスの場合は安全側(=削除する側)に倒す。`backgrounds_dir` はこの関数が
+/// 管理する専用ディレクトリであり、他人のファイルを消す心配はないため。
+///
+/// `backgrounds_dir` 自体が存在しない場合は何もせず `Ok(())` を返す(起動をブロックしないため、
+/// 呼び出し側でも失敗を warn ログに留めて継続する設計だが、この関数自体もここで吸収する)。
+pub(crate) fn gc_unused_background_files(
+    backgrounds_dir: &std::path::Path,
+    keep_path: Option<&str>,
+) -> Result<()> {
+    if !backgrounds_dir.exists() {
+        return Ok(());
+    }
+
+    let keep_canonical = keep_path.and_then(|p| std::path::Path::new(p).canonicalize().ok());
+
+    for entry in std::fs::read_dir(backgrounds_dir)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if !entry_path.is_file() {
+            continue;
+        }
+        let entry_canonical = entry_path.canonicalize().ok();
+        let is_kept = match (&entry_canonical, &keep_canonical) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+        if !is_kept {
+            if let Err(e) = std::fs::remove_file(&entry_path) {
+                log::warn!(
+                    "gc_unused_background_files: failed to remove {}: {e}",
+                    entry_path.display()
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 /// `src` を `dest` へコピーする。Android では `content://` URI を扱うため
@@ -96,17 +129,6 @@ async fn copy_media_file(
             .map_err(|e| Error::Invalid(format!("cannot copy file {src}: {e}")))?;
         Ok(())
     }
-}
-
-/// `path` が `dir` 配下(サブファイル/サブディレクトリ)であるかを検証する。
-/// シンボリックリンク経由の脱出を避けるため `canonicalize()` で実体パスに解決してから
-/// 比較する。どちらかが存在せず canonicalize に失敗した場合は安全側に倒して false を返す
-/// (= 削除しない)。
-fn is_within_dir(path: &std::path::Path, dir: &std::path::Path) -> bool {
-    let (Ok(canonical_path), Ok(canonical_dir)) = (path.canonicalize(), dir.canonicalize()) else {
-        return false;
-    };
-    canonical_path != canonical_dir && canonical_path.starts_with(&canonical_dir)
 }
 
 /// 現在の NG 設定を取得。
@@ -154,17 +176,6 @@ pub async fn get_ui_prefs(state: State<'_, AppState>) -> Result<UiPrefs> {
 #[specta::specta]
 pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<()> {
     state.settings.save_ui(&prefs)
-}
-
-/// ローカル画像ファイルを data URL(base64)へ変換する（背景画像設定用）。
-/// 背景メディアは `UiPrefs.background_kind`/`background_path` でファイル参照する方式
-/// (`import_background_media` 経由)に移行中で、フロント側が切り替わるまでの間、
-/// 現行の背景画像ピッカー(`pickBackgroundImage`)が引き続き本関数で data URL 化して
-/// いる。拡張子から MIME を推定する。
-#[tauri::command]
-#[specta::specta]
-pub async fn read_image_data_url(app: AppHandle, path: String) -> Result<String> {
-    read_file_as_data_url(&app, &path, MAX_BACKGROUND_IMAGE_BYTES, guess_image_mime).await
 }
 
 /// ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。
@@ -221,20 +232,6 @@ pub(crate) async fn read_file_as_data_url(
     let mime = guess_mime(path);
     let b64 = STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{b64}"))
-}
-
-/// 拡張子から画像 MIME を推定する。不明な拡張子は octet-stream(ブラウザ側で概ね表示可)。
-fn guess_image_mime(path: &str) -> &'static str {
-    match extension_lower(path).as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "avif" => "image/avif",
-        "bmp" => "image/bmp",
-        "svg" => "image/svg+xml",
-        _ => "application/octet-stream",
-    }
 }
 
 /// 拡張子から音声 MIME を推定する。不明な拡張子は octet-stream。
@@ -428,29 +425,70 @@ mod background_media_tests {
         assert_eq!(classify_background_kind("a.txt"), None);
     }
 
+    fn make_tmp_backgrounds_dir() -> std::path::PathBuf {
+        let tmp = std::env::temp_dir().join(format!("tsumugi-gc-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        tmp
+    }
+
     #[test]
-    fn is_within_dir_rejects_paths_outside_backgrounds_dir() {
-        let tmp = std::env::temp_dir().join(format!("tsumugi-test-{}", uuid::Uuid::new_v4()));
-        let backgrounds_dir = tmp.join("backgrounds");
-        let outside_dir = tmp.join("outside");
-        std::fs::create_dir_all(&backgrounds_dir).unwrap();
-        std::fs::create_dir_all(&outside_dir).unwrap();
+    fn gc_unused_background_files_keeps_only_matching_keep_path() {
+        let backgrounds_dir = make_tmp_backgrounds_dir();
+        let kept = backgrounds_dir.join("kept.png");
+        let other1 = backgrounds_dir.join("other1.png");
+        let other2 = backgrounds_dir.join("other2.mp4");
+        std::fs::write(&kept, b"dummy").unwrap();
+        std::fs::write(&other1, b"dummy").unwrap();
+        std::fs::write(&other2, b"dummy").unwrap();
 
-        let inside_file = backgrounds_dir.join("kept.png");
-        let outside_file = outside_dir.join("important.png");
-        std::fs::write(&inside_file, b"dummy").unwrap();
-        std::fs::write(&outside_file, b"dummy").unwrap();
+        gc_unused_background_files(&backgrounds_dir, Some(kept.to_str().unwrap())).unwrap();
 
-        assert!(is_within_dir(&inside_file, &backgrounds_dir));
-        assert!(!is_within_dir(&outside_file, &backgrounds_dir));
-        // backgrounds_dir 自身は「配下」ではない
-        assert!(!is_within_dir(&backgrounds_dir, &backgrounds_dir));
-        // 存在しないパスは安全側に倒して false
-        assert!(!is_within_dir(
-            &tmp.join("does-not-exist.png"),
-            &backgrounds_dir
-        ));
+        assert!(kept.exists());
+        assert!(!other1.exists());
+        assert!(!other2.exists());
 
-        std::fs::remove_dir_all(&tmp).unwrap();
+        std::fs::remove_dir_all(&backgrounds_dir).unwrap();
+    }
+
+    #[test]
+    fn gc_unused_background_files_removes_all_when_keep_path_is_none() {
+        let backgrounds_dir = make_tmp_backgrounds_dir();
+        let f1 = backgrounds_dir.join("f1.png");
+        let f2 = backgrounds_dir.join("f2.mp4");
+        std::fs::write(&f1, b"dummy").unwrap();
+        std::fs::write(&f2, b"dummy").unwrap();
+
+        gc_unused_background_files(&backgrounds_dir, None).unwrap();
+
+        assert!(!f1.exists());
+        assert!(!f2.exists());
+
+        std::fs::remove_dir_all(&backgrounds_dir).unwrap();
+    }
+
+    #[test]
+    fn gc_unused_background_files_removes_all_when_keep_path_does_not_exist() {
+        let backgrounds_dir = make_tmp_backgrounds_dir();
+        let f1 = backgrounds_dir.join("f1.png");
+        std::fs::write(&f1, b"dummy").unwrap();
+
+        gc_unused_background_files(
+            &backgrounds_dir,
+            Some(backgrounds_dir.join("does-not-exist.png").to_str().unwrap()),
+        )
+        .unwrap();
+
+        assert!(!f1.exists());
+
+        std::fs::remove_dir_all(&backgrounds_dir).unwrap();
+    }
+
+    #[test]
+    fn gc_unused_background_files_ok_when_dir_missing() {
+        let backgrounds_dir =
+            std::env::temp_dir().join(format!("tsumugi-gc-test-missing-{}", uuid::Uuid::new_v4()));
+        assert!(!backgrounds_dir.exists());
+
+        gc_unused_background_files(&backgrounds_dir, None).unwrap();
     }
 }
