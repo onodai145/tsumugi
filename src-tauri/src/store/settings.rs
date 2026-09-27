@@ -6,7 +6,7 @@
 use crate::domain::{
     Account, CacheBackendConfig, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs,
 };
-use crate::error::{Error, Result};
+use crate::error::Result;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -421,9 +421,14 @@ fn migrate_legacy_background_image(
         "image/svg+xml" => "svg",
         _ => "bin",
     };
-    let bytes = STANDARD
-        .decode(b64)
-        .map_err(|e| Error::Invalid(format!("legacy backgroundImage base64 decode failed: {e}")))?;
+    let bytes = match STANDARD.decode(b64) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("legacy backgroundImage base64 decode failed, dropping: {e}");
+            // backgroundImage キーは既に上で remove 済みのため、ここでは何もせず migrated 扱いで返す
+            return Ok(true);
+        }
+    };
     std::fs::create_dir_all(backgrounds_dir)?;
     let file_path = backgrounds_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     std::fs::write(&file_path, bytes)?;
@@ -951,6 +956,43 @@ mod tests {
         // 書き戻され、再読込でも同じ結果になること(次回起動時に再移行が走らない)。
         let reloaded = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
         assert_eq!(reloaded.load_ui().unwrap().background_path, Some(bg_path));
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir_all(&backgrounds_dir).ok();
+    }
+
+    /// backgroundImage のBase64デコードに失敗した場合でも、起動時パニックせず
+    /// backgroundImageキーを削除して読み込みが継続すること(background_kind/background_pathはNoneのまま)。
+    #[test]
+    fn no_panic_on_invalid_legacy_background_image_base64() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-invalid-bg-b64-{}.json", uuid::Uuid::new_v4()));
+        let backgrounds_dir = std::env::temp_dir()
+            .join(format!("tsumugi-invalid-bg-b64-dir-{}", uuid::Uuid::new_v4()));
+        let legacy_json = r#"{
+            "ui": {
+                "theme": "dark",
+                "defaultColumnWidth": 300,
+                "backgroundImage": "data:image/png;base64,not valid base64!!!"
+            }
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+
+        let s = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        let ui = s.load_ui().unwrap();
+        assert_eq!(ui.background_kind, None);
+        assert_eq!(ui.background_path, None);
+        // backgrounds_dir へのファイル書き出しは行われない(create_dir_all前にreturnする)こと。
+        assert!(!backgrounds_dir.exists());
+
+        // 不正な backgroundImage キーはファイルから削除され、再移行が走らないこと
+        // (次回起動時も同じ警告が無限に出続けない)。
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("backgroundImage"));
+        let reloaded = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        let reloaded_ui = reloaded.load_ui().unwrap();
+        assert_eq!(reloaded_ui.background_kind, None);
+        assert_eq!(reloaded_ui.background_path, None);
 
         std::fs::remove_file(&path).ok();
         std::fs::remove_dir_all(&backgrounds_dir).ok();
