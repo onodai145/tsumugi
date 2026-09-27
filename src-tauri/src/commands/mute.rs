@@ -1,13 +1,13 @@
 //! NG（ミュート）・通知設定の取得・更新。
 
 use crate::api::mutes::{fetch_muted_and_blocked, fetch_muted_words};
-use crate::domain::{MuteConfig, NotifyConfig, UiPrefs};
+use crate::domain::{BackgroundKind, MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 #[cfg(target_os = "android")]
 use tauri_plugin_fs::FsExt;
 
@@ -15,6 +15,63 @@ use tauri_plugin_fs::FsExt;
 const MAX_BACKGROUND_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 /// 通知音として許容する最大サイズ（短い効果音程度を想定）。
 const MAX_NOTIFY_SOUND_BYTES: usize = 5 * 1024 * 1024;
+
+/// 背景メディアとして許容する拡張子から種類を判定する。未知の拡張子は None。
+fn classify_background_kind(path: &str) -> Option<BackgroundKind> {
+    match extension_lower(path).as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "bmp" | "svg" => {
+            Some(BackgroundKind::Image)
+        }
+        "mp4" | "webm" | "mov" | "m4v" | "mkv" | "avi" | "ogv" => Some(BackgroundKind::Video),
+        _ => None,
+    }
+}
+
+/// `import_background_media` の戻り値。
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundMedia {
+    pub kind: BackgroundKind,
+    pub absolute_path: String,
+}
+
+/// 背景画像/動画として選んだファイルを `app_data_dir()/backgrounds/` にコピーし、
+/// 種類判定した上でコピー後の絶対パスを返す。`previous_path` が指定されていれば、
+/// コピー成功後に削除して backgrounds/ にゴミが溜まらないようにする。
+/// サイズ上限は設けない（コピーは非同期コマンドなのでUIをブロックしない）。
+#[tauri::command]
+#[specta::specta]
+pub async fn import_background_media(
+    app: AppHandle,
+    path: String,
+    previous_path: Option<String>,
+) -> Result<BackgroundMedia> {
+    let kind = classify_background_kind(&path)
+        .ok_or_else(|| Error::Invalid(format!("対応していないファイル形式です: {path}")))?;
+
+    let backgrounds_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| Error::Invalid(format!("no app data dir: {e}")))?
+        .join("backgrounds");
+    tokio::fs::create_dir_all(&backgrounds_dir).await?;
+
+    let ext = extension_lower(&path);
+    let file_name = format!("{}.{ext}", uuid::Uuid::new_v4());
+    let dest_path = backgrounds_dir.join(&file_name);
+
+    let bytes = read_file_bytes(&app, &path).await?;
+    tokio::fs::write(&dest_path, &bytes).await?;
+
+    if let Some(prev) = previous_path {
+        let _ = tokio::fs::remove_file(&prev).await;
+    }
+
+    Ok(BackgroundMedia {
+        kind,
+        absolute_path: dest_path.to_string_lossy().into_owned(),
+    })
+}
 
 /// 現在の NG 設定を取得。
 #[tauri::command]
@@ -64,7 +121,10 @@ pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<
 }
 
 /// ローカル画像ファイルを data URL(base64)へ変換する（背景画像設定用）。
-/// UiPrefs.background_image に直接保存できる形にする。拡張子から MIME を推定する。
+/// 背景メディアは `UiPrefs.background_kind`/`background_path` でファイル参照する方式
+/// (`import_background_media` 経由)に移行中で、フロント側が切り替わるまでの間、
+/// 現行の背景画像ピッカー(`pickBackgroundImage`)が引き続き本関数で data URL 化して
+/// いる。拡張子から MIME を推定する。
 #[tauri::command]
 #[specta::specta]
 pub async fn read_image_data_url(app: AppHandle, path: String) -> Result<String> {
@@ -304,5 +364,31 @@ mod tests {
         assert!(!state.is_word_muted("acc1", &note("nothing matches")));
         // 未同期の別アカウントには影響しない
         assert!(!state.is_word_muted("other-acc", &note("foo and bar here")));
+    }
+}
+
+#[cfg(test)]
+mod background_media_tests {
+    use super::*;
+
+    #[test]
+    fn classify_background_kind_recognizes_common_extensions() {
+        assert_eq!(
+            classify_background_kind("a.png"),
+            Some(BackgroundKind::Image)
+        );
+        assert_eq!(
+            classify_background_kind("a.GIF"),
+            Some(BackgroundKind::Image)
+        );
+        assert_eq!(
+            classify_background_kind("a.mp4"),
+            Some(BackgroundKind::Video)
+        );
+        assert_eq!(
+            classify_background_kind("a.webm"),
+            Some(BackgroundKind::Video)
+        );
+        assert_eq!(classify_background_kind("a.txt"), None);
     }
 }
