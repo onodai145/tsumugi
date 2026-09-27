@@ -1,7 +1,7 @@
 # Maintainer: onodai145
 pkgname=tsumugi-bin
 _pkgname=tsumugi
-pkgver=0.6.1
+pkgver=0.12.0
 pkgrel=1
 pkgdesc="Misskey multi-column desktop client (Krile-like UX) built on Tauri v2 (prebuilt AppImage from GitHub Releases)"
 arch=('x86_64')
@@ -12,7 +12,7 @@ provides=('tsumugi')
 conflicts=('tsumugi')
 source=("${_pkgname}_${pkgver}_amd64.AppImage::$url/releases/download/v$pkgver/${_pkgname}_${pkgver}_amd64.AppImage"
         "LICENSE::$url/raw/v$pkgver/LICENSE")
-sha256sums=('956ba0044c73251430c883024e5e60660349138e8c88ee4fa57c49ba0994f6f3'
+sha256sums=('3f4855f3143d21b3b9e81b5cb4e019697b0a47874e8805dab78dac80829b23ab'
             'e1f01c812632b726afcfe397e61a769c9e6a804208506c2695af3b615feddff6')
 
 package() {
