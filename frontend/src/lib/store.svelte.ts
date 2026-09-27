@@ -1552,12 +1552,16 @@ class AppStore {
       }
       if (this.#bgVideoEl.src !== assetUrl) this.#bgVideoEl.src = assetUrl;
       this.#bgVideoEl.style.display = "";
+      this.#bgVideoEl.play().catch(() => {});
       const objectFit =
         BACKGROUND_FIT_MODE_OBJECT_FIT[fitMode as keyof typeof BACKGROUND_FIT_MODE_OBJECT_FIT] ?? "cover";
       this.#bgVideoEl.style.objectFit = objectFit;
       this.#bgVideoEl.style.filter = `blur(${prefs.backgroundBlur ?? 0}px)`;
     } else {
-      if (this.#bgVideoEl) this.#bgVideoEl.style.display = "none";
+      if (this.#bgVideoEl) {
+        this.#bgVideoEl.style.display = "none";
+        this.#bgVideoEl.pause();
+      }
       if (kind === "image" && assetUrl) {
         root.style.setProperty("--bg-image", `url("${assetUrl}")`);
       } else {
