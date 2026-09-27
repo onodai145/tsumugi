@@ -13,6 +13,7 @@
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let mfmAnimationEnabled = $state(app.ui.mfmAnimationEnabled ?? true);
   let instanceTicker = $state(app.ui.instanceTicker ?? "remote");
+  let catMode = $state(app.ui.catMode ?? "respect");
   let avatarRadius = $state(app.ui.avatarRadius ?? 20);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -28,6 +29,12 @@
     { id: "off", label: "表示しない" },
     { id: "remote", label: "リモートのみ" },
     { id: "always", label: "常に表示" },
+  ];
+
+  const catModeOptions: { id: string; label: string }[] = [
+    { id: "respect", label: "ユーザー設定に従う" },
+    { id: "cat", label: "全員を猫化" },
+    { id: "human", label: "全員を人間化" },
   ];
 
   const emojiStyles: { id: EmojiStyle; label: string }[] = [
@@ -219,6 +226,7 @@
         emojiStyle,
         mfmAnimationEnabled,
         instanceTicker,
+        catMode,
         avatarRadius,
       });
       saved = true;
@@ -263,6 +271,25 @@
   <p class="mb-4 mt-0 text-xs text-muted-foreground">
     ノートの投稿者名の下に、投稿元インスタンスのアイコン・名前をテーマカラーで表示します。
     「常に表示」はローカルユーザー（自分と同じインスタンス）の投稿にも表示します。
+  </p>
+</div>
+
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
+  <span class="text-muted-foreground">猫化</span>
+  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
+    {#each catModeOptions as t (t.id)}
+      <button
+        type="button"
+        class={catMode === t.id
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
+        onclick={() => (catMode = t.id)}
+      >{t.label}</button>
+    {/each}
+  </div>
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">
+    ノート本文・CWのにゃん語化とアバターの猫耳に反映されます。
+    「全員を猫化」「全員を人間化」は各ユーザーの猫設定より優先されます。
   </p>
 </div>
 

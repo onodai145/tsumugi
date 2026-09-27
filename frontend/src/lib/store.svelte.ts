@@ -258,6 +258,7 @@ class AppStore {
         noteCacheMaxAgeDays: ui.noteCacheMaxAgeDays ?? 0,
         noteCacheMaxSizeMb: ui.noteCacheMaxSizeMb ?? 0,
         instanceTicker: ui.instanceTicker ?? "remote",
+        catMode: ui.catMode ?? "respect",
         avatarRadius: ui.avatarRadius ?? 20,
       };
       this.#applyTheme(this.ui.theme);

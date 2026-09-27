@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { extractAvgColorFromBlurhash } from "../lib/blurhash";
+  import { effectiveIsCat } from "../lib/catMode";
 
   let {
     isCat = false,
@@ -15,6 +16,7 @@
   } = $props();
 
   const earColor = $derived(extractAvgColorFromBlurhash(avatarBlurhash) ?? "var(--border)");
+  const showEars = $derived(effectiveIsCat(isCat));
 </script>
 
 <span class="avatar-frame relative inline-block {className}">
@@ -26,7 +28,7 @@
   <span class="avatar-content relative z-[1] block h-full w-full">
     {@render children()}
   </span>
-  {#if isCat}
+  {#if showEars}
     <span class="ears" style="color: {earColor}" aria-hidden="true">
       <span class="ear-left"></span>
       <span class="ear-right"></span>

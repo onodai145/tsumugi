@@ -189,6 +189,11 @@ pub struct UiPrefs {
     /// "always" = ローカルユーザー（自分と同一インスタンス）の投稿にも表示。
     #[serde(default = "default_instance_ticker")]
     pub instance_ticker: String,
+    /// 猫化モード（Issue #42）。"respect" = ユーザーの isCat に従う(既定) /
+    /// "cat" = 全ユーザーを猫扱い / "human" = 全ユーザーを人間扱い。
+    /// nyaize と アバターの猫耳の両方に影響する。
+    #[serde(default = "default_cat_mode")]
+    pub cat_mode: String,
     /// アバター画像の角丸（0=直角 〜 100=真円、%）。既定は20（Issue #94）。
     #[serde(default = "default_avatar_radius")]
     pub avatar_radius: i32,
@@ -261,6 +266,10 @@ fn default_instance_ticker() -> String {
     "remote".into()
 }
 
+fn default_cat_mode() -> String {
+    "respect".into()
+}
+
 fn default_avatar_radius() -> i32 {
     20
 }
@@ -301,6 +310,7 @@ impl Default for UiPrefs {
             url_preview_enabled: default_url_preview_enabled(),
             summaly_proxy_url: String::new(),
             instance_ticker: default_instance_ticker(),
+            cat_mode: default_cat_mode(),
             avatar_radius: default_avatar_radius(),
             haptics_enabled: default_haptics_enabled(),
             developer_options_enabled: false,
@@ -440,6 +450,7 @@ mod tests {
             url_preview_enabled: false,
             summaly_proxy_url: "https://my-proxy.example.com/preview".into(),
             instance_ticker: "always".into(),
+            cat_mode: "cat".into(),
             avatar_radius: 65,
             haptics_enabled: true,
             developer_options_enabled: true,
@@ -494,6 +505,13 @@ mod tests {
         // instance_ticker 追加前に保存された JSON も読めること（#[serde(default)]）。
         let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.instance_ticker, "remote");
+    }
+
+    #[test]
+    fn cat_mode_defaults_to_respect_for_legacy_json() {
+        // cat_mode 追加前に保存された JSON も読めること（#[serde(default)]）。
+        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.cat_mode, "respect");
     }
 
     #[test]
