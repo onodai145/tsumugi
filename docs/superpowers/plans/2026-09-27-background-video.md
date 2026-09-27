@@ -449,7 +449,11 @@ pub fn migrate_from_legacy_sqlite(
 `src-tauri/src/lib.rs` の呼び出し元3箇所を更新する(190-229行目付近)。
 
 ```rust
-            let backgrounds_dir = config_dir.join("backgrounds");
+            // Task 2 (import_background_media, commands/mute.rs) は app_data_dir()/backgrounds を
+            // 使っているため、ここも同じディレクトリに揃える(config_dir にすると2つのタスクが
+            // 別々のディレクトリを見てしまい、is_within_dir による削除保護が機能しなくなる)。
+            let backgrounds_dir =
+                app.path().app_data_dir().expect("no app data dir").join("backgrounds");
             let settings_path = config_dir.join("settings.json");
             let settings = if settings_path.exists() {
                 SettingsStore::new(settings_path, backgrounds_dir.clone())
