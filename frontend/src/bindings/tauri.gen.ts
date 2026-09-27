@@ -569,6 +569,8 @@ export type DriveFile = {
 	thumbnailUrl: string | null,
 	/**  元のファイル名（メディア以外はダウンロードリンクの表示名に使う） */
 	name?: string,
+	/**  バイト数。古いキャッシュや Misskey が返さない場合は None */
+	size?: number | null,
 };
 
 export type Edge = "left" | "right" | "top" | "bottom";

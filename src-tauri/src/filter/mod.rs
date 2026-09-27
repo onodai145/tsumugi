@@ -102,6 +102,7 @@ mod tests {
                     url: "u".into(),
                     thumbnail_url: None,
                     name: format!("{i}.png"),
+                    size: None,
                 })
                 .collect(),
             poll: None,

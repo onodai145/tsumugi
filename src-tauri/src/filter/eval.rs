@@ -307,6 +307,7 @@ mod tests {
                 url: "u".into(),
                 thumbnail_url: None,
                 name: "f.png".into(),
+                size: None,
             }],
             poll: None,
             tags: vec!["rust".into()],

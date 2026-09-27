@@ -171,6 +171,8 @@ pub struct RawFile {
     pub thumbnail_url: Option<String>,
     #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -270,6 +272,7 @@ impl From<RawFile> for DriveFile {
             url: f.url,
             thumbnail_url: f.thumbnail_url,
             name: f.name,
+            size: f.size,
         }
     }
 }
@@ -551,5 +554,19 @@ mod tests {
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
         assert_eq!(user.avatar_blurhash.as_deref(), Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj"));
+    }
+
+    #[test]
+    fn raw_file_size_is_mapped() {
+        let raw: RawFile = serde_json::from_str(
+            r#"{"id":"f1","type":"application/pdf","url":"http://x/f1","name":"a.pdf","size":1234}"#,
+        )
+        .unwrap();
+        let f: DriveFile = raw.into();
+        assert_eq!(f.size, Some(1234));
+
+        let raw: RawFile = serde_json::from_str(r#"{"id":"f2"}"#).unwrap();
+        let f: DriveFile = raw.into();
+        assert_eq!(f.size, None);
     }
 }

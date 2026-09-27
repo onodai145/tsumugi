@@ -119,6 +119,10 @@ pub struct DriveFile {
     /// 元のファイル名（メディア以外はダウンロードリンクの表示名に使う）
     #[serde(default)]
     pub name: String,
+    /// バイト数。古いキャッシュや Misskey が返さない場合は None
+    #[serde(default)]
+    #[specta(type = Option<specta_typescript::Number>)]
+    pub size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
