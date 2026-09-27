@@ -60,17 +60,53 @@ pub async fn import_background_media(
     let file_name = format!("{}.{ext}", uuid::Uuid::new_v4());
     let dest_path = backgrounds_dir.join(&file_name);
 
-    let bytes = read_file_bytes(&app, &path).await?;
-    tokio::fs::write(&dest_path, &bytes).await?;
+    copy_media_file(&app, &path, &dest_path).await?;
 
     if let Some(prev) = previous_path {
-        let _ = tokio::fs::remove_file(&prev).await;
+        if is_within_dir(std::path::Path::new(&prev), &backgrounds_dir) {
+            let _ = tokio::fs::remove_file(&prev).await;
+        }
     }
 
     Ok(BackgroundMedia {
         kind,
         absolute_path: dest_path.to_string_lossy().into_owned(),
     })
+}
+
+/// `src` を `dest` へコピーする。Android では `content://` URI を扱うため
+/// `read_file_bytes`(ContentResolverブリッジ)経由でメモリを介してコピーするが、
+/// それ以外の環境では動画のような大きなファイルでもメモリを圧迫しないよう
+/// ストリーミングコピー(`tokio::fs::copy`)を使う。
+async fn copy_media_file(
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: &AppHandle,
+    src: &str,
+    dest: &std::path::Path,
+) -> Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        let bytes = read_file_bytes(app, src).await?;
+        tokio::fs::write(dest, &bytes).await?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        tokio::fs::copy(src, dest)
+            .await
+            .map_err(|e| Error::Invalid(format!("cannot copy file {src}: {e}")))?;
+        Ok(())
+    }
+}
+
+/// `path` が `dir` 配下(サブファイル/サブディレクトリ)であるかを検証する。
+/// シンボリックリンク経由の脱出を避けるため `canonicalize()` で実体パスに解決してから
+/// 比較する。どちらかが存在せず canonicalize に失敗した場合は安全側に倒して false を返す
+/// (= 削除しない)。
+fn is_within_dir(path: &std::path::Path, dir: &std::path::Path) -> bool {
+    let (Ok(canonical_path), Ok(canonical_dir)) = (path.canonicalize(), dir.canonicalize()) else {
+        return false;
+    };
+    canonical_path != canonical_dir && canonical_path.starts_with(&canonical_dir)
 }
 
 /// 現在の NG 設定を取得。
@@ -390,5 +426,31 @@ mod background_media_tests {
             Some(BackgroundKind::Video)
         );
         assert_eq!(classify_background_kind("a.txt"), None);
+    }
+
+    #[test]
+    fn is_within_dir_rejects_paths_outside_backgrounds_dir() {
+        let tmp = std::env::temp_dir().join(format!("tsumugi-test-{}", uuid::Uuid::new_v4()));
+        let backgrounds_dir = tmp.join("backgrounds");
+        let outside_dir = tmp.join("outside");
+        std::fs::create_dir_all(&backgrounds_dir).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        let inside_file = backgrounds_dir.join("kept.png");
+        let outside_file = outside_dir.join("important.png");
+        std::fs::write(&inside_file, b"dummy").unwrap();
+        std::fs::write(&outside_file, b"dummy").unwrap();
+
+        assert!(is_within_dir(&inside_file, &backgrounds_dir));
+        assert!(!is_within_dir(&outside_file, &backgrounds_dir));
+        // backgrounds_dir 自身は「配下」ではない
+        assert!(!is_within_dir(&backgrounds_dir, &backgrounds_dir));
+        // 存在しないパスは安全側に倒して false
+        assert!(!is_within_dir(
+            &tmp.join("does-not-exist.png"),
+            &backgrounds_dir
+        ));
+
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }
