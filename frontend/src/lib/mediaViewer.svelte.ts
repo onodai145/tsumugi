@@ -6,7 +6,7 @@ export const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
 export const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
 /// MediaViewerで前後送りする対象（画像・動画・音声）だけを残す。
-/// その他のファイル（📄表示のもの）はMediaGrid側で従来通りopenUrlするためここでは除外する。
+/// その他のファイル(非メディア)は MediaGrid 側で FileList に分離して表示するためここでは除外する。
 export function deriveViewItems(files: DriveFile[]): DriveFile[] {
   return files.filter((f) => isImage(f) || isVideo(f) || isAudio(f));
 }
