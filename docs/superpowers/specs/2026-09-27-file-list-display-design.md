@@ -12,7 +12,7 @@
 
 ### Rust
 
-- `domain::DriveFile` に `size: Option<u64>` を追加する。`#[serde(default)]` を付け、既存の JSON との互換を保つ。
+- `domain::DriveFile` に `size: Option<i64>`（specta では number として出力。`Poll.expires_at` と同じ既存パターン） を追加する。`#[serde(default)]` を付け、既存の JSON との互換を保つ。
 - `api/normalize.rs` で Misskey の `size` を詰める。
 - `cargo test` で `frontend/src/bindings/tauri.gen.ts` を再生成する。
 
