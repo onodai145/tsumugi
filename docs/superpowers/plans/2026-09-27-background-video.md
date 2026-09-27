@@ -537,6 +537,12 @@ git commit -m "feat: 旧Base64背景画像を起動時に自動でファイル�
     }
 ```
 
+`tauri.conf.json`の設定だけでは不十分で、Tauri v2は`tauri`クレート自体の`protocol-asset` cargo featureを有効化しないとasset protocolハンドラがビルドに含まれない。`src-tauri/Cargo.toml`の`tauri`依存を以下に置き換える。
+
+```toml
+tauri = { version = "2.11.1", features = ["protocol-asset", "specta"] }
+```
+
 - [ ] **Step 2: 動作確認**
 
 Run: `cargo tauri dev`（リポジトリルートから、CLAUDE.md記載の通り）を起動し、コンソールに `assetProtocol` 関連のエラーが出ないことを確認する（この時点では背景動画UIはまだ無いため、起動できることのみ確認）。確認後は必ず自分で起動したプロセスを終了する。
