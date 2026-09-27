@@ -1110,7 +1110,7 @@ mod tests {
                 emojis: std::collections::HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
             },
             reply_id: None, reply_user_id: None, renote_id: None, renote: None,
-            files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into() }],
+            files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into(), size: None }],
             poll: None, tags: vec!["rust".into()], mentions: vec![],
             emojis: std::collections::HashMap::new(), channel_id: None, via: None, lang: None,
             reactions: std::collections::HashMap::from([("👍".into(), 3u32)]),

@@ -2,12 +2,16 @@
   import "vidstack/player/styles/base.css";
   import "vidstack/player";
   import "vidstack/player/ui";
-  import { openUrl } from "@tauri-apps/plugin-opener";
   import type { DriveFile } from "../bindings/tauri.gen";
+  import FileList from "./FileList.svelte";
   import MediaControlBar from "./MediaControlBar.svelte";
   import MediaViewer from "./MediaViewer.svelte";
   import { deriveViewItems, fileName, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
   let { files }: { files: DriveFile[] } = $props();
+
+  const isMedia = (f: DriveFile) => isImage(f) || isVideo(f) || isAudio(f);
+  const mediaFiles = $derived(files.filter(isMedia));
+  const otherFiles = $derived(files.filter((f) => !isMedia(f)));
 
   let revealed = $state<Record<string, boolean>>({});
 
@@ -17,13 +21,13 @@
   };
 </script>
 
-{#if files.length > 0}
+{#if mediaFiles.length > 0}
   <div
-    class={files.length === 1
+    class={mediaFiles.length === 1
       ? "mt-2 grid grid-cols-1 gap-1"
       : "mt-2 grid grid-cols-2 gap-1"}
   >
-    {#each files as f (f.id)}
+    {#each mediaFiles as f (f.id)}
       <div
         class={isAudio(f)
           ? "media-cell media-cell-audio relative flex overflow-hidden rounded-md items-center justify-center self-center"
@@ -72,18 +76,13 @@
             <media-provider></media-provider>
             <MediaControlBar file={f} variant="audio" onExpand={() => openViewer(f)} />
           </media-player>
-        {:else}
-          <button
-            class="max-w-full overflow-hidden text-ellipsis whitespace-nowrap border-0 bg-none p-2 font-[inherit] text-sm text-primary"
-            onclick={() => openUrl(f.url)}
-          >
-            📄 {fileName(f)}
-          </button>
         {/if}
       </div>
     {/each}
   </div>
 {/if}
+
+<FileList files={otherFiles} {revealed} onreveal={(f) => (revealed = reveal(revealed, f))} />
 
 {#if viewerOpenIndex !== null}
   <MediaViewer
