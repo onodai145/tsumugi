@@ -6,7 +6,7 @@
   import FileList from "./FileList.svelte";
   import MediaControlBar from "./MediaControlBar.svelte";
   import MediaViewer from "./MediaViewer.svelte";
-  import { deriveViewItems, fileName, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
+  import { deriveViewItems, fileName, playerSrc, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
   let { files }: { files: DriveFile[] } = $props();
 
   const isMedia = (f: DriveFile) => isImage(f) || isVideo(f) || isAudio(f);
@@ -56,7 +56,7 @@
                拡張子を含まない(例: /files/webpublic-<uuid>)ため、Vidstackがsrc文字列だけからMIMEタイプを
                自動推定するinferType()が失敗し(常に"?"=unknown)、プロバイダ(<video>/<audio>要素)が
                一切生成されない不具合があった。typeを明示することで回避する。 -->
-          <media-player src={{ src: f.url, type: f.mimeType }} viewType="video" playsinline preload="metadata" class="h-full w-full">
+          <media-player src={playerSrc(f)} viewType="video" playsinline preload="metadata" class="h-full w-full">
             <media-provider>
               <!-- 映像クリックで再生/一時停止をトグルする。Vidstack公式の<media-gesture>
                    プリミティブを使う(自前のclickハンドラは書かない、既存方針の踏襲)。
@@ -72,7 +72,7 @@
           </media-player>
         {:else if isAudio(f)}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <media-player src={{ src: f.url, type: f.mimeType }} viewType="audio" preload="metadata" class="w-[calc(100%-16px)]">
+          <media-player src={playerSrc(f)} viewType="audio" preload="metadata" class="w-[calc(100%-16px)]">
             <media-provider></media-provider>
             <MediaControlBar file={f} variant="audio" onExpand={() => openViewer(f)} />
           </media-player>

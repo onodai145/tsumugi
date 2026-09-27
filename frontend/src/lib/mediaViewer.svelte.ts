@@ -3,6 +3,15 @@ import type { DriveFile } from "../bindings/tauri.gen";
 export const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
 export const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
 export const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
+
+// VidstackのisVideoSrc()は拡張子なしURL(MisskeyのドライブURL)だと VIDEO_TYPES
+// (mp4/webm/3gp/ogg/avi/mpeg)に含まれるMIMEしか動画と認識せず、それ以外は<video>プロバイダが
+// 生成されない。実際のコンテナ判別はブラウザ側が行うため、未対応MIMEはvideo/mp4として渡す。
+const VIDSTACK_VIDEO_TYPES = new Set(["video/mp4", "video/webm", "video/3gp", "video/ogg", "video/avi", "video/mpeg"]);
+export const playerSrc = (f: DriveFile) => ({
+  src: f.url,
+  type: isVideo(f) && !VIDSTACK_VIDEO_TYPES.has(f.mimeType) ? "video/mp4" : f.mimeType,
+});
 export const fileName = (f: DriveFile) => f.name || f.mimeType || "file";
 
 /// MediaViewerで前後送りする対象（画像・動画・音声）だけを残す。

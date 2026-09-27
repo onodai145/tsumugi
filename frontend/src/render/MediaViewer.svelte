@@ -20,6 +20,7 @@
     isRevealed,
     isVideo,
     nextIndex,
+    playerSrc,
     prevIndex,
     reveal,
     rotateCCW,
@@ -527,7 +528,7 @@
           {:else}
             <div class="flex h-full w-full items-center justify-center p-4">
               <media-player
-                src={{ src: item.url, type: item.mimeType }}
+                src={playerSrc(item)}
                 title={fileName(item)}
                 playsinline
                 class="max-h-full max-w-full"
@@ -581,7 +582,7 @@
           {:else}
             <div class="w-full max-w-md px-4">
               <media-player
-                src={{ src: item.url, type: item.mimeType }}
+                src={playerSrc(item)}
                 title={fileName(item)}
                 onerror={() => (mediaLoadError = { ...mediaLoadError, [item.id]: true })}
               >

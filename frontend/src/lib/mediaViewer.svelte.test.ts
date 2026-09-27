@@ -5,6 +5,7 @@ import {
   initialImageTransform,
   isRevealed,
   nextIndex,
+  playerSrc,
   prevIndex,
   reveal,
   rotateCCW,
@@ -98,5 +99,21 @@ describe("画像のrotation/flip状態", () => {
     expect(t.flipH).toBe(true);
     t = toggleFlipV(t);
     expect(t).toEqual({ rotation: 0, flipH: true, flipV: true });
+  });
+});
+
+describe("playerSrc", () => {
+  it("Vidstackが認識しない動画MIME(video/quicktime等)はvideo/mp4に正規化する", () => {
+    for (const mimeType of ["video/quicktime", "video/x-m4v", "video/x-matroska", "video/3gpp"]) {
+      expect(playerSrc(file({ mimeType, url: "https://example.com/files/webpublic-abc" }))).toEqual({
+        src: "https://example.com/files/webpublic-abc",
+        type: "video/mp4",
+      });
+    }
+  });
+
+  it("Vidstackが認識する動画MIMEと音声MIMEはそのまま渡す", () => {
+    expect(playerSrc(file({ mimeType: "video/webm", url: "u" }))).toEqual({ src: "u", type: "video/webm" });
+    expect(playerSrc(file({ mimeType: "audio/mpeg", url: "u" }))).toEqual({ src: "u", type: "audio/mpeg" });
   });
 });
