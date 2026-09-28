@@ -4,6 +4,7 @@ import { commands, events, playNotifySound, unwrap, unwrapAcc, formatError, Forb
 import { invalidateReactionUsers } from "./reactionUsersCache";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
@@ -35,7 +36,7 @@ import type {
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
-import { BACKGROUND_FIT_MODE_CSS } from "./backgroundFitMode";
+import { BACKGROUND_FIT_MODE_CSS, BACKGROUND_FIT_MODE_OBJECT_FIT } from "./backgroundFitMode";
 import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { withRecentEmojiUsage } from "./recentEmojis";
@@ -150,7 +151,8 @@ class AppStore {
     defaultColumnWidth: 300,
     keymap: {},
     fontFamily: "",
-    backgroundImage: "",
+    backgroundKind: null,
+    backgroundPath: null,
     backgroundDim: 0,
     backgroundBlur: 0,
     columnOpacity: 100,
@@ -193,6 +195,15 @@ class AppStore {
   // theme="auto"時、OSのprefers-color-scheme変化にライブ追従するためのmatchMediaリスナー解除関数。
   // #applyTheme が呼ばれるたびに前回分を解除してから張り直すことで、リスナーの多重登録を防ぐ。
   #themeMediaCleanup: (() => void) | null = null;
+  // 背景が動画の間だけ生成し、document.body に固定配置する <video> 要素。
+  // #applyBackground が呼ばれるたびに再利用し、種類が変わったら display を切り替える。
+  #bgVideoEl: HTMLVideoElement | null = null;
+  // #bgVideoEl.src に設定済みの背景動画の元パス(UiPrefs.backgroundPath)。フェッチ済みかどうかの
+  // 判定に使う(WebKitGTKのvideo要素はasset://を直接読めないため、asset://ではなくblob: URLを
+  // src に使う。#loadBackgroundVideoBlob 参照)。
+  #bgVideoSourcePath: string | null = null;
+  // #bgVideoSourcePath に対応する blob: URL。切り替え時に確実に revoke してメモリリークを防ぐ。
+  #bgVideoBlobUrl: string | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -227,6 +238,21 @@ class AppStore {
       clearInterval(this.#updateCheckTimer);
       this.#updateCheckTimer = null;
     }
+    // devのHMRで古いインスタンスが破棄される際、背景動画用のblob: URLを解放する
+    // (#loadBackgroundVideoBlob参照)。放置するとリロードごとにメモリが積み上がる。
+    if (this.#bgVideoBlobUrl) {
+      URL.revokeObjectURL(this.#bgVideoBlobUrl);
+      this.#bgVideoBlobUrl = null;
+    }
+    // #applyBackgroundがdocument.bodyにprependした<video>要素も併せて取り除く。
+    // これを怠ると、次のインスタンス(HMR後の新しいAppStore)が新しい<video>を追加するたびに
+    // 古い要素がDOMに孤立して残り、同じz-indexのpaint順で古い方が手前に残り続けてしまう
+    // (前に設定していた背景動画が消えず表示され続ける不具合の原因になっていた)。
+    if (this.#bgVideoEl) {
+      this.#bgVideoEl.remove();
+      this.#bgVideoEl = null;
+    }
+    this.#bgVideoSourcePath = null;
   }
 
   async boot() {
@@ -243,7 +269,8 @@ class AppStore {
         ...ui,
         keymap: ui.keymap ?? {},
         fontFamily: ui.fontFamily ?? "",
-        backgroundImage: ui.backgroundImage ?? "",
+        backgroundKind: ui.backgroundKind ?? null,
+        backgroundPath: ui.backgroundPath ?? null,
         backgroundDim: ui.backgroundDim ?? 0,
         backgroundBlur: ui.backgroundBlur ?? 0,
         columnOpacity: ui.columnOpacity ?? 100,
@@ -1351,7 +1378,8 @@ class AppStore {
       ...prefs,
       keymap: prefs.keymap ?? {},
       fontFamily: prefs.fontFamily ?? "",
-      backgroundImage: prefs.backgroundImage ?? "",
+      backgroundKind: prefs.backgroundKind ?? null,
+      backgroundPath: prefs.backgroundPath ?? null,
       backgroundDim: prefs.backgroundDim ?? 0,
       backgroundBlur: prefs.backgroundBlur ?? 0,
       columnOpacity: prefs.columnOpacity ?? 100,
@@ -1399,14 +1427,20 @@ class AppStore {
     return unicodeEmojiUrl(char, (this.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   }
 
-  /// 画像ファイルを選んで背景画像として読み込む（data URL化のみ。保存は setUiPrefs で）。
-  async pickBackgroundImage(): Promise<string | null> {
+  /// 画像/動画ファイルを選んで backgrounds/ へコピーする（保存は setUiPrefs で）。
+  /// 戻り値は種類とコピー後の絶対パス。旧ファイルの削除は行わない(未保存で閉じた場合に
+  /// 備えて残しておき、起動時のGCでまとめて掃除する。Issue #46 I1)。
+  async pickBackgroundMedia(): Promise<{ kind: "image" | "video"; absolutePath: string } | null> {
     const path = await openDialog({
       multiple: false,
-      filters: [{ name: "画像", extensions: ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"] }],
+      filters: [
+        { name: "画像", extensions: ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"] },
+        { name: "動画", extensions: ["mp4", "webm", "mov", "m4v", "mkv", "avi", "ogv"] },
+      ],
     });
     if (!path || Array.isArray(path)) return null;
-    return unwrap(commands.readImageDataUrl(path));
+    const media = await unwrap(commands.importBackgroundMedia(path));
+    return { kind: media.kind, absolutePath: media.absolutePath };
   }
 
   /// キーバインドの上書きを保存（他の表示設定は据え置き）。
@@ -1505,11 +1539,12 @@ class AppStore {
     }
   }
 
-  /// 背景画像/オーバーレイ/カラム不透明度を <html> に反映する。
+  /// 背景メディア(画像/動画)/オーバーレイ/カラム不透明度を <html> と <video> に反映する。
   #applyBackground(
     prefs: Pick<
       UiPrefs,
-      | "backgroundImage"
+      | "backgroundKind"
+      | "backgroundPath"
       | "backgroundDim"
       | "backgroundBlur"
       | "columnOpacity"
@@ -1518,22 +1553,79 @@ class AppStore {
     >,
   ) {
     const root = document.documentElement;
-    const img = prefs.backgroundImage ?? "";
-    if (img) {
-      root.style.setProperty("--bg-image", `url("${img}")`);
-    } else {
+    const kind = prefs.backgroundKind ?? null;
+    const path = prefs.backgroundPath ?? "";
+    const assetUrl = path ? convertFileSrc(path) : "";
+    // Tileは動画では意味を持たないため、動画のときはcoverへフォールバックする。
+    const rawFitMode = prefs.backgroundFitMode ?? "cover";
+    const fitMode = kind === "video" && rawFitMode === "tile" ? "cover" : rawFitMode;
+
+    if (kind === "video" && path) {
       root.style.removeProperty("--bg-image");
+      if (!this.#bgVideoEl) {
+        const v = document.createElement("video");
+        v.autoplay = true;
+        v.loop = true;
+        v.muted = true;
+        v.playsInline = true;
+        v.className = "bg-video";
+        document.body.prepend(v);
+        this.#bgVideoEl = v;
+      }
+      if (this.#bgVideoSourcePath !== path) void this.#loadBackgroundVideoBlob(path);
+      this.#bgVideoEl.style.display = "";
+      this.#bgVideoEl.play().catch(() => {});
+      const objectFit =
+        BACKGROUND_FIT_MODE_OBJECT_FIT[fitMode as keyof typeof BACKGROUND_FIT_MODE_OBJECT_FIT] ?? "cover";
+      this.#bgVideoEl.style.objectFit = objectFit;
+      this.#bgVideoEl.style.filter = `blur(${prefs.backgroundBlur ?? 0}px)`;
+    } else {
+      if (this.#bgVideoEl) {
+        this.#bgVideoEl.style.display = "none";
+        this.#bgVideoEl.pause();
+      }
+      if (kind === "image" && assetUrl) {
+        root.style.setProperty("--bg-image", `url("${assetUrl}")`);
+      } else {
+        root.style.removeProperty("--bg-image");
+      }
     }
+
     root.style.setProperty("--bg-dim", String((prefs.backgroundDim ?? 0) / 100));
     root.style.setProperty("--bg-blur", `${prefs.backgroundBlur ?? 0}px`);
     root.style.setProperty("--column-opacity", `${prefs.columnOpacity ?? 100}%`);
-    const [bgSize, bgRepeat] = BACKGROUND_FIT_MODE_CSS[prefs.backgroundFitMode ?? "cover"] ??
-      BACKGROUND_FIT_MODE_CSS.cover;
+    const [bgSize, bgRepeat] = BACKGROUND_FIT_MODE_CSS[fitMode] ?? BACKGROUND_FIT_MODE_CSS.cover;
     root.style.setProperty("--bg-size", bgSize);
     root.style.setProperty("--bg-repeat", bgRepeat);
     const bgPosition = BACKGROUND_POSITION_CSS[prefs.backgroundPosition ?? "center"] ??
       BACKGROUND_POSITION_CSS.center;
     root.style.setProperty("--bg-position", bgPosition);
+    if (this.#bgVideoEl) this.#bgVideoEl.style.objectPosition = bgPosition;
+  }
+
+  /// 背景動画のsrcをasset://ではなくblob: URLで設定する。
+  /// WebKitGTK(GStreamerバックエンド)の<video>要素はTauriのasset://カスタムURIスキームを
+  /// 直接解釈できず、`MEDIA_ERR_SRC_NOT_SUPPORTED`で読み込みに失敗する
+  /// (fetch()等のページ側リソースローダー経由では正常に取得できるにもかかわらず)。
+  /// そのため一度fetch()でBlobとして取得し、URL.createObjectURL()のblob: URLを<video src>に
+  /// 使う。#applyBackgroundは同期関数なので、この非同期処理はfire-and-forgetで呼ばれる。
+  async #loadBackgroundVideoBlob(path: string) {
+    try {
+      const res = await fetch(convertFileSrc(path));
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const blob = await res.blob();
+      // fetch中に別の背景に切り替えられていたら、古いレスポンスの反映は捨てる。
+      if (this.ui.backgroundPath !== path || this.ui.backgroundKind !== "video" || !this.#bgVideoEl) {
+        return;
+      }
+      const blobUrl = URL.createObjectURL(blob);
+      if (this.#bgVideoBlobUrl) URL.revokeObjectURL(this.#bgVideoBlobUrl);
+      this.#bgVideoBlobUrl = blobUrl;
+      this.#bgVideoSourcePath = path;
+      this.#bgVideoEl.src = blobUrl;
+    } catch (e) {
+      this.#log("warn", `背景動画の読み込みに失敗しました: ${String(e)}`);
+    }
   }
 
   /// メディアサムネイルの高さ上限を <html> に反映する（ノートを詰めたい人は小さく、

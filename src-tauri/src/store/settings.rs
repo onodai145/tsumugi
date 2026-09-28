@@ -7,6 +7,7 @@ use crate::domain::{
     Account, CacheBackendConfig, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs,
 };
 use crate::error::Result;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -45,8 +46,9 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     /// 指定パスの設定ファイル(JSON)を読み込む。存在しなければ空の設定から始める。
-    pub fn new(path: PathBuf) -> Result<Self> {
-        let data = load_json_or_default(&path)?;
+    /// `backgrounds_dir` は旧形式(Base64背景画像)からの自動移行時にファイルを書き出す先。
+    pub fn new(path: PathBuf, backgrounds_dir: PathBuf) -> Result<Self> {
+        let data = load_json_or_default(&path, &backgrounds_dir)?;
         Ok(Self {
             backing: Backing::File(path),
             data: Mutex::new(data),
@@ -369,14 +371,80 @@ fn collect_group_ids(node: &PaneNode, out: &mut Vec<String>) {
     }
 }
 
-fn load_json_or_default(path: &Path) -> Result<SettingsData> {
+fn load_json_or_default(path: &Path, backgrounds_dir: &Path) -> Result<SettingsData> {
     if !path.exists() {
         return Ok(SettingsData::default());
     }
     let s = std::fs::read_to_string(path)?;
     let mut value: serde_json::Value = serde_json::from_str(&s)?;
     migrate_legacy_pane_group_id(&mut value);
-    Ok(serde_json::from_value(value)?)
+    let migrated = if let Some(ui) = value.get_mut("ui") {
+        migrate_legacy_background_image(ui, backgrounds_dir)?
+    } else {
+        false
+    };
+    let data: SettingsData = serde_json::from_value(value)?;
+    if migrated {
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, serde_json::to_string_pretty(&data)?)?;
+        std::fs::rename(&tmp_path, path)?;
+    }
+    Ok(data)
+}
+
+/// 旧バージョンが `UiPrefs.backgroundImage` に Base64 data URL として保存していた背景画像を、
+/// `backgrounds_dir` 配下にファイルとして書き出し、`backgroundKind`/`backgroundPath` へ移行する。
+/// `backgroundImage` が存在しない/空文字なら何もしない。移行を行った場合は true を返す。
+fn migrate_legacy_background_image(
+    ui: &mut serde_json::Value,
+    backgrounds_dir: &Path,
+) -> Result<bool> {
+    let Some(map) = ui.as_object_mut() else { return Ok(false) };
+    let Some(data_url) = map.get("backgroundImage").and_then(|v| v.as_str().map(str::to_string))
+    else {
+        return Ok(false);
+    };
+    map.remove("backgroundImage");
+    if data_url.is_empty() {
+        return Ok(true);
+    }
+    let Some(rest) = data_url.strip_prefix("data:") else { return Ok(true) };
+    let Some((mime, b64)) = rest.split_once(";base64,") else { return Ok(true) };
+
+    let ext = match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/avif" => "avif",
+        "image/bmp" => "bmp",
+        "image/svg+xml" => "svg",
+        _ => "bin",
+    };
+    let bytes = match STANDARD.decode(b64) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("legacy backgroundImage base64 decode failed, dropping: {e}");
+            // backgroundImage キーは既に上で remove 済みのため、ここでは何もせず migrated 扱いで返す
+            return Ok(true);
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(backgrounds_dir) {
+        log::warn!("legacy backgroundImage migration: failed to create backgrounds dir, dropping: {e}");
+        return Ok(true);
+    }
+    let file_path = backgrounds_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+    if let Err(e) = std::fs::write(&file_path, bytes) {
+        log::warn!("legacy backgroundImage migration: failed to write file, dropping: {e}");
+        return Ok(true);
+    }
+
+    map.insert("backgroundKind".into(), serde_json::json!("image"));
+    map.insert(
+        "backgroundPath".into(),
+        serde_json::json!(file_path.to_string_lossy()),
+    );
+    Ok(true)
 }
 
 /// pane_layout(Issue #31)は当初 PaneNode::Leaf.group_id を "group_id" で書き出していたが、
@@ -416,6 +484,7 @@ fn rename_key_recursive(value: &mut serde_json::Value, from: &str, to: &str) {
 pub fn migrate_from_legacy_sqlite(
     json_path: &Path,
     legacy_conn: &rusqlite::Connection,
+    backgrounds_dir: &Path,
 ) -> Result<SettingsStore> {
     use rusqlite::params;
 
@@ -501,10 +570,14 @@ pub fn migrate_from_legacy_sqlite(
         .map(|s| serde_json::from_str(&s))
         .transpose()?
         .unwrap_or_default();
-    let ui = get_kv("ui")?
-        .map(|s| serde_json::from_str(&s))
-        .transpose()?
-        .unwrap_or_default();
+    let ui: UiPrefs = match get_kv("ui")? {
+        Some(s) => {
+            let mut ui_value: serde_json::Value = serde_json::from_str(&s)?;
+            migrate_legacy_background_image(&mut ui_value, backgrounds_dir)?;
+            serde_json::from_value(ui_value)?
+        }
+        None => UiPrefs::default(),
+    };
 
     let store = SettingsStore {
         backing: Backing::File(json_path.to_path_buf()),
@@ -809,7 +882,7 @@ mod tests {
             host: "db.example".into(), port: 5432, database: "tsumugi".into(), user: "app".into(),
         };
         {
-            let s = SettingsStore::new(path.clone()).unwrap();
+            let s = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
             s.save_cache_backend(&cfg).unwrap();
         }
 
@@ -817,7 +890,7 @@ mod tests {
         assert!(raw.contains("\"postgres\""));
         assert!(raw.contains("\"db.example\""));
 
-        let reloaded = SettingsStore::new(path.clone()).unwrap();
+        let reloaded = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
         assert_eq!(reloaded.load_cache_backend().unwrap(), cfg);
 
         std::fs::remove_file(&path).ok();
@@ -842,7 +915,7 @@ mod tests {
     fn persists_to_plain_text_json_file_and_reloads() {
         let path = std::env::temp_dir().join(format!("tsumugi-settings-test-{}.json", uuid::Uuid::new_v4()));
         {
-            let s = SettingsStore::new(path.clone()).unwrap();
+            let s = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
             s.upsert_account(&account("a1")).unwrap();
             s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
             s.upsert_column(&column("c1", "a1", 0)).unwrap();
@@ -854,9 +927,97 @@ mod tests {
         assert!(serde_json::from_str::<serde_json::Value>(&raw).is_ok());
 
         // 再読み込みでデータが復元される
-        let reloaded = SettingsStore::new(path.clone()).unwrap();
+        let reloaded = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
         assert_eq!(reloaded.load_accounts().unwrap().len(), 1);
         assert_eq!(reloaded.load_columns().unwrap().len(), 1);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// backgroundImage(Base64 data URL)を含む旧形式JSONを読み込むと、backgrounds/ にファイルが
+    /// 書き出され、backgroundKind/backgroundPath に自動移行されること。
+    #[test]
+    fn migrates_legacy_base64_background_image_to_file() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-legacy-bg-{}.json", uuid::Uuid::new_v4()));
+        let backgrounds_dir = std::env::temp_dir()
+            .join(format!("tsumugi-legacy-bg-dir-{}", uuid::Uuid::new_v4()));
+        // 1x1 の透明PNGのBase64(実データでなくてもデコードできれば十分)。
+        let legacy_json = r#"{
+            "ui": {
+                "theme": "dark",
+                "defaultColumnWidth": 300,
+                "backgroundImage": "data:image/png;base64,iVBORw0KGgo="
+            }
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+
+        let s = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        let ui = s.load_ui().unwrap();
+        assert_eq!(ui.background_kind, Some(crate::domain::BackgroundKind::Image));
+        let bg_path = ui.background_path.expect("background_path should be set");
+        assert!(std::path::Path::new(&bg_path).exists());
+        assert!(bg_path.starts_with(backgrounds_dir.to_str().unwrap()));
+
+        // 書き戻され、再読込でも同じ結果になること(次回起動時に再移行が走らない)。
+        let reloaded = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        assert_eq!(reloaded.load_ui().unwrap().background_path, Some(bg_path));
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir_all(&backgrounds_dir).ok();
+    }
+
+    /// backgroundImage のBase64デコードに失敗した場合でも、起動時パニックせず
+    /// backgroundImageキーを削除して読み込みが継続すること(background_kind/background_pathはNoneのまま)。
+    #[test]
+    fn no_panic_on_invalid_legacy_background_image_base64() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-invalid-bg-b64-{}.json", uuid::Uuid::new_v4()));
+        let backgrounds_dir = std::env::temp_dir()
+            .join(format!("tsumugi-invalid-bg-b64-dir-{}", uuid::Uuid::new_v4()));
+        let legacy_json = r#"{
+            "ui": {
+                "theme": "dark",
+                "defaultColumnWidth": 300,
+                "backgroundImage": "data:image/png;base64,not valid base64!!!"
+            }
+        }"#;
+        std::fs::write(&path, legacy_json).unwrap();
+
+        let s = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        let ui = s.load_ui().unwrap();
+        assert_eq!(ui.background_kind, None);
+        assert_eq!(ui.background_path, None);
+        // backgrounds_dir へのファイル書き出しは行われない(create_dir_all前にreturnする)こと。
+        assert!(!backgrounds_dir.exists());
+
+        // 不正な backgroundImage キーはファイルから削除され、再移行が走らないこと
+        // (次回起動時も同じ警告が無限に出続けない)。
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("backgroundImage"));
+        let reloaded = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        let reloaded_ui = reloaded.load_ui().unwrap();
+        assert_eq!(reloaded_ui.background_kind, None);
+        assert_eq!(reloaded_ui.background_path, None);
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_dir_all(&backgrounds_dir).ok();
+    }
+
+    /// backgroundImage が空文字/未設定の場合は移行処理が何もしないこと。
+    #[test]
+    fn no_migration_when_legacy_background_image_absent() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-no-bg-{}.json", uuid::Uuid::new_v4()));
+        let backgrounds_dir = std::env::temp_dir()
+            .join(format!("tsumugi-no-bg-dir-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&path, r#"{"ui":{"theme":"dark","defaultColumnWidth":300}}"#).unwrap();
+
+        let s = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        let ui = s.load_ui().unwrap();
+        assert_eq!(ui.background_kind, None);
+        assert_eq!(ui.background_path, None);
+        assert!(!backgrounds_dir.exists());
 
         std::fs::remove_file(&path).ok();
     }
@@ -884,7 +1045,7 @@ mod tests {
         }"#;
         std::fs::write(&path, legacy_json).unwrap();
 
-        let s = SettingsStore::new(path.clone()).unwrap();
+        let s = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
         let root = s.load_pane_layout().unwrap();
         let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
         let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected Leaf") };
@@ -928,7 +1089,7 @@ mod tests {
             )
             .unwrap();
 
-        let migrated = migrate_from_legacy_sqlite(&json_path, &legacy_conn).unwrap();
+        let migrated = migrate_from_legacy_sqlite(&json_path, &legacy_conn, &std::env::temp_dir()).unwrap();
         drop(legacy_conn);
 
         assert_eq!(migrated.load_accounts().unwrap().len(), 1);

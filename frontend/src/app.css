@@ -145,9 +145,12 @@
   display: none;
 }
 
-/* 背景画像（設定→表示で選択）。#applyBackground が --bg-image 等を <html> にセットする。
-   body ではなく ::before に描画し、blur を背景だけに掛ける（body 自体を blur すると
-   子要素まで巻き込まれるため）。位置は fixed で viewport 全体、z-index で最背面に固定。 */
+/* 背景メディア(設定→表示で選択)。#applyBackground が --bg-image 等を <html> にセットする。
+   画像は body ではなく ::before に描画し、blur を背景だけに掛ける(body 自体を blur すると
+   子要素まで巻き込まれるため)。位置は fixed で viewport 全体、z-index で最背面に固定。
+   暗さ(dim)オーバーレイは ::after に分離している。動画では background-image が使えず
+   <video class="bg-video"> (JSが動的に挿入する)を使うため、::before の役割を
+   「画像描画専用」に絞り、暗さはメディアの種類に関わらず ::after で共通に掛けられるようにしている。 */
 body {
   position: relative;
 }
@@ -156,14 +159,30 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-image: linear-gradient(
-      rgba(0, 0, 0, var(--bg-dim, 0)),
-      rgba(0, 0, 0, var(--bg-dim, 0))
-    ), var(--bg-image, none);
+  background-image: var(--bg-image, none);
   background-size: var(--bg-size, cover);
   background-position: var(--bg-position, center);
   background-repeat: var(--bg-repeat, no-repeat);
   filter: blur(var(--bg-blur, 0px));
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: rgba(0, 0, 0, var(--bg-dim, 0));
+  pointer-events: none;
+}
+/* 背景動画用。store.svelte.ts の #applyBackground が document.body の先頭に挿入し、
+   backgroundKind に応じて表示/非表示(display)を切り替える。 */
+.bg-video {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  object-position: center;
+  pointer-events: none;
 }
 
 html,

@@ -33,6 +33,6 @@ pub use notify::NotifyConfig;
 pub use pane::{Edge, PaneChild, PaneNode, SplitDirection};
 pub use reaction::{EmojiDef, ReactionSummary, ReactionUser};
 pub use share::ShareReceived;
-pub use ui::UiPrefs;
+pub use ui::{BackgroundKind, UiPrefs};
 pub use url_preview::{UrlPlayer, UrlPreview};
 pub use user::{InstanceInfo, User};

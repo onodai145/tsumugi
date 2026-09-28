@@ -14,3 +14,16 @@ export const BACKGROUND_FIT_MODE_OPTIONS: { value: BackgroundFitMode; label: str
   { value: "fill", label: "Fill（縦横比を無視して引き伸ばし）" },
   { value: "tile", label: "Tile（並べて繰り返し）" },
 ];
+
+// object-fit は background-size と構文が異なる("fill"の縦横比無視表現がキーワード自体)ため、
+// 動画の<video>要素向けに別途マッピングする。
+export const BACKGROUND_FIT_MODE_OBJECT_FIT: Record<"cover" | "contain" | "fill", "cover" | "contain" | "fill"> = {
+  cover: "cover",
+  contain: "contain",
+  fill: "fill",
+};
+
+// Tile(並べて繰り返し)は動画では意味を持たないため、動画選択時のUIからは除外する。
+export const BACKGROUND_FIT_MODE_OPTIONS_FOR_VIDEO = BACKGROUND_FIT_MODE_OPTIONS.filter(
+  (o) => o.value !== "tile",
+);
