@@ -1069,14 +1069,26 @@ class AppStore {
     if (targets.length === 0) return;
 
     const isMine = p.actorId != null && this.#myUserIds().has(p.actorId);
+    // このカラムのアカウント自身の操作か。myReaction はカラムのアカウント視点の値なので、
+    // 他の自分のアカウント(isMine だが isOwn でない)の操作では触れない。
+    const tabUserId = this.accounts.find((a) => a.id === tab.accountId)?.userId;
+    const isOwn = p.actorId != null && p.actorId === tabUserId;
     for (const n of targets) {
       switch (p.update.type) {
         case "reacted":
+          if (isOwn) {
+            applyOwnReactionEvent(n, p.update);
+            break;
+          }
           if (isMine) break;
           n.reactions[p.update.reaction] = (n.reactions[p.update.reaction] ?? 0) + 1;
           n.reactionCount += 1;
           break;
         case "unreacted": {
+          if (isOwn) {
+            applyOwnReactionEvent(n, p.update);
+            break;
+          }
           if (isMine) break;
           const key = p.update.reaction;
           const next = (n.reactions[key] ?? 1) - 1;
@@ -2018,6 +2030,18 @@ function removeReaction(n: Note) {
   else n.reactions[cur] = next;
   n.reactionCount = Math.max(0, n.reactionCount - 1);
   n.myReaction = null;
+}
+/// 自分のアカウントによる reacted/unreacted イベントを反映する(他クライアント由来を含む。Issue #28)。
+/// tsumugi 自身の操作は楽観更新で反映済みなので、myReaction との一致で冪等に扱い二重加算/減算を防ぐ。
+export function applyOwnReactionEvent(
+  n: Note,
+  update: Extract<NoteUpdate, { type: "reacted" | "unreacted" }>,
+) {
+  if (update.type === "reacted") {
+    if (n.myReaction !== update.reaction) addReaction(n, update.reaction);
+  } else if (n.myReaction === update.reaction) {
+    removeReaction(n);
+  }
 }
 function snapshotReaction(n: Note) {
   return { n, reactions: { ...n.reactions }, myReaction: n.myReaction, count: n.reactionCount };

@@ -76,6 +76,23 @@ impl Note {
         self.reaction_count = self.reaction_count.saturating_sub(1);
     }
 
+    /// 自分のアカウントの reacted イベントを反映する（他クライアント由来を含む。Issue #28）。
+    /// tsumugi 自身の操作は apply_my_reaction で反映済みなので、my_reaction が同じなら何もしない
+    /// （二重カウント防止）。frontend の applyOwnReactionEvent と同じ挙動。
+    pub fn record_own_reaction_event(&mut self, reaction: &str) {
+        if self.my_reaction.as_deref() != Some(reaction) {
+            self.apply_my_reaction(reaction);
+        }
+    }
+
+    /// 自分のアカウントの unreacted イベントを反映する（他クライアント由来を含む。Issue #28）。
+    /// my_reaction が一致する時だけ取り消す（自身の取り消し・付け替え後に届く古いイベントは無視）。
+    pub fn record_own_unreaction_event(&mut self, reaction: &str) {
+        if self.my_reaction.as_deref() == Some(reaction) {
+            self.clear_my_reaction();
+        }
+    }
+
     /// 他ユーザーのリアクション付与をローカル反映する（my_reactionには触れない）。
     /// frontend の #applyNoteUpdate の "reacted"(isMineでない場合) と同じ挙動。
     pub fn record_others_reaction(&mut self, reaction: &str) {
@@ -294,5 +311,61 @@ mod tests {
 
         assert_eq!(n.reactions.get("👍"), None);
         assert_eq!(n.reaction_count, 0);
+    }
+    #[test]
+    fn record_own_reaction_event_sets_my_reaction_and_counts_when_from_other_client() {
+        let mut n = minimal_note();
+        n.record_own_reaction_event("👍");
+        assert_eq!(n.my_reaction.as_deref(), Some("👍"));
+        assert_eq!(n.reactions.get("👍"), Some(&1));
+        assert_eq!(n.reaction_count, 1);
+    }
+
+    #[test]
+    fn record_own_reaction_event_is_idempotent_when_already_applied_locally() {
+        let mut n = minimal_note();
+        n.apply_my_reaction("👍");
+        n.record_own_reaction_event("👍");
+        assert_eq!(n.my_reaction.as_deref(), Some("👍"));
+        assert_eq!(n.reactions.get("👍"), Some(&1));
+        assert_eq!(n.reaction_count, 1);
+    }
+
+    #[test]
+    fn record_own_reaction_event_switches_from_existing_reaction() {
+        let mut n = minimal_note();
+        n.apply_my_reaction("👍");
+        n.record_own_reaction_event("😀");
+        assert_eq!(n.my_reaction.as_deref(), Some("😀"));
+        assert_eq!(n.reactions.get("👍"), None);
+        assert_eq!(n.reactions.get("😀"), Some(&1));
+        assert_eq!(n.reaction_count, 1);
+    }
+
+    #[test]
+    fn record_own_unreaction_event_clears_my_reaction_when_from_other_client() {
+        let mut n = minimal_note();
+        n.apply_my_reaction("👍");
+        n.record_own_unreaction_event("👍");
+        assert_eq!(n.my_reaction, None);
+        assert_eq!(n.reactions.get("👍"), None);
+        assert_eq!(n.reaction_count, 0);
+    }
+
+    #[test]
+    fn record_own_unreaction_event_is_noop_when_not_reacted_or_reaction_differs() {
+        let mut n = minimal_note();
+        n.reactions.insert("👍".into(), 1);
+        n.reaction_count = 1;
+        n.record_own_unreaction_event("👍");
+        assert_eq!(n.reactions.get("👍"), Some(&1));
+        assert_eq!(n.reaction_count, 1);
+
+        n.my_reaction = Some("😀".into());
+        n.reactions.insert("😀".into(), 1);
+        n.reaction_count = 2;
+        n.record_own_unreaction_event("👍");
+        assert_eq!(n.my_reaction.as_deref(), Some("😀"));
+        assert_eq!(n.reaction_count, 2);
     }
 }

@@ -16,7 +16,7 @@ const invokeMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
-const { app } = await import("./store.svelte");
+const { app, applyOwnReactionEvent } = await import("./store.svelte");
 
 const ACCOUNT_ID = "acc1";
 
@@ -756,5 +756,67 @@ describe("矢印キー選択移動とselectionMoveSeq(Issue #363)", () => {
     const t = app.groups[0].tabs[0];
     expect(t.selectedNoteId).toBe("n1");
     expect(t.selectionMoveSeq).toBe(1);
+  });
+});
+
+describe("自分のアカウントによるreacted/unreactedイベントの反映(Issue #28)", () => {
+  it("他クライアントで付けたリアクションのreactedでmyReactionと件数が反映される", () => {
+    const note = makeNote({ reactions: { "❤️": 2 }, reactionCount: 2, myReaction: null });
+
+    applyOwnReactionEvent(note, { type: "reacted", reaction: "👍" });
+
+    expect(note.myReaction).toBe("👍");
+    expect(note.reactions).toEqual({ "❤️": 2, "👍": 1 });
+    expect(note.reactionCount).toBe(3);
+  });
+
+  it("tsumugi自身の操作で反映済み(myReactionが同じ)のreactedは二重加算しない", () => {
+    const note = makeNote({ reactions: { "👍": 1 }, reactionCount: 1, myReaction: "👍" });
+
+    applyOwnReactionEvent(note, { type: "reacted", reaction: "👍" });
+
+    expect(note.myReaction).toBe("👍");
+    expect(note.reactions).toEqual({ "👍": 1 });
+    expect(note.reactionCount).toBe(1);
+  });
+
+  it("他クライアントで別の絵文字へ付け替えたreactedは旧リアクションを外して付け直す", () => {
+    const note = makeNote({ reactions: { "👍": 1, "❤️": 1 }, reactionCount: 2, myReaction: "👍" });
+
+    applyOwnReactionEvent(note, { type: "reacted", reaction: "😀" });
+
+    expect(note.myReaction).toBe("😀");
+    expect(note.reactions).toEqual({ "❤️": 1, "😀": 1 });
+    expect(note.reactionCount).toBe(2);
+  });
+
+  it("他クライアントで外したリアクションのunreactedでmyReactionと件数が反映される", () => {
+    const note = makeNote({ reactions: { "👍": 2 }, reactionCount: 2, myReaction: "👍" });
+
+    applyOwnReactionEvent(note, { type: "unreacted", reaction: "👍" });
+
+    expect(note.myReaction).toBeNull();
+    expect(note.reactions).toEqual({ "👍": 1 });
+    expect(note.reactionCount).toBe(1);
+  });
+
+  it("tsumugi自身の取り消しで反映済み(myReactionがnull)のunreactedは二重減算しない", () => {
+    const note = makeNote({ reactions: { "👍": 1 }, reactionCount: 1, myReaction: null });
+
+    applyOwnReactionEvent(note, { type: "unreacted", reaction: "👍" });
+
+    expect(note.myReaction).toBeNull();
+    expect(note.reactions).toEqual({ "👍": 1 });
+    expect(note.reactionCount).toBe(1);
+  });
+
+  it("付け替え後に遅れて届く旧リアクションのunreactedは現在のリアクションに影響しない", () => {
+    const note = makeNote({ reactions: { "😀": 1 }, reactionCount: 1, myReaction: "😀" });
+
+    applyOwnReactionEvent(note, { type: "unreacted", reaction: "👍" });
+
+    expect(note.myReaction).toBe("😀");
+    expect(note.reactions).toEqual({ "😀": 1 });
+    expect(note.reactionCount).toBe(1);
   });
 });
