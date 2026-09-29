@@ -226,10 +226,13 @@ a:hover {
    スタイルガイド§2のチップ・小バッジ用トークン(rounded-sm)に合わせる）。
    surface-*はノートカード自体の背景色（--column-opacityでブレンドされる透過カラム機能あり）
    と同じ変数のため、不透明な単色を使うとカードの透過設定と噛み合わず浮いて見える。
-   代わりにaccentを薄く乗せることで、どのテーマ・透過設定でも馴染むタグ風の見た目にする。 */
+   代わりにaccentを薄く乗せることで、どのテーマ・透過設定でも馴染むタグ風の見た目にする。
+   display: inline-flex + align-items: centerは避ける — align-selfがbaselineでない
+   flexアイテムはコンテナの合成ベースライン計算に参加せず、ボーダーボックス下端が
+   ベースラインとして扱われるため、周囲の本文テキストと下揃えにズレて見える(#402)。
+   代わりに通常のinlineフローとし、アイコン側のalign-middle(vertical-align: middle)で
+   位置を揃える。 */
 .mfm-mention-chip {
-  display: inline-flex;
-  align-items: center;
   padding: 1px 6px 1px 3px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
