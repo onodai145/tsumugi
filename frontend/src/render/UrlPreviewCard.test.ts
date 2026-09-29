@@ -96,6 +96,22 @@ describe("UrlPreviewCard", () => {
     expect(media?.style.aspectRatio).toBe("640 / 360");
   });
 
+  it("keeps sending the origin as Referer to the player iframe even though the app defaults to no-referrer (Issue #411)", async () => {
+    cachedUrlPreviewMock.mockReturnValue({
+      ...PREVIEW,
+      thumbnail: "https://example.com/t.png",
+      player: { url: "https://example.com/embed", width: 640, height: 360 },
+    });
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+    screen.getByRole("button", { name: "再生" }).click();
+    await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
+    // index.html の <meta name="referrer" content="no-referrer"> は全リクエストの既定になるが、
+    // 埋め込みプレイヤー(YouTube等はRefererを要求し得る)は従来どおりOriginを送る
+    expect(document.querySelector("iframe")?.getAttribute("referrerpolicy")).toBe(
+      "strict-origin-when-cross-origin",
+    );
+  });
+
   it("falls back to a 16:9 aspect ratio for the expanded player when width/height are missing", async () => {
     const withPlayer = {
       ...PREVIEW,

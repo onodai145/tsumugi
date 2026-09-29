@@ -60,6 +60,7 @@
           title={preview.title ?? preview.url}
           sandbox="allow-scripts allow-same-origin"
           allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+          referrerpolicy="strict-origin-when-cross-origin"
           class="h-full w-full border-0"
         ></iframe>
       </div>
