@@ -29,6 +29,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::open_devtools,
             commands::app::log_frontend_event,
             commands::app::get_pending_share,
+            commands::app::is_safe_mode,
             commands::account::start_miauth,
             commands::account::complete_miauth,
             commands::account::list_accounts,

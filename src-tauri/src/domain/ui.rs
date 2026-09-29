@@ -217,6 +217,11 @@ pub struct UiPrefs {
     /// 一度trueになったら無効化する手段は用意しない（Androidの開発者向けオプション解除と同様）。
     #[serde(default)]
     pub developer_options_enabled: bool,
+    /// ユーザーが書いた任意のCSS。アプリ全体に適用する（Issue #93）。空文字なら何も適用しない。
+    /// 環境変数 `TSUMUGI_SAFE_MODE` で起動した場合は保存値を保ったまま適用だけを止める
+    /// （`commands::app::is_safe_mode` 参照）。
+    #[serde(default)]
+    pub custom_css: String,
 }
 
 fn default_column_opacity() -> i32 {
@@ -327,6 +332,7 @@ impl Default for UiPrefs {
             avatar_radius: default_avatar_radius(),
             haptics_enabled: default_haptics_enabled(),
             developer_options_enabled: false,
+            custom_css: String::new(),
         }
     }
 }
@@ -384,6 +390,24 @@ mod tests {
         // developer_options_enabled も同様に既定値(false, 追加前は開発者オプションタブ自体が
         // 存在しなかった)へフォールバックすること。
         assert_eq!(v.developer_options_enabled, false);
+    }
+
+    #[test]
+    fn custom_css_defaults_to_empty_for_legacy_json() {
+        // customCss（Issue #93）追加前に保存された JSON も空文字として読めること。
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.custom_css, "");
+    }
+
+    #[test]
+    fn custom_css_roundtrips_as_camel_case() {
+        let mut p = UiPrefs::default();
+        p.custom_css = ".note { margin: 0 }\n/* </style> */".into();
+        let s = serde_json::to_string(&p).unwrap();
+        assert!(s.contains("\"customCss\":"));
+        let back: UiPrefs = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.custom_css, p.custom_css);
     }
 
     #[test]
@@ -469,6 +493,7 @@ mod tests {
             avatar_radius: 65,
             haptics_enabled: true,
             developer_options_enabled: true,
+            custom_css: "body { background: #000 }".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
