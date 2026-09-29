@@ -389,15 +389,16 @@
 
       {#if ticker && (safeTickerThemeColor || ticker.iconUrl || tickerLabel)}
         <div
-          class="mt-1 flex w-full items-center gap-1 overflow-hidden rounded-sm px-1.5 py-0.5 text-xs"
+          class="mt-1 flex w-full items-stretch gap-1 overflow-hidden rounded-sm text-xs"
           data-testid="note-instance-ticker"
           style={`background:linear-gradient(90deg, ${safeTickerThemeColor ?? "var(--color-muted)"}, transparent);${safeTickerThemeColor ? `color:${readableTextColor(safeTickerThemeColor)}` : ""}`}
           class:text-muted-foreground={!safeTickerThemeColor}
+          class:px-1.5={!ticker.iconUrl}
         >
           {#if ticker.iconUrl}
-            <img src={ticker.iconUrl} alt="" class="size-3 flex-none rounded-full object-cover" />
+            <img src={ticker.iconUrl} alt="" class="w-4 flex-none object-cover" />
           {/if}
-          <span class="overflow-hidden text-ellipsis whitespace-nowrap">{tickerLabel}</span>
+          <span class="overflow-hidden py-0.5 pr-1.5 text-ellipsis whitespace-nowrap" class:pl-1.5={!ticker.iconUrl}>{tickerLabel}</span>
         </div>
       {/if}
 
