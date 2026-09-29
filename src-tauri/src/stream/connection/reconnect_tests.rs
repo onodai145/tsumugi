@@ -419,18 +419,20 @@ async fn backoff_resets_after_a_connection_was_established() {
     };
     let _h = Harness::start(&server, config);
 
-    // 失敗を重ねて待ち時間を 20→40→80→160 と伸ばす。次に失敗すれば 320ms 待つ状態。
-    for _ in 0..4 {
+    // 失敗を重ねて待ち時間を 20→40→80→160→320 と伸ばす。次に失敗すれば 640ms 待つ状態。
+    for _ in 0..5 {
         server.reject().await;
     }
     let conn = server.accept().await;
     conn.close().await;
     let closed_at = tokio::time::Instant::now();
 
-    // 一度接続できていたので待ち時間は初期値へ戻り、伸ばした値(320ms)は引きずらない。
+    // 一度接続できていたので待ち時間は初期値(20ms)へ戻り、伸ばした値(640ms)は引きずらない。
+    // 上限を見る唯一のテスト。リセットされていれば約20ms、されていなければ640ms以上で、
+    // 閾値を離してあるためCI負荷でも誤検知しにくい。
     server.accept().await;
     assert!(
-        closed_at.elapsed() < Duration::from_millis(200),
+        closed_at.elapsed() < Duration::from_millis(300),
         "reconnect took {:?}; backoff should have been reset to the start value",
         closed_at.elapsed()
     );
