@@ -30,7 +30,7 @@ Never run `./target/debug/tsumugi` or `cargo run` directly — Tauri's debug bui
 
 E2E tests (`e2e/`) launch several background processes (`Xvfb`, `dbus-run-session`, `gnome-keyring-daemon`, the `tsumugi` binary under test) that can be orphaned if a run is killed abruptly. Clean these up by exact PID only (`ps aux` then `kill <pid>`) — never `pkill`/`killall` by name/pattern, since that can match unrelated real processes (e.g. a real browser) on the same machine.
 
-On Linux/Wayland (Hyprland etc.), WebKitGTK's DMABUF renderer can conflict with wlroots compositors and crash rendering with `Gdk Error 71 (protocol error)`. `src-tauri/src/main.rs` sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` by default to work around this; if that doesn't help, fall back to `GDK_BACKEND=x11 cargo tauri dev`.
+On Linux/Wayland (Hyprland etc.), WebKitGTK's DMABUF renderer can request buffer formats the NVIDIA driver doesn't support and crash rendering with `Gdk Error 71 (protocol error)`. `src-tauri/src/main.rs` sets `__NV_DISABLE_EXPLICIT_SYNC=1` by default to work around this without losing HW acceleration (Tauri's recommended first fix — see https://v2.tauri.app/develop/debug/linux-graphics/); if that doesn't help, fall back to `WEBKIT_DISABLE_DMABUF_RENDERER=1` (loses HW acceleration) or `GDK_BACKEND=x11 cargo tauri dev`.
 
 ### Android
 Android build support exists (`src-tauri/tauri.android.conf.json`, `src-tauri/gen/android`). CI (`android-build` job in `.github/workflows/test.yml`) only verifies it compiles and links — no signing or artifact distribution:

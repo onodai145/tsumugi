@@ -164,10 +164,16 @@ search/user/tag以外のソースでは、タブごとに「デスクトップ�
 
 **Linux/Wayland（Hyprland等）で描画が壊れる／`Gdk Error 71 (protocol error)` が出る**
 
-WebKitGTKのDMABUFレンダラがwlroots系コンポジタと衝突することがあります。tsumugiはLinuxでは既定で`WEBKIT_DISABLE_DMABUF_RENDERER=1`をセットして回避していますが、それでも解決しない場合はX11バックエンドでの起動を試してください。
+WebKitGTKのDMABUFレンダラがNVIDIAドライバの未対応バッファ形式を要求し、このエラーを起こすことがあります。tsumugiはLinuxでは既定で`__NV_DISABLE_EXPLICIT_SYNC=1`をセットしてHWアクセラレーションを維持したまま回避していますが、それでも解決しない場合は以下を試してください。
+
+```sh
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./tsumugi
+```
+
+（HWアクセラレーションは失われますが、より広範囲のケースを回避できます。それでも解決しない場合はX11バックエンドでの起動を試してください。）
 
 ```sh
 GDK_BACKEND=x11 ./tsumugi
 ```
 
-（開発ビルドを使っている場合は `cargo tauri dev` の前に同様に `GDK_BACKEND=x11` を付けてください。）
+（開発ビルドを使っている場合は `cargo tauri dev` の前に同様に環境変数を付けてください。）
