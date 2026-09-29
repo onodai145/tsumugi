@@ -14,24 +14,29 @@ where
     Ok(i64::deserialize(deserializer)?.max(0) as u32)
 }
 
+/// `UserLite.instance`（リモートユーザーのみ）。本家 `MkInstanceTicker.vue` はリモートの
+/// アイコンに `iconUrl` ではなく `faviconUrl` を使うため、`iconUrl` は読まない。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawInstanceInfo {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
-    pub icon_url: Option<String>,
+    pub favicon_url: Option<String>,
     #[serde(default)]
     pub theme_color: Option<String>,
 }
 
-impl From<RawInstanceInfo> for crate::domain::InstanceInfo {
-    fn from(r: RawInstanceInfo) -> Self {
+impl RawInstanceInfo {
+    /// `host` はリモートユーザーの所属ホスト。`favicon_url` が無ければ `/favicon.ico` を補う。
+    fn into_domain(self, host: &str) -> crate::domain::InstanceInfo {
         crate::domain::InstanceInfo {
-            name: r.name,
-            icon_url: r.icon_url,
-            theme_color: r.theme_color,
+            name: self.name,
+            icon_url: self.favicon_url,
+            theme_color: self.theme_color,
         }
+        .with_favicon_fallback(host)
+        .with_theme_color_fallback()
     }
 }
 
@@ -74,14 +79,11 @@ pub struct RawUser {
 
 impl From<RawUser> for User {
     fn from(r: RawUser) -> Self {
-        let instance = r.instance.map(|i| {
-            let info: crate::domain::InstanceInfo = i.into();
-            let info = match &r.host {
-                Some(h) => info.with_favicon_fallback(h),
-                None => info,
-            };
-            info.with_theme_color_fallback()
-        });
+        // Misskeyはローカルユーザーに `instance` を付与しないため、`host` が無ければ None。
+        let instance = match (&r.host, r.instance) {
+            (Some(h), Some(i)) => Some(i.into_domain(h)),
+            _ => None,
+        };
         User {
             id: r.id,
             username: r.username,
@@ -519,12 +521,13 @@ mod tests {
 
     #[test]
     fn raw_user_maps_instance_for_remote_user() {
-        let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":\"https://remote.example/icon.png\",\"themeColor\":\"#ff8800\"}}";
+        let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":\"https://remote.example/icon.png\",\"faviconUrl\":\"https://remote.example/favicon.png\",\"themeColor\":\"#ff8800\"}}";
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
         let instance = user.instance.expect("instance should be present for remote user");
         assert_eq!(instance.name, Some("Remote Instance".to_string()));
-        assert_eq!(instance.icon_url, Some("https://remote.example/icon.png".to_string()));
+        // 本家MkInstanceTicker.vueと同様、リモートはiconUrlではなくfaviconUrlを表示する。
+        assert_eq!(instance.icon_url, Some("https://remote.example/favicon.png".to_string()));
         assert_eq!(instance.theme_color, Some("#ff8800".to_string()));
     }
 
@@ -537,10 +540,11 @@ mod tests {
     }
 
     #[test]
-    fn raw_user_instance_falls_back_to_host_favicon_when_icon_url_missing() {
-        // 本家Misskeyと同様、iconUrl/themeColorが無いインスタンス(管理者が未設定)では
+    fn raw_user_instance_falls_back_to_host_favicon_when_favicon_url_missing() {
+        // 本家Misskeyと同様、faviconUrl/themeColorが無いインスタンス(管理者が未設定)では
         // ホストの/favicon.icoと既定グレー(#777777)にそれぞれフォールバックする。
-        let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":null,\"themeColor\":null}}";
+        // iconUrlが設定されていても、faviconとは別物になりうるため使わない。
+        let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":\"https://remote.example/icon.png\",\"faviconUrl\":null,\"themeColor\":null}}";
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
         let instance = user.instance.expect("instance should be present for remote user");

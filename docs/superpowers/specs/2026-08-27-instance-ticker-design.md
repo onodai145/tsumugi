@@ -71,7 +71,7 @@ pub struct InstanceInfo {
 }
 ```
 
-`faviconUrl` は取得対象に含めない（`/api/meta` の `MetaLite` スキーマに存在しないため、リモート側の値も使わない）。ただし `iconUrl`（リモートは`UserLite.instance.iconUrl`、ローカルは`/api/meta`の`iconUrl`）が未設定の場合、`InstanceInfo::with_favicon_fallback` がホストの `https://{host}/favicon.ico` にフォールバックする（本家Misskeyの `MkInstanceTicker.vue` と同じ挙動）。管理者がアイコンを設定していないインスタンスでも favicon が実在すればアイコン欠落を避けられる。
+アイコンは本家Misskeyの `MkInstanceTicker.vue` に合わせてローカル/リモートで取得元を分ける（Issue #406）。ローカルは `/api/meta` の `iconUrl`、リモートは `UserLite.instance.faviconUrl`（`iconUrl` はfaviconと別物になりうるため読まない）。どちらも未設定の場合は `InstanceInfo::with_favicon_fallback` がホストの `https://{host}/favicon.ico` にフォールバックする。管理者がアイコンを設定していないインスタンスでも favicon が実在すればアイコン欠落を避けられる。
 
 `themeColor` が未設定の場合も、本家Misskeyの `MkInstanceTicker.vue` と同じ既定色 `#777777`（グレー）に `InstanceInfo::with_theme_color_fallback` でフォールバックする（本家はホストから動的に取得する手段が無く、固定値にフォールバックしている）。これにより未設定インスタンスの投稿もグラデーション付きで表示される。
 
