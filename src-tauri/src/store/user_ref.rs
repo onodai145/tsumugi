@@ -6,26 +6,53 @@ use crate::error::Result;
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
 
+/// `instance` テーブルへ upsert する(Issue #409)。列ごとに `COALESCE(新, 既存)`:
+/// 再取得の失敗(NULL)が既知の値を消さない。インスタンス単位なので、同一ホストの
+/// 誰か1人の受信でそのホスト全ユーザーの表示が更新される。
+fn upsert_instance(conn: &Connection, host: &str, info: &InstanceInfo) -> Result<()> {
+    conn.execute(
+        "INSERT INTO instance (host, name, icon_url, theme_color) VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(host) DO UPDATE SET
+            name = COALESCE(excluded.name, instance.name),
+            icon_url = COALESCE(excluded.icon_url, instance.icon_url),
+            theme_color = COALESCE(excluded.theme_color, instance.theme_color)",
+        params![host, info.name, info.icon_url, info.theme_color],
+    )?;
+    Ok(())
+}
+
+/// 自己修復パス用: 既存値が無い列だけ埋める(古いノートのスナップショットで、
+/// 直近の値を上書きしない)。
+fn fill_instance(conn: &Connection, host: &str, info: &InstanceInfo) -> Result<()> {
+    conn.execute(
+        "INSERT INTO instance (host, name, icon_url, theme_color) VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(host) DO UPDATE SET
+            name = COALESCE(instance.name, excluded.name),
+            icon_url = COALESCE(instance.icon_url, excluded.icon_url),
+            theme_color = COALESCE(instance.theme_color, excluded.theme_color)",
+        params![host, info.name, info.icon_url, info.theme_color],
+    )?;
+    Ok(())
+}
+
 /// `user` テーブルへ upsert する。UserLite に常に含まれる列は常に最新値で上書きし、
-/// UserLite では省略されうる列(`bio`/`banner_url`/`instance_*`)は、新しい値が
-/// `NULL` のときは既存値を保持する(COALESCE)。これにより:
-/// - フルユーザー取得(bio/banner込み)の後、ノート受信(UserLiteのみ)の `NULL` で
-///   既存の bio/banner_url を踏み潰さない。
-/// - `instance` フェッチが一時的に失敗した投稿(`"instance":null`)が、既に分かっている
-///   instance を消さない。
+/// UserLite では省略されうる列(`bio`/`banner_url`)は、新しい値が `NULL` のときは
+/// 既存値を保持する(COALESCE)。これにより、フルユーザー取得(bio/banner込み)の後、
+/// ノート受信(UserLiteのみ)の `NULL` で既存の bio/banner_url を踏み潰さない。
+/// インスタンス情報は `instance` テーブル(host キー)へ書く(Issue #409)。`instance` の
+/// フェッチが一時的に失敗した投稿(`"instance":null`)は何もしないので、既知の値は消えない。
+/// ローカルユーザー(`host` が None)は instance を持たないため `instance` 行を作らない。
 pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
     let emojis_json = serde_json::to_string(&user.emojis)?;
-    let (instance_name, instance_icon_url, instance_theme_color) = match &user.instance {
-        Some(i) => (i.name.clone(), i.icon_url.clone(), i.theme_color.clone()),
-        None => (None, None, None),
-    };
+    if let (Some(host), Some(instance)) = (&user.host, &user.instance) {
+        upsert_instance(conn, host, instance)?;
+    }
     conn.execute(
         "INSERT INTO user (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
-            avatar_blurhash
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            bio, banner_url, avatar_blurhash
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(id) DO UPDATE SET
             username = excluded.username,
             host = excluded.host,
@@ -39,9 +66,6 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
             emojis = excluded.emojis,
             bio = COALESCE(excluded.bio, user.bio),
             banner_url = COALESCE(excluded.banner_url, user.banner_url),
-            instance_name = COALESCE(excluded.instance_name, user.instance_name),
-            instance_icon_url = COALESCE(excluded.instance_icon_url, user.instance_icon_url),
-            instance_theme_color = COALESCE(excluded.instance_theme_color, user.instance_theme_color),
             avatar_blurhash = COALESCE(excluded.avatar_blurhash, user.avatar_blurhash)",
         params![
             user.id,
@@ -57,9 +81,6 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
             emojis_json,
             user.bio,
             user.banner_url,
-            instance_name,
-            instance_icon_url,
-            instance_theme_color,
             user.avatar_blurhash,
         ],
     )?;
@@ -70,24 +91,23 @@ pub(crate) fn upsert_user(conn: &Connection, user: &User) -> Result<()> {
 /// であり最新とは限らないため、`upsert_user`(ライブ書き込みパス、常に最新のUserLiteを前提に
 /// 常時上書き)と異なり、**全列**を「既存値が無い場合のみ埋める」方針にする(Issue #263 最終レビュー指摘)。
 /// これにより、古いノートを読んだだけで直近の name/avatar_url/emojis/*_count が
-/// 古いスナップショットで上書きされる回帰を防ぐ。
+/// 古いスナップショットで上書きされる回帰を防ぐ。インスタンス情報も `fill_instance` で
+/// 同じ方針(既存値が無い列だけ埋める)にする。
 /// `is_bot`/`is_cat`/`*_count`は0がデフォルト値であり「値が無い」ことを表現できないため、
 /// これらは常に既存値を維持する(=スナップショット側の値は無視する)。
 /// `emojis`は`NOT NULL DEFAULT '{}'`で明示的なNULLを取れないため、
 /// 「既存値が空オブジェクト('{}')なら埋める」という扱いにする(NULLIFで擬似NULL化)。
 pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<()> {
     let emojis_json = serde_json::to_string(&user.emojis)?;
-    let (instance_name, instance_icon_url, instance_theme_color) = match &user.instance {
-        Some(i) => (i.name.clone(), i.icon_url.clone(), i.theme_color.clone()),
-        None => (None, None, None),
-    };
+    if let (Some(host), Some(instance)) = (&user.host, &user.instance) {
+        fill_instance(conn, host, instance)?;
+    }
     conn.execute(
         "INSERT INTO user (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
-            avatar_blurhash
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            bio, banner_url, avatar_blurhash
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(id) DO UPDATE SET
             username = COALESCE(user.username, excluded.username),
             host = COALESCE(user.host, excluded.host),
@@ -101,9 +121,6 @@ pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<
             emojis = COALESCE(NULLIF(user.emojis, '{}'), excluded.emojis),
             bio = COALESCE(user.bio, excluded.bio),
             banner_url = COALESCE(user.banner_url, excluded.banner_url),
-            instance_name = COALESCE(user.instance_name, excluded.instance_name),
-            instance_icon_url = COALESCE(user.instance_icon_url, excluded.instance_icon_url),
-            instance_theme_color = COALESCE(user.instance_theme_color, excluded.instance_theme_color),
             avatar_blurhash = COALESCE(user.avatar_blurhash, excluded.avatar_blurhash)",
         params![
             user.id,
@@ -119,9 +136,6 @@ pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<
             emojis_json,
             user.bio,
             user.banner_url,
-            instance_name,
-            instance_icon_url,
-            instance_theme_color,
             user.avatar_blurhash,
         ],
     )?;
@@ -208,11 +222,12 @@ pub(crate) fn fetch_users_by_ids(conn: &Connection, ids: &[String]) -> Result<Ha
     }
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!(
-        "SELECT id, username, host, name, avatar_url, is_bot, is_cat,
-                followers_count, following_count, notes_count, emojis,
-                bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
-                avatar_blurhash
-         FROM user WHERE id IN ({placeholders})"
+        "SELECT u.id, u.username, u.host, u.name, u.avatar_url, u.is_bot, u.is_cat,
+                u.followers_count, u.following_count, u.notes_count, u.emojis,
+                u.bio, u.banner_url, i.name, i.icon_url, i.theme_color,
+                u.avatar_blurhash
+         FROM user u LEFT JOIN instance i ON i.host = u.host
+         WHERE u.id IN ({placeholders})"
     );
     let mut stmt = conn.prepare(&sql)?;
     let bind_params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
@@ -315,13 +330,29 @@ mod tests {
         }
     }
 
-    fn row(conn: &Connection, id: &str) -> (Option<String>, Option<String>, Option<String>) {
+    fn row(conn: &Connection, id: &str) -> (Option<String>, Option<String>) {
         conn.query_row(
-            "SELECT bio, banner_url, instance_name FROM user WHERE id = ?1",
+            "SELECT bio, banner_url FROM user WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap()
+    }
+
+    fn remote_instance() -> InstanceInfo {
+        InstanceInfo {
+            name: Some("Remote".into()),
+            icon_url: Some("https://remote.example/favicon.ico".into()),
+            theme_color: Some("#ff8800".into()),
+        }
+    }
+
+    fn fetch_one(conn: &Connection, id: &str) -> User {
+        fetch_users_by_ids(conn, &[id.to_string()]).unwrap().remove(id).unwrap()
+    }
+
+    fn instance_row_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM instance", [], |r| r.get(0)).unwrap()
     }
 
     #[test]
@@ -335,7 +366,7 @@ mod tests {
         let lite = user_lite("u1", "Alice (updated)");
         upsert_user(&conn, &lite).unwrap();
 
-        let (bio, _, _) = row(&conn, "u1");
+        let (bio, _) = row(&conn, "u1");
         assert_eq!(bio, Some("hello".to_string()));
     }
 
@@ -355,11 +386,7 @@ mod tests {
     fn upsert_user_preserves_instance_when_later_fetch_fails() {
         let conn = open_cache_in_memory().unwrap();
         let mut with_instance = user_lite("u1", "Alice");
-        with_instance.instance = Some(InstanceInfo {
-            name: Some("Remote".into()),
-            icon_url: Some("https://remote.example/icon.png".into()),
-            theme_color: Some("#ff8800".into()),
-        });
+        with_instance.instance = Some(remote_instance());
         upsert_user(&conn, &with_instance).unwrap();
 
         // instance フェッチ失敗(null)の投稿を後から受信
@@ -367,8 +394,7 @@ mod tests {
         failed_fetch.instance = None;
         upsert_user(&conn, &failed_fetch).unwrap();
 
-        let (_, _, instance_name) = row(&conn, "u1");
-        assert_eq!(instance_name, Some("Remote".to_string()));
+        assert_eq!(fetch_one(&conn, "u1").instance, Some(remote_instance()));
     }
 
     #[test]
@@ -512,7 +538,10 @@ mod tests {
             theme_color: Some("#ff8800".into()),
         });
         upsert_user(&conn, &with_instance).unwrap();
-        upsert_user(&conn, &user_lite("u2", "Bob")).unwrap(); // instance無し
+        // instance無し(ローカルユーザー。同一hostのリモートユーザーだと instance を共有するため)
+        let mut local = user_lite("u2", "Bob");
+        local.host = None;
+        upsert_user(&conn, &local).unwrap();
 
         let ids = vec!["u1".to_string(), "u2".to_string(), "u3".to_string()];
         let users = fetch_users_by_ids(&conn, &ids).unwrap();
@@ -542,5 +571,107 @@ mod tests {
             got["u1"].avatar_blurhash.as_deref(),
             Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj")
         );
+    }
+
+    #[test]
+    fn upsert_user_shares_instance_across_users_of_same_host() {
+        let conn = open_cache_in_memory().unwrap();
+        let mut u1 = user_lite("u1", "Alice");
+        u1.instance = Some(remote_instance());
+        upsert_user(&conn, &u1).unwrap();
+        upsert_user(&conn, &user_lite("u2", "Bob")).unwrap(); // instance無しでも同じhost
+
+        assert_eq!(fetch_one(&conn, "u2").instance, Some(remote_instance()));
+        assert_eq!(instance_row_count(&conn), 1, "同一ホストは1行に集約される");
+    }
+
+    #[test]
+    fn upsert_user_propagates_instance_update_to_all_users_of_host() {
+        let conn = open_cache_in_memory().unwrap();
+        let mut u1 = user_lite("u1", "Alice");
+        u1.instance = Some(remote_instance());
+        upsert_user(&conn, &u1).unwrap();
+        upsert_user(&conn, &user_lite("u2", "Bob")).unwrap();
+
+        // 別ユーザー(同一ホスト)の受信で取得元が変わった(#406のような変更)
+        let mut u3 = user_lite("u3", "Carol");
+        u3.instance = Some(InstanceInfo {
+            name: Some("Remote".into()),
+            icon_url: Some("https://remote.example/new.png".into()),
+            theme_color: Some("#ff8800".into()),
+        });
+        upsert_user(&conn, &u3).unwrap();
+
+        for id in ["u1", "u2", "u3"] {
+            assert_eq!(
+                fetch_one(&conn, id).instance.unwrap().icon_url.as_deref(),
+                Some("https://remote.example/new.png"),
+                "{id} にも反映される"
+            );
+        }
+    }
+
+    #[test]
+    fn upsert_user_keeps_known_instance_columns_when_later_value_is_partial() {
+        let conn = open_cache_in_memory().unwrap();
+        let mut full = user_lite("u1", "Alice");
+        full.instance = Some(remote_instance());
+        upsert_user(&conn, &full).unwrap();
+
+        // 再取得の部分失敗: name だけ Some
+        let mut partial = user_lite("u1", "Alice");
+        partial.instance = Some(InstanceInfo {
+            name: Some("Renamed".into()),
+            icon_url: None,
+            theme_color: None,
+        });
+        upsert_user(&conn, &partial).unwrap();
+
+        let got = fetch_one(&conn, "u1").instance.unwrap();
+        assert_eq!(got.name.as_deref(), Some("Renamed"));
+        assert_eq!(got.icon_url.as_deref(), Some("https://remote.example/favicon.ico"));
+        assert_eq!(got.theme_color.as_deref(), Some("#ff8800"));
+    }
+
+    #[test]
+    fn upsert_user_does_not_store_instance_for_local_user() {
+        let conn = open_cache_in_memory().unwrap();
+        let mut local = user_lite("u1", "Alice");
+        local.host = None;
+        local.instance = Some(remote_instance());
+        upsert_user(&conn, &local).unwrap();
+
+        assert_eq!(instance_row_count(&conn), 0, "ローカルユーザーは instance 行を作らない");
+        assert!(fetch_one(&conn, "u1").instance.is_none());
+    }
+
+    #[test]
+    fn fill_user_from_snapshot_fills_missing_instance_but_keeps_existing() {
+        let conn = open_cache_in_memory().unwrap();
+        let mut fresh = user_lite("u1", "Alice");
+        fresh.instance = Some(remote_instance());
+        upsert_user(&conn, &fresh).unwrap();
+
+        // 古いスナップショット(同一ホストの別ユーザー): iconもthemeも古い/別の値
+        let mut stale = user_lite("u2", "Bob");
+        stale.instance = Some(InstanceInfo {
+            name: Some("Old".into()),
+            icon_url: Some("https://remote.example/old.png".into()),
+            theme_color: Some("#000000".into()),
+        });
+        fill_user_from_snapshot(&conn, &stale).unwrap();
+        assert_eq!(
+            fetch_one(&conn, "u2").instance,
+            Some(remote_instance()),
+            "既存値は古いスナップショットで上書きされない"
+        );
+
+        // 欠けている列だけは埋まる
+        conn.execute("UPDATE instance SET theme_color = NULL WHERE host = 'remote.example'", [])
+            .unwrap();
+        fill_user_from_snapshot(&conn, &stale).unwrap();
+        let got = fetch_one(&conn, "u2").instance.unwrap();
+        assert_eq!(got.theme_color.as_deref(), Some("#000000"));
+        assert_eq!(got.name.as_deref(), Some("Remote"));
     }
 }
