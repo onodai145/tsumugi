@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { applyCustomCss } from "./customCss";
+import { applyCustomCss, customCssBytes, CUSTOM_CSS_MAX_BYTES } from "./customCss";
 
 const STYLE_ID = "tsumugi-custom-css";
 const styleEl = () => document.getElementById(STYLE_ID);
@@ -56,5 +56,18 @@ describe("applyCustomCss", () => {
     // 追加された要素は <style> 1つだけ
     expect(document.head.children.length).toBe(before + 1);
     expect(document.head.querySelector("script")).toBeNull();
+  });
+});
+
+describe("customCssBytes", () => {
+  it("UTF-8 のバイト数で数える（マルチバイトは文字数より大きい）", () => {
+    expect(customCssBytes("abc")).toBe(3);
+    expect(customCssBytes("あ")).toBe(3);
+    expect(customCssBytes("")).toBe(0);
+  });
+
+  it("上限ちょうどは超過せず、1バイト超えると超過する", () => {
+    expect(customCssBytes("a".repeat(CUSTOM_CSS_MAX_BYTES))).toBe(CUSTOM_CSS_MAX_BYTES);
+    expect(customCssBytes("a".repeat(CUSTOM_CSS_MAX_BYTES + 1))).toBeGreaterThan(CUSTOM_CSS_MAX_BYTES);
   });
 });
