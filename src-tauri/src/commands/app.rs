@@ -122,6 +122,21 @@ pub fn get_pending_share() -> Option<ShareReceived> {
     crate::mobile_intent::take_pending_share()
 }
 
+/// 環境変数 `TSUMUGI_SAFE_MODE` の値からセーフモードかを判定する。未設定・空・"0" 以外なら true。
+/// 環境変数の読み取りと切り離してあるのは、プロセス共有の環境変数を並列テストから触らないため。
+fn safe_mode_from_env(value: Option<&str>) -> bool {
+    matches!(value, Some(v) if !v.is_empty() && v != "0")
+}
+
+/// セーフモード（カスタムCSSを適用しない）で起動しているか（Issue #93）。
+/// CSSで設定画面を操作不能にした場合の復旧手段で、`TSUMUGI_SAFE_MODE=1` を付けて起動する。
+/// Androidは環境変数を渡せないため常に false。
+#[tauri::command]
+#[specta::specta]
+pub fn is_safe_mode() -> bool {
+    safe_mode_from_env(std::env::var("TSUMUGI_SAFE_MODE").ok().as_deref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +153,19 @@ mod tests {
     #[test]
     fn get_pending_share_is_none_by_default() {
         assert_eq!(get_pending_share(), None);
+    }
+
+    #[test]
+    fn safe_mode_from_env_is_false_when_unset_empty_or_zero() {
+        assert!(!safe_mode_from_env(None));
+        assert!(!safe_mode_from_env(Some("")));
+        assert!(!safe_mode_from_env(Some("0")));
+    }
+
+    #[test]
+    fn safe_mode_from_env_is_true_for_any_other_value() {
+        assert!(safe_mode_from_env(Some("1")));
+        assert!(safe_mode_from_env(Some("true")));
+        assert!(safe_mode_from_env(Some("yes")));
     }
 }

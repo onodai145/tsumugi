@@ -15,6 +15,7 @@
   let instanceTicker = $state(app.ui.instanceTicker ?? "remote");
   let catMode = $state(app.ui.catMode ?? "respect");
   let avatarRadius = $state(app.ui.avatarRadius ?? 20);
+  let customCss = $state(app.ui.customCss ?? "");
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -228,6 +229,7 @@
         instanceTicker,
         catMode,
         avatarRadius,
+        customCss,
       });
       saved = true;
     } catch (e) {
@@ -540,6 +542,25 @@
 <p class="mb-4 mt-0 text-xs text-muted-foreground" style={fontFamily ? `font-family: ${fontFamily}` : undefined}>
   プレビュー: あいうえお ABCDEFG 123
 </p>
+
+<div class="mb-4 flex flex-col gap-1.5 text-sm">
+  <span class="text-muted-foreground">カスタムCSS</span>
+  {#if app.safeMode}
+    <p class="m-0 rounded-md border border-border bg-muted px-2.5 py-2 text-sm text-[var(--warning)]">
+      セーフモードで起動中のため、カスタムCSSは適用されていません(編集・保存はできます)。
+    </p>
+  {/if}
+  <textarea
+    class="min-h-[160px] w-full rounded-md border border-border bg-muted px-[9px] py-[7px] font-[ui-monospace,monospace] text-sm text-foreground"
+    spellcheck="false"
+    placeholder={'/* 例: ノート本文の文字サイズを変える */\n[data-testid="note-text"] { font-size: 15px; }'}
+    bind:value={customCss}
+  ></textarea>
+  <p class="m-0 text-xs text-muted-foreground">
+    アプリ全体に適用されます。「保存」を押すと反映されます。
+    CSSで画面が操作できなくなった場合は、環境変数 <code>TSUMUGI_SAFE_MODE=1</code> を付けて起動するとカスタムCSSが適用されません(Androidでは使えません)。
+  </p>
+</div>
 
 <div class="flex items-center justify-end gap-3">
   {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}

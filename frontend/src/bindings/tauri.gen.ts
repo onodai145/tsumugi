@@ -45,6 +45,12 @@ export const commands = {
 	text: string | null,
 	filePaths: string[],
 } | null>("get_pending_share"),
+	/**
+	 *  セーフモード（カスタムCSSを適用しない）で起動しているか（Issue #93）。
+	 *  CSSで設定画面を操作不能にした場合の復旧手段で、`TSUMUGI_SAFE_MODE=1` を付けて起動する。
+	 *  Androidは環境変数を渡せないため常に false。
+	 */
+	isSafeMode: () => __TAURI_INVOKE<boolean>("is_safe_mode"),
 	/**  MiAuth を開始し、認可URLと session_id を返す。 */
 	startMiauth: (host: string) => typedError<MiAuthSession, Error>(__TAURI_INVOKE("start_miauth", { host })),
 	/**  ブラウザでの認可完了後に呼ぶ。token を keyring に保存し、Account を返す。 */
@@ -1042,6 +1048,12 @@ export type UiPrefs = {
 	 *  一度trueになったら無効化する手段は用意しない（Androidの開発者向けオプション解除と同様）。
 	 */
 	developerOptionsEnabled?: boolean,
+	/**
+	 *  ユーザーが書いた任意のCSS。アプリ全体に適用する（Issue #93）。空文字なら何も適用しない。
+	 *  環境変数 `TSUMUGI_SAFE_MODE` で起動した場合は保存値を保ったまま適用だけを止める
+	 *  （`commands::app::is_safe_mode` 参照）。
+	 */
+	customCss?: string,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */
