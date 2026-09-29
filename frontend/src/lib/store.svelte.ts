@@ -268,7 +268,8 @@ class AppStore {
       const notify = await unwrap(commands.getNotify());
       this.notify = { ...notify, soundChoice: notify.soundChoice ?? "" };
       const ui = await unwrap(commands.getUiPrefs());
-      this.safeMode = await commands.isSafeMode().catch(() => false);
+      // セーフモードは復旧手段なので、取得に失敗したら fail-closed（CSSを適用しない側）に倒す。
+      this.safeMode = await commands.isSafeMode().catch(() => true);
       this.ui = {
         ...ui,
         keymap: ui.keymap ?? {},
