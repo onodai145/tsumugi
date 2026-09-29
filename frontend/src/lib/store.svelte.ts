@@ -41,6 +41,7 @@ import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { withRecentEmojiUsage } from "./recentEmojis";
 import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
+import { applyCustomCss } from "./customCss";
 import { isMobilePlatform } from "./platform";
 import { adjacentColumnId, canMoveAdjacentColumn, type AdjacentDirection } from "./swipeNav";
 
@@ -146,6 +147,8 @@ class AppStore {
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false, soundChoice: "" });
+  // TSUMUGI_SAFE_MODE で起動しているか。true の間はカスタムCSSを適用しない（Issue #93）。
+  safeMode = $state(false);
   ui = $state<UiPrefs>({
     theme: "auto",
     defaultColumnWidth: 300,
@@ -265,6 +268,7 @@ class AppStore {
       const notify = await unwrap(commands.getNotify());
       this.notify = { ...notify, soundChoice: notify.soundChoice ?? "" };
       const ui = await unwrap(commands.getUiPrefs());
+      this.safeMode = await commands.isSafeMode().catch(() => false);
       this.ui = {
         ...ui,
         keymap: ui.keymap ?? {},
@@ -287,6 +291,7 @@ class AppStore {
         instanceTicker: ui.instanceTicker ?? "remote",
         catMode: ui.catMode ?? "respect",
         avatarRadius: ui.avatarRadius ?? 20,
+        customCss: ui.customCss ?? "",
       };
       this.#applyTheme(this.ui.theme);
       this.#applySyntaxTheme(this.ui.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
@@ -294,6 +299,7 @@ class AppStore {
       this.#applyBackground(this.ui);
       this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
       this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
+      this.#applyCustomCss();
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
       await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
       await this.#subscribe();
@@ -1396,6 +1402,7 @@ class AppStore {
       noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
       noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
       avatarRadius: prefs.avatarRadius ?? 20,
+      customCss: prefs.customCss ?? "",
     };
     this.#applyTheme(prefs.theme);
     this.#applySyntaxTheme(prefs.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
@@ -1403,6 +1410,7 @@ class AppStore {
     this.#applyBackground(this.ui);
     this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
     this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
+    this.#applyCustomCss();
     this.#log("info", "表示設定を保存しました");
   }
 
@@ -1639,6 +1647,11 @@ class AppStore {
   #applyAvatarRadius(pct: number) {
     const clamped = Math.min(100, Math.max(0, pct));
     document.documentElement.style.setProperty("--avatar-radius", `${clamped}%`);
+  }
+
+  /// カスタムCSSを <head> の <style> に反映する（Issue #93）。セーフモード中は適用しない。
+  #applyCustomCss() {
+    applyCustomCss(this.ui.customCss ?? "", this.safeMode);
   }
 
   // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。
