@@ -866,9 +866,8 @@ async fn handle_text<R: Runtime>(
                             .emit(app);
                         }
                         if let Some(state) = app.try_state::<AppState>() {
-                            if !is_own_actor(&state, &account_id, actor_id.as_deref()) {
-                                apply_note_update_to_cache(&state, &note_id, &update).await;
-                            }
+                            let is_own = is_own_actor(&state, &account_id, actor_id.as_deref());
+                            apply_note_update_to_cache(&state, &note_id, &update, is_own).await;
                         }
                     }
                 }
@@ -899,12 +898,12 @@ async fn handle_text<R: Runtime>(
                     }
                     .emit(app);
                 }
-                // 自分の操作は react/unreact コマンド側で既にキャッシュへ反映済み(Issue #89)。
-                // ここで再度適用すると二重カウントになるため、他ユーザーの更新の時だけ反映する。
+                // 自分の操作は react/unreact コマンド側で既にキャッシュへ反映済み(Issue #89)だが、
+                // 他クライアントでの操作はここでしか届かない(Issue #28)。自分の更新は my_reaction との
+                // 一致で冪等に扱い、コマンド側の反映と二重カウントしない。
                 if let Some(state) = app.try_state::<AppState>() {
-                    if !is_own_actor(&state, account_id, actor_id.as_deref()) {
-                        apply_note_update_to_cache(&state, &note_id, &update).await;
-                    }
+                    let is_own = is_own_actor(&state, account_id, actor_id.as_deref());
+                    apply_note_update_to_cache(&state, &note_id, &update, is_own).await;
                 }
             }
             HandleResult::None
@@ -963,16 +962,18 @@ fn is_own_actor(state: &AppState, account_id: &str, actor_id: Option<&str>) -> b
 
 /// 他ユーザーの reacted/unreacted をキャッシュへ反映する（無ければ何もしない）。
 /// pollVoted/deleted はキャッシュ整合性への影響が小さいため対象外(Issue #89はリアクションのみ報告)。
-async fn apply_note_update_to_cache(state: &AppState, note_id: &str, update: &NoteUpdate) {
+async fn apply_note_update_to_cache(state: &AppState, note_id: &str, update: &NoteUpdate, is_own: bool) {
     let (NoteUpdate::Reacted { reaction } | NoteUpdate::Unreacted { reaction }) = update else {
         return;
     };
     let Ok(Some(mut note)) = state.cache.get_note(note_id).await else {
         return;
     };
-    match update {
-        NoteUpdate::Reacted { .. } => note.record_others_reaction(reaction),
-        NoteUpdate::Unreacted { .. } => note.record_others_unreaction(reaction),
+    match (update, is_own) {
+        (NoteUpdate::Reacted { .. }, true) => note.record_own_reaction_event(reaction),
+        (NoteUpdate::Unreacted { .. }, true) => note.record_own_unreaction_event(reaction),
+        (NoteUpdate::Reacted { .. }, false) => note.record_others_reaction(reaction),
+        (NoteUpdate::Unreacted { .. }, false) => note.record_others_unreaction(reaction),
         _ => unreachable!(),
     }
     let _ = state.cache.update_note(&note).await;
@@ -1257,12 +1258,12 @@ mod tests {
         let state = state_with_account("acc1", "u-self");
         state.cache.cache_note("col1", &minimal_note("n1")).await.unwrap();
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }).await;
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, false).await;
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.reactions.get("👍"), Some(&1));
         assert_eq!(n.reaction_count, 1);
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() }).await;
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() }, false).await;
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.reactions.get("👍"), None);
         assert_eq!(n.reaction_count, 0);
@@ -1272,7 +1273,38 @@ mod tests {
     async fn apply_note_update_to_cache_is_noop_when_note_not_cached() {
         let state = state_with_account("acc1", "u-self");
         // n1 は未キャッシュ。panicせず何もしないこと。
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }).await;
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, false).await;
         assert!(state.cache.get_note("n1").await.unwrap().is_none());
+    }
+    #[tokio::test]
+    async fn apply_note_update_to_cache_reflects_own_reaction_from_other_client() {
+        let state = state_with_account("acc1", "u-self");
+        state.cache.cache_note("col1", &minimal_note("n1")).await.unwrap();
+
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, true).await;
+        let n = state.cache.get_note("n1").await.unwrap().unwrap();
+        assert_eq!(n.my_reaction.as_deref(), Some("👍"));
+        assert_eq!(n.reactions.get("👍"), Some(&1));
+        assert_eq!(n.reaction_count, 1);
+
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() }, true).await;
+        let n = state.cache.get_note("n1").await.unwrap().unwrap();
+        assert_eq!(n.my_reaction, None);
+        assert_eq!(n.reactions.get("👍"), None);
+        assert_eq!(n.reaction_count, 0);
+    }
+
+    #[tokio::test]
+    async fn apply_note_update_to_cache_does_not_double_count_own_reaction_already_applied_by_command() {
+        let state = state_with_account("acc1", "u-self");
+        let mut note = minimal_note("n1");
+        note.apply_my_reaction("👍"); // react コマンド側の反映済み状態
+        state.cache.cache_note("col1", &note).await.unwrap();
+
+        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, true).await;
+        let n = state.cache.get_note("n1").await.unwrap().unwrap();
+        assert_eq!(n.my_reaction.as_deref(), Some("👍"));
+        assert_eq!(n.reactions.get("👍"), Some(&1));
+        assert_eq!(n.reaction_count, 1);
     }
 }
