@@ -25,7 +25,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri::Manager as _;
 use tauri_specta::Event as _;
 use tokio::net::TcpStream;
@@ -43,6 +43,30 @@ const BACKOFF_MAX: Duration = Duration::from_secs(30);
 // 遅れて届く原因になっていた（Issue #12）。
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 const READ_TIMEOUT: Duration = Duration::from_secs(65);
+
+/// 接続ループの調整値。本番は [`Default`] を使い、再接続テスト(`reconnect_tests`)だけが
+/// `ws` スキームと短い時間を渡す。スキームを設定に持たせているのは、`cfg(test)` 分岐で
+/// 本番コードに平文 `ws://` の経路を残さないため。
+#[derive(Clone)]
+struct StreamConfig {
+    scheme: &'static str,
+    backoff_start: Duration,
+    backoff_max: Duration,
+    ping_interval: Duration,
+    read_timeout: Duration,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            scheme: "wss",
+            backoff_start: BACKOFF_START,
+            backoff_max: BACKOFF_MAX,
+            ping_interval: PING_INTERVAL,
+            read_timeout: READ_TIMEOUT,
+        }
+    }
+}
 
 /// ストリームの扱い方。Notes はフィルタ適用してノートを流し、Notifications は通知を流す。
 #[derive(Clone)]
@@ -114,9 +138,9 @@ impl ConnectionManager {
     /// 張り、あれば相乗りする。`sub_key` は1カラム内の複数チャンネル購読(TQL複数ソース)を
     /// 区別する識別子。単一ソースのカラムは `sub_key == column_id` を渡せばよい。
     #[allow(clippy::too_many_arguments)]
-    pub fn open_channel(
+    pub fn open_channel<R: Runtime>(
         &self,
-        app: AppHandle,
+        app: AppHandle<R>,
         sub_key: String,
         column_id: String,
         account_id: String,
@@ -147,9 +171,9 @@ impl ConnectionManager {
     }
 
     /// 通知(main チャンネル)を流すカラムを開く。
-    pub fn open_notifications(
+    pub fn open_notifications<R: Runtime>(
         &self,
-        app: AppHandle,
+        app: AppHandle<R>,
         column_id: String,
         account_id: String,
         host: String,
@@ -174,9 +198,9 @@ impl ConnectionManager {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn add_channel(
+    fn add_channel<R: Runtime>(
         &self,
-        app: AppHandle,
+        app: AppHandle<R>,
         sub_key: String,
         column_id: String,
         account_id: String,
@@ -269,8 +293,8 @@ impl ConnectionManager {
     }
 }
 
-fn spawn_account(
-    app: AppHandle,
+fn spawn_account<R: Runtime>(
+    app: AppHandle<R>,
     account_id: String,
     host: String,
     token: String,
@@ -278,7 +302,16 @@ fn spawn_account(
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (cmd_tx, cmd_rx) = mpsc::channel(128);
     let handle = tauri::async_runtime::spawn(async move {
-        run_account(app, account_id, host, token, cancel_rx, cmd_rx).await;
+        run_account(
+            app,
+            account_id,
+            host,
+            token,
+            StreamConfig::default(),
+            cancel_rx,
+            cmd_rx,
+        )
+        .await;
     });
     AccountCtl {
         cmd: cmd_tx,
@@ -403,13 +436,19 @@ enum RunOutcome {
     Fatal,
 }
 
+/// 次回の再接続待ち時間。倍々に伸ばし、`max` で頭打ちにする。
+fn next_backoff(current: Duration, max: Duration) -> Duration {
+    (current * 2).min(max)
+}
+
 /// アカウント接続ループ（再接続込み）。購読チャンネルとキャプチャ集合は再接続をまたいで
 /// 保持し、接続確立時に一括で再購読する。
-async fn run_account(
-    app: AppHandle,
+async fn run_account<R: Runtime>(
+    app: AppHandle<R>,
     account_id: String,
     host: String,
     token: String,
+    config: StreamConfig,
     mut cancel: watch::Receiver<bool>,
     mut cmd_rx: mpsc::Receiver<AccountCommand>,
 ) {
@@ -420,7 +459,7 @@ async fn run_account(
     // reactionタイプの通知に埋め込まれたノートも使ってリアクション反映する(Issue #101)。
     // noteUpdatedと通知が両方届いた場合の二重加算は (note_id, actor_id, reaction) で防ぐ。
     let mut reaction_event_dedup = Dedup::new(DEDUP_CAPACITY);
-    let mut backoff = BACKOFF_START;
+    let mut backoff = config.backoff_start;
     // 一度でも接続確立した後の再接続かどうか(Issue #147)。true のときだけ
     // 再接続ギャップ埋めを行う（初回接続時は open_stream_and_fetch 側のREST初期取得で足りる）。
     let mut ever_connected = false;
@@ -437,6 +476,7 @@ async fn run_account(
             &account_id,
             &host,
             &token,
+            &config,
             &mut subs,
             &mut sub_index,
             &mut captures,
@@ -452,7 +492,7 @@ async fn run_account(
         // 可能性が高いのでバックオフを初期値へ戻す（そうしないと長時間安定接続した
         // 後の再接続まで無関係に長い待ち時間を引きずってしまう）。
         if connected {
-            backoff = BACKOFF_START;
+            backoff = config.backoff_start;
             ever_connected = true;
         }
 
@@ -468,16 +508,17 @@ async fn run_account(
             _ = tokio::time::sleep(backoff) => {}
             _ = cancel.changed() => { if *cancel.borrow() { return; } }
         }
-        backoff = (backoff * 2).min(BACKOFF_MAX);
+        backoff = next_backoff(backoff, config.backoff_max);
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn connect_and_run(
-    app: &AppHandle,
+async fn connect_and_run<R: Runtime>(
+    app: &AppHandle<R>,
     account_id: &str,
     host: &str,
     token: &str,
+    config: &StreamConfig,
     subs: &mut HashMap<String, ChannelSub>,
     sub_index: &mut HashMap<String, String>,
     captures: &mut CaptureSet,
@@ -487,7 +528,7 @@ async fn connect_and_run(
     connected: &mut bool,
     is_reconnect: bool,
 ) -> RunOutcome {
-    let url = format!("wss://{host}/streaming?i={token}");
+    let url = format!("{}://{host}/streaming?i={token}", config.scheme);
     // ハンドシェイクに User-Agent を付ける（既定では送られないため）。
     let request = {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -538,7 +579,7 @@ async fn connect_and_run(
         spawn_reconnect_gap_fill(app, subs);
     }
 
-    let mut ping_tick = tokio::time::interval(PING_INTERVAL);
+    let mut ping_tick = tokio::time::interval(config.ping_interval);
     ping_tick.tick().await; // 直後に即発火する最初のtickは消費するだけ
     let mut last_rx = tokio::time::Instant::now();
 
@@ -554,7 +595,7 @@ async fn connect_and_run(
                 }
             }
             _ = ping_tick.tick() => {
-                if last_rx.elapsed() > READ_TIMEOUT {
+                if last_rx.elapsed() > config.read_timeout {
                     log::warn!("[{account_id}] ws idle timeout, reconnecting");
                     return RunOutcome::Disconnected;
                 }
@@ -659,7 +700,7 @@ async fn connect_and_run(
 
 /// 再接続確立時、切断中に届いていたはずのノート/通知をRESTで補完する(Issue #147)。
 /// 再接続ループ自体をブロックしないようバックグラウンドタスクとして起動する。
-fn spawn_reconnect_gap_fill(app: &AppHandle, subs: &HashMap<String, ChannelSub>) {
+fn spawn_reconnect_gap_fill<R: Runtime>(app: &AppHandle<R>, subs: &HashMap<String, ChannelSub>) {
     let mut seen_columns = HashSet::new();
     for sub in subs.values() {
         match &sub.mode {
@@ -721,8 +762,8 @@ enum HandleResult {
 /// - channel notification: 同様にカラム特定して ColumnNotification を emit。
 ///   reaction 通知は埋め込みノートを使って noteUpdated 相当の反映も行う(Issue #101)。
 /// - noteUpdated: そのノートを表示中の全カラムへ ColumnNoteUpdated を emit。
-async fn handle_text(
-    app: &AppHandle,
+async fn handle_text<R: Runtime>(
+    app: &AppHandle<R>,
     account_id: &str,
     text: &str,
     subs: &mut HashMap<String, ChannelSub>,
@@ -978,7 +1019,7 @@ fn map_note_update(kind: &str, body: &Value) -> Option<(NoteUpdate, Option<Strin
 }
 
 /// 指定アカウントの全カラムへ接続状態を通知する。
-fn emit_state_all(app: &AppHandle, subs: &HashMap<String, ChannelSub>, state: ConnectionState) {
+fn emit_state_all<R: Runtime>(app: &AppHandle<R>, subs: &HashMap<String, ChannelSub>, state: ConnectionState) {
     // TQL複数ソースでは複数の ChannelSub が同じ column_id を持つため重複排除する
     let mut seen = HashSet::new();
     for sub in subs.values() {
@@ -988,13 +1029,16 @@ fn emit_state_all(app: &AppHandle, subs: &HashMap<String, ChannelSub>, state: Co
     }
 }
 
-fn emit_state(app: &AppHandle, column_id: &str, state: ConnectionState) {
+fn emit_state<R: Runtime>(app: &AppHandle<R>, column_id: &str, state: ConnectionState) {
     let _ = ColumnConnectionState {
         column_id: column_id.to_string(),
         state,
     }
     .emit(app);
 }
+
+#[cfg(test)]
+mod reconnect_tests;
 
 #[cfg(test)]
 mod tests {

@@ -15,7 +15,7 @@ use crate::state::{AppState, BackfillOutcome};
 use crate::store::NoteCacheStore;
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_specta::Event as _;
 
 const INITIAL_LIMIT: u32 = 20;
@@ -952,12 +952,12 @@ async fn fill_gap(
 
 /// フラッピング再接続時に同一カラムへ複数波のギャップ埋めタスクが多重起動されないよう、
 /// 実行中の column_id を記録するガード。Drop で自動的に集合から取り除く（RAII）。
-struct GapFillGuard {
-    app: AppHandle,
+struct GapFillGuard<R: Runtime> {
+    app: AppHandle<R>,
     column_id: String,
 }
 
-impl Drop for GapFillGuard {
+impl<R: Runtime> Drop for GapFillGuard<R> {
     fn drop(&mut self) {
         if let Some(state) = self.app.try_state::<AppState>() {
             state.gap_fill_in_flight.lock().unwrap().remove(&self.column_id);
@@ -965,9 +965,9 @@ impl Drop for GapFillGuard {
     }
 }
 
-impl GapFillGuard {
+impl<R: Runtime> GapFillGuard<R> {
     /// column_id の in-flight 登録を試みる。既に実行中なら None を返す。
-    fn try_acquire(app: &AppHandle, state: &AppState, column_id: &str) -> Option<Self> {
+    fn try_acquire(app: &AppHandle<R>, state: &AppState, column_id: &str) -> Option<Self> {
         let mut inflight = state.gap_fill_in_flight.lock().unwrap();
         if !inflight.insert(column_id.to_string()) {
             return None;
@@ -983,7 +983,7 @@ impl GapFillGuard {
 /// Stream再接続時のノートギャップ埋め(Issue #147)。起動時(resume_column)と同じ fill_gap を
 /// 使い、SQLiteキャッシュの最新ノートidを起点にRESTで遡って補完する。初回接続では呼ばれない
 /// 前提（呼び出し判定は stream/connection.rs の is_reconnect 側で行う）。
-pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
+pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column_id: &str) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
@@ -1044,8 +1044,8 @@ pub(crate) async fn gap_fill_on_reconnect(app: &AppHandle, column_id: &str) {
 /// Stream再接続時の通知ギャップ埋め(Issue #147)。通知はSQLiteキャッシュを持たないため、
 /// stream/connection.rs がメモリ上で保持する最終受信通知id(last_seen_id)を起点に、
 /// fill_gap と同構造(until_id で遡り、既知idに追いついたら打ち切り)でREST補完する。
-pub(crate) async fn notification_gap_fill_on_reconnect(
-    app: &AppHandle,
+pub(crate) async fn notification_gap_fill_on_reconnect<R: Runtime>(
+    app: &AppHandle<R>,
     column_id: &str,
     last_seen_id: &str,
 ) {
