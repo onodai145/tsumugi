@@ -6,19 +6,55 @@ use crate::domain::{InstanceInfo, User};
 use crate::error::Result;
 use std::collections::HashMap;
 
+/// `instance` テーブルへ upsert する(Issue #409)。列ごとに `COALESCE(新, 既存)`。
+async fn upsert_instance(pool: &sqlx::PgPool, host: &str, info: &InstanceInfo) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO instance (host, name, icon_url, theme_color) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (host) DO UPDATE SET
+            name = COALESCE(excluded.name, instance.name),
+            icon_url = COALESCE(excluded.icon_url, instance.icon_url),
+            theme_color = COALESCE(excluded.theme_color, instance.theme_color)",
+    )
+    .bind(host)
+    .bind(&info.name)
+    .bind(&info.icon_url)
+    .bind(&info.theme_color)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 自己修復パス用: 既存値が無い列だけ埋める。
+async fn fill_instance(pool: &sqlx::PgPool, host: &str, info: &InstanceInfo) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO instance (host, name, icon_url, theme_color) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (host) DO UPDATE SET
+            name = COALESCE(instance.name, excluded.name),
+            icon_url = COALESCE(instance.icon_url, excluded.icon_url),
+            theme_color = COALESCE(instance.theme_color, excluded.theme_color)",
+    )
+    .bind(host)
+    .bind(&info.name)
+    .bind(&info.icon_url)
+    .bind(&info.theme_color)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// `user_ref.rs::upsert_user`と同じ規約。インスタンス情報は `instance` テーブルへ書く。
+/// ローカルユーザー(`host` が None)は `instance` 行を作らない。
 pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> {
     let emojis_json = serde_json::to_string(&user.emojis)?;
-    let (instance_name, instance_icon_url, instance_theme_color) = match &user.instance {
-        Some(i) => (i.name.clone(), i.icon_url.clone(), i.theme_color.clone()),
-        None => (None, None, None),
-    };
+    if let (Some(host), Some(instance)) = (&user.host, &user.instance) {
+        upsert_instance(pool, host, instance).await?;
+    }
     sqlx::query(
         "INSERT INTO \"user\" (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
-            avatar_blurhash
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            bio, banner_url, avatar_blurhash
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT (id) DO UPDATE SET
             username = excluded.username,
             host = excluded.host,
@@ -32,9 +68,6 @@ pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> 
             emojis = excluded.emojis,
             bio = COALESCE(excluded.bio, \"user\".bio),
             banner_url = COALESCE(excluded.banner_url, \"user\".banner_url),
-            instance_name = COALESCE(excluded.instance_name, \"user\".instance_name),
-            instance_icon_url = COALESCE(excluded.instance_icon_url, \"user\".instance_icon_url),
-            instance_theme_color = COALESCE(excluded.instance_theme_color, \"user\".instance_theme_color),
             avatar_blurhash = COALESCE(excluded.avatar_blurhash, \"user\".avatar_blurhash)",
     )
     .bind(&user.id)
@@ -50,9 +83,6 @@ pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> 
     .bind(&emojis_json)
     .bind(&user.bio)
     .bind(&user.banner_url)
-    .bind(&instance_name)
-    .bind(&instance_icon_url)
-    .bind(&instance_theme_color)
     .bind(&user.avatar_blurhash)
     .execute(pool)
     .await?;
@@ -63,17 +93,15 @@ pub(crate) async fn upsert_user(pool: &sqlx::PgPool, user: &User) -> Result<()> 
 /// 全列を「既存値が無い場合のみ埋める」。詳細は`user_ref.rs`のdocコメント参照)。
 pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) -> Result<()> {
     let emojis_json = serde_json::to_string(&user.emojis)?;
-    let (instance_name, instance_icon_url, instance_theme_color) = match &user.instance {
-        Some(i) => (i.name.clone(), i.icon_url.clone(), i.theme_color.clone()),
-        None => (None, None, None),
-    };
+    if let (Some(host), Some(instance)) = (&user.host, &user.instance) {
+        fill_instance(pool, host, instance).await?;
+    }
     sqlx::query(
         "INSERT INTO \"user\" (
             id, username, host, name, avatar_url, is_bot, is_cat,
             followers_count, following_count, notes_count, emojis,
-            bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
-            avatar_blurhash
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            bio, banner_url, avatar_blurhash
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT (id) DO UPDATE SET
             username = COALESCE(\"user\".username, excluded.username),
             host = COALESCE(\"user\".host, excluded.host),
@@ -87,9 +115,6 @@ pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) ->
             emojis = COALESCE(NULLIF(\"user\".emojis, '{}'), excluded.emojis),
             bio = COALESCE(\"user\".bio, excluded.bio),
             banner_url = COALESCE(\"user\".banner_url, excluded.banner_url),
-            instance_name = COALESCE(\"user\".instance_name, excluded.instance_name),
-            instance_icon_url = COALESCE(\"user\".instance_icon_url, excluded.instance_icon_url),
-            instance_theme_color = COALESCE(\"user\".instance_theme_color, excluded.instance_theme_color),
             avatar_blurhash = COALESCE(\"user\".avatar_blurhash, excluded.avatar_blurhash)",
     )
     .bind(&user.id)
@@ -105,9 +130,6 @@ pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) ->
     .bind(&emojis_json)
     .bind(&user.bio)
     .bind(&user.banner_url)
-    .bind(&instance_name)
-    .bind(&instance_icon_url)
-    .bind(&instance_theme_color)
     .bind(&user.avatar_blurhash)
     .execute(pool)
     .await?;
@@ -123,11 +145,13 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> R
     // `sqlx::Row`から列名で直接取り出す(`sqlx::Row`トレイトの`try_get`を使う)。
     use sqlx::Row;
     let rows = sqlx::query(
-        "SELECT id, username, host, name, avatar_url, is_bot, is_cat,
-                followers_count, following_count, notes_count, emojis,
-                bio, banner_url, instance_name, instance_icon_url, instance_theme_color,
-                avatar_blurhash
-         FROM \"user\" WHERE id = ANY($1)",
+        "SELECT u.id, u.username, u.host, u.name, u.avatar_url, u.is_bot, u.is_cat,
+                u.followers_count, u.following_count, u.notes_count, u.emojis,
+                u.bio, u.banner_url,
+                i.name AS instance_name, i.icon_url AS instance_icon_url, i.theme_color AS instance_theme_color,
+                u.avatar_blurhash
+         FROM \"user\" u LEFT JOIN instance i ON i.host = u.host
+         WHERE u.id = ANY($1)",
     )
     .bind(ids)
     .fetch_all(pool)
@@ -221,6 +245,28 @@ mod tests {
         }
     }
 
+    fn remote_user(id: &str) -> User {
+        let mut u = user(id);
+        u.host = Some("remote.example".into());
+        u
+    }
+
+    fn remote_instance() -> InstanceInfo {
+        InstanceInfo {
+            name: Some("Remote".into()),
+            icon_url: Some("https://remote.example/favicon.ico".into()),
+            theme_color: Some("#ff8800".into()),
+        }
+    }
+
+    async fn fetch_one(pool: &sqlx::PgPool, id: &str) -> User {
+        fetch_users_by_ids(pool, &[id.to_string()]).await.unwrap().remove(id).unwrap()
+    }
+
+    async fn instance_row_count(pool: &sqlx::PgPool) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM instance").fetch_one(pool).await.unwrap()
+    }
+
     #[tokio::test]
     #[ignore]
     async fn upsert_user_roundtrip() {
@@ -266,5 +312,79 @@ mod tests {
         let pool = pool().await;
         let got = fetch_users_by_ids(&pool, &[]).await.unwrap();
         assert!(got.is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_user_shares_instance_across_users_of_same_host() {
+        let pool = pool().await;
+        let mut u1 = remote_user("u1");
+        u1.instance = Some(remote_instance());
+        upsert_user(&pool, &u1).await.unwrap();
+        upsert_user(&pool, &remote_user("u2")).await.unwrap(); // instance無しでも同じhost
+
+        assert_eq!(fetch_one(&pool, "u2").await.instance, Some(remote_instance()));
+        assert_eq!(instance_row_count(&pool).await, 1, "同一ホストは1行に集約される");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_user_propagates_instance_update_and_keeps_known_columns() {
+        let pool = pool().await;
+        let mut u1 = remote_user("u1");
+        u1.instance = Some(remote_instance());
+        upsert_user(&pool, &u1).await.unwrap();
+        upsert_user(&pool, &remote_user("u2")).await.unwrap();
+
+        // 別ユーザー(同一ホスト)の受信で name だけ更新(部分失敗)
+        let mut u3 = remote_user("u3");
+        u3.instance = Some(InstanceInfo { name: Some("Renamed".into()), icon_url: None, theme_color: None });
+        upsert_user(&pool, &u3).await.unwrap();
+
+        for id in ["u1", "u2", "u3"] {
+            let got = fetch_one(&pool, id).await.instance.unwrap();
+            assert_eq!(got.name.as_deref(), Some("Renamed"), "{id}");
+            assert_eq!(got.icon_url.as_deref(), Some("https://remote.example/favicon.ico"), "{id}");
+            assert_eq!(got.theme_color.as_deref(), Some("#ff8800"), "{id}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn upsert_user_does_not_store_instance_for_local_user() {
+        let pool = pool().await;
+        let mut local = user("u1"); // host None
+        local.instance = Some(remote_instance());
+        upsert_user(&pool, &local).await.unwrap();
+
+        assert_eq!(instance_row_count(&pool).await, 0, "ローカルユーザーは instance 行を作らない");
+        assert!(fetch_one(&pool, "u1").await.instance.is_none());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn fill_user_from_snapshot_fills_missing_instance_but_keeps_existing() {
+        let pool = pool().await;
+        let mut fresh = remote_user("u1");
+        fresh.instance = Some(remote_instance());
+        upsert_user(&pool, &fresh).await.unwrap();
+
+        let mut stale = remote_user("u2");
+        stale.instance = Some(InstanceInfo {
+            name: Some("Old".into()),
+            icon_url: Some("https://remote.example/old.png".into()),
+            theme_color: Some("#000000".into()),
+        });
+        fill_user_from_snapshot(&pool, &stale).await.unwrap();
+        assert_eq!(fetch_one(&pool, "u2").await.instance, Some(remote_instance()));
+
+        sqlx::query("UPDATE instance SET theme_color = NULL WHERE host = 'remote.example'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        fill_user_from_snapshot(&pool, &stale).await.unwrap();
+        let got = fetch_one(&pool, "u2").await.instance.unwrap();
+        assert_eq!(got.theme_color.as_deref(), Some("#000000"));
+        assert_eq!(got.name.as_deref(), Some("Remote"));
     }
 }

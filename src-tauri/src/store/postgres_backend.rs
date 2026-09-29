@@ -51,6 +51,45 @@ impl PostgresBackend {
     }
 }
 
+/// Issue #409: `"user".instance_*` を `instance` テーブルへ移す(一度きり)。
+/// 旧 `instance_name` 列が残っていることを「未移行」のマーカーとして使う(PostgreSQLには
+/// 「一度だけ実行」のマーカー機構が無いため)。コピーは競合時に何もしないので、再実行しても
+/// 再受信した新しい値を旧列の値で潰さない。同一ホストで旧行の値が食い違う場合は列ごとの
+/// MAX で1つに決める(次回の受信で自己修復される)。コピーとDROPは1トランザクション。
+async fn migrate_instance_columns(pool: &sqlx::PgPool) -> Result<()> {
+    let legacy: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'user' AND column_name = 'instance_name'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if legacy == 0 {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO instance (host, name, icon_url, theme_color)
+         SELECT host, MAX(instance_name), MAX(instance_icon_url), MAX(instance_theme_color)
+         FROM \"user\"
+         WHERE host IS NOT NULL
+           AND (instance_name IS NOT NULL OR instance_icon_url IS NOT NULL OR instance_theme_color IS NOT NULL)
+         GROUP BY host
+         ON CONFLICT (host) DO NOTHING",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "ALTER TABLE \"user\"
+         DROP COLUMN IF EXISTS instance_name,
+         DROP COLUMN IF EXISTS instance_icon_url,
+         DROP COLUMN IF EXISTS instance_theme_color",
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
 ///
 /// この関数内の`pool.execute(sqlx::AssertSqlSafe(..))`は全てsea-queryの`Table::create()`
@@ -127,9 +166,6 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::Emojis).text().not_null().default("{}"))
         .col(ColumnDef::new(UserTable::Bio).text())
         .col(ColumnDef::new(UserTable::BannerUrl).text())
-        .col(ColumnDef::new(UserTable::InstanceName).text())
-        .col(ColumnDef::new(UserTable::InstanceIconUrl).text())
-        .col(ColumnDef::new(UserTable::InstanceThemeColor).text())
         .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
         .build(PostgresQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(user)).await?;
@@ -137,6 +173,18 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
     // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
     // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(Postgres専用構文、冪等)。
     pool.execute("ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS avatar_blurhash TEXT").await?;
+
+    // Issue #409: インスタンス単位の表示情報。user.instance_* から移行する(旧列があるときだけ)。
+    let instance = Table::create()
+        .table(InstanceTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(InstanceTable::Host).text().primary_key())
+        .col(ColumnDef::new(InstanceTable::Name).text())
+        .col(ColumnDef::new(InstanceTable::IconUrl).text())
+        .col(ColumnDef::new(InstanceTable::ThemeColor).text())
+        .build(PostgresQueryBuilder);
+    pool.execute(sqlx::AssertSqlSafe(instance)).await?;
+    migrate_instance_columns(pool).await?;
 
     let note_reaction = Table::create()
         .table(NoteReactionTable::Table)
@@ -366,10 +414,17 @@ enum UserTable {
     Emojis,
     Bio,
     BannerUrl,
-    InstanceName,
-    InstanceIconUrl,
-    InstanceThemeColor,
     AvatarBlurhash,
+}
+
+#[derive(sea_query::Iden)]
+enum InstanceTable {
+    #[iden = "instance"]
+    Table,
+    Host,
+    Name,
+    IconUrl,
+    ThemeColor,
 }
 
 #[derive(sea_query::Iden)]
@@ -1037,6 +1092,81 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(count, 1);
+    }
+
+    /// Issue #409: 旧スキーマ(`user.instance_*` あり)の既存インストールが、
+    /// `ensure_schema` で `instance` テーブルへ移行され、旧列が消え、再実行しても値が戻らないこと。
+    #[tokio::test]
+    #[ignore]
+    async fn ensure_schema_migrates_legacy_instance_columns() {
+        let container = Postgres::default().start().await.unwrap();
+        let port = container.get_host_port_ipv4(5432).await.unwrap();
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect(&format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres"))
+            .await
+            .unwrap();
+
+        // 旧スキーマの user テーブルを手で作る(instance_* あり、avatar_blurhash は ensure_schema が追加する)
+        sqlx::query(
+            "CREATE TABLE \"user\" (
+                id TEXT PRIMARY KEY, username TEXT NOT NULL, host TEXT, name TEXT, avatar_url TEXT,
+                is_bot SMALLINT NOT NULL DEFAULT 0, is_cat SMALLINT NOT NULL DEFAULT 0,
+                followers_count BIGINT NOT NULL DEFAULT 0, following_count BIGINT NOT NULL DEFAULT 0,
+                notes_count BIGINT NOT NULL DEFAULT 0, emojis TEXT NOT NULL DEFAULT '{}',
+                bio TEXT, banner_url TEXT,
+                instance_name TEXT, instance_icon_url TEXT, instance_theme_color TEXT
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO \"user\" (id, username, host, instance_name, instance_icon_url, instance_theme_color) VALUES
+              ('u1', 'a', 'remote.example', 'Remote', 'https://remote.example/favicon.ico', '#ff8800'),
+              ('u2', 'b', 'remote.example', 'Remote', 'https://remote.example/favicon.ico', '#ff8800'),
+              ('u3', 'c', 'conflict.example', 'Aaa', 'https://conflict.example/a.ico', NULL),
+              ('u4', 'd', 'conflict.example', 'Zzz', NULL, '#123456'),
+              ('u5', 'e', NULL, 'Local', NULL, NULL),
+              ('u6', 'f', 'empty.example', NULL, NULL, NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        ensure_schema(&pool).await.unwrap();
+
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM instance").fetch_one(&pool).await.unwrap();
+        assert_eq!(total, 2, "ローカル(host NULL)と全列NULLのホストは移さない");
+        let (name, icon, theme): (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT name, icon_url, theme_color FROM instance WHERE host = 'conflict.example'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(name.as_deref(), Some("Zzz"), "食い違う旧行は列ごとのMAXで1行に集約");
+        assert_eq!(icon.as_deref(), Some("https://conflict.example/a.ico"));
+        assert_eq!(theme.as_deref(), Some("#123456"));
+
+        let old_cols: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_name = 'user' AND column_name LIKE 'instance\\_%'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old_cols, 0, "旧 instance_* 列は DROP される");
+
+        // 移行後に更新した値は、ensure_schema を再実行しても戻らない
+        sqlx::query("UPDATE instance SET name = 'Renamed' WHERE host = 'remote.example'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        ensure_schema(&pool).await.unwrap();
+        let name: String = sqlx::query_scalar("SELECT name FROM instance WHERE host = 'remote.example'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(name, "Renamed");
     }
 
     /// Postgres接続の組み立て(host/port/database/user/password)が実際に使えることの確認。

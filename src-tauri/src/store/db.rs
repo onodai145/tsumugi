@@ -89,6 +89,11 @@ CREATE TABLE IF NOT EXISTS user (
     notes_count     INTEGER NOT NULL DEFAULT 0
 );
 
+-- Issue #409: リモートインスタンス単位の表示情報(Instance Ticker)。host をキーにユーザー間で共有する。
+CREATE TABLE IF NOT EXISTS instance (
+    host TEXT PRIMARY KEY, name TEXT, icon_url TEXT, theme_color TEXT
+);
+
 CREATE TABLE IF NOT EXISTS note_reaction (note_id TEXT, emoji_key TEXT, count INTEGER);
 CREATE TABLE IF NOT EXISTS note_tag      (note_id TEXT, tag TEXT);
 CREATE TABLE IF NOT EXISTS note_mention  (note_id TEXT, user_id TEXT);
@@ -238,22 +243,22 @@ fn migrate_cache(conn: &Connection) -> Result<()> {
         )?;
     }
     // Issue #263: user テーブルをフル正規化テーブルに格上げする列を追加。
-    // note.payload に埋め込まれていたユーザー情報(instance含む)をここへ集約する。
-    if !column_exists(conn, "user", "instance_name")? {
+    // note.payload に埋め込まれていたユーザー情報をここへ集約する。
+    // instance_* は Issue #409 で instance テーブルへ移したため追加しない
+    // (判定を instance_name にすると、旧列 DROP 後の再起動で全列を再追加してしまう)。
+    if !column_exists(conn, "user", "emojis")? {
         conn.execute_batch(
             "ALTER TABLE user ADD COLUMN avatar_url TEXT;
              ALTER TABLE user ADD COLUMN bio TEXT;
              ALTER TABLE user ADD COLUMN banner_url TEXT;
-             ALTER TABLE user ADD COLUMN emojis TEXT NOT NULL DEFAULT '{}';
-             ALTER TABLE user ADD COLUMN instance_name TEXT;
-             ALTER TABLE user ADD COLUMN instance_icon_url TEXT;
-             ALTER TABLE user ADD COLUMN instance_theme_color TEXT;",
+             ALTER TABLE user ADD COLUMN emojis TEXT NOT NULL DEFAULT '{}';",
         )?;
     }
     // Issue #41: 猫耳表示の色抽出用。avatarBlurhash を正規化テーブルにも保持する。
     if !column_exists(conn, "user", "avatar_blurhash")? {
         conn.execute_batch("ALTER TABLE user ADD COLUMN avatar_blurhash TEXT;")?;
     }
+    migrate_instance_table(conn)?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_cn_column_created \
          ON column_note(column_id, created_at DESC, note_id DESC)",
@@ -273,6 +278,35 @@ fn migrate_cache(conn: &Connection) -> Result<()> {
         &["note_id", "mime_type", "mime_category", "is_sensitive"],
         "idx_nf_unique",
     )?;
+    Ok(())
+}
+
+/// Issue #409: `user.instance_*` を `instance` テーブルへ移す(一度きり)。
+/// 旧 `user.instance_name` 列が残っていることを「未移行」のマーカーとして使う。
+/// コピーは競合時に何もしないため、途中で中断して再実行しても、その間に
+/// 再受信した新しい値を旧列の値で潰さない。同一ホストで旧行の値が食い違う場合は
+/// 列ごとの MAX で1つに決める(次回の受信で自己修復される)。
+fn migrate_instance_table(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "user", "instance_name")? {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS instance (
+             host TEXT PRIMARY KEY, name TEXT, icon_url TEXT, theme_color TEXT
+         );
+         INSERT INTO instance (host, name, icon_url, theme_color)
+         SELECT host, MAX(instance_name), MAX(instance_icon_url), MAX(instance_theme_color)
+         FROM user
+         WHERE host IS NOT NULL
+           AND (instance_name IS NOT NULL OR instance_icon_url IS NOT NULL OR instance_theme_color IS NOT NULL)
+         GROUP BY host
+         ON CONFLICT(host) DO NOTHING;
+         ALTER TABLE user DROP COLUMN instance_name;
+         ALTER TABLE user DROP COLUMN instance_icon_url;
+         ALTER TABLE user DROP COLUMN instance_theme_color;",
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -516,17 +550,11 @@ mod tests {
 
         migrate_cache(&conn).unwrap();
 
-        for col in [
-            "avatar_url",
-            "bio",
-            "banner_url",
-            "emojis",
-            "instance_name",
-            "instance_icon_url",
-            "instance_theme_color",
-        ] {
+        for col in ["avatar_url", "bio", "banner_url", "emojis"] {
             assert!(column_exists(&conn, "user", col).unwrap(), "missing column: {col}");
         }
+        // Issue #409: instance_* は instance テーブルへ移したため user には追加しない
+        assert!(!column_exists(&conn, "user", "instance_name").unwrap());
         // 冪等: 2回目呼んでもエラーにならない
         migrate_cache(&conn).unwrap();
     }
@@ -557,6 +585,93 @@ mod tests {
         assert!(column_exists(&conn, "user", "avatar_blurhash").unwrap());
         // 冪等
         migrate_cache(&conn).unwrap();
+    }
+
+    #[test]
+    fn open_cache_in_memory_has_instance_table_and_never_readds_instance_columns() {
+        let conn = open_cache_in_memory().unwrap();
+        assert!(column_exists(&conn, "instance", "host").unwrap());
+        for col in ["instance_name", "instance_icon_url", "instance_theme_color"] {
+            assert!(!column_exists(&conn, "user", col).unwrap(), "{col} は存在しない");
+        }
+        // 再起動相当: 再実行しても旧列が再追加されない
+        migrate_cache(&conn).unwrap();
+        for col in ["instance_name", "instance_icon_url", "instance_theme_color"] {
+            assert!(!column_exists(&conn, "user", col).unwrap(), "{col} が再追加された");
+        }
+    }
+
+    /// Issue #409: 旧 `user.instance_*` の値を `instance` テーブルへ一度だけ移し、旧列を消す。
+    #[test]
+    fn migrate_cache_moves_instance_columns_to_instance_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE user (
+                id TEXT PRIMARY KEY, username TEXT NOT NULL, host TEXT, name TEXT,
+                is_bot INTEGER NOT NULL DEFAULT 0, is_cat INTEGER NOT NULL DEFAULT 0,
+                followers_count INTEGER NOT NULL DEFAULT 0,
+                following_count INTEGER NOT NULL DEFAULT 0,
+                notes_count INTEGER NOT NULL DEFAULT 0,
+                avatar_url TEXT, bio TEXT, banner_url TEXT, emojis TEXT NOT NULL DEFAULT '{}',
+                instance_name TEXT, instance_icon_url TEXT, instance_theme_color TEXT,
+                avatar_blurhash TEXT
+            );
+            CREATE TABLE note (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+            CREATE TABLE column_note (
+                column_id TEXT NOT NULL, note_id TEXT NOT NULL, received_at INTEGER NOT NULL,
+                PRIMARY KEY (column_id, note_id)
+            );
+            INSERT INTO user (id, username, host, instance_name, instance_icon_url, instance_theme_color) VALUES
+              ('u1', 'a', 'remote.example', 'Remote', 'https://remote.example/favicon.ico', '#ff8800'),
+              ('u2', 'b', 'remote.example', 'Remote', 'https://remote.example/favicon.ico', '#ff8800'),
+              ('u3', 'c', 'conflict.example', 'Aaa', 'https://conflict.example/a.ico', NULL),
+              ('u4', 'd', 'conflict.example', 'Zzz', NULL, '#123456'),
+              ('u5', 'e', NULL, 'Local', NULL, NULL),
+              ('u6', 'f', 'empty.example', NULL, NULL, NULL);",
+        )
+        .unwrap();
+
+        migrate_cache(&conn).unwrap();
+
+        let get = |host: &str| -> Option<(Option<String>, Option<String>, Option<String>)> {
+            conn.query_row(
+                "SELECT name, icon_url, theme_color FROM instance WHERE host = ?1",
+                params![host],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .unwrap()
+        };
+        assert_eq!(
+            get("remote.example"),
+            Some((
+                Some("Remote".into()),
+                Some("https://remote.example/favicon.ico".into()),
+                Some("#ff8800".into())
+            ))
+        );
+        // 同一ホストで値が食い違う旧行は列ごとの MAX で1行に集約される
+        assert_eq!(
+            get("conflict.example"),
+            Some((
+                Some("Zzz".into()),
+                Some("https://conflict.example/a.ico".into()),
+                Some("#123456".into())
+            ))
+        );
+        // ローカル(host NULL)と全列NULLのホストは移さない
+        assert_eq!(get("empty.example"), None);
+        let total: i64 = conn.query_row("SELECT COUNT(*) FROM instance", [], |r| r.get(0)).unwrap();
+        assert_eq!(total, 2);
+        for col in ["instance_name", "instance_icon_url", "instance_theme_color"] {
+            assert!(!column_exists(&conn, "user", col).unwrap(), "{col} は DROP される");
+        }
+
+        // 移行後に更新した値は、再実行しても旧列の値で戻らない(冪等)
+        conn.execute("UPDATE instance SET name = 'Renamed' WHERE host = 'remote.example'", [])
+            .unwrap();
+        migrate_cache(&conn).unwrap();
+        assert_eq!(get("remote.example").unwrap().0.as_deref(), Some("Renamed"));
     }
 
     /// Issue #115: 側テーブルに重複行があっても、UNIQUEインデックス作成前に
