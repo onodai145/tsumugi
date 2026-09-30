@@ -152,19 +152,6 @@ impl NoteCacheStore {
         self.backend().extend_fetch_boundaries(column_id, entries).await
     }
 
-    // ---- 暫定シム: Task 2 で column.rs を新APIへ移したら削除する ----
-    pub async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
-        Ok(self.get_fetch_boundaries(column_id).await?.into_iter().find(|(i, _)| *i == 0).map(|(_, b)| b))
-    }
-
-    pub async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        self.replace_fetch_boundaries(column_id, &[(0, new_oldest_id.to_string())]).await
-    }
-
-    pub async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        self.extend_fetch_boundaries(column_id, &[(0, new_oldest_id.to_string())]).await
-    }
-
     /// 全カラムのbackfill境界を削除する(未確定状態に戻す)。ミュート設定変更時など、
     /// キャッシュされたフィルタ済みノート集合の前提が崩れる操作の後に呼ぶ(Issue #228)。
     pub async fn clear_all_fetch_boundaries(&self) -> Result<()> {

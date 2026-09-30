@@ -112,8 +112,9 @@ export const commands = {
 	 */
 	pruneNoteCache: () => typedError<number, Error>(__TAURI_INVOKE("prune_note_cache")),
 	/**
-	 *  過去ページ（上スクロール）。単一ソースのカラムは、要求範囲がbackfill境界より新しければ
-	 *  キャッシュのみで応答する(Issue #228)。境界未確定・範囲外・件数不足なら通常どおりAPIへ。
+	 *  過去ページ（上スクロール）。`from cache` を含まないカラムは、要求範囲が全ソースの
+	 *  backfill境界(`max(b_i)`)より新しければキャッシュのみで応答する(Issue #228 / #238)。
+	 *  いずれかのソースの境界が未確定・範囲外・件数不足なら通常どおりAPIへ。
 	 */
 	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
 	/**  通知カラムの過去ページ。 */

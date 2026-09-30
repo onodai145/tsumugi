@@ -26,7 +26,7 @@ pub struct PendingMiAuth {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackfillOutcome {
     Hit,
-    /// cache_eligibleだがbackfill境界(get_fetch_boundary)が未確定でAPIへ。
+    /// cache_eligibleだがいずれかのソースのbackfill境界(get_fetch_boundaries)が未確定でAPIへ。
     /// Issue #228のPR #237で残課題として記載された「実は機能が働いていない」ケースを可視化する。
     FallbackBoundaryUnset,
     /// cache_eligibleだが境界は確定済み、範囲外/件数不足でAPIへ。
