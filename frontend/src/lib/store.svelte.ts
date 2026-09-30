@@ -38,7 +38,7 @@ import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS, BACKGROUND_FIT_MODE_OBJECT_FIT } from "./backgroundFitMode";
 import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
-import { applyUiScale, UI_SCALE_DEFAULT } from "./uiScale";
+import { applyUiScale, normalizeUiScale, UI_SCALE_DEFAULT } from "./uiScale";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { withRecentEmojiUsage } from "./recentEmojis";
 import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
@@ -294,7 +294,7 @@ class AppStore {
         instanceTicker: ui.instanceTicker ?? "remote",
         catMode: ui.catMode ?? "respect",
         avatarRadius: ui.avatarRadius ?? 20,
-        uiScale: ui.uiScale ?? UI_SCALE_DEFAULT,
+        uiScale: normalizeUiScale(ui.uiScale),
         customCss: ui.customCss ?? "",
       };
       this.#applyTheme(this.ui.theme);
@@ -1425,7 +1425,7 @@ class AppStore {
       noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
       noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
       avatarRadius: prefs.avatarRadius ?? 20,
-      uiScale: prefs.uiScale ?? UI_SCALE_DEFAULT,
+      uiScale: normalizeUiScale(prefs.uiScale),
       customCss: prefs.customCss ?? "",
     };
     this.#applyTheme(prefs.theme);
@@ -1676,8 +1676,17 @@ class AppStore {
 
   /// UI全体のスケールを WebView のズームに反映する（Issue #40）。
   /// 未対応環境などで失敗しても、設定の保存や他の反映を止めないよう警告ログだけ残す。
+  /// 直前に適用した倍率と同じなら何もしない（テーマ等の保存のたびに setZoom の IPC を往復させない）。
+  /// 失敗したら記録を戻し、次の保存で再試行する。
+  #appliedUiScale: number | null = null;
   #applyUiScale(scale: number | undefined) {
-    applyUiScale(scale).catch((e) => this.#log("warn", `UIスケールを適用できませんでした: ${formatError(e)}`));
+    const normalized = normalizeUiScale(scale);
+    if (this.#appliedUiScale === normalized) return;
+    this.#appliedUiScale = normalized;
+    applyUiScale(normalized).catch((e) => {
+      if (this.#appliedUiScale === normalized) this.#appliedUiScale = null;
+      this.#log("warn", `UIスケールを適用できませんでした: ${formatError(e)}`);
+    });
   }
 
   /// カスタムCSSを <head> の <style> に反映する（Issue #93）。セーフモード中は適用しない。

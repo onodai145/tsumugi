@@ -7,7 +7,7 @@
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { CUSTOM_CSS_MAX_BYTES, customCssBytes } from "../../lib/customCss";
-  import { UI_SCALE_DEFAULT, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from "../../lib/uiScale";
+  import { UI_SCALE_DEFAULT, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, snapUiScaleToStep } from "../../lib/uiScale";
   import { isMobilePlatform } from "../../lib/platform";
 
   let theme = $state(app.ui.theme);
@@ -18,7 +18,7 @@
   let instanceTicker = $state(app.ui.instanceTicker ?? "remote");
   let catMode = $state(app.ui.catMode ?? "respect");
   let avatarRadius = $state(app.ui.avatarRadius ?? 20);
-  let uiScale = $state(app.ui.uiScale ?? UI_SCALE_DEFAULT);
+  let uiScale = $state(snapUiScaleToStep(app.ui.uiScale));
   let customCss = $state(app.ui.customCss ?? "");
   let busy = $state(false);
   let err = $state<string | null>(null);

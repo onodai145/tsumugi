@@ -734,6 +734,33 @@ describe("UIスケール(Issue #40)", () => {
     expect(app.ui.uiScale).toBe(100);
   });
 
+  it("範囲外のuiScaleは正規化されてapp.uiに保持され、正規化後の値が適用される", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, uiScale: 1000 });
+    expect(app.ui.uiScale).toBe(200);
+    expect(applyUiScaleMock).toHaveBeenLastCalledWith(200);
+  });
+
+  it("同じ倍率の保存ではapplyUiScaleを繰り返し呼ばない", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, uiScale: 170 });
+    await app.setUiPrefs({ ...app.ui, uiScale: 170 });
+    expect(applyUiScaleMock.mock.calls.filter(([v]) => v === 170)).toHaveLength(1);
+    await app.setUiPrefs({ ...app.ui, uiScale: 180 });
+    expect(applyUiScaleMock).toHaveBeenLastCalledWith(180);
+  });
+
+  it("適用に失敗した後、同じ倍率の保存では再試行される", async () => {
+    mockPrefersColorSchemeDark(false);
+    const warnCount = () => app.logs.filter((l) => l.level === "warn" && l.text.includes("UIスケール")).length;
+    const before = warnCount();
+    applyUiScaleMock.mockRejectedValueOnce(new Error("unsupported"));
+    await app.setUiPrefs({ ...app.ui, uiScale: 190 });
+    await vi.waitFor(() => expect(warnCount()).toBe(before + 1));
+    await app.setUiPrefs({ ...app.ui, uiScale: 190 });
+    expect(applyUiScaleMock.mock.calls.filter(([v]) => v === 190)).toHaveLength(2);
+  });
+
   it("applyUiScaleが失敗しても設定の保存は成功し、警告ログが残る", async () => {
     mockPrefersColorSchemeDark(false);
     applyUiScaleMock.mockRejectedValue(new Error("unsupported"));

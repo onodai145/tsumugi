@@ -14,6 +14,12 @@ export function normalizeUiScale(value: number | null | undefined): number {
   return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, Math.round(value)));
 }
 
+/// 設定画面のスライダー用。正規化したうえで、スライダーの刻み(UI_SCALE_STEP)の最寄りに丸める。
+/// 手編集などで刻みに乗らない値が保存されていても、ラベルとつまみの位置が食い違わないようにする。
+export function snapUiScaleToStep(value: number | null | undefined): number {
+  return Math.round(normalizeUiScale(value) / UI_SCALE_STEP) * UI_SCALE_STEP;
+}
+
 /// WebView のズームを反映する。失敗（未対応環境・IPCエラー）は投げるので、呼び出し側でログする。
 export async function applyUiScale(value: number | null | undefined): Promise<void> {
   if (isMobilePlatform) return;

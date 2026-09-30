@@ -10,7 +10,8 @@ vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ setZoom: setZoomMock }),
 }));
 
-const { normalizeUiScale, applyUiScale, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_DEFAULT } = await import("./uiScale");
+const { normalizeUiScale, snapUiScaleToStep, applyUiScale, UI_SCALE_MIN, UI_SCALE_MAX, UI_SCALE_DEFAULT } =
+  await import("./uiScale");
 
 beforeEach(() => {
   setZoomMock.mockReset();
@@ -45,6 +46,27 @@ describe("normalizeUiScale", () => {
     expect(normalizeUiScale(Number.NaN)).toBe(UI_SCALE_DEFAULT);
     expect(normalizeUiScale(Number.POSITIVE_INFINITY)).toBe(UI_SCALE_DEFAULT);
     expect(normalizeUiScale(Number.NEGATIVE_INFINITY)).toBe(UI_SCALE_DEFAULT);
+  });
+});
+
+describe("snapUiScaleToStep", () => {
+  it("スライダーの刻み(10)に乗っている値はそのまま返す", () => {
+    expect(snapUiScaleToStep(100)).toBe(100);
+    expect(snapUiScaleToStep(50)).toBe(50);
+    expect(snapUiScaleToStep(200)).toBe(200);
+  });
+
+  it("刻みに乗らない値(手編集など)は最寄りの刻みに丸める", () => {
+    expect(snapUiScaleToStep(124)).toBe(120);
+    expect(snapUiScaleToStep(125)).toBe(130);
+    expect(snapUiScaleToStep(55)).toBe(60);
+  });
+
+  it("範囲外・壊れた値は範囲内の刻みか既定100に倒す", () => {
+    expect(snapUiScaleToStep(1000)).toBe(200);
+    expect(snapUiScaleToStep(0)).toBe(50);
+    expect(snapUiScaleToStep(undefined)).toBe(100);
+    expect(snapUiScaleToStep(Number.NaN)).toBe(100);
   });
 });
 
