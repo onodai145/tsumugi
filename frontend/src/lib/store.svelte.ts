@@ -38,6 +38,7 @@ import type { KeyAction } from "./keymap";
 import { unicodeEmojiUrl, type EmojiStyle } from "./emoji";
 import { BACKGROUND_FIT_MODE_CSS, BACKGROUND_FIT_MODE_OBJECT_FIT } from "./backgroundFitMode";
 import { BACKGROUND_POSITION_CSS } from "./backgroundPosition";
+import { applyUiScale, UI_SCALE_DEFAULT } from "./uiScale";
 import { DEFAULT_PINNED_EMOJIS } from "./unicodeEmojiList";
 import { withRecentEmojiUsage } from "./recentEmojis";
 import { applyThemeColors, applySyntaxColors, findPreset, parseThemeRef } from "./theme";
@@ -173,6 +174,7 @@ class AppStore {
     noteCacheMaxAgeDays: 0,
     noteCacheMaxSizeMb: 0,
     avatarRadius: 20,
+    uiScale: UI_SCALE_DEFAULT,
   });
   // キーボード操作: フォーカス中カラムと、開いているリアクションピッカー
   focusedGroupId = $state<string | null>(null);
@@ -292,6 +294,7 @@ class AppStore {
         instanceTicker: ui.instanceTicker ?? "remote",
         catMode: ui.catMode ?? "respect",
         avatarRadius: ui.avatarRadius ?? 20,
+        uiScale: ui.uiScale ?? UI_SCALE_DEFAULT,
         customCss: ui.customCss ?? "",
       };
       this.#applyTheme(this.ui.theme);
@@ -299,6 +302,7 @@ class AppStore {
       this.#applyFont(this.ui.fontFamily ?? "");
       this.#applyBackground(this.ui);
       this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
+      this.#applyUiScale(this.ui.uiScale);
       this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
       this.#applyCustomCss();
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
@@ -1421,6 +1425,7 @@ class AppStore {
       noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
       noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
       avatarRadius: prefs.avatarRadius ?? 20,
+      uiScale: prefs.uiScale ?? UI_SCALE_DEFAULT,
       customCss: prefs.customCss ?? "",
     };
     this.#applyTheme(prefs.theme);
@@ -1428,6 +1433,7 @@ class AppStore {
     this.#applyFont(prefs.fontFamily ?? "");
     this.#applyBackground(this.ui);
     this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
+    this.#applyUiScale(this.ui.uiScale);
     this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
     this.#applyCustomCss();
     this.#log("info", "表示設定を保存しました");
@@ -1666,6 +1672,12 @@ class AppStore {
   #applyAvatarRadius(pct: number) {
     const clamped = Math.min(100, Math.max(0, pct));
     document.documentElement.style.setProperty("--avatar-radius", `${clamped}%`);
+  }
+
+  /// UI全体のスケールを WebView のズームに反映する（Issue #40）。
+  /// 未対応環境などで失敗しても、設定の保存や他の反映を止めないよう警告ログだけ残す。
+  #applyUiScale(scale: number | undefined) {
+    applyUiScale(scale).catch((e) => this.#log("warn", `UIスケールを適用できませんでした: ${formatError(e)}`));
   }
 
   /// カスタムCSSを <head> の <style> に反映する（Issue #93）。セーフモード中は適用しない。
