@@ -23,6 +23,138 @@ if [ -n "${E2E_REUSE_HOME_FILE:-}" ]; then
 else
   TMP_HOME="$(mktemp -d /tmp/tsumugi-e2e-XXXXXX)"
 fi
+
+# --- 後始末（Issue #422）---
+# session終了時、run-app.shのPID単体(プロセスグループではない)へSIGKILLが直接送られる
+# (`strace -f -e trace=kill`で受信を確認済み。送信元はtauri-driver/WebKitWebDriver側と
+# 推定しているが、プロセスの特定まではしていない)。bashはSIGKILLをtrapできないため、
+# 後述の`trap cleanup`は走らず、Xvfb・dbus-run-session・tsumugi本体・
+# gnome-keyring-daemon(--daemonizeが自前でsetsidするためプロセスグループ
+# にも属さない)・D-Bus活性化されたサービス(at-spi・xdg-desktop-portal・gvfsd等)が
+# 孤児として残留し、/tmp/.X<N>-lockと$TMP_HOMEも残っていた。
+#
+# 対策:
+# 1. 起動ごとに一意なトークンをTSUMUGI_E2E_RUN_TOKENとしてexportする。子孫プロセスは
+#    全てこれを環境変数として継承する(プロセスグループやsetsidを越える)。
+# 2. run-app.shの生死を監視するwatchdogを別プロセスグループで起動する。run-app.shが
+#    SIGKILLを含めどう死んでも、同トークンを環境変数に持つプロセスを/proc/<pid>/environ
+#    から厳密なPIDとして集めて終了させる。名前パターンでのkillはしない(CLAUDE.md方針)。
+#
+# トークンに$TMP_HOMEを使わないのは、E2E_REUSE_HOME_FILE(part1→part2)では$TMP_HOMEが
+# 起動間で再利用されるため。part1のwatchdogが遅れて動いてもpart2のプロセスを
+# 巻き込まないよう、起動ごとに別のトークンにしている。
+#
+# set -mはバックグラウンドジョブ(watchdog・Xvfb・dbus-run-session)をそれぞれ独立した
+# プロセスグループにするために必要(詳細は下のXvfbの節のコメント参照)。
+set -m
+RUN_TOKEN="$(cat /proc/sys/kernel/random/uuid)"
+export TSUMUGI_E2E_RUN_TOKEN="$RUN_TOKEN"
+XVFB_PID=""
+APP_PID=""
+
+# ゾンビ(State: Z)は生きているものとして扱わない。SIGKILLされた直後のrun-app.shは、
+# 親が回収するまでゾンビとして残り、kill -0では生存と判定されてしまうため。
+proc_alive() {
+  local st
+  st="$(sed -n 's/^State:[[:space:]]*\(.\).*/\1/p' "/proc/$1/status" 2>/dev/null)" || return 1
+  [ -n "$st" ] && [ "$st" != "Z" ]
+}
+
+has_run_token() {
+  grep -qzxF "TSUMUGI_E2E_RUN_TOKEN=$RUN_TOKEN" "/proc/$1/environ" 2>/dev/null
+}
+
+# このrunのトークンを持つプロセスをTERM→(猶予後)KILLで終了させ、そのXvfbが残した
+# ロックファイルを削除する。$$と$BASHPID(watchdogのサブシェル)は自分自身なので除外。
+reap_run_processes() {
+  local f pid p alive lock lpid n
+  local -a pids=()
+  for f in /proc/[0-9]*/environ; do
+    pid="${f#/proc/}"
+    pid="${pid%/environ}"
+    if [ "$pid" = "$$" ] || [ "$pid" = "$BASHPID" ]; then
+      continue
+    fi
+    if has_run_token "$pid"; then
+      pids+=("$pid")
+    fi
+  done
+  if [ "${#pids[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  kill -TERM "${pids[@]}" 2>/dev/null || true
+  for _ in $(seq 1 25); do
+    alive=0
+    for p in "${pids[@]}"; do
+      if proc_alive "$p"; then alive=1; fi
+    done
+    if [ "$alive" -eq 0 ]; then break; fi
+    sleep 0.2
+  done
+  for p in "${pids[@]}"; do
+    # 猶予中にPIDが別プロセスへ再利用されていないか、トークンを再確認してからKILLする。
+    if proc_alive "$p" && has_run_token "$p"; then
+      kill -KILL "$p" 2>/dev/null || true
+    fi
+  done
+
+  # XvfbがKILLされるとロックファイルとソケットが残るため、終了させたPIDが所有者の
+  # ものだけを削除する。
+  for lock in /tmp/.X*-lock; do
+    [ -e "$lock" ] || continue
+    lpid="$(tr -d ' \n' < "$lock" 2>/dev/null || true)"
+    for p in "${pids[@]}"; do
+      if [ "$lpid" = "$p" ]; then
+        n="${lock#/tmp/.X}"
+        n="${n%-lock}"
+        rm -f -- "$lock" "/tmp/.X11-unix/X$n"
+      fi
+    done
+  done
+}
+
+# E2E_REUSE_HOME_FILE指定時(settings-persistence-restart)はpart1→part2で再利用するため消さない。
+remove_tmp_home() {
+  if [ -n "${E2E_REUSE_HOME_FILE:-}" ]; then
+    return 0
+  fi
+  case "$TMP_HOME" in
+    /tmp/tsumugi-e2e-?*) rm -rf -- "$TMP_HOME" || true ;;
+  esac
+}
+
+# 標準入出力を全て切り離す(wdio等が握るパイプをwatchdogが保持し続けないように)。
+# INT/TERM/HUPは無視する(watchdog自身が道連れに死んだら意味がない)。
+(
+  trap '' INT TERM HUP
+  set +e
+  while proc_alive "$$"; do sleep 0.5; done
+  reap_run_processes
+  remove_tmp_home
+) </dev/null >/dev/null 2>&1 &
+
+CLEANED=""
+cleanup() {
+  if [ -n "$CLEANED" ]; then
+    return 0
+  fi
+  CLEANED=1
+  if [ -n "$APP_PID" ]; then
+    kill -TERM -- "-$APP_PID" 2>/dev/null || true
+  fi
+  if [ -n "$XVFB_PID" ]; then
+    kill -TERM "$XVFB_PID" 2>/dev/null || true
+  fi
+  reap_run_processes
+  remove_tmp_home
+}
+# INT/TERMはexitへ落とし、後始末はEXIT trapの1箇所に集約する(trapを早い段階で
+# 張るため、シグナル受信後にスクリプトの後続処理へ進んでしまわないようにする)。
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap cleanup EXIT
+
 export XDG_CONFIG_HOME="$TMP_HOME/config"
 export XDG_CACHE_HOME="$TMP_HOME/cache"
 export XDG_DATA_HOME="$TMP_HOME/data"
@@ -186,7 +318,9 @@ export SSL_CERT_FILE="$TMP_CERT_BUNDLE"
 # dbus-run-session・gnome-keyring-daemon・tsumugi本体を含む配下の
 # プロセス全てに確実にシグナルが届く(実機検証済み: SIGTERMを送って
 # `ps -ef`で残留プロセスが無いことを確認)。
-set -m
+# ただし実際のsession終了時にはSIGTERMではなくSIGKILLが送られるため、このtrapは
+# 走らない。その場合の回収は冒頭のwatchdogが担う(Issue #422)。
+# (set -mは冒頭の後始末の節で有効化済み)
 # 未使用のXディスプレイ番号を探す(/tmp/.X<N>-lockが存在しないものを探す)。
 # 固定番号(:88)だと、前回実行のXvfb/tsumugi/dbus-run-sessionプロセスツリーが
 # 正常終了せず残留していた場合、xdpyinfoによる生存確認が「孤立した前回のXvfb」に
@@ -236,12 +370,6 @@ dbus-run-session -- bash -c '
   exec "$0" "$@"
 ' "$BINARY" "$@" &
 APP_PID=$!
-
-cleanup() {
-  kill -TERM -- "-$APP_PID" 2>/dev/null || true
-  kill -TERM "$XVFB_PID" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
 
 set +e
 wait "$APP_PID"
