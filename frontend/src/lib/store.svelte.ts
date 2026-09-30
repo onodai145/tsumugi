@@ -1218,6 +1218,12 @@ class AppStore {
   /// 既存タブのソース/フィルタ/名前を変更し、ストリームを張り直して内容を差し替える。
   async updateColumn(tabId: string, kind: ColumnKind, filter: FilterQuery, title?: string) {
     const name = title?.trim() || null;
+    // ソース/フィルタが同一なら名前だけの変更。ストリーム再接続とキャッシュ破棄は不要(Issue #59)。
+    const current = this.#findTab(tabId);
+    if (current && sameJson(current.kind, kind) && sameJson(current.filter, filter)) {
+      await this.renameTab(tabId, name ?? "");
+      return;
+    }
     const opened = await unwrap(commands.updateColumn(tabId, kind, filter, name));
     const tab = this.#findTab(tabId);
     if (tab) {
@@ -2015,6 +2021,19 @@ class AppStore {
 }
 
 // ---- リアクションのローカル操作（Misskey は 1ユーザ1リアクション） ----
+
+/// キー順に依存しないJSON等価判定。判定できない場合は false 側(=従来の全再取得)に倒れる。
+function canonicalJson(v: unknown): string {
+  return JSON.stringify(v, (_k, val) =>
+    val && typeof val === "object" && !Array.isArray(val)
+      ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : val,
+  );
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return canonicalJson(a) === canonicalJson(b);
+}
 
 function addReaction(n: Note, reaction: string) {
   if (n.myReaction) removeReaction(n);
