@@ -3,7 +3,7 @@
 // (browser-open.sh)がこのブリッジのCDPセッションに新規タブとしてURLを渡す。
 // approveNext()はその新規タブを検知し、「許可」ボタンをクリックする。
 import { chromium, type BrowserContext, type Page } from "playwright";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -139,70 +139,81 @@ export async function startMiauthBridge(
       // このChromiumだけがmisskey.localを127.0.0.1へ解決できるようにする。
       "--host-resolver-rules=MAP misskey.local 127.0.0.1",
     ],
+  }).catch((err: unknown) => {
+    rmSync(userDataDir, { recursive: true, force: true });
+    throw err;
   });
 
-  // ページの`console`/`pageerror`を漏れなく拾うため、`context.on("page", ...)`で
-  // 新規タブが生成された瞬間にリスナーを付ける。個々のページを取得してから
-  // (`waitForEvent("page")`の戻り値等)付けると、ロード中に出た最初のconsole
-  // 出力やエラーを取りこぼす(実機で未検証だが、Playwrightのイベント順序上
-  // 確実に安全な側に倒す措置)。
-  context.on("page", (page: Page) => {
-    debugLog("miauthBridge:page", `new page created: ${page.url()}`);
-    page.on("console", (msg) => {
-      debugLog("miauthBridge:console", `[${page.url()}] ${msg.type()}: ${msg.text()}`);
+  // セットアップ途中で失敗すると呼び出し側にbridgeが渡らずteardown()が呼ばれないため、
+  // ここでChromiumとuserDataDirを片付けてから再throwする(Issue #422)。
+  try {
+    // ページの`console`/`pageerror`を漏れなく拾うため、`context.on("page", ...)`で
+    // 新規タブが生成された瞬間にリスナーを付ける。個々のページを取得してから
+    // (`waitForEvent("page")`の戻り値等)付けると、ロード中に出た最初のconsole
+    // 出力やエラーを取りこぼす(実機で未検証だが、Playwrightのイベント順序上
+    // 確実に安全な側に倒す措置)。
+    context.on("page", (page: Page) => {
+      debugLog("miauthBridge:page", `new page created: ${page.url()}`);
+      page.on("console", (msg) => {
+        debugLog("miauthBridge:console", `[${page.url()}] ${msg.type()}: ${msg.text()}`);
+      });
+      page.on("pageerror", (err) => {
+        debugLog("miauthBridge:pageerror", `[${page.url()}] ${err.stack ?? err.message}`);
+      });
+      page.on("framenavigated", (frame) => {
+        if (frame === page.mainFrame()) {
+          debugLog("miauthBridge:navigation", `page navigated to ${frame.url()}`);
+        }
+      });
     });
-    page.on("pageerror", (err) => {
-      debugLog("miauthBridge:pageerror", `[${page.url()}] ${err.stack ?? err.message}`);
-    });
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame()) {
-        debugLog("miauthBridge:navigation", `page navigated to ${frame.url()}`);
-      }
-    });
-  });
 
-  debugLog("miauthBridge:setup", `signin-flow: POST ${MISSKEY_URL}/api/signin-flow (user=${seeded.username})`);
-  const signinRes = await fetch(`${MISSKEY_URL}/api/signin-flow`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: seeded.username, password: seeded.password }),
-  });
-  if (!signinRes.ok) {
-    throw new Error(`miauthBridge: /api/signin-flow failed with ${signinRes.status}`);
-  }
-  const signinBody = (await signinRes.json()) as { finished?: boolean; i?: string };
-  if (!signinBody.finished || !signinBody.i) {
-    throw new Error(
-      `miauthBridge: /api/signin-flow did not complete in one step (got ${JSON.stringify(signinBody)}); ` +
-        "2FA/captcha may be enabled on this instance, which this bridge does not handle",
+    debugLog("miauthBridge:setup", `signin-flow: POST ${MISSKEY_URL}/api/signin-flow (user=${seeded.username})`);
+    const signinRes = await fetch(`${MISSKEY_URL}/api/signin-flow`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: seeded.username, password: seeded.password }),
+    });
+    if (!signinRes.ok) {
+      throw new Error(`miauthBridge: /api/signin-flow failed with ${signinRes.status}`);
+    }
+    const signinBody = (await signinRes.json()) as { finished?: boolean; i?: string };
+    if (!signinBody.finished || !signinBody.i) {
+      throw new Error(
+        `miauthBridge: /api/signin-flow did not complete in one step (got ${JSON.stringify(signinBody)}); ` +
+          "2FA/captcha may be enabled on this instance, which this bridge does not handle",
+      );
+    }
+    const token = (signinBody as SigninFlowFinished).i;
+    debugLog("miauthBridge:setup", "signin-flow: finished=true, token acquired");
+
+    const meRes = await fetch(`${MISSKEY_URL}/api/i`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ i: token }),
+    });
+    if (!meRes.ok) {
+      throw new Error(`miauthBridge: /api/i failed with ${meRes.status}`);
+    }
+    const me = await meRes.json();
+    debugLog("miauthBridge:setup", `/api/i: id=${(me as { id?: string }).id ?? "?"} username=${(me as { username?: string }).username ?? "?"}`);
+
+    // packages/frontend/src/i.ts reads this synchronously at module-load time
+    // (before any app code runs), so it must land in localStorage before the
+    // page's own scripts execute — addInitScript() runs on every subsequent
+    // document in this context, exactly what's needed here.
+    const accountJson = JSON.stringify({ ...me, token });
+    await context.addInitScript(
+      (value: string) => {
+        window.localStorage.setItem("account", value);
+      },
+      accountJson,
     );
+    debugLog("miauthBridge:setup", "addInitScript registered (localStorage account injection); bridge ready");
+  } catch (err) {
+    await context.close().catch(() => {});
+    rmSync(userDataDir, { recursive: true, force: true });
+    throw err;
   }
-  const token = (signinBody as SigninFlowFinished).i;
-  debugLog("miauthBridge:setup", "signin-flow: finished=true, token acquired");
-
-  const meRes = await fetch(`${MISSKEY_URL}/api/i`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ i: token }),
-  });
-  if (!meRes.ok) {
-    throw new Error(`miauthBridge: /api/i failed with ${meRes.status}`);
-  }
-  const me = await meRes.json();
-  debugLog("miauthBridge:setup", `/api/i: id=${(me as { id?: string }).id ?? "?"} username=${(me as { username?: string }).username ?? "?"}`);
-
-  // packages/frontend/src/i.ts reads this synchronously at module-load time
-  // (before any app code runs), so it must land in localStorage before the
-  // page's own scripts execute — addInitScript() runs on every subsequent
-  // document in this context, exactly what's needed here.
-  const accountJson = JSON.stringify({ ...me, token });
-  await context.addInitScript(
-    (value: string) => {
-      window.localStorage.setItem("account", value);
-    },
-    accountJson,
-  );
-  debugLog("miauthBridge:setup", "addInitScript registered (localStorage account injection); bridge ready");
 
   return {
     cdpPort: CDP_PORT,
@@ -229,7 +240,12 @@ export async function startMiauthBridge(
       }
     },
     async teardown() {
-      await context.close();
+      try {
+        await context.close();
+      } finally {
+        // launchPersistentContext()に渡したuserDataDirは、context.close()では消えない(Issue #422)。
+        rmSync(userDataDir, { recursive: true, force: true });
+      }
     },
   };
 }
