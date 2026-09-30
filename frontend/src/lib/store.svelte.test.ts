@@ -15,6 +15,13 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 const invokeMock = vi.fn().mockResolvedValue({ status: "ok", data: null });
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+// applyUiScale は実 WebView を触るため差し替える。boot() を呼ぶ既存テストでも例外にならないよう、
+// 既定で resolve する Promise を返す。
+const applyUiScaleMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("./uiScale", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./uiScale")>()),
+  applyUiScale: applyUiScaleMock,
+}));
 
 const { app, applyOwnReactionEvent } = await import("./store.svelte");
 
@@ -699,6 +706,68 @@ describe("#applyAvatarRadius (Issue #94: アイコンの丸みカスタマイズ
     mockPrefersColorSchemeDark(false);
     await app.setUiPrefs({ ...app.ui, avatarRadius: -10 });
     expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("0%");
+  });
+});
+
+describe("UIスケール(Issue #40)", () => {
+  beforeEach(() => {
+    applyUiScaleMock.mockReset();
+    applyUiScaleMock.mockResolvedValue(undefined);
+    app.ui = { ...app.ui, theme: "auto" };
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("setUiPrefsでuiScaleを指定するとapplyUiScaleに渡される", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, uiScale: 130 });
+    expect(applyUiScaleMock).toHaveBeenCalledWith(130);
+    expect(app.ui.uiScale).toBe(130);
+  });
+
+  it("uiScaleが未設定(旧データ)なら100で適用される", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, uiScale: undefined });
+    expect(applyUiScaleMock).toHaveBeenCalledWith(100);
+    expect(app.ui.uiScale).toBe(100);
+  });
+
+  it("範囲外のuiScaleは正規化されてapp.uiに保持され、正規化後の値が適用される", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, uiScale: 1000 });
+    expect(app.ui.uiScale).toBe(200);
+    expect(applyUiScaleMock).toHaveBeenLastCalledWith(200);
+  });
+
+  it("同じ倍率の保存ではapplyUiScaleを繰り返し呼ばない", async () => {
+    mockPrefersColorSchemeDark(false);
+    await app.setUiPrefs({ ...app.ui, uiScale: 170 });
+    await app.setUiPrefs({ ...app.ui, uiScale: 170 });
+    expect(applyUiScaleMock.mock.calls.filter(([v]) => v === 170)).toHaveLength(1);
+    await app.setUiPrefs({ ...app.ui, uiScale: 180 });
+    expect(applyUiScaleMock).toHaveBeenLastCalledWith(180);
+  });
+
+  it("適用に失敗した後、同じ倍率の保存では再試行される", async () => {
+    mockPrefersColorSchemeDark(false);
+    const warnCount = () => app.logs.filter((l) => l.level === "warn" && l.text.includes("UIスケール")).length;
+    const before = warnCount();
+    applyUiScaleMock.mockRejectedValueOnce(new Error("unsupported"));
+    await app.setUiPrefs({ ...app.ui, uiScale: 190 });
+    await vi.waitFor(() => expect(warnCount()).toBe(before + 1));
+    await app.setUiPrefs({ ...app.ui, uiScale: 190 });
+    expect(applyUiScaleMock.mock.calls.filter(([v]) => v === 190)).toHaveLength(2);
+  });
+
+  it("applyUiScaleが失敗しても設定の保存は成功し、警告ログが残る", async () => {
+    mockPrefersColorSchemeDark(false);
+    applyUiScaleMock.mockRejectedValue(new Error("unsupported"));
+    await expect(app.setUiPrefs({ ...app.ui, uiScale: 150 })).resolves.toBeUndefined();
+    await vi.waitFor(() => {
+      expect(app.logs.some((l) => l.level === "warn" && l.text.includes("UIスケール"))).toBe(true);
+    });
   });
 });
 

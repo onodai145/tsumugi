@@ -1054,6 +1054,12 @@ export type UiPrefs = {
 	 *  （`commands::app::is_safe_mode` 参照）。
 	 */
 	customCss?: string,
+	/**
+	 *  UI全体の拡大率（%、50〜200）。既定は100（Issue #40）。デスクトップのみ意味を持つ
+	 *  （Tauri の Webview::set_zoom は Android 非対応）。値の clamp はフロント（lib/uiScale）が
+	 *  適用時に行うため、Rust 側では不透明に永続化する。
+	 */
+	uiScale?: number,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */

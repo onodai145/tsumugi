@@ -222,6 +222,11 @@ pub struct UiPrefs {
     /// （`commands::app::is_safe_mode` 参照）。
     #[serde(default)]
     pub custom_css: String,
+    /// UI全体の拡大率（%、50〜200）。既定は100（Issue #40）。デスクトップのみ意味を持つ
+    /// （Tauri の Webview::set_zoom は Android 非対応）。値の clamp はフロント（lib/uiScale）が
+    /// 適用時に行うため、Rust 側では不透明に永続化する。
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: i32,
 }
 
 fn default_column_opacity() -> i32 {
@@ -295,6 +300,10 @@ fn default_haptics_enabled() -> bool {
     true
 }
 
+fn default_ui_scale() -> i32 {
+    100
+}
+
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
@@ -333,6 +342,7 @@ impl Default for UiPrefs {
             haptics_enabled: default_haptics_enabled(),
             developer_options_enabled: false,
             custom_css: String::new(),
+            ui_scale: default_ui_scale(),
         }
     }
 }
@@ -494,6 +504,7 @@ mod tests {
             haptics_enabled: true,
             developer_options_enabled: true,
             custom_css: "body { background: #000 }".into(),
+            ui_scale: 130,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -587,5 +598,24 @@ mod tests {
         // 既定は20%(追加前の rounded-md に近い見た目、Issue #94)。
         let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.avatar_radius, 20);
+    }
+
+    #[test]
+    fn ui_scale_defaults_to_100_for_legacy_json() {
+        // ui_scale 追加前に保存された JSON も読めること（#[serde(default)]）。
+        // 0 ではなく 100（等倍）にフォールバックすること（Issue #40）。
+        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.ui_scale, 100);
+        assert_eq!(UiPrefs::default().ui_scale, 100);
+    }
+
+    #[test]
+    fn ui_scale_roundtrips_as_camel_case() {
+        let mut p = UiPrefs::default();
+        p.ui_scale = 130;
+        let s = serde_json::to_string(&p).unwrap();
+        assert!(s.contains("\"uiScale\":130"));
+        let back: UiPrefs = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.ui_scale, 130);
     }
 }
