@@ -47,9 +47,9 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
     async fn get_note(&self, note_id: &str) -> Result<Option<Note>>;
     async fn update_note(&self, note: &Note) -> Result<()>;
     async fn clear_column_notes(&self, column_id: &str) -> Result<()>;
-    async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>>;
-    async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()>;
-    async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()>;
+    async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>>;
+    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()>;
+    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()>;
     async fn clear_all_fetch_boundaries(&self) -> Result<()>;
     async fn note_count(&self) -> Result<i32>;
     async fn notes_since(&self, since_epoch_secs: i32) -> Result<i32>;
@@ -134,20 +134,35 @@ impl NoteCacheStore {
         self.backend().clear_column_notes(column_id).await
     }
 
-    /// カラムの境界(oldest_fetched_id)を取得。未確定ならNone。
+    /// カラムの全ソース境界を (source_idx, oldest_fetched_id) で返す(source_idx昇順)。
+    /// 行が無ければ空。`""` は「そのソースは先頭まで枯渇済み」(Issue #238)。
+    pub async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
+        self.backend().get_fetch_boundaries(column_id).await
+    }
+
+    /// カラムの境界を entries で置き換える(初回REST取得時に使う)。既存行は全削除してから挿入する。
+    /// entries に含まれないソースは未確定になる。
+    pub async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+        self.backend().replace_fetch_boundaries(column_id, entries).await
+    }
+
+    /// 各 (source_idx, id) について境界を古い方向へのみ延長する(単調性を保証)。
+    /// 行が無ければ挿入し、既存値の方が古ければ何もしない。
+    pub async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+        self.backend().extend_fetch_boundaries(column_id, entries).await
+    }
+
+    // ---- 暫定シム: Task 2 で column.rs を新APIへ移したら削除する ----
     pub async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
-        self.backend().get_fetch_boundary(column_id).await
+        Ok(self.get_fetch_boundaries(column_id).await?.into_iter().find(|(i, _)| *i == 0).map(|(_, b)| b))
     }
 
-    /// 境界を new_oldest_id で無条件に新規セット/上書きする(初回REST取得時に使う)。
     pub async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        self.backend().set_fetch_boundary(column_id, new_oldest_id).await
+        self.replace_fetch_boundaries(column_id, &[(0, new_oldest_id.to_string())]).await
     }
 
-    /// 境界を new_oldest_id まで延長する(古い方向へのみ、単調性を保証)。
-    /// 既存値の方が既に古ければ何もしない。
     pub async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        self.backend().extend_fetch_boundary(column_id, new_oldest_id).await
+        self.extend_fetch_boundaries(column_id, &[(0, new_oldest_id.to_string())]).await
     }
 
     /// 全カラムのbackfill境界を削除する(未確定状態に戻す)。ミュート設定変更時など、
@@ -271,8 +286,9 @@ fn self_heal_node(conn: &Connection, node: &mut serde_json::Value) -> Result<boo
 
 /// `select_sql`（`SELECT id FROM note ...` 形式）にマッチするノートと、その関連テーブル
 /// （note_reaction 等）・column_note を削除する（FK制約は張っていないため手動カスケード）。
-/// 削除によって影響を受けたカラムの backfill 境界(column_fetch_boundary)も、生存している
-/// 最古ノートIDまで引き上げる（全滅したカラムは境界ごと削除）。境界が「削除前の完全な範囲」
+/// 削除によって影響を受けたカラムの backfill 境界(column_source_boundary)も、生存している
+/// 最古ノートIDまで引き上げる（全滅したカラムは境界ごと削除）。`column_note` はソースの帰属を
+/// 持たないため、カラムの全ソース行に同じ引き上げを適用する。境界が「削除前の完全な範囲」
 /// を主張したままだと、prune後にキャッシュに無いノートを「完全」と誤認して欠落表示になる
 /// ため(Issue #228)。
 /// 戻り値は削除したノート件数。
@@ -326,14 +342,14 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
                     _ => oldest,
                 };
                 conn.execute(
-                    "UPDATE column_fetch_boundary SET oldest_fetched_id = ?2
+                    "UPDATE column_source_boundary SET oldest_fetched_id = ?2
                      WHERE column_id = ?1 AND oldest_fetched_id < ?2",
                     params![column_id, candidate],
                 )?;
             }
             None => {
                 conn.execute(
-                    "DELETE FROM column_fetch_boundary WHERE column_id = ?1",
+                    "DELETE FROM column_source_boundary WHERE column_id = ?1",
                     params![column_id],
                 )?;
             }
