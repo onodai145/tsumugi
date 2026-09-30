@@ -820,3 +820,92 @@ describe("自分のアカウントによるreacted/unreactedイベントの反�
     expect(note.reactionCount).toBe(1);
   });
 });
+
+describe("タブ編集で名前だけ変えた場合はノートを保持する(Issue #59)", () => {
+  it("kind/filterが同一ならrename_columnだけ呼びupdate_columnは呼ばない", async () => {
+    const note = makeNote({ id: "keep-me" });
+    app.groups = [makeGroup([makeNormalTab({ notes: [note], selectedNoteId: "keep-me" })])];
+
+    await app.updateColumn("tab1", { type: "home" }, { kind: "keywords", value: [] }, "新しい名前");
+
+    const commandsCalled = invokeMock.mock.calls.map((c) => c[0]);
+    expect(commandsCalled).toEqual(["rename_column"]);
+    const tab = app.groups[0].tabs[0];
+    expect(tab.customTitle).toBe("新しい名前");
+    expect(tab.notes.map((n) => n.id)).toEqual(["keep-me"]);
+    expect(tab.selectedNoteId).toBe("keep-me");
+    expect(tab.state).toBe("connected");
+  });
+
+  it("filterのキー順が違っても同一とみなす", async () => {
+    app.groups = [
+      makeGroup([
+        makeNormalTab({
+          kind: { type: "tql" },
+          filter: { kind: "tql", value: "from home" },
+        }),
+      ]),
+    ];
+
+    await app.updateColumn(
+      "tab1",
+      { type: "tql" },
+      { value: "from home", kind: "tql" } as never,
+      "名前",
+    );
+
+    expect(invokeMock.mock.calls.map((c) => c[0])).toEqual(["rename_column"]);
+  });
+
+  it("名前を空にすると自動生成名に戻す", async () => {
+    app.groups = [makeGroup([makeNormalTab({ customTitle: "旧名" })])];
+
+    await app.updateColumn("tab1", { type: "home" }, { kind: "keywords", value: [] }, "  ");
+
+    expect(invokeMock).toHaveBeenCalledWith("rename_column", { columnId: "tab1", title: null });
+    expect(app.groups[0].tabs[0].customTitle).toBeNull();
+  });
+
+  it("kindが変わったら従来どおりupdate_columnで再取得する", async () => {
+    const opened = {
+      column: {
+        id: "tab1",
+        accountId: ACCOUNT_ID,
+        kind: { type: "local" },
+        filter: { kind: "keywords", value: [] },
+        title: null,
+      },
+      group: { id: "group1" },
+      notes: [],
+      notifications: [],
+    };
+    invokeMock.mockResolvedValueOnce(opened);
+    app.groups = [makeGroup([makeNormalTab({ notes: [makeNote({ id: "old" })] })])];
+
+    await app.updateColumn("tab1", { type: "local" }, { kind: "keywords", value: [] }, undefined);
+
+    expect(invokeMock.mock.calls[0][0]).toBe("update_column");
+    expect(app.groups[0].tabs[0].notes).toEqual([]);
+  });
+
+  it("filterが変わったら従来どおりupdate_columnで再取得する", async () => {
+    const opened = {
+      column: {
+        id: "tab1",
+        accountId: ACCOUNT_ID,
+        kind: { type: "home" },
+        filter: { kind: "keywords", value: ["foo"] },
+        title: null,
+      },
+      group: { id: "group1" },
+      notes: [],
+      notifications: [],
+    };
+    invokeMock.mockResolvedValueOnce(opened);
+    app.groups = [makeGroup([makeNormalTab({ notes: [makeNote({ id: "old" })] })])];
+
+    await app.updateColumn("tab1", { type: "home" }, { kind: "keywords", value: ["foo"] }, undefined);
+
+    expect(invokeMock.mock.calls[0][0]).toBe("update_column");
+  });
+});
