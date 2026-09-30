@@ -6,7 +6,7 @@ import { isMobilePlatform } from "./platform";
 export const UI_SCALE_MIN = 50;
 export const UI_SCALE_MAX = 200;
 export const UI_SCALE_DEFAULT = 100;
-export const UI_SCALE_STEP = 10;
+export const UI_SCALE_STEP = 5;
 
 /// 保存値を適用可能な整数%（50〜200）にする。壊れた値（null/NaN/Infinity）は既定の100に倒す。
 export function normalizeUiScale(value: number | null | undefined): number {

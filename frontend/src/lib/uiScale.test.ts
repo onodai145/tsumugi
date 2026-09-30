@@ -50,16 +50,19 @@ describe("normalizeUiScale", () => {
 });
 
 describe("snapUiScaleToStep", () => {
-  it("スライダーの刻み(10)に乗っている値はそのまま返す", () => {
+  it("スライダーの刻み(5)に乗っている値はそのまま返す", () => {
     expect(snapUiScaleToStep(100)).toBe(100);
     expect(snapUiScaleToStep(50)).toBe(50);
     expect(snapUiScaleToStep(200)).toBe(200);
+    expect(snapUiScaleToStep(125)).toBe(125);
+    expect(snapUiScaleToStep(55)).toBe(55);
   });
 
   it("刻みに乗らない値(手編集など)は最寄りの刻みに丸める", () => {
-    expect(snapUiScaleToStep(124)).toBe(120);
-    expect(snapUiScaleToStep(125)).toBe(130);
-    expect(snapUiScaleToStep(55)).toBe(60);
+    expect(snapUiScaleToStep(122)).toBe(120);
+    expect(snapUiScaleToStep(123)).toBe(125);
+    expect(snapUiScaleToStep(127)).toBe(125);
+    expect(snapUiScaleToStep(128)).toBe(130);
   });
 
   it("範囲外・壊れた値は範囲内の刻みか既定100に倒す", () => {

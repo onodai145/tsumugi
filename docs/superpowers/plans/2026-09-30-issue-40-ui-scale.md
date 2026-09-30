@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - 対象はデスクトップのみ。Android/iOS（`isMobilePlatform`）では`setZoom`を呼ばず、設定項目も表示しない。
-- 範囲は50〜200%、既定は100%、スライダーは10刻み。
+- 範囲は50〜200%、既定は100%、スライダーは5刻み。
 - `UiPrefs.ui_scale`は`#[serde(default = "default_ui_scale")]`で、旧JSONは100として読める。Rust側でclamp/検証はしない（他の数値項目と同じ流儀）。
 - clamp/正規化はフロントの純関数`normalizeUiScale`で行い、適用時に必ず通す。
 - `frontend/src/bindings/tauri.gen.ts`は手編集しない。`cd src-tauri && cargo test`で再生成する。
@@ -143,7 +143,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `isMobilePlatform`（`./platform`）、`getCurrentWebview`（`@tauri-apps/api/webview`）
 - Produces:
-  - `UI_SCALE_MIN = 50`, `UI_SCALE_MAX = 200`, `UI_SCALE_DEFAULT = 100`, `UI_SCALE_STEP = 10`
+  - `UI_SCALE_MIN = 50`, `UI_SCALE_MAX = 200`, `UI_SCALE_DEFAULT = 100`, `UI_SCALE_STEP = 5`
   - `normalizeUiScale(value: number | null | undefined): number` — 整数%を返す。`null`/`undefined`/`NaN`/`Infinity`は100。それ以外は四捨五入して50〜200にclamp。
   - `applyUiScale(value: number | null | undefined): Promise<void>` — モバイルでは何もしない。それ以外は`getCurrentWebview().setZoom(normalizeUiScale(value) / 100)`を呼ぶ。失敗時は例外をそのまま投げる（呼び出し側がログする）。
 
@@ -247,7 +247,7 @@ import { isMobilePlatform } from "./platform";
 export const UI_SCALE_MIN = 50;
 export const UI_SCALE_MAX = 200;
 export const UI_SCALE_DEFAULT = 100;
-export const UI_SCALE_STEP = 10;
+export const UI_SCALE_STEP = 5;
 
 /// 保存値を適用可能な整数%（50〜200）にする。壊れた値（null/NaN/Infinity）は既定の100に倒す。
 export function normalizeUiScale(value: number | null | undefined): number {
@@ -525,7 +525,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 最終レビューのMinor 3件に対応した。いずれもTDD（RED→GREEN）で、上のタスクの実装を次のとおり置き換えている。
 
-- **範囲外の保存値**: `store.svelte.ts`の`boot()`と`setUiPrefs`で`uiScale: normalizeUiScale(...)`とし、`app.ui.uiScale`を常に有効値（50〜200の整数）にする。手編集などで1000が保存されていても、設定画面のラベルが「1000%」になったり、再保存で1000が残ったりしない。刻みに乗らない値（125など）は、`AppearanceSection.svelte`の初期値を`snapUiScaleToStep(app.ui.uiScale)`（`lib/uiScale.ts`に追加）にして、ラベルとつまみの位置を揃える。
+- **範囲外の保存値**: `store.svelte.ts`の`boot()`と`setUiPrefs`で`uiScale: normalizeUiScale(...)`とし、`app.ui.uiScale`を常に有効値（50〜200の整数）にする。手編集などで1000が保存されていても、設定画面のラベルが「1000%」になったり、再保存で1000が残ったりしない。刻みに乗らない値（123など）は、`AppearanceSection.svelte`の初期値を`snapUiScaleToStep(app.ui.uiScale)`（`lib/uiScale.ts`に追加）にして、ラベルとつまみの位置を揃える。
 - **重複適用**: `#applyUiScale`が直前に適用した倍率（`#appliedUiScale`）を持ち、同じ倍率ならスキップする。失敗したら記録を戻して次の保存で再試行する。
 - **プランの記述ずれ**: Task 3の`applyUiScaleMock`の既定値（`mockResolvedValue(undefined)`）を上のコードに反映した。
 
