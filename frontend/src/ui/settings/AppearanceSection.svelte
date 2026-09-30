@@ -7,6 +7,8 @@
   import { X, Check, Pencil, Trash2, Plus } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { CUSTOM_CSS_MAX_BYTES, customCssBytes } from "../../lib/customCss";
+  import { UI_SCALE_DEFAULT, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from "../../lib/uiScale";
+  import { isMobilePlatform } from "../../lib/platform";
 
   let theme = $state(app.ui.theme);
   let codeHighlightTheme = $state(app.ui.codeHighlightTheme ?? "auto");
@@ -16,6 +18,7 @@
   let instanceTicker = $state(app.ui.instanceTicker ?? "remote");
   let catMode = $state(app.ui.catMode ?? "respect");
   let avatarRadius = $state(app.ui.avatarRadius ?? 20);
+  let uiScale = $state(app.ui.uiScale ?? UI_SCALE_DEFAULT);
   let customCss = $state(app.ui.customCss ?? "");
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -235,6 +238,7 @@
         instanceTicker,
         catMode,
         avatarRadius,
+        uiScale,
         customCss,
       });
       saved = true;
@@ -316,6 +320,29 @@
   ノート・アカウント切替・プロフィール等、アプリ内すべてのアイコンに反映されます。
   0%が直角、100%が真円です。
 </p>
+
+{#if !isMobilePlatform}
+  <label class="mb-2.5 flex flex-col gap-1 text-sm">
+    <span class="text-muted-foreground">UIスケール({uiScale}%)</span>
+    <span class="flex items-center gap-2">
+      <input
+        class="w-full max-w-[320px] accent-primary"
+        type="range"
+        min={UI_SCALE_MIN}
+        max={UI_SCALE_MAX}
+        step={UI_SCALE_STEP}
+        bind:value={uiScale}
+      />
+      <Button type="button" variant="outline" size="sm" onclick={() => (uiScale = UI_SCALE_DEFAULT)}>
+        100%に戻す
+      </Button>
+    </span>
+  </label>
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">
+    文字・余白・アイコン・画像を含むUI全体の大きさを変えます。保存すると反映されます。
+    拡大すると同時に表示できるカラム数は減ります。
+  </p>
+{/if}
 
 {#snippet swatchStrip(colors: ThemeColors)}
   <span class="flex h-[30px] w-full flex-none">
