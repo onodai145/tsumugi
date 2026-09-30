@@ -293,7 +293,9 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 `frontend/src/lib/store.svelte.test.ts`のファイル先頭のモック群（`vi.mock("@tauri-apps/api/event", ...)`の直後）に追加:
 
 ```ts
-const applyUiScaleMock = vi.hoisted(() => vi.fn());
+// 既定で resolve する Promise を返す（素の vi.fn() だと undefined を返し、boot() を呼ぶ既存テストで
+// ストアの .catch が TypeError になる）。
+const applyUiScaleMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("./uiScale", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./uiScale")>()),
   applyUiScale: applyUiScaleMock,
@@ -515,4 +517,15 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - **Spec coverage**: 設定値（Task 1）、正規化と適用・モバイル除外・失敗時の扱い（Task 2・3）、capability（Task 1）、設定UI・モバイル非表示（Task 4）、テスト方針の各層（Task 1〜3のテスト、Task 4の実UI確認）、ドキュメント（Task 4）に対応。スコープ外（ショートカット、ライブプレビュー、カラム幅補正、Android）は計画に含めていない。
 - **Placeholder scan**: TBD/TODOなし。
 - **Type consistency**: `normalizeUiScale`/`applyUiScale`/`UI_SCALE_*`は Task 2 の定義と Task 3・4 の使用で一致。`UiPrefs.uiScale?: number`は Task 1 の生成バインディングと一致（`#[serde(default)]`のためTS側はoptional）。
-- **既知のリスク**: Task 4 の実機確認が最も不確か（WebKitGTKでの`setZoom`実挙動）。`store.svelte.test.ts`の`vi.mock("./uiScale")`はファイル全体に効くが、既存テストは`uiScale`を参照しないため影響しない。
+- **既知のリスク**: Task 4 の実機確認が最も不確か（WebKitGTKでの`setZoom`実挙動）。`store.svelte.test.ts`の`vi.mock("./uiScale")`はファイル全体に効くが、`applyUiScale`以外は実物（`importOriginal`）を使い、既定でresolveを返すので既存テストには影響しない。
+
+---
+
+## 追補（最終レビュー後の対応）
+
+最終レビューのMinor 3件に対応した。いずれもTDD（RED→GREEN）で、上のタスクの実装を次のとおり置き換えている。
+
+- **範囲外の保存値**: `store.svelte.ts`の`boot()`と`setUiPrefs`で`uiScale: normalizeUiScale(...)`とし、`app.ui.uiScale`を常に有効値（50〜200の整数）にする。手編集などで1000が保存されていても、設定画面のラベルが「1000%」になったり、再保存で1000が残ったりしない。刻みに乗らない値（125など）は、`AppearanceSection.svelte`の初期値を`snapUiScaleToStep(app.ui.uiScale)`（`lib/uiScale.ts`に追加）にして、ラベルとつまみの位置を揃える。
+- **重複適用**: `#applyUiScale`が直前に適用した倍率（`#appliedUiScale`）を持ち、同じ倍率ならスキップする。失敗したら記録を戻して次の保存で再試行する。
+- **プランの記述ずれ**: Task 3の`applyUiScaleMock`の既定値（`mockResolvedValue(undefined)`）を上のコードに反映した。
+

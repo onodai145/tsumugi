@@ -22,12 +22,12 @@ Issue #40「UIをスケーリングできるようにする」。UI全体（文�
 ### 設定値
 
 - `UiPrefs`に`ui_scale: i32`（%）を追加する。`#[serde(default = "default_ui_scale")]`、既定は100。旧JSONはそのまま読める。
-- 範囲は50〜200%。Rust側は他の数値項目（`column_opacity`等）と同様に値を不透明に永続化し、clamp/正規化はフロント（`lib/uiScale.ts`の純関数`normalizeUiScale`）で行う。壊れた値や範囲外の値でもズームが異常にならないよう、適用時に必ず正規化する。
+- 範囲は50〜200%。Rust側は他の数値項目（`column_opacity`等）と同様に値を不透明に永続化し、clamp/正規化はフロント（`lib/uiScale.ts`の純関数`normalizeUiScale`）で行う。壊れた値や範囲外の値でもズームが異常にならないよう、適用時に必ず正規化する。さらにストアは読み込み時・保存時にも正規化し、`app.ui.uiScale`を常に有効値（50〜200の整数）に保つ。設定画面のスライダーの初期値は、刻み（10）の最寄りに丸める。
 - `tauri-specta`のバインディング（`frontend/src/bindings/tauri.gen.ts`）は`cargo test`で再生成する。手編集しない。
 
 ### 反映
 
-- `store.svelte.ts`に`#applyUiScale(scale)`を追加し、`#applyFont`と同じ箇所（起動時の設定読み込みと`setUiPrefs`）から呼ぶ。中身は`getCurrentWebview().setZoom(normalizeUiScale(scale) / 100)`。
+- `store.svelte.ts`に`#applyUiScale(scale)`を追加し、`#applyFont`と同じ箇所（起動時の設定読み込みと`setUiPrefs`）から呼ぶ。中身は`getCurrentWebview().setZoom(normalizeUiScale(scale) / 100)`。ストアは直前に適用した倍率を保持し、同じ倍率ならスキップする（テーマなど無関係な保存のたびにIPCを往復させない）。失敗した場合は記録を戻し、次の保存で再試行する。
 - モバイル（`isMobilePlatform`）では何もしない。`setZoom`の失敗（未対応環境など）は例外を握りつぶさずログへ出すが、アプリの動作は止めない。
 - `src-tauri/capabilities/default.json`に`core:webview:allow-set-webview-zoom`を追加する。
 - 起動時は保存値を読み込んだ後に適用するため、一瞬100%で描画されてから切り替わる。テーマ・フォントと同じ挙動であり、許容する。
