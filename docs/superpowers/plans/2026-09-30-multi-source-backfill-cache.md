@@ -28,7 +28,7 @@
 - **不連続な `until_id`:** 1ソースだけ `until_id < b_i` のとき、そのソースの境界は延長されず、他ソースは延長されること。→ Task 2 の `plan_boundary_extend` テスト。
 - **prune後の境界:** 全ソース行（`""` の行を含む）が生存最古ID（連合ノートでは削除最大ID）まで引き上がり、全滅時は全行が消えること。→ Task 1 の prune テスト。
 - **マイグレーション:** 旧 `column_fetch_boundary` の行が `source_idx=0` へ移り旧テーブルが消え、再実行や新テーブル既存行との衝突で値が壊れないこと。→ Task 1 の移行テスト（SQLite / Postgres / MySQL）。
-- **`from cache` 併用カラム:** 常に API 経由（境界を読まない・書かない）であること。→ Task 2 の `backfill_cache_eligible` テスト。
+- **`from cache` 併用カラム・非ストリーミングソース含有カラム:** `from cache` を含むカラム、および User / Tag / Search などストリーミングを持たないソース(`stream_request()` が None)を含むカラムは、常に API 経由（境界を読まない・書かない）であること。非ストリーミングソースはライブノートが `column_note` に入らず、境界より新しい範囲の完全性を言えないため。→ Task 2 の `backfill_cache_eligible` テスト。
 
 ---
 
@@ -980,7 +980,7 @@ git commit -m "feat: backfill境界をソース単位のテーブルへ移す (#
     }
 
     #[test]
-    fn backfill_cache_eligible_requires_api_sources_and_no_cache_source() {
+    fn backfill_cache_eligible_requires_streaming_api_sources_and_no_cache_source() {
         let mk = |kinds: Vec<ColumnKind>, use_cache: bool| ResolvedSources {
             kinds,
             use_cache,
@@ -990,6 +990,19 @@ git commit -m "feat: backfill境界をソース単位のテーブルへ移す (#
         assert!(backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], false)));
         assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], true)));
         assert!(!backfill_cache_eligible(&mk(vec![], true)));
+        assert!(backfill_cache_eligible(&mk(
+            vec![ColumnKind::Home, ColumnKind::Local, ColumnKind::List { list_id: "l1".into() }],
+            false
+        )));
+        // ストリーミングを持たないソース(User/Tag/Search)はライブノートが column_note に入らないため対象外
+        let user = || ColumnKind::User { user_id: "u1".into() };
+        let tag = || ColumnKind::Tag { tag: "rust".into() };
+        let search = || ColumnKind::Search { query: "q".into() };
+        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, user()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![user()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![tag()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![search()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, search()], false)));
     }
 
     #[test]
@@ -1125,10 +1138,16 @@ fn effective_boundary(boundaries: &std::collections::HashMap<u32, String>, sourc
     max.cloned()
 }
 
-/// backfill のキャッシュ優先経路の対象か。`from cache` を含むカラムは、`search_cache` が
-/// グローバルな note テーブルを読み `column_note` だけでは API 経路と同じ結果を再現できないため対象外。
+/// backfill のキャッシュ優先経路の対象か。次のカラムは対象外(常にAPI経由)。
+/// - `from cache` を含むカラム: `search_cache` がグローバルな note テーブルを読み、
+///   `column_note` だけでは API 経路と同じ結果を再現できない。
+/// - ストリーミングを持たないソース(User / Tag / Search 等。`stream_request()` が None)を含むカラム:
+///   これらはライブノートが `column_note` に入らないため、境界 E より新しい範囲が完全だとは言えず、
+///   キャッシュだけで返すとそのソースの新着ノートが欠落する。
 fn backfill_cache_eligible(resolved: &ResolvedSources) -> bool {
-    !resolved.use_cache && !resolved.kinds.is_empty()
+    !resolved.use_cache
+        && !resolved.kinds.is_empty()
+        && resolved.kinds.iter().all(|k| k.stream_request().is_some())
 }
 
 /// 重複除去・created_at降順ソート済みのフィルタ通過ノートから、画面へ返す分と

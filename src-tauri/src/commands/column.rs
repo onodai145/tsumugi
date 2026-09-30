@@ -412,8 +412,10 @@ pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
         as i32)
 }
 
-/// 過去ページ（上スクロール）。`from cache` を含まないカラムは、要求範囲が全ソースの
-/// backfill境界(`max(b_i)`)より新しければキャッシュのみで応答する(Issue #228 / #238)。
+/// 過去ページ（上スクロール）。`from cache` を含まず、かつ全ソースがストリーミング対応の
+/// カラムは、要求範囲が全ソースのbackfill境界(`max(b_i)`)より新しければキャッシュのみで応答する
+/// (Issue #228 / #238)。User/Tag/Search などストリーミングを持たないソースを含むカラムは、
+/// ライブノートが column_note に入らず境界より新しい範囲の完全性を言えないため常にAPIへ。
 /// いずれかのソースの境界が未確定・範囲外・件数不足なら通常どおりAPIへ。
 #[tauri::command]
 #[specta::specta]
@@ -1199,10 +1201,16 @@ fn effective_boundary(boundaries: &std::collections::HashMap<u32, String>, sourc
     max.cloned()
 }
 
-/// backfill のキャッシュ優先経路の対象か。`from cache` を含むカラムは、`search_cache` が
-/// グローバルな note テーブルを読み `column_note` だけでは API 経路と同じ結果を再現できないため対象外。
+/// backfill のキャッシュ優先経路の対象か。次のカラムは対象外(常にAPI経由)。
+/// - `from cache` を含むカラム: `search_cache` がグローバルな note テーブルを読み、
+///   `column_note` だけでは API 経路と同じ結果を再現できない。
+/// - ストリーミングを持たないソース(User / Tag / Search 等。`stream_request()` が None)を含むカラム:
+///   これらはライブノートが `column_note` に入らないため、境界 E より新しい範囲が完全だとは言えず、
+///   キャッシュだけで返すとそのソースの新着ノートが欠落する。
 fn backfill_cache_eligible(resolved: &ResolvedSources) -> bool {
-    !resolved.use_cache && !resolved.kinds.is_empty()
+    !resolved.use_cache
+        && !resolved.kinds.is_empty()
+        && resolved.kinds.iter().all(|k| k.stream_request().is_some())
 }
 
 /// 重複除去・created_at降順ソート済みのフィルタ通過ノートから、画面へ返す分と
@@ -1705,7 +1713,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_cache_eligible_requires_api_sources_and_no_cache_source() {
+    fn backfill_cache_eligible_requires_streaming_api_sources_and_no_cache_source() {
         let mk = |kinds: Vec<ColumnKind>, use_cache: bool| ResolvedSources {
             kinds,
             use_cache,
@@ -1715,6 +1723,19 @@ mod tests {
         assert!(backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], false)));
         assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], true)));
         assert!(!backfill_cache_eligible(&mk(vec![], true)));
+        assert!(backfill_cache_eligible(&mk(
+            vec![ColumnKind::Home, ColumnKind::Local, ColumnKind::List { list_id: "l1".into() }],
+            false
+        )));
+        // ストリーミングを持たないソース(User/Tag/Search)はライブノートが column_note に入らないため対象外
+        let user = || ColumnKind::User { user_id: "u1".into() };
+        let tag = || ColumnKind::Tag { tag: "rust".into() };
+        let search = || ColumnKind::Search { query: "q".into() };
+        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, user()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![user()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![tag()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![search()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, search()], false)));
     }
 
     #[test]

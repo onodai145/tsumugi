@@ -12,12 +12,18 @@ Issue #228 / PR #237（`docs/superpowers/specs/2026-08-23-cache-first-backfill-d
 
 ブレインストーミングで「スカラー境界を流用し、更新値を `min(現境界, 各ソース生最古IDの最大)` にする案（案A）」も検討した。スキーマ変更が要らず小さく済む案だったが、Issue の記載どおり**ソース単位の境界テーブルを新設する案（案B）**を採用した。以降は案B の設計である。
 
+## 設計変更の経緯
+
+当初は対象を `!use_cache && !kinds.is_empty()` としていたが、ブランチ全体の最終レビューで穴が見つかった。境界「`id > E` は `column_note` に完全」が成り立つのは、初回RESTページで取得したノートかストリーミングで届くライブノート(`stream/connection.rs` が `column_note` へ記録)だけである。`User` / `Tag` / `Search` などストリーミングを持たないソース(`stream_request()` が None)にはライブノートが無く、初回取得より新しい分が `column_note` に入らない。そのため `from home, user:@alice` のようなカラムで一覧が初回取得を超えて伸びた後に `fetch_backfill` がキャッシュで応答すると、alice の新着ノートが黙って欠落する。対象を全ソースがストリーミング対応のカラムに絞ることで解消する。
+
 ## スコープ
 
-- 対象: `resolve_sources` の結果が `!use_cache && !kinds.is_empty()` のカラム。単一ソースも複数ソースも同じ経路で扱う（単一ソースは N=1 の特殊ケース）。
+- 対象: `resolve_sources` の結果が `!use_cache && !kinds.is_empty() && kinds.iter().all(|k| k.stream_request().is_some())` のカラム。単一ソースも複数ソースも同じ経路で扱う（単一ソースは N=1 の特殊ケース）。
 - 対象外（実装しない）:
   - `from cache` を含むカラム。`search_cache` はグローバルな `note` テーブルを読み、他カラムの backfill で古いIDのノートが増え続ける。そのため `column_note` だけを見るキャッシュ優先経路では、API 経路と同じ結果を再現できない。常にAPI経由のまま。
-  - `fill_gap` / `gap_fill_on_reconnect` / `fillRemainingGap`。「新しい方向」のギャップ埋めで、境界の意味と無関係。
+  - ストリーミングを持たないソース(User / Tag / Search)を含むカラム。これらのソースはライブノートが `column_note` に入らないため、初回取得範囲より新しい側で「`id > E` は完全」が成り立たない。#228 が単一ソースの user/tag/search カラムに対して抱えていた同じ穴もここで塞ぐ(#228 からの挙動変更: これらのカラムは常にAPI経由になる)。
+  - `fill_gap` / `gap_fill_on_reconnect`。「新しい方向」のギャップ埋めで、境界の意味と無関係。
+  - 既存の別問題: `fillRemainingGap` も同じ `fetch_backfill` 経路を通るため、キャッシュに Hit してギャップマーカーを消すだけで実際にはギャップを埋めないことがある(#228 から存在する)。`fetch_backfill` はギャップ埋め呼び出しとスクロールを区別できないため、別途の修正が必要。本 Issue では直さない。当初の「`fillRemainingGap` は境界と無関係」という記述はこの点で誤りだった。
   - 既存の別問題: フィルタが強い複数ソースで、フロントの `until_id`（表示中の最古ノート）が浅いソースの生最古IDより古くなり、API 経路でその間のノートを読み飛ばす。本 Issue では直さず、別 Issue として起票する。連続性チェックがあるため、キャッシュ優先経路が読み飛ばしを「完全」と誤認することはない。
   - ミュート設定変更後の古いキャッシュ問題（既存挙動を変えない。ミュート変更時は従来どおり `clear_all_fetch_boundaries` で全境界が破棄される）。
 
@@ -120,12 +126,12 @@ fn plan_boundary_initial(outcomes: &[SourceOutcome]) -> Vec<(u32, String)>;
 
 #### `open_stream_and_fetch`
 
-対象条件 `!use_cache && !kinds.is_empty()` のとき、`cache_notes(&fetch.cacheable)` の後に `replace_fetch_boundaries(column.id, plan_boundary_initial(...))` を呼ぶ。
+対象条件 `!use_cache && !kinds.is_empty() && kinds.iter().all(|k| k.stream_request().is_some())` のとき、`cache_notes(&fetch.cacheable)` の後に `replace_fetch_boundaries(column.id, plan_boundary_initial(...))` を呼ぶ。
 
 #### `fetch_backfill`
 
 ```text
-cache_eligible = !use_cache && !kinds.is_empty()
+cache_eligible = !use_cache && !kinds.is_empty() && kinds.iter().all(|k| k.stream_request().is_some())
 if cache_eligible:
     boundaries = get_fetch_boundaries(column.id)      // 失敗は握りつぶして空扱い
     if boundaries が 0..kinds.len() の全インデックスを含む:
@@ -170,7 +176,7 @@ return fetch.notes
 - `plan_boundary_initial` / `plan_boundary_extend` の単体テスト: 全ソース成功、1ソース失敗、枯渇ソース（`""`）、ソース単位の連続性（1ソースだけ `until_id < prev`）、境界未確定ソース。
 - 回帰テスト（truncateによる欠落）: 2ソースが交互にインターリーブし全件フィルタを通過する状態で `fetch_and_filter_multi` 相当の合成を行い、`cacheable` をキャッシュした後、`E` 以上の全ノートが `load_cached_before` で取得できること。`notes`（truncate後）だけをキャッシュした場合は欠落することを対比で示す。
 - 有効境界 `E = max(b_i)` の判定（全ソースの境界が揃わない場合は API へ、枯渇ソース `""` が `E` を塞がない）。既存の `cache_backfill_page` テストは維持する。
-- `from cache` 併用カラムは常にAPI経由（`cache_eligible == false`）。
+- `from cache` 併用カラム、およびストリーミングを持たないソース(User / Tag / Search)を含むカラムは常にAPI経由（`cache_eligible == false`）。
 
 ## 実装ボリュームの見立て
 
