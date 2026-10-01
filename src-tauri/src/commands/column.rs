@@ -354,6 +354,7 @@ pub async fn resume_column(
                         boundary_id: None,
                         sources: vec![],
                         all_reached: false,
+                        dropped_floor: None,
                     });
                 // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
                 // 残るので、空判定の前に行う(Issue #432)。
@@ -870,6 +871,10 @@ struct GapFillResult {
     sources: Vec<GapSourceState>,
     /// 全ソースが newest_known_id に追いついたか。偽なら穴が残りうる(収集が0件でも偽になりうる)。
     all_reached: bool,
+    /// `limit` で切り捨てたノートの id の最大値。切り捨てが無ければ None。
+    /// 全ソースが追いついていても、内側ループは1周で各ソース1ページずつ足すため `limit` を超えうる。
+    /// 切り捨てた範囲はキャッシュに入らないので、これより新しい側だけが「完全」と言える(Issue #432)。
+    dropped_floor: Option<String>,
 }
 
 /// 収集済みノートを重複除去・整形し、`newest_known_id` に追いつけたかを判定する。
@@ -878,10 +883,21 @@ fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool,
     let mut seen = std::collections::HashSet::new();
     collected.retain(|n| seen.insert(n.id.clone()));
     collected.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-    collected.truncate(limit.max(0) as usize);
+    let keep = limit.max(0) as usize;
+    // 切り詰めは created_at 順、境界は id 順なので、捨てたノートの id が残した最古より大きい
+    // こともありうる。境界の下限には「捨てた id の最大値」を使う(Issue #432)。
+    let dropped_floor = collected.iter().skip(keep).map(|n| n.id.as_str()).max().map(str::to_string);
+    collected.truncate(keep);
     let truncated = !all_sources_reached_target && !collected.is_empty();
     let boundary_id = if truncated { collected.last().map(|n| n.id.clone()) } else { None };
-    GapFillResult { notes: collected, truncated, boundary_id, sources: vec![], all_reached: all_sources_reached_target }
+    GapFillResult {
+        notes: collected,
+        truncated,
+        boundary_id,
+        sources: vec![],
+        all_reached: all_sources_reached_target,
+        dropped_floor,
+    }
 }
 
 /// backfill 要求(until_id より古いページ)をキャッシュのみで賄えるか判定する純粋関数。
@@ -925,6 +941,7 @@ async fn fill_gap(
             boundary_id: None,
             sources: vec![],
             all_reached: true,
+            dropped_floor: None,
         });
     }
     let client = state.client_for(account_id)?;
@@ -1281,35 +1298,41 @@ fn backfill_cache_eligible(resolved: &ResolvedSources) -> bool {
 /// 打ち切られたギャップ埋めの後に書き戻す境界の一覧(`replace_fetch_boundaries` に渡す全行)。
 /// 変更が無ければ None。`prev` は既存の境界(ソース位置 -> id)。
 ///
-/// 全ソースが追いついた(`all_reached`)なら穴は無いので None。そうでなければ `prev` の各行を、
-/// - 追いついたソース: そのまま。
-/// - 追いついていないソースで `oldest_fetched` が `Some(o)`: `max(b, o, floor)`。
-///   `floor`(`GapFillResult::boundary_id`=切り詰め後の最古ノート)を含めるのは、
-///   `finalize_gap_fill` が収集結果を `limit` 件に切り詰めてからキャッシュに書くため、
-///   `o` まで遡っていても切り捨てた範囲は `column_note` に無いから。
+/// 全ソースが追いつき(`all_reached`)、かつ切り捨ても無い(`dropped_floor` が None)なら穴は
+/// 無いので None。そうでなければ `prev` の各行を、
+/// - 追いついたソース: `dropped_floor` があれば `max(b, dropped_floor)`、無ければそのまま。
+/// - 追いついていないソースで `oldest_fetched` が `Some(o)`: `max(b, o, dropped_floor)`。
 /// - それ以外(1ページも取れていない、ソース情報が無い): 行を落として未確定にする。
+///
+/// `dropped_floor`(`finalize_gap_fill` が `limit` で切り捨てたノートの id の最大値)を全ソースに
+/// 適用するのは、切り詰めが全ソース合算で行われ、追いついたソースのノートも捨てられうるため。
+/// 行はソースごとの「id > b は揃っている」を表し、後続の延長もソースごとに動くので、
+/// 追いついたソースの行を古いまま残すと意味が壊れる。
+/// 未到達ソースが `o` まで遡っていても、切り捨てた範囲は `column_note` に無いので `dropped_floor`
+/// も下限に含める。
 ///
 /// `prev` に無いソースは行を作らない。
 fn plan_boundary_raise_after_gap(
     prev: &std::collections::HashMap<u32, String>,
     sources: &[GapSourceState],
     all_reached: bool,
-    floor: Option<&str>,
+    dropped_floor: Option<&str>,
 ) -> Option<Vec<(u32, String)>> {
-    if all_reached || prev.is_empty() {
+    if (all_reached && dropped_floor.is_none()) || prev.is_empty() {
         return None;
     }
+    let raise = |b: &str, extra: Option<&str>| -> String {
+        let mut v = b;
+        for c in [extra, dropped_floor].into_iter().flatten() {
+            v = v.max(c);
+        }
+        v.to_string()
+    };
     let mut next: Vec<(u32, String)> = prev
         .iter()
         .filter_map(|(i, b)| match sources.get(*i as usize) {
-            Some(s) if s.reached_target => Some((*i, b.clone())),
-            Some(GapSourceState { oldest_fetched: Some(o), .. }) => {
-                let mut v = b.as_str().max(o.as_str());
-                if let Some(f) = floor {
-                    v = v.max(f);
-                }
-                Some((*i, v.to_string()))
-            }
+            Some(s) if s.reached_target => Some((*i, raise(b, None))),
+            Some(GapSourceState { oldest_fetched: Some(o), .. }) => Some((*i, raise(b, Some(o)))),
             _ => None,
         })
         .collect();
@@ -1342,7 +1365,7 @@ async fn apply_gap_fill_boundaries(cache: &NoteCacheStore, column_id: &str, gap:
     };
     let prev: std::collections::HashMap<u32, String> = prev.into_iter().collect();
     if let Some(entries) =
-        plan_boundary_raise_after_gap(&prev, &gap.sources, gap.all_reached, gap.boundary_id.as_deref())
+        plan_boundary_raise_after_gap(&prev, &gap.sources, gap.all_reached, gap.dropped_floor.as_deref())
     {
         let _ = cache.replace_fetch_boundaries(column_id, &entries).await;
     }
@@ -1948,13 +1971,34 @@ mod tests {
     }
 
     #[test]
-    fn plan_boundary_raise_after_gap_keeps_reached_sources_and_raises_only_the_truncated_ones() {
+    fn plan_boundary_raise_after_gap_leaves_reached_sources_alone_unless_notes_were_dropped() {
         let prev = bmap(&[(0, "n100"), (1, "n200")]);
         let sources = [gs(Some("n500"), false), gs(Some("n150"), true)];
+        // 切り捨てが無ければ、追いついたソース(1)の行はそのまま。未到達(0)だけ oldest_fetched へ。
         assert_eq!(
-            plan_boundary_raise_after_gap(&prev, &sources, false, Some("n450")),
+            plan_boundary_raise_after_gap(&prev, &sources, false, None),
             Some(pairs(&[(0, "n500"), (1, "n200")]))
         );
+        // 切り捨てがあれば、追いついたソースも dropped_floor まで引き上げる(Issue #432 レビュー指摘2)。
+        // 切り詰めは全ソース合算で行うため、追いついたソースのノートも捨てられうる。
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &sources, false, Some("n450")),
+            Some(pairs(&[(0, "n500"), (1, "n450")]))
+        );
+    }
+
+    #[test]
+    fn plan_boundary_raise_after_gap_raises_every_source_when_all_reached_but_notes_were_dropped() {
+        // 全ソースが追いついても、limit 超過で収集結果を切り詰めると newest_known 直上の範囲が
+        // キャッシュに入らない(Issue #432 レビュー指摘1)。
+        let prev = bmap(&[(0, "n100"), (1, "n200")]);
+        let sources = [gs(Some("n050"), true), gs(Some("n150"), true)];
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &sources, true, Some("n300")),
+            Some(pairs(&[(0, "n300"), (1, "n300")]))
+        );
+        // 切り捨ても無ければ何もしない
+        assert_eq!(plan_boundary_raise_after_gap(&prev, &sources, true, None), None);
     }
 
     #[test]
@@ -1983,6 +2027,24 @@ mod tests {
     }
 
     #[test]
+    fn finalize_gap_fill_reports_the_largest_dropped_id_even_when_all_sources_reached() {
+        // 全ソースが追いついていても、limit 超過分は切り捨てられる(Issue #432 レビュー指摘1)。
+        let result = finalize_gap_fill(vec![note("n3", 30), note("n2", 20), note("n1", 10)], true, 2);
+        assert!(result.all_reached);
+        assert_eq!(result.dropped_floor.as_deref(), Some("n1"));
+
+        // 切り詰めは created_at 順、境界は id 順。捨てたノートの id が残した最古より大きくなりうる
+        // ので、下限は「捨てた id の最大値」でなければならない(レビュー指摘3)。
+        let result = finalize_gap_fill(vec![note("n5", 10), note("n9", 5)], true, 1);
+        assert_eq!(result.notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["n5"]);
+        assert_eq!(result.dropped_floor.as_deref(), Some("n9"));
+
+        // 切り捨てが無ければ None
+        assert_eq!(finalize_gap_fill(vec![note("n1", 10)], true, 100).dropped_floor, None);
+        assert_eq!(finalize_gap_fill(vec![], false, 100).dropped_floor, None);
+    }
+
+    #[test]
     fn restrict_to_boundary_keeps_notes_at_or_newer_than_the_effective_boundary() {
         let cached = vec![note("n5", 50), note("n3", 30), note("n1", 10)];
         // 境界未確定なら絞らない
@@ -1996,13 +2058,14 @@ mod tests {
         assert!(restrict_to_boundary(cached, Some("n9")).is_empty());
     }
 
-    fn gap_result(sources: Vec<GapSourceState>, all_reached: bool, boundary_id: Option<&str>) -> GapFillResult {
+    fn gap_result(sources: Vec<GapSourceState>, all_reached: bool, dropped_floor: Option<&str>) -> GapFillResult {
         GapFillResult {
             notes: vec![],
-            truncated: boundary_id.is_some(),
-            boundary_id: boundary_id.map(str::to_string),
+            truncated: !all_reached,
+            boundary_id: None,
             sources,
             all_reached,
+            dropped_floor: dropped_floor.map(str::to_string),
         }
     }
 
@@ -2016,7 +2079,7 @@ mod tests {
 
         let mut got = cache.get_fetch_boundaries("col1").await.unwrap();
         got.sort();
-        assert_eq!(got, pairs(&[(0, "n350"), (1, "n200")]));
+        assert_eq!(got, pairs(&[(0, "n350"), (1, "n350")]));
     }
 
     #[tokio::test]

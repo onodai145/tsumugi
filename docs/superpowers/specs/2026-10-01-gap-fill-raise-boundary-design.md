@@ -44,9 +44,11 @@ struct GapSourceState {
 // GapFillResult に追加
 sources: Vec<GapSourceState>,
 all_reached: bool,
+/// limit で切り捨てたノートの id の最大値。切り捨てが無ければ None。
+dropped_floor: Option<String>,
 ```
 
-`oldest_fetched` は既存の `cursors[i]`、`reached_target` は既存の `reached_target[i]` から作る（ロジックの変更なし）。`all_reached` は `reached_target.iter().all(..)`。`resolved.kinds.is_empty()` の早期 return では `sources: vec![]`, `all_reached: true`。
+`oldest_fetched` は既存の `cursors[i]`、`reached_target` は既存の `reached_target[i]` から作る（ロジックの変更なし）。`all_reached` は `reached_target.iter().all(..)`。`dropped_floor` は `finalize_gap_fill` が `limit` へ切り詰める前に、捨てるノートの id の最大値として計算する。`resolved.kinds.is_empty()` の早期 return では `sources: vec![]`, `all_reached: true`, `dropped_floor: None`。
 
 ### 引き上げの計画（純粋関数）
 
@@ -56,19 +58,21 @@ fn plan_boundary_raise_after_gap(
     prev: &HashMap<u32, String>,
     sources: &[GapSourceState],
     all_reached: bool,
-    floor: Option<&str>, // GapFillResult::boundary_id(切り詰め後の最古ノートID)
+    dropped_floor: Option<&str>, // GapFillResult::dropped_floor(limit で捨てたノートidの最大値)
 ) -> Option<Vec<(u32, String)>>
 ```
 
-- `all_reached` が真なら None（穴は無い。何もしない）。
-- 偽のとき、`prev` の各行 `(i, b)` について新しい境界を決め、全行を並べた `Vec` を返す（`replace_fetch_boundaries` に渡すため、変更しない行も含める）。
-  - `sources[i].reached_target` が真: `b` のまま。
-  - `reached_target` が偽で `oldest_fetched` が `Some(o)`: `max(b, o, floor)`。
+- `all_reached` が真で、かつ `dropped_floor` が None なら None（穴は無い。何もしない）。
+- そうでないとき、`prev` の各行 `(i, b)` について新しい境界を決め、全行を並べた `Vec` を返す（`replace_fetch_boundaries` に渡すため、変更しない行も含める）。
+  - `sources[i].reached_target` が真: `dropped_floor` があれば `max(b, dropped_floor)`、無ければ `b` のまま。
+  - `reached_target` が偽で `oldest_fetched` が `Some(o)`: `max(b, o, dropped_floor)`。
   - `reached_target` が偽で `oldest_fetched` が `None`: その行を落とす（未確定にする）。
 - `prev` に無いソース（未確定）は行を作らない。
 - 結果が `prev` と同一なら None。
 
-`floor`（`boundary_id`）を `max` に含める理由: `finalize_gap_fill` は収集結果を新しい順に `limit` 件へ切り詰めて `cache_notes` に書く。そのため、ソースが `o` まで遡って取得していても、切り詰めで捨てられた範囲（`boundary_id` より古い側）は `column_note` に無い。完全と言えるのは `max(各ソースの o, boundary_id)` より新しい側だけ。
+`dropped_floor` を `max` に含める理由: `finalize_gap_fill` は収集結果を新しい順に `limit` 件へ切り詰めて `cache_notes` に書く。そのため、ソースが `o` まで遡って取得していても、切り捨てられた範囲は `column_note` に無い。完全と言えるのは `max(各ソースの o, 捨てたノートの id の最大値)` より新しい側だけ。切り詰めは created_at 順、境界は id 順なので、捨てたノートの id が残した最古より大きくなりうる。下限は「残した最古」(`boundary_id`)ではなく「捨てた id の最大値」とする。
+
+追いついたソースにも `dropped_floor` を適用し、`all_reached` が真でも `dropped_floor` があれば動かす理由（実装中の最終レビューで判明した、当初の spec の前提の誤り）: `fill_gap` の内側ループは1周で各ソースが1ページずつ足すため、全ソースが追いついたのに収集件数が `limit` を超えて切り捨てが起きうる。切り詰めは全ソース合算なので追いついたソースのノートも捨てられる。行は「ソースごとの id > b は揃っている」を表し、後続の延長（`plan_boundary_extend` / `extend_fetch_boundaries`）もソースごとに動くため、追いついたソースの行を古いまま残すと、後で有効境界が穴の中へ戻る。
 
 判定を `truncated`（収集が1件以上ある場合のみ真）ではなく `all_reached` にする理由: 全ソースの取得失敗や強いフィルタで収集が0件でも、未取得の範囲は残る。その場合 `floor` は None で、`o` だけで引き上げる。`o` が取れないソースは行を落とす。
 
@@ -95,7 +99,8 @@ async fn apply_gap_fill_boundaries(cache: &NoteCacheStore, column_id: &str, gap:
 ## 限界
 
 - 打ち切られたギャップ埋めで、ある境界行のあるソースが1ページも取得できなかった場合、その行を落として未確定にする。有効境界が `None` になり、そのカラムはキャッシュ優先をやめてAPI経由になる。復元一覧も絞らない。境界は、カラムのキャッシュが空になって `open_stream_and_fetch` が作り直すまで戻らない。かなり稀で、動作は安全側（APIへ行く）。
-- 引き上げは、ギャップ埋めの完了から `replace_fetch_boundaries` までの間に走る `fetch_backfill` の境界延長と競合しうる（#429 の既知項目と同種で、窓は狭い）。
+- 引き上げは、`fetch_backfill` の境界延長と競合しうる（#429 の既知項目と同種）。`fetch_backfill` は先頭で境界を読み、API取得の往復の後で `extend_fetch_boundaries` を書くため、窓は往復の間ずっと開いている。たとえば起動直後のギャップ埋め中にユーザーが最下部まで `loadMore` すると、古い境界を根拠に延長が書かれ、引き上げた境界が穴より下へ戻りうる。窓を塞ぐには境界の更新をカラム単位で直列化する必要があり、本Issueの範囲外とする。
+- ギャップ埋めが `limit` で切り捨てたのに全ソースが追いついた場合(`truncated=false`)、フロントにギャップマーカーは出ない。境界は引き上げられるので再起動後は穴が復元一覧から外れるが、同一セッション内の一覧には穴が静かに残る（既存の挙動）。
 
 ## 代替案（不採用）
 
@@ -106,10 +111,12 @@ async fn apply_gap_fill_boundaries(cache: &NoteCacheStore, column_id: &str, gap:
 ## テスト
 
 - Rust 単体（`plan_boundary_raise_after_gap`）:
-  - 全ソース追いつき → None。
-  - 単一ソースが打ち切り → `max(b, oldest_fetched, floor)` へ引き上げ。
-  - 複数ソースで一部だけ追いつき → 追いついたソースの行は据え置き、打ち切られたソースだけ引き上げ。
-  - 収集0件（`floor = None`）でも `oldest_fetched` で引き上げ。
+  - 全ソース追いつき、切り捨て無し → None。
+  - 全ソース追いついたが切り捨てあり（`dropped_floor = Some`）→ 全ソースを `max(b, dropped_floor)` へ引き上げ。
+  - 単一ソースが打ち切り → `max(b, oldest_fetched, dropped_floor)` へ引き上げ。
+  - 複数ソースで一部だけ追いつき → 切り捨て無しなら追いついたソースの行は据え置き、切り捨てありなら `dropped_floor` まで引き上げ。
+  - 収集0件（`dropped_floor = None`）でも `oldest_fetched` で引き上げ。
+  - `finalize_gap_fill`: 全ソース追いついても `limit` 超過で `dropped_floor` を返す。created_at 順と id 順がずれる場合は捨てた id の最大値を返す。
   - `oldest_fetched = None` のソース → 行を落とす。
   - `prev` に無いソース → 行を作らない。
   - 引き上げ後の値が既存と同一 → None。
