@@ -80,7 +80,7 @@ pub async fn get_user_notes(
     until_id: Option<String>,
 ) -> Result<Vec<Note>> {
     let client = state.client_for(&account_id)?;
-    let kind = crate::domain::ColumnKind::User { user_id };
+    let kind = ColumnKind::User { user_id };
     let (endpoint, body) = kind.rest_request(20, until_id.as_deref()).expect("User kind always has rest_request");
     api::notes::fetch_notes(&client, endpoint, &body).await
 }
