@@ -708,6 +708,134 @@ describe("app.fillRemainingGap (Issue #148)", () => {
   });
 });
 
+describe("app.fillGapBelow (ノートメニュー「この投稿より前を取得」)", () => {
+  /// invoke("fetch_backfill") を、渡された ページ列 で順に返す。呼び出し引数を calls に積む。
+  function mockBackfillPages(pages: Note[][], calls: unknown[]) {
+    let call = 0;
+    invokeMock.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "fetch_backfill") {
+        calls.push(args);
+        return pages[call++] ?? [];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+  }
+
+  it("一覧に無いノートなら何もしない", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n9", createdAt: 90 })]);
+    app.groups = [makeGroup([tab])];
+
+    await app.fillGapBelow(tab.id, "nope");
+
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("次のノートに到達するまで、キャッシュを使わずに取得して穴の位置へマージする", async () => {
+    // n9 の次の表示ノートは n5。間 (n5, n9) が穴。
+    const tab = makeNoteTab([
+      makeNote({ id: "n9", createdAt: 90 }),
+      makeNote({ id: "n5", createdAt: 50 }),
+      makeNote({ id: "n1", createdAt: 10 }),
+    ]);
+    app.groups = [makeGroup([tab])];
+    const calls: unknown[] = [];
+    mockBackfillPages(
+      [
+        [makeNote({ id: "n8", createdAt: 80 }), makeNote({ id: "n7", createdAt: 70 })],
+        [makeNote({ id: "n6", createdAt: 60 }), makeNote({ id: "n5", createdAt: 50 })],
+      ],
+      calls,
+    );
+
+    await app.fillGapBelow(tab.id, "n9");
+
+    // 1ページ目は押したノートから、2ページ目は1ページ目の最古から。どちらもキャッシュバイパス。
+    expect(calls).toEqual([
+      { columnId: tab.id, untilId: "n9", bypassCache: true },
+      { columnId: tab.id, untilId: "n7", bypassCache: true },
+    ]);
+    const live = app.groups[0].tabs[0];
+    expect(live.notes.map((n) => n.id)).toEqual(["n9", "n8", "n7", "n6", "n5", "n1"]);
+    expect(live.fillingGap).toBe(false);
+  });
+
+  it("穴が無ければ1回の取得で止まる", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n9", createdAt: 90 }), makeNote({ id: "n8", createdAt: 80 })]);
+    app.groups = [makeGroup([tab])];
+    const calls: unknown[] = [];
+    mockBackfillPages([[makeNote({ id: "n8", createdAt: 80 }), makeNote({ id: "n7", createdAt: 70 })]], calls);
+
+    await app.fillGapBelow(tab.id, "n9");
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it("一覧の最後のノートでは、到達点が無いので1ページだけ取得して続きに追加する", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n9", createdAt: 90 }), makeNote({ id: "n8", createdAt: 80 })]);
+    app.groups = [makeGroup([tab])];
+    const calls: unknown[] = [];
+    mockBackfillPages(
+      [[makeNote({ id: "n7", createdAt: 70 }), makeNote({ id: "n6", createdAt: 60 })], [makeNote({ id: "n5", createdAt: 50 })]],
+      calls,
+    );
+
+    await app.fillGapBelow(tab.id, "n8");
+
+    expect(calls).toEqual([{ columnId: tab.id, untilId: "n8", bypassCache: true }]);
+    expect(app.groups[0].tabs[0].notes.map((n) => n.id)).toEqual(["n9", "n8", "n7", "n6"]);
+  });
+
+  it("到達できなくてもページ上限(10回)で止まる", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n9", createdAt: 90 }), makeNote({ id: "a0", createdAt: 1 })]);
+    app.groups = [makeGroup([tab])];
+    const calls: unknown[] = [];
+    mockBackfillPages(
+      Array.from({ length: 12 }, (_, i) => [makeNote({ id: `n${String(80 - i).padStart(2, "0")}`, createdAt: 80 - i })]),
+      calls,
+    );
+
+    await app.fillGapBelow(tab.id, "n9");
+
+    expect(calls).toHaveLength(10);
+    expect(app.groups[0].tabs[0].fillingGap).toBe(false);
+  });
+
+  it("ギャップマーカーと同じ穴を埋め切ったらマーカーを消す", async () => {
+    const tab = makeNoteTab(
+      [makeNote({ id: "n9", createdAt: 90 }), makeNote({ id: "n5", createdAt: 50 })],
+      { gapMarker: { boundaryId: "n9", targetId: "n5" } },
+    );
+    app.groups = [makeGroup([tab])];
+    mockBackfillPages([[makeNote({ id: "n7", createdAt: 70 }), makeNote({ id: "n5", createdAt: 50 })]], []);
+
+    await app.fillGapBelow(tab.id, "n9");
+
+    expect(app.groups[0].tabs[0].gapMarker).toBeNull();
+  });
+
+  it("取得中の再実行は無視し、失敗時は fillingGap を戻してエラーモーダルを出す", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n9", createdAt: 90 }), makeNote({ id: "n5", createdAt: 50 })], {
+      fillingGap: true,
+    });
+    app.groups = [makeGroup([tab])];
+    await app.fillGapBelow(tab.id, "n9");
+    expect(invokeMock).not.toHaveBeenCalled();
+
+    app.groups = [makeGroup([makeNoteTab([makeNote({ id: "n9", createdAt: 90 }), makeNote({ id: "n5", createdAt: 50 })])])];
+    app.errorModal = null;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "fetch_backfill") throw { kind: "network", message: "boom" };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.fillGapBelow("tab1", "n9");
+
+    expect(app.groups[0].tabs[0].fillingGap).toBe(false);
+    expect(app.errorModal).not.toBeNull();
+  });
+});
+
 describe("AppStore.now (共有tick)", () => {
   beforeEach(() => {
     // boot() は list_accounts の結果を this.accounts に代入し、その直後に

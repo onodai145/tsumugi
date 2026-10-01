@@ -589,7 +589,7 @@
                   onclick={(e) => e.stopPropagation()}
                   role="presentation"
                 >
-                  <NoteMenu {accountId} note={inner} pureRenoteOf={isPureRenote ? note : undefined} onclose={() => (noteMenuOpen = false)} />
+                  <NoteMenu {accountId} note={inner} pureRenoteOf={isPureRenote ? note : undefined} {tabId} listNoteId={tabId ? note.id : undefined} onclose={() => (noteMenuOpen = false)} />
                 </div>
               </div>
             {/if}
