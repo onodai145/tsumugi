@@ -1,15 +1,26 @@
 <script lang="ts">
   import type { Note, Clip } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
-  import { Star, Paperclip, ChevronRight, Trash2, Copy, Repeat2 } from "@lucide/svelte";
+  import { Star, Paperclip, ChevronRight, Trash2, Copy, Repeat2, ArrowDownToLine } from "@lucide/svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
   let {
     accountId,
     note,
     pureRenoteOf,
+    tabId,
+    listNoteId,
     onclose,
-  }: { accountId: string; note: Note; pureRenoteOf?: Note; onclose: () => void } = $props();
+  }: {
+    accountId: string;
+    note: Note;
+    pureRenoteOf?: Note;
+    /// カラム内のトップレベルのノートのときだけ渡される(「この投稿より前を取得」の対象カラム)。
+    tabId?: string;
+    /// カラムの一覧に並んでいるノートのid(純リノートではリノート自身。`note` はリノート先になる)。
+    listNoteId?: string;
+    onclose: () => void;
+  } = $props();
 
   const isOwnNote = $derived(app.accounts.find((a) => a.id === accountId)?.userId === note.user.id);
   const canUndoRenote = $derived(
@@ -31,6 +42,11 @@
     if (note.text) {
       navigator.clipboard.writeText(note.text).catch((e) => console.error("本文のコピーに失敗しました", e));
     }
+    onclose();
+  }
+
+  function fetchOlder() {
+    if (tabId && listNoteId) void app.fillGapBelow(tabId, listNoteId);
     onclose();
   }
 
@@ -112,6 +128,12 @@
     <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={copyText}>
       <Copy size={16} />
       内容をコピー
+    </button>
+  {/if}
+  {#if tabId && listNoteId}
+    <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={fetchOlder}>
+      <ArrowDownToLine size={16} />
+      この投稿より前を取得
     </button>
   {/if}
   <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={toggleFavorite}>

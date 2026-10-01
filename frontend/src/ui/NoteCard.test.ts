@@ -315,6 +315,47 @@ describe("投稿削除メニュー", () => {
     expect(queryByText("内容をコピー")).toBeNull();
   });
 
+  it("カラム内のノート(tabIdあり)では「この投稿より前を取得」を表示し、クリックで一覧上のノートidを渡して閉じる", async () => {
+    const spy = vi.spyOn(app, "fillGapBelow").mockResolvedValue(undefined);
+    const note = makeNote({ id: "n9" });
+    const { getByLabelText, getByText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1", tabId: "tab1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("この投稿より前を取得").click();
+
+    expect(spy).toHaveBeenCalledWith("tab1", "n9");
+    expect(queryByText("この投稿より前を取得")).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("純リノートでは、リノート先ではなくカラムの一覧上のノート(リノート自身)のidを渡す", async () => {
+    const spy = vi.spyOn(app, "fillGapBelow").mockResolvedValue(undefined);
+    const target = makeNote({ id: "target1", text: "元の投稿" });
+    const renote = makeNote({ id: "rn9", text: null, renoteId: "target1", renote: target });
+    const { getByLabelText, getByText } = render(NoteCard, {
+      props: { note: renote, accountId: "acc1", tabId: "tab1" },
+    });
+
+    await getByLabelText("その他").click();
+    await getByText("この投稿より前を取得").click();
+
+    expect(spy).toHaveBeenCalledWith("tab1", "rn9");
+    spy.mockRestore();
+  });
+
+  it("カラム外(tabIdなし: プロフィール・検索・引用内)では「この投稿より前を取得」を表示しない", async () => {
+    const note = makeNote({ id: "n9" });
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note, accountId: "acc1" },
+    });
+
+    await getByLabelText("その他").click();
+
+    expect(queryByText("この投稿より前を取得")).toBeNull();
+  });
+
   it("本文がnullのノートでは「内容をコピー」項目を表示しない", async () => {
     const note = makeNote({ text: null });
     const { getByLabelText, queryByText } = render(NoteCard, {

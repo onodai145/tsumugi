@@ -1786,6 +1786,21 @@ class AppStore {
     }
   }
 
+  /// backfill で取得したノートを一覧へ id 降順でマージし、新規分を subNote 購読する。
+  /// MAX_NOTES で切り捨てない(Issue #433, #239 と同じ理由)。古い側を切ると、更新後の
+  /// gapMarker.boundaryId のノートが一覧から消えてマーカーが描画されなくなる。
+  #mergeBackfilled(tab: TabView, fetched: Note[]) {
+    const known = new Set(tab.notes.map((n) => n.id));
+    const fresh = fetched.filter((n) => !known.has(n.id));
+    if (fresh.length === 0) return;
+    const merged = [...tab.notes, ...fresh];
+    merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    tab.notes = merged;
+    // captureInitial 同様に subNote 購読しないと、この先そのノートへの
+    // リアクション追加/削除が noteUpdated イベントとして届かず反映されない(Issue #3)。
+    this.#captureInitial(tab.id, fresh);
+  }
+
   /// 起動時ギャップ埋めが打ち切られて残った空白を、ユーザー操作で埋める(Issue #148)。
   /// tab.gapMarker.targetId に到達するまで fetch_backfill を最大 GAP_CONTINUE_MAX_PAGES 回
   /// ループ呼び出しする。到達しなければ gapMarker を最新の境界で更新して残す(再クリック可能)。
@@ -1800,19 +1815,7 @@ class AppStore {
         // ギャップ区間 (targetId, boundaryId) は未取得なので、キャッシュ優先を避けて必ずAPIから取る(Issue #427)。
         const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId, true));
         if (fetched.length === 0) break;
-
-        const known = new Set(tab.notes.map((n) => n.id));
-        const fresh = fetched.filter((n) => !known.has(n.id));
-        if (fresh.length > 0) {
-          const merged = [...tab.notes, ...fresh];
-          merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-          // MAX_NOTES で切り捨てない(Issue #433, #239 と同じ理由)。古い側を切ると、更新後の
-          // gapMarker.boundaryId のノートが一覧から消えてマーカーが描画されなくなる。
-          tab.notes = merged;
-          // captureInitial 同様に subNote 購読しないと、この先そのノートへの
-          // リアクション追加/削除が noteUpdated イベントとして届かず反映されない(Issue #3)。
-          this.#captureInitial(tab.id, fresh);
-        }
+        this.#mergeBackfilled(tab, fetched);
 
         if (fetched.some((n) => n.id <= targetId)) {
           if (tab.gapMarker?.targetId === targetId) tab.gapMarker = null;
@@ -1820,6 +1823,38 @@ class AppStore {
         }
         boundaryId = fetched[fetched.length - 1].id;
         if (tab.gapMarker?.targetId === targetId) tab.gapMarker = { boundaryId, targetId };
+      }
+    } catch (e) {
+      this.#failModal(e);
+    } finally {
+      tab.fillingGap = false;
+    }
+  }
+
+  /// ノートメニュー「この投稿より前を取得」: 一覧上の `noteId` のノートから、一覧上の次のノートに
+  /// 到達するまで(最大 GAP_CONTINUE_MAX_PAGES 回)キャッシュを使わずに過去ページを取得して、穴の位置へ
+  /// マージする。穴が無ければ1回の取得で止まる。一覧の最後のノートには到達点が無いので1ページだけ取得する。
+  /// 押したノートがギャップマーカーの基準で、埋め切ったらマーカーも消す。
+  async fillGapBelow(tabId: string, noteId: string) {
+    const tab = this.#findTab(tabId);
+    if (!tab || tab.fillingGap) return;
+    const index = tab.notes.findIndex((n) => n.id === noteId);
+    if (index < 0) return;
+    const targetId = tab.notes[index + 1]?.id ?? null;
+    tab.fillingGap = true;
+    let boundaryId = noteId;
+    try {
+      for (let page = 0; page < GAP_CONTINUE_MAX_PAGES; page++) {
+        const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId, true));
+        if (fetched.length === 0) break;
+        this.#mergeBackfilled(tab, fetched);
+
+        if (targetId === null) break;
+        if (fetched.some((n) => n.id <= targetId)) {
+          if (tab.gapMarker?.targetId === targetId) tab.gapMarker = null;
+          break;
+        }
+        boundaryId = fetched[fetched.length - 1].id;
       }
     } catch (e) {
       this.#failModal(e);
