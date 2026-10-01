@@ -313,7 +313,14 @@ pub async fn resume_column(
         vec![]
     } else {
         let cached = state.cache.load_cached(&column.id, INITIAL_LIMIT).await?;
-        let notes = if cached.is_empty() { vec![] } else { cached };
+        // ギャップ埋めが打ち切られて境界が引き上げられていると、境界より古い側には穴がありうる。
+        // 復元一覧が穴をまたがないよう、有効境界以上に絞る。結果が空なら下の「キャッシュが空」
+        // 経路(REST初回取得)に入る(Issue #432)。
+        let restore_e = match resolved.as_ref() {
+            Some(r) => restore_boundary(&state, &column.id, r).await,
+            None => None,
+        };
+        let notes = restrict_to_boundary(cached, restore_e.as_deref());
         state.cache_metrics.record_resume(!notes.is_empty());
         notes
     };
@@ -348,6 +355,9 @@ pub async fn resume_column(
                         sources: vec![],
                         all_reached: false,
                     });
+                // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
+                // 残るので、空判定の前に行う(Issue #432)。
+                apply_gap_fill_boundaries(&state.cache, &column_id, &gap_result).await;
                 if gap_result.notes.is_empty() {
                     return;
                 }
@@ -930,6 +940,9 @@ async fn fill_gap(
     // done とは別に「newest_known_id に本当に追いついたか」を持つ。done はページ枯渇/失敗
     // でも true になるため、truncated 判定には使えない。
     let mut reached_target: Vec<bool> = vec![false; resolved.kinds.len()];
+    // ソースごとに遡れた最古の生ページIDを「ページ内の最小id」で持つ(Issue #432)。境界の比較が
+    // id の辞書順のため、API用の cursors(created_at降順の最後)とは別に持つ。
+    let mut oldest_fetched: Vec<Option<String>> = vec![None; resolved.kinds.len()];
 
     for _ in 0..GAP_FILL_MAX_PAGES {
         if done.iter().all(|d| *d) || collected.len() as i32 >= limit {
@@ -955,6 +968,11 @@ async fn fill_gap(
                 continue;
             }
             any_fetched = true;
+            if let Some(m) = page.iter().map(|n| n.id.as_str()).min() {
+                if oldest_fetched[i].as_deref().is_none_or(|o| m < o) {
+                    oldest_fetched[i] = Some(m.to_string());
+                }
+            }
             page.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
             let oldest_this_page = page.last().map(|n| n.id.clone());
             for n in page {
@@ -979,7 +997,13 @@ async fn fill_gap(
     }
 
     let all_reached = reached_target.iter().all(|r| *r);
-    Ok(finalize_gap_fill(collected, all_reached, limit))
+    let mut result = finalize_gap_fill(collected, all_reached, limit);
+    result.sources = oldest_fetched
+        .into_iter()
+        .zip(reached_target)
+        .map(|(oldest_fetched, reached_target)| GapSourceState { oldest_fetched, reached_target })
+        .collect();
+    Ok(result)
 }
 
 /// フラッピング再接続時に同一カラムへ複数波のギャップ埋めタスクが多重起動されないよう、
@@ -1055,6 +1079,9 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
     else {
         return;
     };
+    // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
+    // 残るので、空判定の前に行う(Issue #432)。
+    apply_gap_fill_boundaries(&state.cache, &column.id, &gap_result).await;
     if gap_result.notes.is_empty() {
         return;
     }
@@ -1261,6 +1288,7 @@ fn backfill_cache_eligible(resolved: &ResolvedSources) -> bool {
 ///   `finalize_gap_fill` が収集結果を `limit` 件に切り詰めてからキャッシュに書くため、
 ///   `o` まで遡っていても切り捨てた範囲は `column_note` に無いから。
 /// - それ以外(1ページも取れていない、ソース情報が無い): 行を落として未確定にする。
+///
 /// `prev` に無いソースは行を作らない。
 fn plan_boundary_raise_after_gap(
     prev: &std::collections::HashMap<u32, String>,
@@ -1303,6 +1331,37 @@ fn restrict_to_boundary(mut cached: Vec<Note>, effective: Option<&str>) -> Vec<N
         cached.retain(|n| n.id.as_str() >= e);
     }
     cached
+}
+
+/// 打ち切られたギャップ埋めの結果に応じて、保存済みの境界を引き上げる(Issue #432)。
+/// 境界が無い(cache_eligible でない)カラムでは何もしない。DBエラーは握りつぶす
+/// (更新できなくても従来の挙動に戻るだけで、他の境界書き込みと同じ扱い)。
+async fn apply_gap_fill_boundaries(cache: &NoteCacheStore, column_id: &str, gap: &GapFillResult) {
+    let Ok(prev) = cache.get_fetch_boundaries(column_id).await else {
+        return;
+    };
+    let prev: std::collections::HashMap<u32, String> = prev.into_iter().collect();
+    if let Some(entries) =
+        plan_boundary_raise_after_gap(&prev, &gap.sources, gap.all_reached, gap.boundary_id.as_deref())
+    {
+        let _ = cache.replace_fetch_boundaries(column_id, &entries).await;
+    }
+}
+
+/// `resume_column` の復元一覧を絞る有効境界。キャッシュ優先の対象でないカラムや、
+/// 境界が未確定のカラムは None(絞らない)。
+async fn restore_boundary(state: &AppState, column_id: &str, resolved: &ResolvedSources) -> Option<String> {
+    if !backfill_cache_eligible(resolved) {
+        return None;
+    }
+    let boundaries: std::collections::HashMap<u32, String> = state
+        .cache
+        .get_fetch_boundaries(column_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    effective_boundary(&boundaries, resolved.kinds.len())
 }
 
 /// backfill でキャッシュ読み出し(`load_cached_before` 〜 Hit判定)に入るか。
@@ -1935,6 +1994,57 @@ mod tests {
         assert_eq!(restrict_to_boundary(cached.clone(), Some("")).len(), 3);
         // すべて境界より古ければ空になる
         assert!(restrict_to_boundary(cached, Some("n9")).is_empty());
+    }
+
+    fn gap_result(sources: Vec<GapSourceState>, all_reached: bool, boundary_id: Option<&str>) -> GapFillResult {
+        GapFillResult {
+            notes: vec![],
+            truncated: boundary_id.is_some(),
+            boundary_id: boundary_id.map(str::to_string),
+            sources,
+            all_reached,
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_gap_fill_boundaries_raises_stored_boundaries_when_truncated() {
+        let cache = cache_with(&[]).await;
+        cache.replace_fetch_boundaries("col1", &pairs(&[(0, "n100"), (1, "n200")])).await.unwrap();
+
+        let gap = gap_result(vec![gs(Some("n300"), false), gs(Some("n150"), true)], false, Some("n350"));
+        apply_gap_fill_boundaries(&cache, "col1", &gap).await;
+
+        let mut got = cache.get_fetch_boundaries("col1").await.unwrap();
+        got.sort();
+        assert_eq!(got, pairs(&[(0, "n350"), (1, "n200")]));
+    }
+
+    #[tokio::test]
+    async fn apply_gap_fill_boundaries_leaves_boundaries_when_gap_fully_filled() {
+        let cache = cache_with(&[]).await;
+        cache.replace_fetch_boundaries("col1", &pairs(&[(0, "n100")])).await.unwrap();
+
+        apply_gap_fill_boundaries(&cache, "col1", &gap_result(vec![gs(Some("n050"), true)], true, None)).await;
+
+        assert_eq!(cache.get_fetch_boundaries("col1").await.unwrap(), pairs(&[(0, "n100")]));
+    }
+
+    #[tokio::test]
+    async fn apply_gap_fill_boundaries_is_a_no_op_for_columns_without_boundaries() {
+        let cache = cache_with(&[]).await;
+        apply_gap_fill_boundaries(&cache, "col1", &gap_result(vec![gs(None, false)], false, None)).await;
+        assert!(cache.get_fetch_boundaries("col1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn apply_gap_fill_boundaries_clears_rows_when_fill_gap_errored() {
+        // fill_gap が Err のとき resume_column は sources=[] / all_reached=false を渡す
+        let cache = cache_with(&[]).await;
+        cache.replace_fetch_boundaries("col1", &pairs(&[(0, "n100")])).await.unwrap();
+
+        apply_gap_fill_boundaries(&cache, "col1", &gap_result(vec![], false, None)).await;
+
+        assert!(cache.get_fetch_boundaries("col1").await.unwrap().is_empty());
     }
 
     #[test]
