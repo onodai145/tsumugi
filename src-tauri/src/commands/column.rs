@@ -1596,14 +1596,30 @@ pub async fn search_cache_notes(
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
 /// ただし失敗は `source_outcomes` に `Failed` として残し、backfill境界を進めないようにする。
+/// 画面へ返すのは、各ソースの生ページの最古idのうち最大(透かし)以上のノートだけで、必要なら
+/// 内部で取り直す(`collect_backfill_pages`, Issue #428)。
 async fn fetch_and_filter_multi(
     state: &AppState,
     account_id: &str,
     resolved: &ResolvedSources,
     until_id: Option<&str>,
 ) -> Result<FilteredFetch> {
+    collect_backfill_pages(until_id, resolved.use_cache, |until| async move {
+        fetch_backfill_pass(state, account_id, resolved, until.as_deref()).await
+    })
+    .await
+}
+
+/// `fetch_and_filter_multi` の1パス分の取得(Issue #428)。各ソースから `until_id` より古い
+/// 生ページを取得し、`cache` ソースがあればローカル検索も合成して、フィルタ/ミュートを適用する。
+async fn fetch_backfill_pass(
+    state: &AppState,
+    account_id: &str,
+    resolved: &ResolvedSources,
+    until_id: Option<&str>,
+) -> Result<BackfillPass> {
     let mut all: Vec<Note> = Vec::new();
-    let mut source_outcomes: Vec<SourceOutcome> = Vec::with_capacity(resolved.kinds.len());
+    let mut outcomes: Vec<SourceOutcome> = Vec::with_capacity(resolved.kinds.len());
 
     if !resolved.kinds.is_empty() {
         let client = state.client_for(account_id)?;
@@ -1619,10 +1635,11 @@ async fn fetch_and_filter_multi(
                     Err(_) => SourceOutcome::Failed,
                 },
             };
-            source_outcomes.push(outcome);
+            outcomes.push(outcome);
         }
     }
 
+    let mut cache_min: Option<String> = None;
     if resolved.use_cache {
         let sql_ctx = sql::SqlCtx {
             my_ids: state.eval_context().my_user_ids.into_iter().collect(),
@@ -1637,13 +1654,17 @@ async fn fetch_and_filter_multi(
             None => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
         };
         if let Ok(cached) = state.cache.search_cache(&where_sql, until_id, INITIAL_LIMIT).await {
+            // 検索結果が上限に達したときだけ、その最小idを透かしの候補にする(未満なら枯渇扱い)。
+            if cached.len() as u32 >= INITIAL_LIMIT {
+                cache_min = cached.iter().map(|n| n.id.clone()).min();
+            }
             all.extend(cached);
         }
     }
 
     let ctx = state.eval_context();
     let mute = state.mute.lock().unwrap().clone();
-    let filtered: Vec<Note> = all
+    let notes: Vec<Note> = all
         .into_iter()
         .filter(|n| {
             resolved.filter.matches(n, &ctx)
@@ -1653,8 +1674,7 @@ async fn fetch_and_filter_multi(
         })
         .collect();
 
-    let (notes, cacheable) = split_display_and_cacheable(filtered, resolved.use_cache, None);
-    Ok(FilteredFetch { notes, cacheable, source_outcomes })
+    Ok(BackfillPass { notes, outcomes, cache_min })
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
