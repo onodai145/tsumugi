@@ -476,7 +476,7 @@ pub async fn fetch_backfill(
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    state.cache.cache_notes(&column.id, &fetch.cacheable).await?;
+    cache_fetched(&state.cache, &column.id, &fetch).await?;
     if cache_eligible {
         // ソースごとに、既存の境界と連続している場合のみ延長する(plan_boundary_extend)。
         // 境界未確定のソースは連続性を検証できないので延長せず、カラム開き直し時の
@@ -790,7 +790,7 @@ async fn open_stream_and_fetch(
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    state.cache.cache_notes(&column.id, &fetch.cacheable).await?;
+    cache_fetched(&state.cache, &column.id, &fetch).await?;
     if backfill_cache_eligible(&resolved) {
         let entries = plan_boundary_initial(&fetch.source_outcomes);
         let _ = state.cache.replace_fetch_boundaries(&column.id, &entries).await;
@@ -1145,6 +1145,14 @@ struct FilteredFetch {
     cacheable: Vec<Note>,
     /// `resolved.kinds` と同じ並びの、ソースごとの取得結果。
     source_outcomes: Vec<SourceOutcome>,
+}
+
+/// 取得結果をキャッシュへ書く。書くのは画面用の `notes`(truncate後)ではなく `cacheable`。
+/// backfill境界は「ソースごとのRESTページ全体が column_note に入っている」ことを前提に
+/// 進めるため、`notes` を書くと境界が完全と主張する範囲に欠落が出る。`fetch_backfill` と
+/// `open_stream_and_fetch` の両方がこれを経由することで、書き込み対象を1か所に固定する。
+async fn cache_fetched(cache: &NoteCacheStore, column_id: &str, fetch: &FilteredFetch) -> Result<()> {
+    cache.cache_notes(column_id, &fetch.cacheable).await
 }
 
 /// 1ページ分の生レスポンスから `SourceOutcome` を決める。
@@ -1780,5 +1788,22 @@ mod tests {
         let store = cache_with(&display).await;
         let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
         assert!(got.iter().filter(|n| n.id.as_str() >= e.as_str()).count() < 39);
+    }
+
+    /// 呼び出し側(fetch_backfill / open_stream_and_fetch)がキャッシュへ書くのは
+    /// `FilteredFetch::cacheable` でなければならない。画面用の `notes`(truncate後)を書くと、
+    /// 境界が完全と主張する範囲に欠落が出る。両呼び出し元が共有する `cache_fetched` で固定する。
+    #[tokio::test]
+    async fn cache_fetched_stores_the_cacheable_set_not_the_truncated_display_notes() {
+        let all: Vec<Note> = (1..=40).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        let (notes, cacheable) = split_display_and_cacheable(all, false);
+        assert_eq!((notes.len(), cacheable.len()), (20, 40));
+        let fetch = FilteredFetch { notes, cacheable, source_outcomes: vec![fetched("n02"), fetched("n01")] };
+
+        let store = cache_with(&[]).await;
+        cache_fetched(&store, "col1", &fetch).await.unwrap();
+
+        let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
+        assert_eq!(got.len(), 40);
     }
 }
