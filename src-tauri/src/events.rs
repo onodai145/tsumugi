@@ -20,7 +20,8 @@ pub struct ColumnNote {
 pub struct ColumnGapFill {
     pub column_id: String,
     pub notes: Vec<Note>,
-    /// newest_known_id に追いつく前に gap_fill_limit 等で打ち切られた場合 true。
+    /// newest_known_id に追いつく前に gap_fill_limit 等で打ち切られた場合、または追いついたが
+    /// gap_fill_limit 超過で古い側を切り捨てた場合 true(どちらも間にギャップが残る)。
     pub truncated: bool,
     /// truncated=true のとき、続きを取得する際に fetch_backfill の until_id に使う境界ノートid。
     pub boundary_id: Option<String>,

@@ -864,7 +864,8 @@ struct GapSourceState {
 /// 呼び出し元(resume_column/gap_fill_on_reconnect)がフロントへ伝えるために持つ。
 struct GapFillResult {
     notes: Vec<Note>,
-    /// newest_known_id に追いつく前に limit/ページ数上限で打ち切られた場合 true。
+    /// newest_known_id に追いつく前に limit/ページ数上限で打ち切られた場合、または追いついたが
+    /// limit 超過で古い側を切り捨てた場合 true(どちらも間にギャップが残る)。
     truncated: bool,
     /// truncated=true のとき、取得できた中で一番古いノートのid。
     /// フロントが「続きを取得」で fetch_backfill の until_id に使う。
@@ -890,7 +891,9 @@ fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool,
     // こともありうる。境界の下限には「捨てた id の最大値」を使う(Issue #432)。
     let dropped_floor = collected.iter().skip(keep).map(|n| n.id.as_str()).max().map(str::to_string);
     collected.truncate(keep);
-    let truncated = !all_sources_reached_target && !collected.is_empty();
+    // 全ソースが追いついても、limit 超過で切り捨てがあれば newest_known 直上に穴ができる。
+    // フロントにギャップマーカーを出させて、ユーザーが埋められるようにする。
+    let truncated = (!all_sources_reached_target || dropped_floor.is_some()) && !collected.is_empty();
     let boundary_id = if truncated { collected.last().map(|n| n.id.clone()) } else { None };
     GapFillResult {
         notes: collected,
@@ -1921,6 +1924,18 @@ mod tests {
         assert!(result.truncated);
         assert_eq!(result.boundary_id.as_deref(), Some("n1"));
         assert_eq!(result.notes.len(), 3);
+    }
+
+    #[test]
+    fn finalize_gap_fill_marks_truncated_when_notes_were_dropped_even_if_all_sources_reached_target() {
+        // 全ソースが追いついても、limit 超過分の切り捨てで newest_known 直上に穴ができる。
+        // マーカーを出して、ユーザーが埋められるようにする。基準は残した最古のノート。
+        let collected = vec![note("n3", 30), note("n2", 20), note("n1", 10)];
+        let result = finalize_gap_fill(collected, true, 2);
+
+        assert!(result.truncated);
+        assert_eq!(result.boundary_id.as_deref(), Some("n2"));
+        assert_eq!(result.notes.len(), 2);
     }
 
     #[test]
