@@ -349,7 +349,7 @@ pub enum FilterQuery {
 | `reorder_columns` | `ordered_ids: Vec<String>` | `()` | 並べ替え（D&D 反映） |
 | `list_columns` | — | `Vec<Column>` | 起動時のカラム構成復元 |
 | **タイムライン取得** | | | |
-| `fetch_backfill` | `column_id, until_id: Option<String>` | `Vec<Note>` | 上スクロールで過去ページ取得 |
+| `fetch_backfill` | `column_id, until_id: String, bypass_cache: bool` | `Vec<Note>` | 上スクロール/ギャップ埋めで過去ページ取得。`bypass_cache=true` はキャッシュ優先を使わず常にAPI(Issue #427) |
 | `load_cached` | `column_id, limit: u32` | `Vec<Note>` | 起動時にSQLiteキャッシュから即時復元 |
 | **投稿・操作** | | | |
 | `post_note` | `account_id, draft: NoteDraft` | `Note` | 投稿（本文/CW/可視性/添付/投票/reply/quote） |

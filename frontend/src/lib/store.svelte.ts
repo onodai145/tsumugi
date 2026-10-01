@@ -1769,7 +1769,7 @@ class AppStore {
       } else {
         if (tab.notes.length === 0) return;
         const oldest = tab.notes[tab.notes.length - 1].id;
-        const older = await unwrap(commands.fetchBackfill(tab.id, oldest));
+        const older = await unwrap(commands.fetchBackfill(tab.id, oldest, false));
         const known = new Set(tab.notes.map((n) => n.id));
         const fresh = older.filter((n) => !known.has(n.id));
         // 同上(Issue #239): MAX_NOTESで切り捨てない。
@@ -1797,7 +1797,8 @@ class AppStore {
     let boundaryId = tab.gapMarker.boundaryId;
     try {
       for (let page = 0; page < GAP_CONTINUE_MAX_PAGES; page++) {
-        const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId));
+        // ギャップ区間 (targetId, boundaryId) は未取得なので、キャッシュ優先を避けて必ずAPIから取る(Issue #427)。
+        const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId, true));
         if (fetched.length === 0) break;
 
         const known = new Set(tab.notes.map((n) => n.id));

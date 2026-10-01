@@ -475,6 +475,24 @@ function makeNoteTab(notes: Note[], overrides: Partial<TabView> = {}): TabView {
 }
 
 describe("app.loadMore (Issue #239)", () => {
+  it("通常の上スクロールはキャッシュ優先を使う(bypassCache=false で fetch_backfill を呼ぶ, Issue #427)", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n0002", createdAt: 2 })]);
+    app.groups = [makeGroup([tab])];
+
+    invokeMock.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "fetch_backfill") {
+        expect(args).toMatchObject({ columnId: tab.id, untilId: "n0002", bypassCache: false });
+        return [];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.loadMore(tab.id);
+
+    expect(invokeMock).toHaveBeenCalledWith("fetch_backfill", expect.objectContaining({ bypassCache: false }));
+  });
+
   it("MAX_NOTES(300件)到達後もbackfillで取得した古いノートを保持し、最古IDが前進すること", async () => {
     // MAX_NOTES は store.svelte.ts からは export されていないため、ここではリテラルの
     // 300 を使う(既存の GAP_CONTINUE_MAX_PAGES=10 のテストと同じ慣習)。
@@ -627,6 +645,36 @@ describe("app.fillRemainingGap (Issue #148)", () => {
     expect(live.gapMarker).toEqual({ boundaryId: "n4", targetId: "a0" });
     expect(live.fillingGap).toBe(false);
     expect(app.errorModal).not.toBeNull();
+  });
+
+  it("全ページで bypassCache=true を指定してキャッシュHitを避ける(Issue #427)", async () => {
+    const tab = makeNoteTab(
+      [makeNote({ id: "n5", createdAt: 50 })],
+      { gapMarker: { boundaryId: "n4", targetId: "a0" } },
+    );
+    app.groups = [makeGroup([tab])];
+
+    const calls: unknown[] = [];
+    invokeMock.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "fetch_backfill") {
+        calls.push(args);
+        // 2ページ目で targetId("a0") に到達させる
+        return calls.length === 1
+          ? [makeNote({ id: "n3", createdAt: 30 })]
+          : [makeNote({ id: "a0", createdAt: 1 })];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.fillRemainingGap(tab.id);
+
+    expect(calls).toHaveLength(2);
+    for (const args of calls) {
+      expect(args).toMatchObject({ columnId: tab.id, bypassCache: true });
+    }
+    expect(calls[0]).toMatchObject({ untilId: "n4" });
+    expect(calls[1]).toMatchObject({ untilId: "n3" });
   });
 });
 

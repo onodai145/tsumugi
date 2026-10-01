@@ -117,8 +117,11 @@ export const commands = {
 	 *  (Issue #228 / #238)。User/Tag/Search などストリーミングを持たないソースを含むカラムは、
 	 *  ライブノートが column_note に入らず境界より新しい範囲の完全性を言えないため常にAPIへ。
 	 *  いずれかのソースの境界が未確定・範囲外・件数不足なら通常どおりAPIへ。
+	 *  `bypass_cache=true`(fillRemainingGap)のときはキャッシュ読み出しを行わず常にAPIへ行く。
+	 *  ギャップ区間 `(targetId, boundaryId)` は未取得のため、キャッシュHitで埋めた気になってはならない(Issue #427)。
+	 *  境界の延長はバイパス時も従来どおり行う(`plan_boundary_extend` が連続性を検証する)。
 	 */
-	fetchBackfill: (columnId: string, untilId: string) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId })),
+	fetchBackfill: (columnId: string, untilId: string, bypassCache: boolean) => typedError<Note[], Error>(__TAURI_INVOKE("fetch_backfill", { columnId, untilId, bypassCache })),
 	/**  通知カラムの過去ページ。 */
 	fetchNotificationsBackfill: (columnId: string, untilId: string) => typedError<Notification[], Error>(__TAURI_INVOKE("fetch_notifications_backfill", { columnId, untilId })),
 	/**  タブを閉じる（購読解除＋永続層から削除＋空グループ掃除）。 */
