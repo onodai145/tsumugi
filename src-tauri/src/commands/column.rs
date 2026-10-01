@@ -417,12 +417,16 @@ pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
 /// (Issue #228 / #238)。User/Tag/Search などストリーミングを持たないソースを含むカラムは、
 /// ライブノートが column_note に入らず境界より新しい範囲の完全性を言えないため常にAPIへ。
 /// いずれかのソースの境界が未確定・範囲外・件数不足なら通常どおりAPIへ。
+/// `bypass_cache=true`(fillRemainingGap)のときはキャッシュ読み出しを行わず常にAPIへ行く。
+/// ギャップ区間 `(targetId, boundaryId)` は未取得のため、キャッシュHitで埋めた気になってはならない(Issue #427)。
+/// 境界の延長はバイパス時も従来どおり行う(`plan_boundary_extend` が連続性を検証する)。
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_backfill(
     state: State<'_, AppState>,
     column_id: String,
     until_id: String,
+    bypass_cache: bool,
 ) -> Result<Vec<Note>> {
     let column = load_column(&state, &column_id)?;
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
@@ -439,7 +443,7 @@ pub async fn fetch_backfill(
     } else {
         std::collections::HashMap::new()
     };
-    if cache_eligible {
+    if should_try_backfill_cache(cache_eligible, bypass_cache) {
         let effective = effective_boundary(&boundaries, resolved.kinds.len());
         let mut cached = match &effective {
             Some(e) if until_id.as_str() > e.as_str() => state
@@ -1221,6 +1225,13 @@ fn backfill_cache_eligible(resolved: &ResolvedSources) -> bool {
         && resolved.kinds.iter().all(|k| k.stream_request().is_some())
 }
 
+/// backfill でキャッシュ読み出し(`load_cached_before` 〜 Hit判定)に入るか。
+/// `bypass_cache`(fillRemainingGap=ギャップ埋め)のときは、`until_id` より新しい未取得区間を
+/// キャッシュが覆っていると言えないため、eligible でも必ずAPIへ行く(Issue #427)。
+fn should_try_backfill_cache(cache_eligible: bool, bypass_cache: bool) -> bool {
+    cache_eligible && !bypass_cache
+}
+
 /// 重複除去・created_at降順ソート済みのフィルタ通過ノートから、画面へ返す分と
 /// キャッシュする分を決める。詳細は `FilteredFetch::cacheable` を参照。
 fn split_display_and_cacheable(mut filtered: Vec<Note>, use_cache: bool) -> (Vec<Note>, Vec<Note>) {
@@ -1744,6 +1755,16 @@ mod tests {
         assert!(!backfill_cache_eligible(&mk(vec![tag()], false)));
         assert!(!backfill_cache_eligible(&mk(vec![search()], false)));
         assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, search()], false)));
+    }
+
+    #[test]
+    fn should_try_backfill_cache_is_off_when_bypassed_or_ineligible() {
+        // 通常の上スクロール: eligible のときだけキャッシュを試す
+        assert!(should_try_backfill_cache(true, false));
+        assert!(!should_try_backfill_cache(false, false));
+        // ギャップ埋め(Issue #427): eligible でもキャッシュを使わない
+        assert!(!should_try_backfill_cache(true, true));
+        assert!(!should_try_backfill_cache(false, true));
     }
 
     #[test]
