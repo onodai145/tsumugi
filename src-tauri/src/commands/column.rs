@@ -1209,6 +1209,42 @@ enum SourceOutcome {
     Failed,
 }
 
+/// 複数パスにまたがる1ソースの取得結果を統合する(Issue #428)。ソースごとの結果は、
+/// 最初のパスから連続して取得できた範囲を表す必要がある(backfill境界の前提)。
+/// - 最初のパスで失敗(`Failed`)したソースは、その後取得できても先頭から連続していないので `Failed`。
+/// - `Exhausted` は以降も `Exhausted`。
+/// - 取得成功(`Fetched`)同士はより古い(小さい)idへ。後続で `Exhausted` なら `Exhausted`。
+/// - 後続パスの失敗は、それまでに取れた範囲を保つ。
+fn merge_source_outcome(prev: SourceOutcome, next: SourceOutcome) -> SourceOutcome {
+    use SourceOutcome::{Exhausted, Failed, Fetched};
+    match (prev, next) {
+        (Failed, _) => Failed,
+        (Exhausted, _) => Exhausted,
+        (Fetched(_), Exhausted) => Exhausted,
+        (Fetched(a), Fetched(b)) => Fetched(a.min(b)),
+        (Fetched(a), Failed) => Fetched(a),
+    }
+}
+
+/// 1パス分の取得結果から、画面へ返してよい最古のid(透かし)を決める(Issue #428)。
+/// 各ソースの生ページの最古idのうち最大(=最も浅いソースの深さ)。`Exhausted`/`Failed` の
+/// ソースは制約しない。`cache_min`(`from cache` の検索結果が `INITIAL_LIMIT` 件に達したときの
+/// その最小id)も1ソースとして含める。制約するソースが無ければ None(全ノートを返してよい)。
+///
+/// 画面へ返すノートを透かし以上に限ると、フロントが次の `until_id` に使う「表示中の最古」は
+/// 透かし以上になる。次回は全ソースが `until_id` から取り直すので、浅いソースの区間が飛ばされない。
+fn backfill_watermark(outcomes: &[SourceOutcome], cache_min: Option<&str>) -> Option<String> {
+    outcomes
+        .iter()
+        .filter_map(|o| match o {
+            SourceOutcome::Fetched(id) => Some(id.as_str()),
+            _ => None,
+        })
+        .chain(cache_min)
+        .max()
+        .map(str::to_string)
+}
+
 /// `fetch_and_filter_multi` の戻り値。
 struct FilteredFetch {
     /// 画面へ返す分(重複除去・created_at降順・INITIAL_LIMIT件へtruncate済み)。
@@ -1396,12 +1432,23 @@ fn should_try_backfill_cache(cache_eligible: bool, bypass_cache: bool) -> bool {
 
 /// 重複除去・created_at降順ソート済みのフィルタ通過ノートから、画面へ返す分と
 /// キャッシュする分を決める。詳細は `FilteredFetch::cacheable` を参照。
-fn split_display_and_cacheable(mut filtered: Vec<Note>, use_cache: bool) -> (Vec<Note>, Vec<Note>) {
+/// `watermark`(Some)のときは、画面へ返す分を `id >= watermark` のノートだけに限る
+/// (`backfill_watermark`)。`cacheable` には透かしより古いノートも入る(Issue #428)。
+fn split_display_and_cacheable(
+    mut filtered: Vec<Note>,
+    use_cache: bool,
+    watermark: Option<&str>,
+) -> (Vec<Note>, Vec<Note>) {
     // 複数ソースに同じノートが跨る場合の重複除去 + created_at 降順ソート
     let mut seen = std::collections::HashSet::new();
     filtered.retain(|n| seen.insert(n.id.clone()));
     filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-    let display: Vec<Note> = filtered.iter().take(INITIAL_LIMIT as usize).cloned().collect();
+    let display: Vec<Note> = filtered
+        .iter()
+        .filter(|n| watermark.is_none_or(|w| n.id.as_str() >= w))
+        .take(INITIAL_LIMIT as usize)
+        .cloned()
+        .collect();
     let cacheable = if use_cache { display.clone() } else { filtered };
     (display, cacheable)
 }
@@ -1535,7 +1582,7 @@ async fn fetch_and_filter_multi(
         })
         .collect();
 
-    let (notes, cacheable) = split_display_and_cacheable(filtered, resolved.use_cache);
+    let (notes, cacheable) = split_display_and_cacheable(filtered, resolved.use_cache, None);
     Ok(FilteredFetch { notes, cacheable, source_outcomes })
 }
 
@@ -2116,14 +2163,69 @@ mod tests {
         let mut with_dup = filtered.clone();
         with_dup.push(note("n25", 25)); // 複数ソースに同じノートが跨る場合
 
-        let (display, cacheable) = split_display_and_cacheable(with_dup.clone(), false);
+        let (display, cacheable) = split_display_and_cacheable(with_dup.clone(), false, None);
         assert_eq!(display.len(), INITIAL_LIMIT as usize);
         assert_eq!(display[0].id, "n25"); // created_at 降順
         assert_eq!(cacheable.len(), 25); // 重複除去済み・truncateしない
 
         // `from cache` を含むカラムは従来どおり truncate 後だけをキャッシュする
-        let (display, cacheable) = split_display_and_cacheable(with_dup, true);
+        let (display, cacheable) = split_display_and_cacheable(with_dup, true, None);
         assert_eq!(cacheable.len(), display.len());
+    }
+
+    #[test]
+    fn split_display_and_cacheable_hides_notes_older_than_the_watermark_from_the_display_only() {
+        let all: Vec<Note> = (1..=10).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+
+        // 透かし n06: 画面用は n06 以上だけ(n10..n06)。cacheable は全件(10件)。
+        let (display, cacheable) = split_display_and_cacheable(all.clone(), false, Some("n06"));
+        assert_eq!(display.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["n10", "n09", "n08", "n07", "n06"]);
+        assert_eq!(cacheable.len(), 10);
+
+        // `from cache` を含むカラムは cacheable が画面用と同じ
+        let (display, cacheable) = split_display_and_cacheable(all.clone(), true, Some("n06"));
+        assert_eq!(cacheable.len(), display.len());
+        assert_eq!(display.len(), 5);
+
+        // 透かしより新しいノートが無ければ画面用は空
+        assert!(split_display_and_cacheable(all, false, Some("n99")).0.is_empty());
+    }
+
+    #[test]
+    fn backfill_watermark_is_the_newest_of_the_per_source_oldest_ids() {
+        // 最も浅い(=最古idが最も新しい)ソースの深さ
+        assert_eq!(
+            backfill_watermark(&[fetched("n500"), fetched("n200")], None),
+            Some("n500".to_string())
+        );
+        // 枯渇済み・失敗したソースは制約しない
+        assert_eq!(
+            backfill_watermark(&[SourceOutcome::Exhausted, fetched("n200"), SourceOutcome::Failed], None),
+            Some("n200".to_string())
+        );
+        // 制約するソースが無ければ None
+        assert_eq!(backfill_watermark(&[SourceOutcome::Exhausted, SourceOutcome::Failed], None), None);
+        assert_eq!(backfill_watermark(&[], None), None);
+        // `from cache` の検索結果(INITIAL_LIMIT件に達したときの最小id)も1ソースとして含める
+        assert_eq!(backfill_watermark(&[fetched("n200")], Some("n600")), Some("n600".to_string()));
+        assert_eq!(backfill_watermark(&[], Some("n600")), Some("n600".to_string()));
+    }
+
+    #[test]
+    fn merge_source_outcome_keeps_the_contiguous_per_source_coverage() {
+        use SourceOutcome::{Exhausted, Failed};
+        // 最初のパスで失敗したソースは、先頭から連続して取得できていないので Failed のまま
+        assert_eq!(merge_source_outcome(Failed, fetched("n100")), Failed);
+        assert_eq!(merge_source_outcome(Failed, Exhausted), Failed);
+        // 枯渇済みはそれ以降も枯渇済み
+        assert_eq!(merge_source_outcome(Exhausted, fetched("n100")), Exhausted);
+        // 取得成功同士は、より古い(小さい)idへ
+        assert_eq!(merge_source_outcome(fetched("n500"), fetched("n400")), fetched("n400"));
+        assert_eq!(merge_source_outcome(fetched("n300"), fetched("n400")), fetched("n300"));
+        // 後続パスで枯渇したら枯渇済み
+        assert_eq!(merge_source_outcome(fetched("n500"), Exhausted), Exhausted);
+        // 後続パスの失敗は、それまでに取れた範囲を保つ
+        assert_eq!(merge_source_outcome(fetched("n500"), Failed), fetched("n500"));
     }
 
     /// truncate 起因の欠落の回帰テスト: 2ソースが交互に並び全件フィルタを通るとき、
@@ -2139,7 +2241,7 @@ mod tests {
         let e = effective_boundary(&boundaries, 2).unwrap();
         assert_eq!(e, "n02");
 
-        let (display, cacheable) = split_display_and_cacheable(all, false);
+        let (display, cacheable) = split_display_and_cacheable(all, false, None);
         assert_eq!(display.len(), 20);
 
         // 全件キャッシュ: E 以上(n02..n40 の39件)がすべて取り出せる
@@ -2160,7 +2262,7 @@ mod tests {
     #[tokio::test]
     async fn cache_fetched_stores_the_cacheable_set_not_the_truncated_display_notes() {
         let all: Vec<Note> = (1..=40).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
-        let (notes, cacheable) = split_display_and_cacheable(all, false);
+        let (notes, cacheable) = split_display_and_cacheable(all, false, None);
         assert_eq!((notes.len(), cacheable.len()), (20, 40));
         let fetch = FilteredFetch { notes, cacheable, source_outcomes: vec![fetched("n02"), fetched("n01")] };
 
