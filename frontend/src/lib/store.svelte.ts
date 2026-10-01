@@ -1806,7 +1806,9 @@ class AppStore {
         if (fresh.length > 0) {
           const merged = [...tab.notes, ...fresh];
           merged.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-          tab.notes = merged.slice(0, MAX_NOTES);
+          // MAX_NOTES で切り捨てない(Issue #433, #239 と同じ理由)。古い側を切ると、更新後の
+          // gapMarker.boundaryId のノートが一覧から消えてマーカーが描画されなくなる。
+          tab.notes = merged;
           // captureInitial 同様に subNote 購読しないと、この先そのノートへの
           // リアクション追加/削除が noteUpdated イベントとして届かず反映されない(Issue #3)。
           this.#captureInitial(tab.id, fresh);
