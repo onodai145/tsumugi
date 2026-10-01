@@ -412,8 +412,11 @@ pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
         as i32)
 }
 
-/// 過去ページ（上スクロール）。単一ソースのカラムは、要求範囲がbackfill境界より新しければ
-/// キャッシュのみで応答する(Issue #228)。境界未確定・範囲外・件数不足なら通常どおりAPIへ。
+/// 過去ページ（上スクロール）。`from cache` を含まず、かつ全ソースがストリーミング対応の
+/// カラムは、要求範囲が全ソースのbackfill境界(`max(b_i)`)より新しければキャッシュのみで応答する
+/// (Issue #228 / #238)。User/Tag/Search などストリーミングを持たないソースを含むカラムは、
+/// ライブノートが column_note に入らず境界より新しい範囲の完全性を言えないため常にAPIへ。
+/// いずれかのソースの境界が未確定・範囲外・件数不足なら通常どおりAPIへ。
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_backfill(
@@ -424,26 +427,33 @@ pub async fn fetch_backfill(
     let column = load_column(&state, &column_id)?;
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
 
-    let cache_eligible = resolved.kinds.len() == 1 && !resolved.use_cache;
-    let boundary = if cache_eligible {
-        state.cache.get_fetch_boundary(&column.id).await.ok().flatten()
+    let cache_eligible = backfill_cache_eligible(&resolved);
+    let boundaries: std::collections::HashMap<u32, String> = if cache_eligible {
+        state
+            .cache
+            .get_fetch_boundaries(&column.id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
     } else {
-        None
+        std::collections::HashMap::new()
     };
     if cache_eligible {
-        let mut cached = match &boundary {
-            Some(b) if until_id.as_str() > b.as_str() => state
+        let effective = effective_boundary(&boundaries, resolved.kinds.len());
+        let mut cached = match &effective {
+            Some(e) if until_id.as_str() > e.as_str() => state
                 .cache
                 .load_cached_before(&column.id, &until_id, INITIAL_LIMIT)
                 .await
                 .unwrap_or_default(),
             _ => vec![],
         };
-        // [boundary, until_id) の範囲外(=このセッションでは未検証)の行を除外する。
+        // [E, until_id) の範囲外(=このセッションでは未検証)の行を除外する。
         // load_cached_before 自体は下限を持たないため、範囲内の件数が不足していても
         // セッションをまたいだ古いキャッシュ行で limit を満たしてしまう可能性がある。
-        if let Some(b) = &boundary {
-            cached.retain(|n| n.id.as_str() >= b.as_str());
+        if let Some(e) = &effective {
+            cached.retain(|n| n.id.as_str() >= e.as_str());
         }
         // ミュート/フィルタ設定はキャッシュ後に変更されうるため、都度再適用する。
         let ctx = state.eval_context();
@@ -454,11 +464,11 @@ pub async fn fetch_backfill(
                 && !server_muted_note(&state, &column.account_id, n)
                 && !state.is_word_muted(&column.account_id, n)
         });
-        if let Some(notes) = cache_backfill_page(boundary.as_deref(), &until_id, cached, INITIAL_LIMIT) {
+        if let Some(notes) = cache_backfill_page(effective.as_deref(), &until_id, cached, INITIAL_LIMIT) {
             state.cache_metrics.record_backfill(BackfillOutcome::Hit);
             return Ok(notes);
         }
-        state.cache_metrics.record_backfill(if boundary.is_none() {
+        state.cache_metrics.record_backfill(if effective.is_none() {
             BackfillOutcome::FallbackBoundaryUnset
         } else {
             BackfillOutcome::FallbackOther
@@ -466,21 +476,14 @@ pub async fn fetch_backfill(
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    state.cache.cache_notes(&column.id, &fetch.notes).await?;
+    cache_fetched(&state.cache, &column.id, &fetch).await?;
     if cache_eligible {
-        if let Some(oldest) = &fetch.raw_oldest_id {
-            // 既存の境界と連続している(=until_idが境界以上)場合のみ延長する。
-            // 不連続な場合(例: fillRemainingGapがgap markerのtargetIdまで遡って取得した場合)に
-            // 境界と今回の取得範囲の間の未検証の隙間を「完全」と誤認するのを防ぐ(Issue #228)。
-            // 境界未確定(None)なら連続性を検証できないので、延長せずAPI経由のままにする
-            // (境界はカラム開き直し時の open_stream_and_fetch が改めて確定させる)。
-            let contiguous = match &boundary {
-                Some(b) => until_id.as_str() >= b.as_str(),
-                None => false,
-            };
-            if contiguous {
-                let _ = state.cache.extend_fetch_boundary(&column.id, oldest).await;
-            }
+        // ソースごとに、既存の境界と連続している場合のみ延長する(plan_boundary_extend)。
+        // 境界未確定のソースは連続性を検証できないので延長せず、カラム開き直し時の
+        // open_stream_and_fetch が改めて確定させる。
+        let entries = plan_boundary_extend(&boundaries, &until_id, &fetch.source_outcomes);
+        if !entries.is_empty() {
+            let _ = state.cache.extend_fetch_boundaries(&column.id, &entries).await;
         }
     }
     Ok(fetch.notes)
@@ -787,11 +790,10 @@ async fn open_stream_and_fetch(
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    state.cache.cache_notes(&column.id, &fetch.notes).await?;
-    if resolved.kinds.len() == 1 && !resolved.use_cache {
-        if let Some(oldest) = &fetch.raw_oldest_id {
-            let _ = state.cache.set_fetch_boundary(&column.id, oldest).await;
-        }
+    cache_fetched(&state.cache, &column.id, &fetch).await?;
+    if backfill_cache_eligible(&resolved) {
+        let entries = plan_boundary_initial(&fetch.source_outcomes);
+        let _ = state.cache.replace_fetch_boundaries(&column.id, &entries).await;
     }
     open_streams_only(app, state, column, &resolved, host, token);
     Ok((fetch.notes, vec![]))
@@ -1121,13 +1123,114 @@ pub(crate) async fn notification_gap_fill_on_reconnect<R: Runtime>(
     .emit(app);
 }
 
-/// `fetch_and_filter_multi` の戻り値。`raw_oldest_id` は単一ソース時のみ、
-/// フィルタ適用前の生APIレスポンスの最古IDを持つ（backfill境界の更新に使う。
-/// フィルタ後の最古IDだと、末尾がフィルタで弾かれた場合に「実際にはもっと深く
-/// APIを見ている」事実を取り逃すため）。複数ソース時はNone(境界追跡の対象外)。
+/// 1ソースのREST取得結果。backfill境界の更新内容を決めるのに使う(Issue #238)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourceOutcome {
+    /// 取得成功。生APIレスポンスの最古ID(id辞書順の最小)。フィルタ適用前の値で、
+    /// フィルタで末尾が弾かれても「実際にはもっと深くAPIを見ている」事実を取り逃さない。
+    Fetched(String),
+    /// 取得成功だが0件(それより古いノートは無い)。境界は `""`(枯渇済み)にする。
+    Exhausted,
+    /// 取得失敗、またはREST取得できない種別。境界は更新しない。
+    Failed,
+}
+
+/// `fetch_and_filter_multi` の戻り値。
 struct FilteredFetch {
+    /// 画面へ返す分(重複除去・created_at降順・INITIAL_LIMIT件へtruncate済み)。
     notes: Vec<Note>,
-    raw_oldest_id: Option<String>,
+    /// キャッシュする分。境界は「ソースごとのRESTページ全体が column_note に入っている」ことを
+    /// 前提に進めるため、複数ソースではtruncate前の重複除去済みフィルタ通過分を全件入れる。
+    /// `from cache` を含むカラムは境界の対象外なので従来どおりtruncate後(`notes`と同内容)。
+    cacheable: Vec<Note>,
+    /// `resolved.kinds` と同じ並びの、ソースごとの取得結果。
+    source_outcomes: Vec<SourceOutcome>,
+}
+
+/// 取得結果をキャッシュへ書く。書くのは画面用の `notes`(truncate後)ではなく `cacheable`。
+/// backfill境界は「ソースごとのRESTページ全体が column_note に入っている」ことを前提に
+/// 進めるため、`notes` を書くと境界が完全と主張する範囲に欠落が出る。`fetch_backfill` と
+/// `open_stream_and_fetch` の両方がこれを経由することで、書き込み対象を1か所に固定する。
+async fn cache_fetched(cache: &NoteCacheStore, column_id: &str, fetch: &FilteredFetch) -> Result<()> {
+    cache.cache_notes(column_id, &fetch.cacheable).await
+}
+
+/// 1ページ分の生レスポンスから `SourceOutcome` を決める。
+fn source_outcome_from_page(raw: &[Note]) -> SourceOutcome {
+    // 境界の比較は全て id の辞書順で行うため、ここも id 基準で最古を選ぶ(Issue #228)。
+    match raw.iter().map(|n| n.id.as_str()).min() {
+        Some(id) => SourceOutcome::Fetched(id.to_string()),
+        None => SourceOutcome::Exhausted,
+    }
+}
+
+/// 初回取得(`until_id` 無し)で境界へ書く内容。失敗したソースは行を作らない(未確定のまま)。
+fn plan_boundary_initial(outcomes: &[SourceOutcome]) -> Vec<(u32, String)> {
+    outcomes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, o)| match o {
+            SourceOutcome::Fetched(id) => Some((i as u32, id.clone())),
+            SourceOutcome::Exhausted => Some((i as u32, String::new())),
+            SourceOutcome::Failed => None,
+        })
+        .collect()
+}
+
+/// `fetch_backfill` のAPI取得後に境界へ延長する内容。ソースごとに、既存の境界があり
+/// `until_id >= b_i`(=今回の取得範囲が既存の完全範囲と連続)なときだけ延長する。
+/// 不連続なソース(例: fillRemainingGap が gap marker の targetId まで遡った場合)や
+/// 境界未確定のソースは、間の未検証の隙間を「完全」と誤認しないよう更新しない。
+fn plan_boundary_extend(
+    prev: &std::collections::HashMap<u32, String>,
+    until_id: &str,
+    outcomes: &[SourceOutcome],
+) -> Vec<(u32, String)> {
+    plan_boundary_initial(outcomes)
+        .into_iter()
+        .filter(|(i, _)| prev.get(i).is_some_and(|b| until_id >= b.as_str()))
+        .collect()
+}
+
+/// 全ソースの境界が揃っているときだけ、カラム全体で完全な範囲 `id > E` の `E = max(b_i)` を返す。
+/// 1ソースでも境界が無ければ None(未確定)。`""`(枯渇済み)は他ソースの境界より小さいので塞がない。
+fn effective_boundary(boundaries: &std::collections::HashMap<u32, String>, source_count: usize) -> Option<String> {
+    if source_count == 0 {
+        return None;
+    }
+    let mut max: Option<&String> = None;
+    for i in 0..source_count as u32 {
+        let b = boundaries.get(&i)?;
+        max = Some(match max {
+            Some(m) if m >= b => m,
+            _ => b,
+        });
+    }
+    max.cloned()
+}
+
+/// backfill のキャッシュ優先経路の対象か。次のカラムは対象外(常にAPI経由)。
+/// - `from cache` を含むカラム: `search_cache` がグローバルな note テーブルを読み、
+///   `column_note` だけでは API 経路と同じ結果を再現できない。
+/// - ストリーミングを持たないソース(User / Tag / Search 等。`stream_request()` が None)を含むカラム:
+///   これらはライブノートが `column_note` に入らないため、境界 E より新しい範囲が完全だとは言えず、
+///   キャッシュだけで返すとそのソースの新着ノートが欠落する。
+fn backfill_cache_eligible(resolved: &ResolvedSources) -> bool {
+    !resolved.use_cache
+        && !resolved.kinds.is_empty()
+        && resolved.kinds.iter().all(|k| k.stream_request().is_some())
+}
+
+/// 重複除去・created_at降順ソート済みのフィルタ通過ノートから、画面へ返す分と
+/// キャッシュする分を決める。詳細は `FilteredFetch::cacheable` を参照。
+fn split_display_and_cacheable(mut filtered: Vec<Note>, use_cache: bool) -> (Vec<Note>, Vec<Note>) {
+    // 複数ソースに同じノートが跨る場合の重複除去 + created_at 降順ソート
+    let mut seen = std::collections::HashSet::new();
+    filtered.retain(|n| seen.insert(n.id.clone()));
+    filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    let display: Vec<Note> = filtered.iter().take(INITIAL_LIMIT as usize).cloned().collect();
+    let cacheable = if use_cache { display.clone() } else { filtered };
+    (display, cacheable)
 }
 
 /// キャッシュDB検索(Issue #248)の中核ロジック。SQL射影で粗く絞り込んだ後、
@@ -1201,6 +1304,7 @@ pub async fn search_cache_notes(
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
+/// ただし失敗は `source_outcomes` に `Failed` として残し、backfill境界を進めないようにする。
 async fn fetch_and_filter_multi(
     state: &AppState,
     account_id: &str,
@@ -1208,25 +1312,25 @@ async fn fetch_and_filter_multi(
     until_id: Option<&str>,
 ) -> Result<FilteredFetch> {
     let mut all: Vec<Note> = Vec::new();
+    let mut source_outcomes: Vec<SourceOutcome> = Vec::with_capacity(resolved.kinds.len());
 
     if !resolved.kinds.is_empty() {
         let client = state.client_for(account_id)?;
         for k in &resolved.kinds {
-            if let Some((endpoint, body)) = k.rest_request(INITIAL_LIMIT, until_id) {
-                if let Ok(raw) = fetch_notes(&client, endpoint, &body).await {
-                    all.extend(raw);
-                }
-            }
+            let outcome = match k.rest_request(INITIAL_LIMIT, until_id) {
+                None => SourceOutcome::Failed,
+                Some((endpoint, body)) => match fetch_notes(&client, endpoint, &body).await {
+                    Ok(raw) => {
+                        let outcome = source_outcome_from_page(&raw);
+                        all.extend(raw);
+                        outcome
+                    }
+                    Err(_) => SourceOutcome::Failed,
+                },
+            };
+            source_outcomes.push(outcome);
         }
     }
-
-    // 単一ソース時のみ、フィルタ適用前の生レスポンスの最古IDを控える(backfill境界用)。
-    let raw_oldest_id = if resolved.kinds.len() == 1 {
-        // 境界の比較は全て id の辞書順で行うため、ここも id 基準で最古を選ぶ(Issue #228)。
-        all.iter().min_by(|a, b| a.id.cmp(&b.id)).map(|n| n.id.clone())
-    } else {
-        None
-    };
 
     if resolved.use_cache {
         let sql_ctx = sql::SqlCtx {
@@ -1248,7 +1352,7 @@ async fn fetch_and_filter_multi(
 
     let ctx = state.eval_context();
     let mute = state.mute.lock().unwrap().clone();
-    let mut filtered: Vec<Note> = all
+    let filtered: Vec<Note> = all
         .into_iter()
         .filter(|n| {
             resolved.filter.matches(n, &ctx)
@@ -1258,12 +1362,8 @@ async fn fetch_and_filter_multi(
         })
         .collect();
 
-    // 複数ソースに同じノートが跨る場合の重複除去 + created_at 降順ソート + limit へ切り詰め
-    let mut seen = std::collections::HashSet::new();
-    filtered.retain(|n| seen.insert(n.id.clone()));
-    filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-    filtered.truncate(INITIAL_LIMIT as usize);
-    Ok(FilteredFetch { notes: filtered, raw_oldest_id })
+    let (notes, cacheable) = split_display_and_cacheable(filtered, resolved.use_cache);
+    Ok(FilteredFetch { notes, cacheable, source_outcomes })
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
@@ -1557,5 +1657,153 @@ mod tests {
             result.unwrap().iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
             cached.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()
         );
+    }
+
+    fn fetched(id: &str) -> SourceOutcome {
+        SourceOutcome::Fetched(id.to_string())
+    }
+
+    fn bmap(entries: &[(u32, &str)]) -> std::collections::HashMap<u32, String> {
+        entries.iter().map(|(i, b)| (*i, b.to_string())).collect()
+    }
+
+    #[test]
+    fn source_outcome_from_page_uses_min_id_and_flags_empty_as_exhausted() {
+        // 最古は created_at ではなく id の辞書順の最小(境界比較が id 基準のため)
+        let raw = vec![note("n3", 10), note("n1", 30), note("n2", 20)];
+        assert_eq!(source_outcome_from_page(&raw), fetched("n1"));
+        assert_eq!(source_outcome_from_page(&[]), SourceOutcome::Exhausted);
+    }
+
+    #[test]
+    fn plan_boundary_initial_skips_failed_sources_and_maps_exhausted_to_empty_string() {
+        let outcomes = [fetched("n5"), SourceOutcome::Failed, SourceOutcome::Exhausted];
+        assert_eq!(plan_boundary_initial(&outcomes), vec![(0, "n5".to_string()), (2, String::new())]);
+        assert!(plan_boundary_initial(&[SourceOutcome::Failed]).is_empty());
+        assert!(plan_boundary_initial(&[]).is_empty());
+    }
+
+    #[test]
+    fn plan_boundary_extend_extends_only_contiguous_sources() {
+        // source0: 境界n500, source1: 境界n300。until_id=n400 なので source0 は不連続(400<500)、
+        // source1 は連続(400>=300)。連続なソースだけ延長する。
+        let prev = bmap(&[(0, "n500"), (1, "n300")]);
+        let outcomes = [fetched("n380"), fetched("n350")];
+        assert_eq!(plan_boundary_extend(&prev, "n400", &outcomes), vec![(1, "n350".to_string())]);
+    }
+
+    #[test]
+    fn plan_boundary_extend_skips_failed_and_unknown_sources_and_extends_exhausted_to_empty() {
+        let prev = bmap(&[(0, "n100"), (2, "n100")]); // source1 は境界未確定
+        let outcomes = [SourceOutcome::Failed, fetched("n50"), SourceOutcome::Exhausted];
+        // 0: 失敗 / 1: 境界が無く連続性を検証できない / 2: 枯渇 → ""
+        assert_eq!(plan_boundary_extend(&prev, "n200", &outcomes), vec![(2, String::new())]);
+    }
+
+    #[test]
+    fn plan_boundary_extend_treats_until_id_equal_to_boundary_as_contiguous() {
+        let prev = bmap(&[(0, "n300")]);
+        assert_eq!(plan_boundary_extend(&prev, "n300", &[fetched("n250")]), vec![(0, "n250".to_string())]);
+    }
+
+    #[test]
+    fn effective_boundary_is_max_and_requires_every_source() {
+        assert_eq!(effective_boundary(&bmap(&[(0, "n100"), (1, "n300")]), 2), Some("n300".to_string()));
+        // 枯渇済み("")は有効境界を塞がない
+        assert_eq!(effective_boundary(&bmap(&[(0, ""), (1, "n300")]), 2), Some("n300".to_string()));
+        assert_eq!(effective_boundary(&bmap(&[(0, ""), (1, "")]), 2), Some(String::new()));
+        // 1ソースでも境界が無ければ未確定
+        assert_eq!(effective_boundary(&bmap(&[(0, "n100")]), 2), None);
+        assert_eq!(effective_boundary(&bmap(&[(1, "n100")]), 2), None);
+        // 余分な行(ソース数より大きい idx)は無視する
+        assert_eq!(effective_boundary(&bmap(&[(0, "n100"), (5, "n900")]), 1), Some("n100".to_string()));
+        assert_eq!(effective_boundary(&bmap(&[]), 0), None);
+    }
+
+    #[test]
+    fn backfill_cache_eligible_requires_streaming_api_sources_and_no_cache_source() {
+        let mk = |kinds: Vec<ColumnKind>, use_cache: bool| ResolvedSources {
+            kinds,
+            use_cache,
+            filter: CompiledFilter::PassAll,
+        };
+        assert!(backfill_cache_eligible(&mk(vec![ColumnKind::Home], false)));
+        assert!(backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], true)));
+        assert!(!backfill_cache_eligible(&mk(vec![], true)));
+        assert!(backfill_cache_eligible(&mk(
+            vec![ColumnKind::Home, ColumnKind::Local, ColumnKind::List { list_id: "l1".into() }],
+            false
+        )));
+        // ストリーミングを持たないソース(User/Tag/Search)はライブノートが column_note に入らないため対象外
+        let user = || ColumnKind::User { user_id: "u1".into() };
+        let tag = || ColumnKind::Tag { tag: "rust".into() };
+        let search = || ColumnKind::Search { query: "q".into() };
+        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, user()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![user()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![tag()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![search()], false)));
+        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, search()], false)));
+    }
+
+    #[test]
+    fn split_display_and_cacheable_dedupes_sorts_and_truncates_only_the_display() {
+        let filtered: Vec<Note> = (1..=25).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        let mut with_dup = filtered.clone();
+        with_dup.push(note("n25", 25)); // 複数ソースに同じノートが跨る場合
+
+        let (display, cacheable) = split_display_and_cacheable(with_dup.clone(), false);
+        assert_eq!(display.len(), INITIAL_LIMIT as usize);
+        assert_eq!(display[0].id, "n25"); // created_at 降順
+        assert_eq!(cacheable.len(), 25); // 重複除去済み・truncateしない
+
+        // `from cache` を含むカラムは従来どおり truncate 後だけをキャッシュする
+        let (display, cacheable) = split_display_and_cacheable(with_dup, true);
+        assert_eq!(cacheable.len(), display.len());
+    }
+
+    /// truncate 起因の欠落の回帰テスト: 2ソースが交互に並び全件フィルタを通るとき、
+    /// 初回取得後の境界 E 以上のノートが column_note に全部入っていなければならない。
+    /// 画面へ返す20件だけをキャッシュすると E 以上のノートが欠落する。
+    #[tokio::test]
+    async fn caching_the_full_filtered_set_keeps_every_note_at_or_above_the_boundary() {
+        // source A: 偶数 n02..n40、source B: 奇数 n01..n39(各20件、id と created_at は同順)
+        let mut all: Vec<Note> = (1..=40).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        all.reverse();
+        let outcomes = [fetched("n02"), fetched("n01")];
+        let boundaries = bmap(&plan_boundary_initial(&outcomes).iter().map(|(i, b)| (*i, b.as_str())).collect::<Vec<_>>());
+        let e = effective_boundary(&boundaries, 2).unwrap();
+        assert_eq!(e, "n02");
+
+        let (display, cacheable) = split_display_and_cacheable(all, false);
+        assert_eq!(display.len(), 20);
+
+        // 全件キャッシュ: E 以上(n02..n40 の39件)がすべて取り出せる
+        let store = cache_with(&cacheable).await;
+        let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
+        let at_or_above: Vec<&str> = got.iter().map(|n| n.id.as_str()).filter(|id| *id >= e.as_str()).collect();
+        assert_eq!(at_or_above.len(), 39);
+
+        // 対比: 画面へ返す20件だけをキャッシュすると、境界 E が完全と主張する範囲に欠落が出る
+        let store = cache_with(&display).await;
+        let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
+        assert!(got.iter().filter(|n| n.id.as_str() >= e.as_str()).count() < 39);
+    }
+
+    /// 呼び出し側(fetch_backfill / open_stream_and_fetch)がキャッシュへ書くのは
+    /// `FilteredFetch::cacheable` でなければならない。画面用の `notes`(truncate後)を書くと、
+    /// 境界が完全と主張する範囲に欠落が出る。両呼び出し元が共有する `cache_fetched` で固定する。
+    #[tokio::test]
+    async fn cache_fetched_stores_the_cacheable_set_not_the_truncated_display_notes() {
+        let all: Vec<Note> = (1..=40).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        let (notes, cacheable) = split_display_and_cacheable(all, false);
+        assert_eq!((notes.len(), cacheable.len()), (20, 40));
+        let fetch = FilteredFetch { notes, cacheable, source_outcomes: vec![fetched("n02"), fetched("n01")] };
+
+        let store = cache_with(&[]).await;
+        cache_fetched(&store, "col1", &fetch).await.unwrap();
+
+        let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
+        assert_eq!(got.len(), 40);
     }
 }

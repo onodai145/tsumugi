@@ -151,7 +151,7 @@ impl NoteCacheBackend for SqliteBackend {
             let guard = conn.lock().unwrap();
             guard.execute("DELETE FROM column_note WHERE column_id = ?1", rusqlite::params![column_id])?;
             guard.execute(
-                "DELETE FROM column_fetch_boundary WHERE column_id = ?1",
+                "DELETE FROM column_source_boundary WHERE column_id = ?1",
                 rusqlite::params![column_id],
             )?;
             Ok(())
@@ -160,53 +160,64 @@ impl NoteCacheBackend for SqliteBackend {
         .map_err(map_join_error)?
     }
 
-    async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
+    async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
         let conn = Arc::clone(&self.conn);
         let column_id = column_id.to_string();
-        tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>> {
+        tauri::async_runtime::spawn_blocking(move || -> Result<Vec<(u32, String)>> {
             let guard = conn.lock().unwrap();
-            let v: Option<String> = guard
-                .query_row(
-                    "SELECT oldest_fetched_id FROM column_fetch_boundary WHERE column_id = ?1",
-                    rusqlite::params![column_id],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            Ok(v)
+            let mut stmt = guard.prepare(
+                "SELECT source_idx, oldest_fetched_id FROM column_source_boundary
+                 WHERE column_id = ?1 ORDER BY source_idx",
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![column_id], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
         })
         .await
         .map_err(map_join_error)?
     }
 
-    async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
         let conn = Arc::clone(&self.conn);
         let column_id = column_id.to_string();
-        let new_oldest_id = new_oldest_id.to_string();
+        let entries = entries.to_vec();
         tauri::async_runtime::spawn_blocking(move || -> Result<()> {
-            let guard = conn.lock().unwrap();
-            guard.execute(
-                "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
-                 ON CONFLICT(column_id) DO UPDATE SET oldest_fetched_id = excluded.oldest_fetched_id",
-                rusqlite::params![column_id, new_oldest_id],
-            )?;
+            let mut guard = conn.lock().unwrap();
+            let tx = guard.transaction()?;
+            tx.execute("DELETE FROM column_source_boundary WHERE column_id = ?1", rusqlite::params![column_id])?;
+            for (idx, id) in &entries {
+                tx.execute(
+                    "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![column_id, idx, id],
+                )?;
+            }
+            tx.commit()?;
             Ok(())
         })
         .await
         .map_err(map_join_error)?
     }
 
-    async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
         let conn = Arc::clone(&self.conn);
         let column_id = column_id.to_string();
-        let new_oldest_id = new_oldest_id.to_string();
+        let entries = entries.to_vec();
         tauri::async_runtime::spawn_blocking(move || -> Result<()> {
-            let guard = conn.lock().unwrap();
-            guard.execute(
-                "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?1, ?2)
-                 ON CONFLICT(column_id) DO UPDATE SET
-                    oldest_fetched_id = MIN(oldest_fetched_id, excluded.oldest_fetched_id)",
-                rusqlite::params![column_id, new_oldest_id],
-            )?;
+            let mut guard = conn.lock().unwrap();
+            let tx = guard.transaction()?;
+            for (idx, id) in &entries {
+                tx.execute(
+                    "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(column_id, source_idx) DO UPDATE SET
+                        oldest_fetched_id = MIN(oldest_fetched_id, excluded.oldest_fetched_id)",
+                    rusqlite::params![column_id, idx, id],
+                )?;
+            }
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -217,7 +228,7 @@ impl NoteCacheBackend for SqliteBackend {
         let conn = Arc::clone(&self.conn);
         tauri::async_runtime::spawn_blocking(move || -> Result<()> {
             let guard = conn.lock().unwrap();
-            guard.execute("DELETE FROM column_fetch_boundary", [])?;
+            guard.execute("DELETE FROM column_source_boundary", [])?;
             Ok(())
         })
         .await
@@ -288,6 +299,23 @@ mod tests {
 
     fn store() -> SqliteBackend {
         SqliteBackend::new(crate::store::db::open_cache_in_memory().unwrap())
+    }
+
+    fn b(idx: u32, id: &str) -> (u32, String) {
+        (idx, id.to_string())
+    }
+
+    /// source_idx=0 だけの境界を置き換える(単一ソース時代のテストを新APIへ移すためのヘルパー)。
+    async fn set0(s: &SqliteBackend, column_id: &str, id: &str) {
+        s.replace_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+    }
+
+    async fn extend0(s: &SqliteBackend, column_id: &str, id: &str) {
+        s.extend_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+    }
+
+    async fn b0(s: &SqliteBackend, column_id: &str) -> Option<String> {
+        s.get_fetch_boundaries(column_id).await.unwrap().into_iter().find(|(i, _)| *i == 0).map(|(_, v)| v)
     }
 
     fn note(id: &str, created_at: i64) -> Note {
@@ -496,51 +524,51 @@ mod tests {
     #[tokio::test]
     async fn fetch_boundary_roundtrip() {
         let s = store();
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
+        assert!(b0(&s, "col1").await.is_none());
 
-        s.set_fetch_boundary("col1", "n100").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n100"));
+        set0(&s, "col1", "n100").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n100"));
     }
 
     #[tokio::test]
     async fn set_fetch_boundary_overwrites_unconditionally() {
         let s = store();
-        s.set_fetch_boundary("col1", "n100").await.unwrap();
-        s.set_fetch_boundary("col1", "n999").await.unwrap(); // より新しい値でも無条件に上書き
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n999"));
+        set0(&s, "col1", "n100").await;
+        set0(&s, "col1", "n999").await; // より新しい値でも無条件に上書き
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n999"));
     }
 
     #[tokio::test]
     async fn extend_fetch_boundary_only_moves_older() {
         let s = store();
-        s.set_fetch_boundary("col1", "n500").await.unwrap();
+        set0(&s, "col1", "n500").await;
 
         // より古い値(n300)への延長は反映される
-        s.extend_fetch_boundary("col1", "n300").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n300"));
+        extend0(&s, "col1", "n300").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n300"));
 
         // より新しい値(n800)は無視される(単調性)
-        s.extend_fetch_boundary("col1", "n800").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n300"));
+        extend0(&s, "col1", "n800").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n300"));
     }
 
     #[tokio::test]
     async fn extend_fetch_boundary_sets_when_absent() {
         let s = store();
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
-        s.extend_fetch_boundary("col1", "n300").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n300"));
+        assert!(b0(&s, "col1").await.is_none());
+        extend0(&s, "col1", "n300").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n300"));
     }
 
     #[tokio::test]
     async fn clear_column_notes_also_removes_boundary() {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
-        s.set_fetch_boundary("col1", "n1").await.unwrap();
+        set0(&s, "col1", "n1").await;
 
         s.clear_column_notes("col1").await.unwrap();
 
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
+        assert!(b0(&s, "col1").await.is_none());
     }
 
     #[tokio::test]
@@ -662,13 +690,13 @@ mod tests {
     async fn prune_raises_boundary_to_surviving_oldest_note_after_keep_exceeded() {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
-        s.set_fetch_boundary("col1", "n1").await.unwrap(); // n1まで(=全件)取得済みと主張
+        set0(&s, "col1", "n1").await; // n1まで(=全件)取得済みと主張
 
         let deleted = s.prune(2, 0, 0).await.unwrap(); // 最古のn1が削除される
         assert_eq!(deleted, 1);
 
         // n1が消えたので、生存最古のn2まで境界を引き上げる
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n2"));
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n2"));
     }
 
     /// created_at は古いが id は生存最古より新しいノート(連合ノート)が prune で消えた場合、
@@ -678,25 +706,25 @@ mod tests {
         let s = store();
         // id順: n1 < n2 < n5、created_at順: n5(100) < n1(200) < n2(300)
         s.cache_notes("col1", &[note("n5", 100), note("n1", 200), note("n2", 300)]).await.unwrap();
-        s.set_fetch_boundary("col1", "n1").await.unwrap();
+        set0(&s, "col1", "n1").await;
 
         let deleted = s.prune(2, 0, 0).await.unwrap(); // created_at 最古の n5 が削除される
         assert_eq!(deleted, 1);
 
         // 生存最古IDは n1 のままなので、削除された n5 まで境界を引き上げる必要がある
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n5"));
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n5"));
     }
 
     #[tokio::test]
     async fn clear_all_fetch_boundaries_removes_every_column() {
         let s = store();
-        s.set_fetch_boundary("col1", "n100").await.unwrap();
-        s.set_fetch_boundary("col2", "n200").await.unwrap();
+        set0(&s, "col1", "n100").await;
+        set0(&s, "col2", "n200").await;
 
         s.clear_all_fetch_boundaries().await.unwrap();
 
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
-        assert!(s.get_fetch_boundary("col2").await.unwrap().is_none());
+        assert!(b0(&s, "col1").await.is_none());
+        assert!(b0(&s, "col2").await.is_none());
     }
 
     #[tokio::test]
@@ -705,13 +733,13 @@ mod tests {
         let now = crate::store::note_cache::now_epoch();
         let one_day = 86_400;
         s.cache_notes("col1", &[note("old", now - 40 * one_day)]).await.unwrap();
-        s.set_fetch_boundary("col1", "old").await.unwrap();
+        set0(&s, "col1", "old").await;
 
         let deleted = s.prune(0, 30, 0).await.unwrap();
         assert_eq!(deleted, 1);
 
         // カラムのキャッシュが全滅したので境界は未確定に戻る
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
+        assert!(b0(&s, "col1").await.is_none());
     }
 
     #[tokio::test]
@@ -719,14 +747,121 @@ mod tests {
         let s = store();
         s.cache_notes("colA", &[note("a1", 50)]).await.unwrap();
         s.cache_notes("colB", &[note("b1", 100), note("b2", 200), note("b3", 300)]).await.unwrap();
-        s.set_fetch_boundary("colA", "a1").await.unwrap();
-        s.set_fetch_boundary("colB", "b1").await.unwrap();
+        set0(&s, "colA", "a1").await;
+        set0(&s, "colB", "b1").await;
 
         let deleted = s.prune(3, 0, 0).await.unwrap(); // 4件中keep=3 → 全体最古のa1のみ削除
         assert_eq!(deleted, 1);
 
-        assert!(s.get_fetch_boundary("colA").await.unwrap().is_none());
-        assert_eq!(s.get_fetch_boundary("colB").await.unwrap().as_deref(), Some("b1")); // 変わらない
+        assert!(b0(&s, "colA").await.is_none());
+        assert_eq!(b0(&s, "colB").await.as_deref(), Some("b1")); // 変わらない
+    }
+
+    #[tokio::test]
+    async fn fetch_boundaries_are_kept_per_source_and_per_column() {
+        let s = store();
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+
+        s.replace_fetch_boundaries("col1", &[b(1, "n200"), b(0, "n100")]).await.unwrap();
+        s.replace_fetch_boundaries("col2", &[b(0, "m1")]).await.unwrap();
+
+        // source_idx 昇順で返り、別カラムには影響しない
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n100"), b(1, "n200")]);
+        assert_eq!(s.get_fetch_boundaries("col2").await.unwrap(), vec![b(0, "m1")]);
+    }
+
+    #[tokio::test]
+    async fn replace_fetch_boundaries_drops_sources_missing_from_entries() {
+        let s = store();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+
+        s.replace_fetch_boundaries("col1", &[b(0, "n5")]).await.unwrap();
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n5")]);
+
+        s.replace_fetch_boundaries("col1", &[]).await.unwrap();
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn extend_fetch_boundaries_moves_each_source_older_only_and_inserts_absent() {
+        let s = store();
+        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n500")]).await.unwrap();
+
+        s.extend_fetch_boundaries("col1", &[b(0, "n300"), b(1, "n800"), b(2, "n100")]).await.unwrap();
+
+        // 0: 古い方へ延長 / 1: 新しい値は無視 / 2: 行が無ければ挿入
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n300"), b(1, "n500"), b(2, "n100")]
+        );
+    }
+
+    #[tokio::test]
+    async fn extend_fetch_boundaries_accepts_empty_string_as_exhausted() {
+        let s = store();
+        s.replace_fetch_boundaries("col1", &[b(0, "n500")]).await.unwrap();
+
+        s.extend_fetch_boundaries("col1", &[b(0, "")]).await.unwrap();
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "")]);
+
+        // 枯渇済み("")は、後から通常のIDで延長しても戻らない
+        s.extend_fetch_boundaries("col1", &[b(0, "n1")]).await.unwrap();
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "")]);
+    }
+
+    #[tokio::test]
+    async fn clear_column_notes_removes_every_source_row_of_the_column_only() {
+        let s = store();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+        s.replace_fetch_boundaries("col2", &[b(0, "m1")]).await.unwrap();
+
+        s.clear_column_notes("col1").await.unwrap();
+
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+        assert_eq!(s.get_fetch_boundaries("col2").await.unwrap(), vec![b(0, "m1")]);
+    }
+
+    #[tokio::test]
+    async fn clear_all_fetch_boundaries_removes_rows_of_every_source_and_column() {
+        let s = store();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+        s.replace_fetch_boundaries("col2", &[b(0, "m1")]).await.unwrap();
+
+        s.clear_all_fetch_boundaries().await.unwrap();
+
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+        assert!(s.get_fetch_boundaries("col2").await.unwrap().is_empty());
+    }
+
+    /// prune は column_note がソースの帰属を持たないため、そのカラムの全ソース行を
+    /// 一律に生存最古IDまで引き上げる(枯渇済みの "" も含む)。
+    #[tokio::test]
+    async fn prune_raises_every_source_boundary_of_the_column() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, ""), b(2, "n2")]).await.unwrap();
+
+        let deleted = s.prune(2, 0, 0).await.unwrap(); // 最古の n1 が削除される
+        assert_eq!(deleted, 1);
+
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n2"), b(1, "n2"), b(2, "n2")]
+        );
+    }
+
+    #[tokio::test]
+    async fn prune_removes_every_source_row_when_column_fully_pruned() {
+        let s = store();
+        let now = crate::store::note_cache::now_epoch();
+        let one_day = 86_400;
+        s.cache_notes("col1", &[note("old", now - 40 * one_day)]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, "")]).await.unwrap();
+
+        let deleted = s.prune(0, 30, 0).await.unwrap();
+        assert_eq!(deleted, 1);
+
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
     }
 
     /// 旧形式(userフルオブジェクト埋め込み)の行を素のSQLで作る(upsert_noteを経由しない=

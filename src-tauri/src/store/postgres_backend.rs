@@ -90,6 +90,33 @@ async fn migrate_instance_columns(pool: &sqlx::PgPool) -> Result<()> {
     Ok(())
 }
 
+/// Issue #238: 単一ソース境界 `column_fetch_boundary` を `column_source_boundary`
+/// (source_idx=0)へ移す(一度きり)。旧テーブルが残っていることを「未移行」のマーカーとして使う。
+/// コピーは競合時に何もしないので、再実行しても移行後に更新された値を旧値で潰さない。
+/// コピーとDROPは1トランザクション。
+async fn migrate_fetch_boundary(pool: &sqlx::PgPool) -> Result<()> {
+    let legacy: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'column_fetch_boundary'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if legacy == 0 {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id)
+         SELECT column_id, 0, oldest_fetched_id FROM column_fetch_boundary
+         ON CONFLICT (column_id, source_idx) DO NOTHING",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DROP TABLE column_fetch_boundary").execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
 ///
 /// この関数内の`pool.execute(sqlx::AssertSqlSafe(..))`は全てsea-queryの`Table::create()`
@@ -355,13 +382,21 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .build(PostgresQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(idx_cn_column_created)).await?;
 
-    let column_fetch_boundary = Table::create()
-        .table(ColumnFetchBoundaryTable::Table)
+    let column_source_boundary = Table::create()
+        .table(ColumnSourceBoundaryTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(ColumnFetchBoundaryTable::ColumnId).text().primary_key())
-        .col(ColumnDef::new(ColumnFetchBoundaryTable::OldestFetchedId).text().not_null())
+        .col(ColumnDef::new(ColumnSourceBoundaryTable::ColumnId).text().not_null())
+        .col(ColumnDef::new(ColumnSourceBoundaryTable::SourceIdx).integer().not_null())
+        .col(ColumnDef::new(ColumnSourceBoundaryTable::OldestFetchedId).text().not_null())
+        .primary_key(
+            Index::create()
+                .col(ColumnSourceBoundaryTable::ColumnId)
+                .col(ColumnSourceBoundaryTable::SourceIdx),
+        )
         .build(PostgresQueryBuilder);
-    pool.execute(sqlx::AssertSqlSafe(column_fetch_boundary)).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_source_boundary)).await?;
+
+    migrate_fetch_boundary(pool).await?;
 
     Ok(())
 }
@@ -481,10 +516,11 @@ enum ColumnNoteTable {
 }
 
 #[derive(sea_query::Iden)]
-enum ColumnFetchBoundaryTable {
-    #[iden = "column_fetch_boundary"]
+enum ColumnSourceBoundaryTable {
+    #[iden = "column_source_boundary"]
     Table,
     ColumnId,
+    SourceIdx,
     OldestFetchedId,
 }
 
@@ -851,49 +887,66 @@ impl NoteCacheBackend for PostgresBackend {
 
     async fn clear_column_notes(&self, column_id: &str) -> Result<()> {
         sqlx::query("DELETE FROM column_note WHERE column_id = $1").bind(column_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM column_fetch_boundary WHERE column_id = $1").bind(column_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1").bind(column_id).execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
-        let v: Option<(String,)> = sqlx::query_as(
-            "SELECT oldest_fetched_id FROM column_fetch_boundary WHERE column_id = $1",
+    async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
+        let rows: Vec<(i32, String)> = sqlx::query_as(
+            "SELECT source_idx, oldest_fetched_id FROM column_source_boundary
+             WHERE column_id = $1 ORDER BY source_idx",
         )
         .bind(column_id)
-        .fetch_optional(&self.pool)
+        .fetch_all(&self.pool)
         .await?;
-        Ok(v.map(|(s,)| s))
+        Ok(rows.into_iter().map(|(i, b)| (i as u32, b)).collect())
     }
 
-    async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES ($1,$2)
-             ON CONFLICT (column_id) DO UPDATE SET oldest_fetched_id = excluded.oldest_fetched_id",
-        )
-        .bind(column_id)
-        .bind(new_oldest_id)
-        .execute(&self.pool)
-        .await?;
+    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1")
+            .bind(column_id)
+            .execute(&mut *tx)
+            .await?;
+        for (idx, id) in entries {
+            sqlx::query(
+                "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id) VALUES ($1,$2,$3)",
+            )
+            .bind(column_id)
+            .bind(*idx as i32)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
-    async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
         // LEAST(...)による大小比較も、load_cached_beforeと同様Postgresのデフォルトテキスト
         // 照合順序がSQLiteのバイナリバイト比較と一致することに依存している。
-        sqlx::query(
-            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES ($1,$2)
-             ON CONFLICT (column_id) DO UPDATE SET
-                oldest_fetched_id = LEAST(column_fetch_boundary.oldest_fetched_id, excluded.oldest_fetched_id)",
-        )
-        .bind(column_id)
-        .bind(new_oldest_id)
-        .execute(&self.pool)
-        .await?;
+        let mut tx = self.pool.begin().await?;
+        for (idx, id) in entries {
+            sqlx::query(
+                "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id) VALUES ($1,$2,$3)
+                 ON CONFLICT (column_id, source_idx) DO UPDATE SET
+                    oldest_fetched_id = LEAST(column_source_boundary.oldest_fetched_id, excluded.oldest_fetched_id)",
+            )
+            .bind(column_id)
+            .bind(*idx as i32)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
     async fn clear_all_fetch_boundaries(&self) -> Result<()> {
-        sqlx::query("DELETE FROM column_fetch_boundary").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_source_boundary").execute(&self.pool).await?;
         Ok(())
     }
 
@@ -964,7 +1017,7 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
                     _ => oldest,
                 };
                 sqlx::query(
-                    "UPDATE column_fetch_boundary SET oldest_fetched_id = $2 WHERE column_id = $1 AND oldest_fetched_id < $2",
+                    "UPDATE column_source_boundary SET oldest_fetched_id = $2 WHERE column_id = $1 AND oldest_fetched_id < $2",
                 )
                 .bind(column_id)
                 .bind(&candidate)
@@ -972,7 +1025,7 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
                 .await?;
             }
             None => {
-                sqlx::query("DELETE FROM column_fetch_boundary WHERE column_id = $1").bind(column_id).execute(&mut **tx).await?;
+                sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1").bind(column_id).execute(&mut **tx).await?;
             }
         }
     }
@@ -1221,6 +1274,23 @@ mod tests {
         backend
     }
 
+    fn b(idx: u32, id: &str) -> (u32, String) {
+        (idx, id.to_string())
+    }
+
+    /// source_idx=0 だけの境界を置き換える(単一ソース時代のテストを新APIへ移すためのヘルパー)。
+    async fn set0(s: &PostgresBackend, column_id: &str, id: &str) {
+        s.replace_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+    }
+
+    async fn extend0(s: &PostgresBackend, column_id: &str, id: &str) {
+        s.extend_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+    }
+
+    async fn b0(s: &PostgresBackend, column_id: &str) -> Option<String> {
+        s.get_fetch_boundaries(column_id).await.unwrap().into_iter().find(|(i, _)| *i == 0).map(|(_, v)| v)
+    }
+
     #[tokio::test]
     #[ignore]
     async fn cache_roundtrip_preserves_note_and_order() {
@@ -1277,19 +1347,19 @@ mod tests {
     /// Issue #289回帰テスト: あるカラムに属する全ノートが1回のprune/削除操作で
     /// 削除された場合(生存ノート0件)、`SELECT MIN(note_id) ...`がNULLを含む1行を
     /// 返し非`Option<String>`列へのデコードに失敗していた。修正後は行自体が
-    /// 返らなくなり、`column_fetch_boundary`の該当行も削除されることを確認する。
+    /// 返らなくなり、`column_source_boundary`の該当行も削除されることを確認する。
     #[tokio::test]
     #[ignore]
     async fn prune_removes_boundary_row_when_column_fully_emptied() {
         let s = backend().await;
         s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
-        s.set_fetch_boundary("col1", "n1").await.unwrap();
+        set0(&s, "col1", "n1").await;
 
         let deleted = s.prune(0, 1, 0).await.unwrap();
 
         assert_eq!(deleted, 2);
         assert_eq!(s.note_count().await.unwrap(), 0);
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
+        assert!(b0(&s, "col1").await.is_none());
     }
 
     #[tokio::test]
@@ -1376,12 +1446,91 @@ mod tests {
     #[ignore]
     async fn fetch_boundary_roundtrip_and_extend_only_moves_older() {
         let s = backend().await;
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
-        s.set_fetch_boundary("col1", "n500").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n500"));
-        s.extend_fetch_boundary("col1", "n300").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n300"));
-        s.extend_fetch_boundary("col1", "n800").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n300"));
+        assert!(b0(&s, "col1").await.is_none());
+        set0(&s, "col1", "n500").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n500"));
+        extend0(&s, "col1", "n300").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n300"));
+        extend0(&s, "col1", "n800").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n300"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn fetch_boundaries_multi_source_roundtrip_extend_and_prune() {
+        let s = backend().await;
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+
+        s.replace_fetch_boundaries("col1", &[b(1, "n2"), b(0, "n1"), b(2, "")]).await.unwrap();
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2"), b(2, "")]);
+
+        s.extend_fetch_boundaries("col1", &[b(0, "n0"), b(1, "n9"), b(3, "n5")]).await.unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n0"), b(1, "n2"), b(2, ""), b(3, "n5")]
+        );
+
+        // prune: 全ソース行が生存最古IDまで引き上がる
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "")]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        assert_eq!(s.prune(2, 0, 0).await.unwrap(), 1);
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n2"), b(1, "n2")]);
+
+        s.clear_column_notes("col1").await.unwrap();
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+    }
+
+    /// 旧 `column_fetch_boundary` を持つ既存インストールが `ensure_schema` で
+    /// `column_source_boundary` (source_idx=0) へ移行され、旧テーブルが消え、再実行しても壊れないこと。
+    #[tokio::test]
+    #[ignore]
+    async fn ensure_schema_migrates_legacy_fetch_boundary_table() {
+        let container = Postgres::default().start().await.unwrap();
+        let port = container.get_host_port_ipv4(5432).await.unwrap();
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect(&format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres"))
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE column_fetch_boundary (column_id TEXT PRIMARY KEY, oldest_fetched_id TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO column_fetch_boundary VALUES ('c1', 'n100'), ('c2', 'n200')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        ensure_schema(&pool).await.unwrap();
+
+        let rows: Vec<(String, i32, String)> = sqlx::query_as(
+            "SELECT column_id, source_idx, oldest_fetched_id FROM column_source_boundary ORDER BY column_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![("c1".to_string(), 0, "n100".to_string()), ("c2".to_string(), 0, "n200".to_string())]
+        );
+        let legacy: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'column_fetch_boundary'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy, 0, "旧テーブルは DROP される");
+
+        // 移行後に更新した値は ensure_schema を再実行しても戻らない
+        sqlx::query("UPDATE column_source_boundary SET oldest_fetched_id = 'n50' WHERE column_id = 'c1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        ensure_schema(&pool).await.unwrap();
+        let v: String = sqlx::query_scalar("SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id = 'c1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(v, "n50");
     }
 }

@@ -161,6 +161,31 @@ async fn migrate_instance_columns(pool: &sqlx::MySqlPool) -> Result<()> {
     Ok(())
 }
 
+/// Issue #238: 単一ソース境界 `column_fetch_boundary` を `column_source_boundary`
+/// (source_idx=0)へ移す(一度きり)。旧テーブルが残っていることを「未移行」のマーカーとして使う。
+/// MySQLのDDLは暗黙コミットされ、コピーとDROPを1トランザクションにできない。コピーは競合時に
+/// 何もしない `INSERT IGNORE` なので、コピー後・DROP前に中断して再実行しても、移行後に更新された
+/// 値を旧値で潰さない。
+async fn migrate_fetch_boundary(pool: &sqlx::MySqlPool) -> Result<()> {
+    let legacy: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.tables
+         WHERE table_schema = DATABASE() AND table_name = 'column_fetch_boundary'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if legacy == 0 {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT IGNORE INTO column_source_boundary (column_id, source_idx, oldest_fetched_id)
+         SELECT column_id, 0, oldest_fetched_id FROM column_fetch_boundary",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("DROP TABLE column_fetch_boundary").execute(pool).await?;
+    Ok(())
+}
+
 /// キャッシュDBのテーブルをすべて作成する(`CREATE TABLE IF NOT EXISTS`相当、冪等)。
 ///
 /// この関数内の`pool.execute(sqlx::AssertSqlSafe(..))`は全てsea-queryの`Table::create()`
@@ -346,13 +371,17 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .build(MysqlQueryBuilder);
     execute_index(pool, idx_cn_column_created.as_str()).await?;
 
-    let column_fetch_boundary = Table::create()
-        .table(ColumnFetchBoundaryTable::Table)
+    let column_source_boundary = Table::create()
+        .table(ColumnSourceBoundaryTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(ColumnFetchBoundaryTable::ColumnId).string_len(64).primary_key())
-        .col(ColumnDef::new(ColumnFetchBoundaryTable::OldestFetchedId).text().not_null())
+        .col(ColumnDef::new(ColumnSourceBoundaryTable::ColumnId).string_len(64).not_null())
+        .col(ColumnDef::new(ColumnSourceBoundaryTable::SourceIdx).integer().not_null())
+        .col(ColumnDef::new(ColumnSourceBoundaryTable::OldestFetchedId).text().not_null())
+        .primary_key(Index::create().col(ColumnSourceBoundaryTable::ColumnId).col(ColumnSourceBoundaryTable::SourceIdx))
         .build(MysqlQueryBuilder);
-    pool.execute(sqlx::AssertSqlSafe(column_fetch_boundary)).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_source_boundary)).await?;
+
+    migrate_fetch_boundary(pool).await?;
 
     Ok(())
 }
@@ -416,9 +445,9 @@ enum ColumnNoteTable {
 }
 
 #[derive(sea_query::Iden)]
-enum ColumnFetchBoundaryTable {
-    #[iden = "column_fetch_boundary"]
-    Table, ColumnId, OldestFetchedId,
+enum ColumnSourceBoundaryTable {
+    #[iden = "column_source_boundary"]
+    Table, ColumnId, SourceIdx, OldestFetchedId,
 }
 
 use crate::domain::Note;
@@ -774,47 +803,63 @@ impl NoteCacheBackend for MySqlBackend {
 
     async fn clear_column_notes(&self, column_id: &str) -> Result<()> {
         sqlx::query("DELETE FROM column_note WHERE column_id = ?").bind(column_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM column_fetch_boundary WHERE column_id = ?").bind(column_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?").bind(column_id).execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn get_fetch_boundary(&self, column_id: &str) -> Result<Option<String>> {
-        let v: Option<(String,)> =
-            sqlx::query_as("SELECT oldest_fetched_id FROM column_fetch_boundary WHERE column_id = ?")
+    async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
+        let rows: Vec<(i32, String)> = sqlx::query_as(
+            "SELECT source_idx, oldest_fetched_id FROM column_source_boundary
+             WHERE column_id = ? ORDER BY source_idx",
+        )
+        .bind(column_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(i, b)| (i as u32, b)).collect())
+    }
+
+    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?")
+            .bind(column_id)
+            .execute(&mut *tx)
+            .await?;
+        for (idx, id) in entries {
+            sqlx::query("INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id) VALUES (?,?,?)")
                 .bind(column_id)
-                .fetch_optional(&self.pool)
+                .bind(*idx as i32)
+                .bind(id)
+                .execute(&mut *tx)
                 .await?;
-        Ok(v.map(|(s,)| s))
-    }
-
-    async fn set_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?,?)
-             ON DUPLICATE KEY UPDATE oldest_fetched_id = VALUES(oldest_fetched_id)",
-        )
-        .bind(column_id)
-        .bind(new_oldest_id)
-        .execute(&self.pool)
-        .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
-    async fn extend_fetch_boundary(&self, column_id: &str, new_oldest_id: &str) -> Result<()> {
+    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
         // LEAST(...)はMySQLも同名関数をサポートするため変更不要(Global Constraints参照)。
-        sqlx::query(
-            "INSERT INTO column_fetch_boundary (column_id, oldest_fetched_id) VALUES (?,?)
-             ON DUPLICATE KEY UPDATE
-                oldest_fetched_id = LEAST(oldest_fetched_id, VALUES(oldest_fetched_id))",
-        )
-        .bind(column_id)
-        .bind(new_oldest_id)
-        .execute(&self.pool)
-        .await?;
+        let mut tx = self.pool.begin().await?;
+        for (idx, id) in entries {
+            sqlx::query(
+                "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id) VALUES (?,?,?)
+                 ON DUPLICATE KEY UPDATE
+                    oldest_fetched_id = LEAST(oldest_fetched_id, VALUES(oldest_fetched_id))",
+            )
+            .bind(column_id)
+            .bind(*idx as i32)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
     async fn clear_all_fetch_boundaries(&self) -> Result<()> {
-        sqlx::query("DELETE FROM column_fetch_boundary").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_source_boundary").execute(&self.pool).await?;
         Ok(())
     }
 
@@ -909,7 +954,7 @@ async fn delete_matching_ids_with_chunk_size(
                     _ => oldest,
                 };
                 sqlx::query(
-                    "UPDATE column_fetch_boundary SET oldest_fetched_id = ? WHERE column_id = ? AND oldest_fetched_id < ?",
+                    "UPDATE column_source_boundary SET oldest_fetched_id = ? WHERE column_id = ? AND oldest_fetched_id < ?",
                 )
                 .bind(&candidate)
                 .bind(column_id)
@@ -918,7 +963,7 @@ async fn delete_matching_ids_with_chunk_size(
                 .await?;
             }
             None => {
-                sqlx::query("DELETE FROM column_fetch_boundary WHERE column_id = ?").bind(column_id).execute(&mut **tx).await?;
+                sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?").bind(column_id).execute(&mut **tx).await?;
             }
         }
     }
@@ -1256,6 +1301,23 @@ mod tests {
         backend
     }
 
+    fn b(idx: u32, id: &str) -> (u32, String) {
+        (idx, id.to_string())
+    }
+
+    /// source_idx=0 だけの境界を置き換える(単一ソース時代のテストを新APIへ移すためのヘルパー)。
+    async fn set0(s: &MySqlBackend, column_id: &str, id: &str) {
+        s.replace_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+    }
+
+    async fn extend0(s: &MySqlBackend, column_id: &str, id: &str) {
+        s.extend_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+    }
+
+    async fn b0(s: &MySqlBackend, column_id: &str) -> Option<String> {
+        s.get_fetch_boundaries(column_id).await.unwrap().into_iter().find(|(i, _)| *i == 0).map(|(_, v)| v)
+    }
+
     #[tokio::test]
     #[ignore]
     async fn cache_roundtrip_preserves_note_and_order() {
@@ -1380,13 +1442,13 @@ mod tests {
     #[ignore]
     async fn fetch_boundary_roundtrip_and_extend_only_moves_older() {
         let s = backend().await;
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
-        s.set_fetch_boundary("col1", "n500").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n500"));
-        s.extend_fetch_boundary("col1", "n300").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n300"));
-        s.extend_fetch_boundary("col1", "n800").await.unwrap();
-        assert_eq!(s.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n300"));
+        assert!(b0(&s, "col1").await.is_none());
+        set0(&s, "col1", "n500").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n500"));
+        extend0(&s, "col1", "n300").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n300"));
+        extend0(&s, "col1", "n800").await;
+        assert_eq!(b0(&s, "col1").await.as_deref(), Some("n300"));
     }
 
     /// レビュー指摘の本丸(Fix 2): `delete_matching_ids`が`ids`を1本の`IN (?,...)`に
@@ -1400,8 +1462,8 @@ mod tests {
         // col1: n1..n5の5件。col2: n2,n4のみ(2列にまたがるnoteを含める)。
         s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300), note("n4", 400), note("n5", 500)]).await.unwrap();
         s.cache_notes("col2", &[note("n2", 200), note("n4", 400)]).await.unwrap();
-        s.set_fetch_boundary("col1", "n1").await.unwrap();
-        s.set_fetch_boundary("col2", "n2").await.unwrap();
+        set0(&s, "col1", "n1").await;
+        set0(&s, "col2", "n2").await;
     }
 
     async fn delete_via_chunk_size(s: &MySqlBackend, ids: &[String], chunk_size: usize) -> i64 {
@@ -1434,13 +1496,13 @@ mod tests {
 
         // col1: 残存はn4,n5 → MIN=n4。max_deleted_by_column[col1]=n3 < n4なのでoldest=n4を採用。
         // col1の元boundaryはn1(<n4)なので更新される。
-        assert_eq!(s_chunked.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n4"));
-        assert_eq!(s_single.get_fetch_boundary("col1").await.unwrap().as_deref(), Some("n4"));
+        assert_eq!(b0(&s_chunked, "col1").await.as_deref(), Some("n4"));
+        assert_eq!(b0(&s_single, "col1").await.as_deref(), Some("n4"));
 
         // col2: 残存はn4のみ → MIN=n4。max_deleted_by_column[col2]=n2 < n4なのでoldest=n4を採用。
         // col2の元boundaryはn2(<n4)なので更新される。
-        assert_eq!(s_chunked.get_fetch_boundary("col2").await.unwrap().as_deref(), Some("n4"));
-        assert_eq!(s_single.get_fetch_boundary("col2").await.unwrap().as_deref(), Some("n4"));
+        assert_eq!(b0(&s_chunked, "col2").await.as_deref(), Some("n4"));
+        assert_eq!(b0(&s_single, "col2").await.as_deref(), Some("n4"));
     }
 
     /// 全件削除でカラムの生存noteがゼロになった場合、fetch_boundary行自体が
@@ -1457,7 +1519,82 @@ mod tests {
 
         assert_eq!(deleted, 5);
         assert_eq!(s.note_count().await.unwrap(), 0);
-        assert!(s.get_fetch_boundary("col1").await.unwrap().is_none());
-        assert!(s.get_fetch_boundary("col2").await.unwrap().is_none());
+        assert!(b0(&s, "col1").await.is_none());
+        assert!(b0(&s, "col2").await.is_none());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn fetch_boundaries_multi_source_roundtrip_extend_and_prune() {
+        let s = backend().await;
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+
+        s.replace_fetch_boundaries("col1", &[b(1, "n2"), b(0, "n1"), b(2, "")]).await.unwrap();
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2"), b(2, "")]);
+
+        s.extend_fetch_boundaries("col1", &[b(0, "n0"), b(1, "n9"), b(3, "n5")]).await.unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n0"), b(1, "n2"), b(2, ""), b(3, "n5")]
+        );
+
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "")]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        assert_eq!(s.prune(2, 0, 0).await.unwrap(), 1);
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n2"), b(1, "n2")]);
+
+        s.clear_column_notes("col1").await.unwrap();
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn ensure_schema_migrates_legacy_fetch_boundary_table() {
+        let container = Mysql::default().start().await.unwrap();
+        let port = container.get_host_port_ipv4(3306).await.unwrap();
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .connect(&format!("mysql://root@127.0.0.1:{port}/test"))
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE column_fetch_boundary (column_id VARCHAR(64) PRIMARY KEY, oldest_fetched_id TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO column_fetch_boundary VALUES ('c1', 'n100'), ('c2', 'n200')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        ensure_schema(&pool).await.unwrap();
+
+        let rows: Vec<(String, i32, String)> = sqlx::query_as(
+            "SELECT column_id, source_idx, oldest_fetched_id FROM column_source_boundary ORDER BY column_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![("c1".to_string(), 0, "n100".to_string()), ("c2".to_string(), 0, "n200".to_string())]
+        );
+        let legacy: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'column_fetch_boundary' AND table_schema = 'test'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy, 0, "旧テーブルは DROP される");
+
+        sqlx::query("UPDATE column_source_boundary SET oldest_fetched_id = 'n50' WHERE column_id = 'c1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        ensure_schema(&pool).await.unwrap();
+        let v: String = sqlx::query_scalar("SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id = 'c1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(v, "n50");
     }
 }

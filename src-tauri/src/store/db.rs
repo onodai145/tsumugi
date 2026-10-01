@@ -115,10 +115,13 @@ CREATE TABLE IF NOT EXISTS column_note (
 );
 CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id);
 
--- カラムごとの「これより新しいノートはAPI取得済みで完全」境界（Issue #228）
-CREATE TABLE IF NOT EXISTS column_fetch_boundary (
-    column_id         TEXT PRIMARY KEY,
-    oldest_fetched_id TEXT NOT NULL
+-- ソースごとの「これより新しいノートはAPI取得済みで完全」境界（Issue #228 / #238）。
+-- source_idx は TQL の from 節内の位置。oldest_fetched_id = '' はそのソースが先頭まで枯渇済み。
+CREATE TABLE IF NOT EXISTS column_source_boundary (
+    column_id         TEXT NOT NULL,
+    source_idx        INTEGER NOT NULL,
+    oldest_fetched_id TEXT NOT NULL,
+    PRIMARY KEY (column_id, source_idx)
 );
 "#;
 
@@ -259,6 +262,7 @@ fn migrate_cache(conn: &Connection) -> Result<()> {
         conn.execute_batch("ALTER TABLE user ADD COLUMN avatar_blurhash TEXT;")?;
     }
     migrate_instance_table(conn)?;
+    migrate_fetch_boundary(conn)?;
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_cn_column_created \
          ON column_note(column_id, created_at DESC, note_id DESC)",
@@ -305,6 +309,32 @@ fn migrate_instance_table(conn: &Connection) -> Result<()> {
          ALTER TABLE user DROP COLUMN instance_name;
          ALTER TABLE user DROP COLUMN instance_icon_url;
          ALTER TABLE user DROP COLUMN instance_theme_color;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Issue #238: 単一ソース境界 `column_fetch_boundary` を `column_source_boundary`
+/// (source_idx=0)へ移す(一度きり)。旧テーブルが残っていることを「未移行」のマーカーとして使う。
+/// #228 の仕様で境界が付くのは単一ソースのカラムだけなので、source_idx=0 への写像は正確。
+/// コピーは競合時に何もしない(`ON CONFLICT DO NOTHING`)ため、途中で中断して再実行しても
+/// 移行後に更新された値を旧値で潰さない。SQLite の `INSERT ... SELECT ... ON CONFLICT` は
+/// 構文解析の曖昧さを避けるため `WHERE true` が必要。
+fn migrate_fetch_boundary(conn: &Connection) -> Result<()> {
+    let legacy: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='column_fetch_boundary'",
+        [],
+        |r| r.get(0),
+    )?;
+    if legacy == 0 {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id)
+         SELECT column_id, 0, oldest_fetched_id FROM column_fetch_boundary WHERE true
+         ON CONFLICT(column_id, source_idx) DO NOTHING;
+         DROP TABLE column_fetch_boundary;",
     )?;
     tx.commit()?;
     Ok(())
@@ -722,5 +752,54 @@ mod tests {
 
         // 冪等: 再実行してもエラーにならない(UNIQUE違反にならない)。
         migrate_cache(&conn).unwrap();
+    }
+
+    #[test]
+    fn migrate_fetch_boundary_moves_legacy_rows_to_source_zero_and_is_idempotent() {
+        let conn = open_cache_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE column_fetch_boundary (column_id TEXT PRIMARY KEY, oldest_fetched_id TEXT NOT NULL);
+             INSERT INTO column_fetch_boundary VALUES ('c1', 'n100'), ('c2', 'n200');",
+        )
+        .unwrap();
+
+        migrate_fetch_boundary(&conn).unwrap();
+
+        let rows: Vec<(String, i64, String)> = conn
+            .prepare("SELECT column_id, source_idx, oldest_fetched_id FROM column_source_boundary ORDER BY column_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![("c1".to_string(), 0, "n100".to_string()), ("c2".to_string(), 0, "n200".to_string())]
+        );
+        let legacy: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='column_fetch_boundary'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(legacy, 0, "旧テーブルは DROP される");
+
+        // 旧テーブルが無い状態での再実行は何もしない(冪等)
+        migrate_fetch_boundary(&conn).unwrap();
+    }
+
+    #[test]
+    fn migrate_fetch_boundary_does_not_overwrite_rows_already_in_new_table() {
+        let conn = open_cache_in_memory().unwrap();
+        conn.execute_batch(
+            "INSERT INTO column_source_boundary VALUES ('c1', 0, 'n50');
+             CREATE TABLE column_fetch_boundary (column_id TEXT PRIMARY KEY, oldest_fetched_id TEXT NOT NULL);
+             INSERT INTO column_fetch_boundary VALUES ('c1', 'n100');",
+        )
+        .unwrap();
+
+        migrate_fetch_boundary(&conn).unwrap();
+
+        let v: String = conn
+            .query_row("SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id='c1' AND source_idx=0", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, "n50", "中断後の再実行で、移行後に更新された値を旧値で潰さない");
     }
 }
