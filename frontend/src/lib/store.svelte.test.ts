@@ -647,6 +647,36 @@ describe("app.fillRemainingGap (Issue #148)", () => {
     expect(app.errorModal).not.toBeNull();
   });
 
+  it("MAX_NOTES(300件)到達後も取得した古いノートを切り捨てず、マーカーの基準ノートが一覧に残る(Issue #433)", async () => {
+    // 300件ちょうど。gapMarker の基準(boundaryId)は表示中の最古ノート。
+    const notes = Array.from({ length: 300 }, (_, i) =>
+      makeNote({ id: `n${String(1300 - i).padStart(4, "0")}`, createdAt: 1300 - i }),
+    );
+    const tab = makeNoteTab(notes, { gapMarker: { boundaryId: "n1001", targetId: "a0" } });
+    app.groups = [makeGroup([tab])];
+
+    let call = 0;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "fetch_backfill") {
+        call += 1;
+        // 1ページ目だけ古いノートを返し、2ページ目で空を返してループを止める
+        return call === 1 ? [makeNote({ id: "n0900", createdAt: 900 })] : [];
+      }
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.fillRemainingGap(tab.id);
+
+    const live = app.groups[0].tabs[0];
+    // slice(0, MAX_NOTES) で古い側を切り捨てると、更新後の boundaryId("n0900")が
+    // 一覧から消え、Column.svelte がマーカーを描画できなくなる。
+    expect(live.notes.map((n) => n.id)).toContain("n0900");
+    expect(live.notes).toHaveLength(301);
+    expect(live.gapMarker).toEqual({ boundaryId: "n0900", targetId: "a0" });
+    expect(live.notes.some((n) => n.id === live.gapMarker?.boundaryId)).toBe(true);
+  });
+
   it("全ページで bypassCache=true を指定してキャッシュHitを避ける(Issue #427)", async () => {
     const tab = makeNoteTab(
       [makeNote({ id: "n5", createdAt: 50 })],
