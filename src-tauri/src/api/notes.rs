@@ -17,6 +17,46 @@ pub async fn fetch_notes(
     Ok(raw.into_iter().map(Into::into).collect())
 }
 
+/// `notes/search` の検索条件（サーバーサイド検索、Issue #430）。日時はミリ秒の epoch。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchParams {
+    pub query: String,
+    pub user_id: Option<String>,
+    /// ローカルは `"."`（Misskey の仕様）。
+    pub host: Option<String>,
+    pub since_date_ms: Option<u64>,
+    pub until_date_ms: Option<u64>,
+    pub until_id: Option<String>,
+    pub limit: u32,
+}
+
+/// `notes/search` のリクエストボディ。`None` の条件はキーごと出さない
+/// （対応していない古いサーバーに余計なパラメータを送らないため）。
+pub fn build_search_body(p: &SearchParams) -> serde_json::Value {
+    let mut body = json!({ "query": p.query, "limit": p.limit });
+    if let Some(v) = &p.user_id {
+        body["userId"] = json!(v);
+    }
+    if let Some(v) = &p.host {
+        body["host"] = json!(v);
+    }
+    if let Some(v) = p.since_date_ms {
+        body["sinceDate"] = json!(v);
+    }
+    if let Some(v) = p.until_date_ms {
+        body["untilDate"] = json!(v);
+    }
+    if let Some(v) = &p.until_id {
+        body["untilId"] = json!(v);
+    }
+    body
+}
+
+/// サーバーサイド検索（`notes/search`）。
+pub async fn search_notes(client: &MisskeyClient, p: &SearchParams) -> Result<Vec<Note>> {
+    fetch_notes(client, "notes/search", &build_search_body(p)).await
+}
+
 
 /// `notes/create` 等の入力。フロントの NoteDraft をそのまま受ける想定。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
@@ -350,5 +390,36 @@ mod tests {
         assert_eq!(deduped[0].username, "alice");
         assert_eq!(deduped[1].id, "u2");
         assert_eq!(deduped[1].username, "bob");
+    }
+
+    #[test]
+    fn build_search_body_includes_every_given_condition() {
+        let body = build_search_body(&SearchParams {
+            query: "rust".into(),
+            user_id: Some("u9".into()),
+            host: Some("example.com".into()),
+            since_date_ms: Some(1_700_000_000_000),
+            until_date_ms: Some(1_800_000_000_000),
+            until_id: Some("n5".into()),
+            limit: 20,
+        });
+        assert_eq!(
+            body,
+            json!({
+                "query": "rust",
+                "limit": 20,
+                "userId": "u9",
+                "host": "example.com",
+                "sinceDate": 1_700_000_000_000u64,
+                "untilDate": 1_800_000_000_000u64,
+                "untilId": "n5",
+            })
+        );
+    }
+
+    #[test]
+    fn build_search_body_omits_conditions_that_are_none() {
+        let body = build_search_body(&SearchParams { query: "x".into(), limit: 10, ..Default::default() });
+        assert_eq!(body, json!({ "query": "x", "limit": 10 }));
     }
 }
