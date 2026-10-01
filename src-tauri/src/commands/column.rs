@@ -1216,7 +1216,9 @@ enum SourceOutcome {
 /// - 最初のパスで失敗(`Failed`)したソースは、その後取得できても先頭から連続していないので `Failed`。
 /// - `Exhausted` は以降も `Exhausted`。
 /// - 取得成功(`Fetched`)同士はより古い(小さい)idへ。後続で `Exhausted` なら `Exhausted`。
-/// - 後続パスの失敗は、それまでに取れた範囲を保つ。
+/// - 後続パスの失敗は、それまでに取れた範囲を保つ。ただし1ソースずつ2つの結果を比べるだけでは、
+///   その後に取得が復帰したとき間の欠落を連続とみなしてしまう。`collect_backfill_pages` は
+///   一度 `Fetched` になった後に `Failed` になったソースを凍結し、以降のパス結果を渡さない。
 fn merge_source_outcome(prev: SourceOutcome, next: SourceOutcome) -> SourceOutcome {
     use SourceOutcome::{Exhausted, Failed, Fetched};
     match (prev, next) {
@@ -1271,12 +1273,18 @@ struct BackfillPass {
 
 /// 1パス分の取得を `fetch_pass` で繰り返し、透かし以上のノートだけを画面用として集める(Issue #428)。
 ///
-/// 各パスで `backfill_watermark` を計算し、`split_display_and_cacheable` に渡す。画面用が0件で
-/// 透かしがあれば(=まだ深く取れるソースがある)、`until_id = 透かし` で取り直す。これが無いと、
-/// 浅いソースの生ページが全てフィルタで落ち他ソースのノートが全て透かしより古い場合に、
-/// フロントが同じ `until_id` を繰り返してそのカラムが遡れなくなる。
+/// 各パスで `backfill_watermark` を計算し、`split_display_and_cacheable` に渡す。画面用が
+/// `INITIAL_LIMIT` 件に満たず透かしがあれば(=まだ深く取れるソースがある)、`until_id = 透かし` で
+/// 取り直し、各パスの画面用を積み上げる。これが無いと、
+/// - 画面用が0件のとき、フロントが同じ `until_id` を繰り返してそのカラムが遡れなくなる。
+/// - 画面用が数件のとき、カラムがスクロールできず(`loadMore` は scroll イベントでだけ呼ばれる)
+///   それ以上遡れなくなる。
+/// 後続パスの画面用は前のパスの透かしより古い範囲に収まるので、積み上げた全体は最後の透かし以上に
+/// 収まり、次の `until_id` も最後の透かし以上になる。
 /// `BACKFILL_MAX_PASSES` に達しても0件なら、スクロールが止まらないよう最後の1パスだけ透かしなしで返す。
-/// `cacheable` は全パスの和集合、`source_outcomes` はパス間で `merge_source_outcome` により統合する。
+/// `cacheable` は全パスの和集合、`source_outcomes` はパス間で統合する。一度 `Fetched` になった後に
+/// `Failed` になったソースは、以降のパスの結果を無視する(間の区間が未取得なので、後のパスの結果と
+/// 連続しているとは言えない)。
 async fn collect_backfill_pages<F, Fut>(
     until_id: Option<&str>,
     use_cache: bool,
@@ -1288,44 +1296,58 @@ where
 {
     let mut until = until_id.map(str::to_string);
     let mut all_cacheable: Vec<Note> = Vec::new();
-    let mut merged_outcomes: Option<Vec<SourceOutcome>> = None;
+    let mut display_acc: Vec<Note> = Vec::new();
+    let mut merged_outcomes: Vec<SourceOutcome> = Vec::new();
+    let mut frozen: Vec<bool> = Vec::new();
     let mut pass_no: u32 = 0;
-    let notes = loop {
+    loop {
         pass_no += 1;
         let pass = fetch_pass(until.clone()).await?;
-        merged_outcomes = Some(match merged_outcomes.take() {
-            None => pass.outcomes.clone(),
-            Some(prev) => prev
-                .into_iter()
-                .zip(pass.outcomes.iter().cloned())
-                .map(|(p, n)| merge_source_outcome(p, n))
-                .collect(),
-        });
+        if pass_no == 1 {
+            merged_outcomes = pass.outcomes.clone();
+            frozen = vec![false; pass.outcomes.len()];
+        } else {
+            for (i, next) in pass.outcomes.iter().enumerate() {
+                let Some(prev) = merged_outcomes.get(i).cloned() else { break };
+                if frozen[i] {
+                    continue;
+                }
+                if matches!((&prev, next), (SourceOutcome::Fetched(_), SourceOutcome::Failed)) {
+                    frozen[i] = true;
+                    continue;
+                }
+                merged_outcomes[i] = merge_source_outcome(prev, next.clone());
+            }
+        }
         let watermark = backfill_watermark(&pass.outcomes, pass.cache_min.as_deref());
         let is_last = pass_no >= BACKFILL_MAX_PASSES;
         let fallback_notes = if is_last { Some(pass.notes.clone()) } else { None };
         let (mut display, mut cacheable) = split_display_and_cacheable(pass.notes, use_cache, watermark.as_deref());
-        if display.is_empty() && watermark.is_some() && is_last {
+        if display_acc.is_empty() && display.is_empty() && watermark.is_some() && is_last {
             if let Some(notes) = fallback_notes {
                 (display, cacheable) = split_display_and_cacheable(notes, use_cache, None);
             }
         }
         all_cacheable.extend(cacheable);
-        if !display.is_empty() || watermark.is_none() || is_last {
-            break display;
+        display_acc.extend(display);
+        if display_acc.len() as u32 >= INITIAL_LIMIT || watermark.is_none() || is_last {
+            break;
         }
         until = watermark;
-    };
+    }
 
     // 全パスの和集合(id 重複除去、created_at 降順)。1パスで終わった場合は split の結果と同じ。
+    let order = |a: &Note, b: &Note| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id));
+    let mut seen = std::collections::HashSet::new();
+    display_acc.retain(|n| seen.insert(n.id.clone()));
+    display_acc.sort_by(order);
+    display_acc.truncate(INITIAL_LIMIT as usize);
     let mut seen = std::collections::HashSet::new();
     all_cacheable.retain(|n| seen.insert(n.id.clone()));
-    all_cacheable.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
-    Ok(FilteredFetch {
-        notes,
-        cacheable: all_cacheable,
-        source_outcomes: merged_outcomes.unwrap_or_default(),
-    })
+    all_cacheable.sort_by(order);
+    // `from cache` を含むカラムは境界の対象外なので、cacheable は画面用と同じ。
+    let cacheable = if use_cache { display_acc.clone() } else { all_cacheable };
+    Ok(FilteredFetch { notes: display_acc, cacheable, source_outcomes: merged_outcomes })
 }
 
 /// 取得結果をキャッシュへ書く。書くのは画面用の `notes`(truncate後)ではなく `cacheable`。
@@ -2327,6 +2349,11 @@ mod tests {
         }
     }
 
+    /// id `n{lo}`..`n{hi}`(3桁、created_at は数値と同順)のノートを `hi` から `lo` の順に並べて作る。
+    fn range_notes(lo: i64, hi: i64) -> Vec<Note> {
+        (lo..=hi).rev().map(|i| note(&format!("n{i:03}"), i)).collect()
+    }
+
     fn ids(notes: &[Note]) -> Vec<&str> {
         notes.iter().map(|n| n.id.as_str()).collect()
     }
@@ -2337,11 +2364,15 @@ mod tests {
     #[tokio::test]
     async fn collect_backfill_pages_hides_notes_older_than_the_shallowest_source_depth() {
         let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
-        let mut script = std::collections::VecDeque::from(vec![bp(
-            &[("n600", 600), ("n550", 550), ("n300", 300), ("n250", 250)],
-            vec![fetched("n500"), fetched("n200")],
-            None,
-        )]);
+        // 透かし n500 以上が INITIAL_LIMIT 件あるので1パスで終わる
+        let mut notes = range_notes(601, 620);
+        notes.push(note("n300", 300));
+        notes.push(note("n250", 250));
+        let mut script = std::collections::VecDeque::from(vec![BackfillPass {
+            notes,
+            outcomes: vec![fetched("n500"), fetched("n200")],
+            cache_min: None,
+        }]);
 
         let fetch = collect_backfill_pages(Some("n900"), false, |until| {
             calls.borrow_mut().push(until);
@@ -2350,9 +2381,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(ids(&fetch.notes), vec!["n600", "n550"]);
+        assert_eq!(fetch.notes.len(), INITIAL_LIMIT as usize);
+        assert!(fetch.notes.iter().all(|n| n.id.as_str() >= "n500"));
         // 透かしより古いノートもキャッシュには入る(境界は生ページ全体が column_note にある前提)
-        assert_eq!(fetch.cacheable.len(), 4);
+        assert_eq!(fetch.cacheable.len(), 22);
         assert_eq!(*calls.borrow(), vec![Some("n900".to_string())]);
         assert_eq!(fetch.source_outcomes, vec![fetched("n500"), fetched("n200")]);
     }
@@ -2363,8 +2395,8 @@ mod tests {
         let mut script = std::collections::VecDeque::from(vec![
             // 1パス目: 返せるノートは全て透かし n500 より古い → 画面用は空
             bp(&[("n300", 300), ("n250", 250)], vec![fetched("n500"), fetched("n250")], None),
-            // 2パス目(until_id = n500): 透かし n400 以上のノートがある
-            bp(&[("n480", 480), ("n470", 470)], vec![fetched("n400"), fetched("n300")], None),
+            // 2パス目(until_id = n500): 全ソースが枯渇 → 透かし無し、これで終わる
+            bp(&[("n480", 480), ("n470", 470)], vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted], None),
         ]);
 
         let fetch = collect_backfill_pages(Some("n900"), false, |until| {
@@ -2378,8 +2410,39 @@ mod tests {
         assert_eq!(ids(&fetch.notes), vec!["n480", "n470"]);
         // cacheable は全パスの和集合
         assert_eq!(fetch.cacheable.len(), 4);
-        // ソース別の取得結果はパス間で統合される(より古い方、先頭から連続)
-        assert_eq!(fetch.source_outcomes, vec![fetched("n400"), fetched("n250")]);
+        assert_eq!(fetch.source_outcomes, vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted]);
+    }
+
+    /// 画面用が INITIAL_LIMIT 件に満たない間はパスを続け、各パスの画面用を積み上げる。
+    /// 最初のページが短いとカラムがスクロールできず、loadMore が呼ばれない(Column.svelte は
+    /// scroll イベントでだけ loadMore を呼ぶ)。
+    #[tokio::test]
+    async fn collect_backfill_pages_accumulates_display_notes_across_passes_up_to_the_limit() {
+        let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
+        let mut script = std::collections::VecDeque::from(vec![
+            // 1パス目: 透かし n500 以上は2件だけ
+            bp(&[("n600", 600), ("n550", 550), ("n300", 300)], vec![fetched("n500"), fetched("n300")], None),
+            // 2パス目(until_id = n500): 透かし n400 以上が18件 → 合計 INITIAL_LIMIT 件で止まる
+            BackfillPass {
+                notes: range_notes(481, 498),
+                outcomes: vec![fetched("n400"), fetched("n300")],
+                cache_min: None,
+            },
+        ]);
+
+        let fetch = collect_backfill_pages(Some("n900"), false, |until| {
+            calls.borrow_mut().push(until);
+            std::future::ready(Ok(script.pop_front().expect("unexpected extra pass")))
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(*calls.borrow(), vec![Some("n900".to_string()), Some("n500".to_string())]);
+        assert_eq!(fetch.notes.len(), INITIAL_LIMIT as usize);
+        assert_eq!(&ids(&fetch.notes)[..2], ["n600", "n550"]);
+        assert_eq!(fetch.notes.last().unwrap().id, "n481");
+        // 返したノートは全て最後の透かし n400 以上(次の until_id もそれ以上になる)
+        assert!(fetch.notes.iter().all(|n| n.id.as_str() >= "n400"));
     }
 
     #[tokio::test]
@@ -2426,7 +2489,7 @@ mod tests {
     async fn collect_backfill_pages_keeps_a_source_that_failed_on_the_first_pass_failed() {
         let mut script = std::collections::VecDeque::from(vec![
             bp(&[("n300", 300)], vec![SourceOutcome::Failed, fetched("n500")], None),
-            bp(&[("n460", 460)], vec![fetched("n450"), fetched("n400")], None),
+            bp(&[("n460", 460)], vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted], None),
         ]);
 
         let fetch = collect_backfill_pages(Some("n900"), false, |_| {
@@ -2437,16 +2500,41 @@ mod tests {
 
         assert_eq!(ids(&fetch.notes), vec!["n460"]);
         // 先頭から連続して取得できていないソースは境界に使わせない
-        assert_eq!(fetch.source_outcomes, vec![SourceOutcome::Failed, fetched("n400")]);
+        assert_eq!(fetch.source_outcomes, vec![SourceOutcome::Failed, SourceOutcome::Exhausted]);
+    }
+
+    /// 途中のパスで失敗したソースが後のパスで復帰しても、間の欠落を連続とみなして境界を書いてはいけない
+    /// (Issue #428 レビュー指摘1)。X: n500 まで取得 → 2パス目で失敗 → 3パス目で枯渇、のとき、
+    /// (n300, n500) は未取得なので X の境界は枯渇(`""`)ではなく n500 のまま。
+    #[tokio::test]
+    async fn collect_backfill_pages_freezes_a_source_that_failed_after_it_had_succeeded() {
+        let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
+        let mut script = std::collections::VecDeque::from(vec![
+            bp(&[], vec![fetched("n500"), fetched("n480")], None),
+            // X は失敗(透かしを制約しない)、Y は n300 まで
+            bp(&[], vec![SourceOutcome::Failed, fetched("n300")], None),
+            // X が復帰して枯渇、Y も枯渇
+            bp(&[], vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted], None),
+        ]);
+
+        let fetch = collect_backfill_pages(None, false, |until| {
+            calls.borrow_mut().push(until);
+            std::future::ready(Ok(script.pop_front().expect("unexpected extra pass")))
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(*calls.borrow(), vec![None, Some("n500".to_string()), Some("n300".to_string())]);
+        assert_eq!(fetch.source_outcomes, vec![fetched("n500"), SourceOutcome::Exhausted]);
     }
 
     #[tokio::test]
     async fn collect_backfill_pages_treats_a_full_cache_search_page_as_a_source_for_the_watermark() {
-        let mut script = std::collections::VecDeque::from(vec![bp(
-            &[("n700", 700), ("n300", 300)],
-            vec![fetched("n200")],
-            Some("n600"),
-        )]);
+        let mut script = std::collections::VecDeque::from(vec![
+            bp(&[("n700", 700), ("n300", 300)], vec![fetched("n200")], Some("n600")),
+            // 2パス目(until_id = n600): 枯渇して終わる
+            bp(&[], vec![SourceOutcome::Exhausted], None),
+        ]);
 
         let fetch = collect_backfill_pages(None, true, |_| {
             std::future::ready(Ok(script.pop_front().expect("unexpected extra pass")))
