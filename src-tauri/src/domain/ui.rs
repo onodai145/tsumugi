@@ -227,6 +227,10 @@ pub struct UiPrefs {
     /// 適用時に行うため、Rust 側では不透明に永続化する。
     #[serde(default = "default_ui_scale")]
     pub ui_scale: i32,
+    /// ノート翻訳（Issue #440）の翻訳先言語コード。サーバーの `notes/translate` の `targetLang` へ
+    /// そのまま渡す。空文字や空白のみの値は翻訳時に `ja` として扱う（`commands::note::effective_translate_lang`）。
+    #[serde(default = "default_translate_target_lang")]
+    pub translate_target_lang: String,
 }
 
 fn default_column_opacity() -> i32 {
@@ -278,6 +282,10 @@ fn default_mfm_animation_enabled() -> bool {
 
 fn default_search_engine_url() -> String {
     "https://www.google.com/search?q={query}".into()
+}
+
+fn default_translate_target_lang() -> String {
+    "ja".into()
 }
 
 fn default_url_preview_enabled() -> bool {
@@ -343,6 +351,7 @@ impl Default for UiPrefs {
             developer_options_enabled: false,
             custom_css: String::new(),
             ui_scale: default_ui_scale(),
+            translate_target_lang: default_translate_target_lang(),
         }
     }
 }
@@ -505,6 +514,7 @@ mod tests {
             developer_options_enabled: true,
             custom_css: "body { background: #000 }".into(),
             ui_scale: 130,
+            translate_target_lang: "en".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -567,6 +577,26 @@ mod tests {
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert!(v.url_preview_enabled);
         assert_eq!(v.summaly_proxy_url, "");
+    }
+
+    #[test]
+    fn translate_target_lang_defaults_to_ja_for_legacy_json() {
+        // translate_target_lang 追加前に保存されたJSONも読めること（#[serde(default)]）。
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.translate_target_lang, "ja");
+        assert_eq!(UiPrefs::default().translate_target_lang, "ja");
+    }
+
+    #[test]
+    fn translate_target_lang_round_trips_camel_case() {
+        let v: UiPrefs = serde_json::from_str(
+            r#"{"theme":"dark","defaultColumnWidth":320,"translateTargetLang":"en"}"#,
+        )
+        .unwrap();
+        assert_eq!(v.translate_target_lang, "en");
+        let json = serde_json::to_value(&v).unwrap();
+        assert_eq!(json["translateTargetLang"], "en");
     }
 
     #[test]
