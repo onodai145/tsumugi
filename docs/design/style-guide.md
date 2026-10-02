@@ -101,6 +101,8 @@ lucideアイコン（`size={N}` prop）の指定値が `10/12/13/14/15/16/20` �
 
 `Settings.svelte` はセクション分割済み（`AccountsSection` / `LayoutSection` / `MobileSection` / `AppearanceSection` / `BackgroundSection` / `ReactionSection` / `ExternalIntegrationSection` / `DataSection` / `NotifySection` / `MuteSection` / `KeysSection` / `AboutSection` / `DeveloperSection`）。新しい設定項目を追加する際は既存のいずれかのセクションに載せるか、性質が明確に異なる場合のみ新規セクションを切る。セクション内の見出し・説明文・コントロールの縦間隔は既存セクションの実装（例: `MobileSection.svelte`）に揃える。
 
+選択式の入力にOSネイティブの `<select>` は使わず、`Dropdown.svelte`（値+ラベルのテーマ適用済みドロップダウン）を使う。ネイティブ`<select>`の一覧はWebKitGTK/OSが描画するためアプリのテーマ（CSS変数・カスタムテーマ）が効かない（翻訳先言語で発生、Issue #440）。
+
 ## 10. 色の意味づけ
 
 `--success` / `--info` / `--danger` / `--warning` は用途が固定されている（例: Renoteバナー = success、リプライバナー = info）。新しい用途にこれらを流用する場合、既存の意味づけと衝突しないか確認する。装飾目的の色選びには `--accent` を使い、意味づけ色を装飾用途に転用しない。

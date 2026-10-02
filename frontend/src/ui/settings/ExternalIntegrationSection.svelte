@@ -3,6 +3,7 @@
   import { SEARCH_ENGINE_PRESETS, DEFAULT_SEARCH_ENGINE_URL } from "../../lib/searchEngine";
   import { TRANSLATE_LANG_PRESETS, normalizeTranslateLang } from "../../lib/translateLang";
   import { Button } from "$lib/components/ui/button";
+  import Dropdown from "../Dropdown.svelte";
 
   let searchEngineUrl = $state(app.ui.searchEngineUrl ?? DEFAULT_SEARCH_ENGINE_URL);
   let urlPreviewEnabled = $state(app.ui.urlPreviewEnabled ?? true);
@@ -10,9 +11,10 @@
   let translateTargetLang = $state(normalizeTranslateLang(app.ui.translateTargetLang));
   // プリセットに無い保存値は、保存で上書きして消さないよう選択肢の末尾に足す。
   const translateLangOptions = $derived(
-    TRANSLATE_LANG_PRESETS.some((p) => p.code === translateTargetLang)
+    (TRANSLATE_LANG_PRESETS.some((p) => p.code === translateTargetLang)
       ? TRANSLATE_LANG_PRESETS
-      : [...TRANSLATE_LANG_PRESETS, { code: translateTargetLang, label: translateTargetLang }],
+      : [...TRANSLATE_LANG_PRESETS, { code: translateTargetLang, label: translateTargetLang }]
+    ).map((o) => ({ value: o.code, label: o.label })),
   );
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -88,16 +90,11 @@
 </div>
 
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
-  <label class="text-muted-foreground" for="translate-target-lang">翻訳先言語</label>
-  <select
-    id="translate-target-lang"
-    class="w-fit rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground"
-    bind:value={translateTargetLang}
-  >
-    {#each translateLangOptions as o (o.code)}
-      <option value={o.code}>{o.label}</option>
-    {/each}
-  </select>
+  <span class="text-muted-foreground">翻訳先言語</span>
+  <!-- OSネイティブの<select>は一覧をWebKitGTK/OSが描画してテーマが効かないため、Dropdownを使う。 -->
+  <div class="w-48">
+    <Dropdown bind:value={translateTargetLang} options={translateLangOptions} testid="translate-target-lang" />
+  </div>
   <p class="mb-0 mt-0 text-xs text-muted-foreground">
     ノートのメニューの「翻訳」で使う言語です。翻訳は接続先サーバーの翻訳機能（DeepL / LibreTranslate）で行われるため、
     サーバー側で翻訳が設定されている場合のみ使えます。
