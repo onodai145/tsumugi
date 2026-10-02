@@ -159,6 +159,14 @@ pub struct PollChoice {
     pub is_voted: bool,
 }
 
+/// `notes/translate` の翻訳結果（Issue #440）。`source_lang` は検出された翻訳元言語コード。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Translation {
+    pub source_lang: String,
+    pub text: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

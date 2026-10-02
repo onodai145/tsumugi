@@ -130,6 +130,22 @@ pub async fn fetch_server_version(client: &MisskeyClient) -> Result<Option<Strin
     Ok(raw.version)
 }
 
+/// `/api/meta` の `translatorAvailable` だけを読む。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawTranslator {
+    #[serde(default)]
+    translator_available: bool,
+}
+
+/// 接続先サーバーでノート翻訳（DeepL / LibreTranslate）が使えるか（Issue #440）。
+/// `translatorAvailable` は `MetaLite` に含まれるので `detail: false` で取れる。
+/// `fetch_server_version` と同様、`InstanceInfo` には足さず独立に取得する。
+pub async fn fetch_translator_available(client: &MisskeyClient) -> Result<bool> {
+    let raw: RawTranslator = client.post("meta", &json!({ "detail": false })).await?;
+    Ok(raw.translator_available)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawMeta {
@@ -202,6 +218,37 @@ mod meta_info_tests {
     fn raw_version_defaults_missing_version_to_none() {
         let raw: RawVersion = serde_json::from_str(r#"{}"#).unwrap();
         assert_eq!(raw.version, None);
+    }
+
+    #[test]
+    fn raw_translator_reads_flag_and_defaults_to_false() {
+        let t: RawTranslator = serde_json::from_str(r#"{"translatorAvailable":true}"#).unwrap();
+        assert!(t.translator_available);
+        let f: RawTranslator = serde_json::from_str(r#"{"translatorAvailable":false}"#).unwrap();
+        assert!(!f.translator_available);
+        // 古いサーバー等でフィールドが無い場合は非対応扱い。
+        let m: RawTranslator = serde_json::from_str(r#"{"version":"2024.1.0"}"#).unwrap();
+        assert!(!m.translator_available);
+    }
+
+    #[tokio::test]
+    async fn fetch_translator_available_reads_meta_lite() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/meta"))
+            .and(body_partial_json(json!({ "detail": false })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "version": "2026.9.1",
+                "translatorAvailable": true
+            })))
+            .mount(&mock)
+            .await;
+
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        assert!(fetch_translator_available(&client).await.unwrap());
     }
 
     /// 実サーバーの `/api/meta` から version が取れること（認証不要）。

@@ -106,6 +106,9 @@ pub struct AppState {
     /// account_id -> 接続先サーバーの Misskey バージョン文字列(`/api/meta`)。サーバーサイド検索
     /// (Issue #430)の対応機能判定に使う。取得に成功した値だけ保存し、アプリ再起動まで再取得しない。
     pub server_versions: Mutex<HashMap<String, String>>,
+    /// account_id -> 接続先サーバーでノート翻訳が使えるか(`/api/meta` の `translatorAvailable`、Issue #440)。
+    /// 取得に成功した値だけ保存し、アプリ再起動まで再取得しない。
+    pub translator_available: Mutex<HashMap<String, bool>>,
     /// ローカル NG（ミュート）設定。ストリーム/REST の受信ノートに適用する
     pub mute: Mutex<MuteConfig>,
     /// account_id -> サーバ側でミュート/ブロックしているユーザの userId 集合。
@@ -168,6 +171,7 @@ impl AppState {
             connections: ConnectionManager::default(),
             emoji_cache: Mutex::new(HashMap::new()),
             server_versions: Mutex::new(HashMap::new()),
+            translator_available: Mutex::new(HashMap::new()),
             mute: Mutex::new(mute),
             server_mutes: Mutex::new(HashMap::new()),
             server_word_mutes: Mutex::new(HashMap::new()),
@@ -231,6 +235,24 @@ impl AppState {
     /// account のバージョンキャッシュを破棄する（アカウント削除時）。
     pub fn forget_server_version(&self, account_id: &str) {
         self.server_versions.lock().unwrap().remove(account_id);
+    }
+
+    /// account の接続先サーバーでノート翻訳が使えるか（取得済みの場合のみ）。
+    pub fn translator_available(&self, account_id: &str) -> Option<bool> {
+        self.translator_available.lock().unwrap().get(account_id).copied()
+    }
+
+    /// account の翻訳可否を保存する。
+    pub fn set_translator_available(&self, account_id: &str, available: bool) {
+        self.translator_available
+            .lock()
+            .unwrap()
+            .insert(account_id.to_string(), available);
+    }
+
+    /// account の翻訳可否キャッシュを破棄する（アカウント削除時）。
+    pub fn forget_translator_available(&self, account_id: &str) {
+        self.translator_available.lock().unwrap().remove(account_id);
     }
 
     #[cfg(test)]
@@ -312,6 +334,21 @@ mod tests {
 
         state.forget_server_version("a1");
         assert_eq!(state.server_version("a1"), None);
+    }
+
+    #[test]
+    fn translator_available_is_remembered_per_account_and_forgettable() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        assert_eq!(state.translator_available("a1"), None);
+
+        state.set_translator_available("a1", true);
+        state.set_translator_available("a2", false);
+        assert_eq!(state.translator_available("a1"), Some(true));
+        assert_eq!(state.translator_available("a2"), Some(false));
+
+        state.forget_translator_available("a1");
+        assert_eq!(state.translator_available("a1"), None);
+        assert_eq!(state.translator_available("a2"), Some(false));
     }
 
     #[test]
