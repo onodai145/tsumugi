@@ -292,9 +292,12 @@
   let translation = $state<TranslationState | null>(null);
   // 翻訳の読み込み中にノートが入れ替わっても古い結果を出さないための世代番号。
   let translateSeq = 0;
-  // 仮想リスト等で別のノートに使い回されたら、翻訳ブロックを破棄する。
+  // 仮想リスト等で別のノートに使い回されたら、翻訳ブロックを破棄する。`inner` そのものではなく
+  // id(プリミティブ)を購読する: リアクション更新などで同じidの新しいNoteオブジェクトに
+  // 差し替わっても、表示中の翻訳を消さないため。
+  const innerId = $derived(inner.id);
   $effect(() => {
-    void inner.id;
+    void innerId;
     translateSeq++;
     translation = null;
   });

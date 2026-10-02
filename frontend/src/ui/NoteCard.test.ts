@@ -903,6 +903,22 @@ describe("ノート翻訳", () => {
     await waitFor(() => expect(translateSpy).toHaveBeenCalledWith("acc1", "n-target"));
   });
 
+  it("同じidの新しいノートオブジェクトに差し替わっても(リアクション更新など)、表示中の翻訳は消えない", async () => {
+    setup(true);
+    const { getByLabelText, findByText, getByTestId, rerender } = render(NoteCard, {
+      props: { note: makeNote({ id: "n-same", text: "hello" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("こんにちは"));
+
+    await rerender({ note: makeNote({ id: "n-same", text: "hello", reactions: { "👍": 1 } }), accountId: "acc1" });
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+
+    expect(getByTestId("note-translation").textContent).toContain("こんにちは");
+  });
+
   it("翻訳の読み込み中に別のノートへ入れ替わったら、古い結果を新しいノートの下に出さない", async () => {
     let resolveFirst!: (v: unknown) => void;
     setup(true, () => new Promise((r) => (resolveFirst = r)));
