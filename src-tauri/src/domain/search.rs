@@ -19,7 +19,7 @@ pub struct SearchCapabilities {
 /// Misskey のバージョン文字列から先頭の `YYYY.M.P` だけを読む。
 /// `-alpha.0` や `-io.12b-...` などのサフィックスは無視する。形式が合わなければ None。
 pub fn parse_misskey_version(version: &str) -> Option<(u32, u32, u32)> {
-    let core = version.trim().split(|c: char| c == '-' || c == '+').next()?;
+    let core = version.trim().split(['-', '+']).next()?;
     let mut parts = core.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;

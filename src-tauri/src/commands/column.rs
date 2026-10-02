@@ -2,12 +2,14 @@
 //! タブはソース種別＋フィルタを持ち、購読＋REST取得しフィルタ適用して表示する。
 //! 定義は SQLite に永続化し、起動時に list_groups/list_columns → resume_column で復元する。
 
-use crate::api::meta::{fetch_antennas, fetch_followed_channels, fetch_user_lists, resolve_user};
-use crate::api::notes::fetch_notes;
+use crate::api::meta::{
+    fetch_antennas, fetch_followed_channels, fetch_server_version, fetch_user_lists, resolve_user,
+};
+use crate::api::notes::{fetch_notes, search_notes, SearchParams};
 use crate::api::notifications::fetch_notifications;
 use crate::domain::{
-    Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note, Notification, PaneNode,
-    SourceItem, SplitDirection, User, UserList,
+    search_capabilities, Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note,
+    Notification, PaneNode, SearchCapabilities, SourceItem, SplitDirection, User, UserList,
 };
 use crate::error::{Error, Result};
 use crate::filter::{ast, eval::EvalContext, parser, sql, CompiledFilter};
@@ -1617,6 +1619,126 @@ pub async fn search_cache_notes(
     .await
 }
 
+/// サーバー検索(Issue #430)の `host` 入力を API 用に正規化する。空は未指定、`.` と
+/// アカウント自身のホスト（大文字小文字・前後空白は無視）は Misskey の「ローカル」表記 `"."` にする。
+fn normalize_search_host(input: Option<&str>, account_host: &str) -> Option<String> {
+    let h = input?.trim();
+    if h.is_empty() {
+        return None;
+    }
+    if h == "." || h.eq_ignore_ascii_case(account_host) {
+        return Some(".".into());
+    }
+    Some(h.to_string())
+}
+
+/// サーバー検索の入力検証。`notes/search` は `query` 必須（空の挙動は未確認なので送らない）で、
+/// 日時範囲はサーバーが対応しているときだけ許可する。
+fn check_search_request(query: &str, has_date: bool, caps: &SearchCapabilities) -> Result<()> {
+    if query.trim().is_empty() {
+        return Err(Error::Invalid("search query is empty".into()));
+    }
+    if has_date && !caps.date_range {
+        return Err(Error::Invalid("date range search is not supported by this server".into()));
+    }
+    Ok(())
+}
+
+/// フロントから秒で受けた日時を API が使うミリ秒へ変換する。
+fn secs_to_ms(secs: u32) -> u64 {
+    u64::from(secs) * 1000
+}
+
+/// サーバー検索の結果にキャッシュ検索(`search_cache_core`)と同じミュートを適用する。
+fn apply_search_mutes(
+    notes: Vec<Note>,
+    mute: &MuteConfig,
+    is_server_muted: impl Fn(&Note) -> bool,
+    is_word_muted: impl Fn(&Note) -> bool,
+) -> Vec<Note> {
+    notes
+        .into_iter()
+        .filter(|n| !crate::filter::mute::is_muted(n, mute) && !is_server_muted(n) && !is_word_muted(n))
+        .collect()
+}
+
+/// アカウントの接続先サーバーが対応する検索機能。バージョンは `AppState` にキャッシュし、
+/// 未取得なら `/api/meta` から取得する。取得失敗は非対応扱い（日時欄を隠す側に倒す）で、
+/// 失敗はキャッシュしないため次回また取りに行く。未登録アカウントだけはエラーを返す。
+async fn search_capabilities_for(state: &AppState, account_id: &str) -> Result<SearchCapabilities> {
+    if let Some(v) = state.server_version(account_id) {
+        return Ok(search_capabilities(Some(&v)));
+    }
+    let client = state.client_for(account_id)?;
+    match fetch_server_version(&client).await {
+        Ok(Some(v)) => {
+            state.set_server_version(account_id, v.clone());
+            Ok(search_capabilities(Some(&v)))
+        }
+        Ok(None) | Err(_) => Ok(search_capabilities(None)),
+    }
+}
+
+/// 検索モーダル(Issue #430)用: アカウントの接続先サーバーが対応する検索機能を返す。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_search_capabilities(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<SearchCapabilities> {
+    search_capabilities_for(&state, &account_id).await
+}
+
+/// 検索モーダル(Issue #430)用: Misskey サーバーの `notes/search` による一回性の検索。
+/// `acct` は `@user@host` 形式（userId へ解決する）、日時は秒（日時範囲はサーバーが対応する場合のみ）。
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn search_server_notes(
+    state: State<'_, AppState>,
+    account_id: String,
+    query: String,
+    acct: Option<String>,
+    host: Option<String>,
+    since_date: Option<u32>,
+    until_date: Option<u32>,
+    until_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<Note>> {
+    let has_date = since_date.is_some() || until_date.is_some();
+    // 日時指定が無ければ対応判定のためのネットワークアクセスを省く
+    let caps = if has_date {
+        search_capabilities_for(&state, &account_id).await?
+    } else {
+        search_capabilities(None)
+    };
+    check_search_request(&query, has_date, &caps)?;
+
+    let client = state.client_for(&account_id)?;
+    let user_id = match acct.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        Some(a) => Some(resolve_user(&client, a).await?.id),
+        None => None,
+    };
+    let params = SearchParams {
+        query: query.trim().to_string(),
+        user_id,
+        host: normalize_search_host(host.as_deref(), client.host()),
+        since_date_ms: since_date.map(secs_to_ms),
+        until_date_ms: until_date.map(secs_to_ms),
+        until_id,
+        limit,
+    };
+    let raw = search_notes(&client, &params).await?;
+
+    let mute = state.mute.lock().unwrap().clone();
+    Ok(apply_search_mutes(
+        raw,
+        &mute,
+        |n| server_muted_note(&state, &account_id, n),
+        |n| state.is_word_muted(&account_id, n),
+    ))
+}
+
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
@@ -2605,5 +2727,62 @@ mod tests {
 
         let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
         assert_eq!(got.len(), 40);
+    }
+
+    #[test]
+    fn normalize_search_host_maps_own_host_and_dot_to_local() {
+        assert_eq!(normalize_search_host(None, "misskey.io"), None);
+        assert_eq!(normalize_search_host(Some(""), "misskey.io"), None);
+        assert_eq!(normalize_search_host(Some("   "), "misskey.io"), None);
+        assert_eq!(normalize_search_host(Some("."), "misskey.io"), Some(".".into()));
+        assert_eq!(normalize_search_host(Some("misskey.io"), "misskey.io"), Some(".".into()));
+        // 大文字小文字・前後空白は無視して自ホストと比較する
+        assert_eq!(normalize_search_host(Some("  Misskey.IO "), "misskey.io"), Some(".".into()));
+        assert_eq!(
+            normalize_search_host(Some(" example.com "), "misskey.io"),
+            Some("example.com".into())
+        );
+    }
+
+    #[test]
+    fn check_search_request_requires_keyword_and_capability_for_dates() {
+        let no_date = SearchCapabilities { date_range: false };
+        let with_date = SearchCapabilities { date_range: true };
+
+        assert!(check_search_request("rust", false, &no_date).is_ok());
+        assert!(check_search_request("rust", true, &with_date).is_ok());
+        assert!(matches!(check_search_request("", false, &with_date), Err(Error::Invalid(_))));
+        assert!(matches!(check_search_request("  \t", false, &with_date), Err(Error::Invalid(_))));
+        // 日時が指定されたのにサーバーが非対応なら拒否（UIが隠す前提の二重防御）
+        assert!(matches!(check_search_request("rust", true, &no_date), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn secs_to_ms_converts_without_overflow() {
+        assert_eq!(secs_to_ms(0), 0);
+        assert_eq!(secs_to_ms(1_700_000_000), 1_700_000_000_000);
+        assert_eq!(secs_to_ms(u32::MAX), 4_294_967_295_000);
+    }
+
+    #[test]
+    fn apply_search_mutes_drops_local_server_and_word_muted_notes_keeping_order() {
+        let mut spoiler = note("n1", 100);
+        spoiler.text = Some("spoiler content".into());
+        let notes = vec![spoiler, note("n2", 200), note("n3", 300), note("n4", 400)];
+        let mute = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+
+        let got = apply_search_mutes(notes, &mute, |n| n.id == "n2", |n| n.id == "n3");
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n4"]);
+    }
+
+    #[tokio::test]
+    async fn search_capabilities_for_uses_the_cached_version_without_network() {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory());
+        state.set_server_version("a1", "2026.9.1".into());
+        state.set_server_version("a2", "2025.4.1-io.12b-fb6fbea074".into());
+
+        assert!(search_capabilities_for(&state, "a1").await.unwrap().date_range);
+        assert!(!search_capabilities_for(&state, "a2").await.unwrap().date_range);
     }
 }

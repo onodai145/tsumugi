@@ -72,6 +72,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::set_column_notify,
             commands::column::update_column,
             commands::column::search_cache_notes,
+            commands::column::get_search_capabilities,
+            commands::column::search_server_notes,
             commands::note::post_note,
             commands::note::renote,
             commands::note::delete_note_cmd,
@@ -401,6 +403,10 @@ mod specta_export {
         assert!(ts.contains("startMiauth"), "missing startMiauth in:\n{ts}");
         assert!(ts.contains("completeMiauth"));
         assert!(ts.contains("whoami"));
+        // サーバーサイド検索(Issue #430)のコマンドと型
+        assert!(ts.contains("searchServerNotes"), "missing searchServerNotes command");
+        assert!(ts.contains("getSearchCapabilities"), "missing getSearchCapabilities command");
+        assert!(ts.contains("dateRange"), "SearchCapabilities.date_range should be camelCase");
         // serde(rename_all="camelCase") が specta 経由で TS に反映されていること
         assert!(
             ts.contains("displayName"),
