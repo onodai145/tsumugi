@@ -1427,6 +1427,22 @@ class AppStore {
     }
   }
 
+  /// NoteMenu の「翻訳」項目を出すか(Issue #440)。取得に失敗しても翻訳が使えない扱い(false)にし、
+  /// メニューを開くたびに誤ってエラーモーダルを出さないよう #logFailure も呼ばない。
+  async getTranslatorAvailable(accountId: string): Promise<boolean> {
+    try {
+      return await unwrapAcc(accountId, commands.getTranslatorAvailable(accountId));
+    } catch {
+      return false;
+    }
+  }
+
+  /// ノート本文を翻訳する(Issue #440)。結果なしは null。失敗は throw するだけで、
+  /// エラーモーダルは出さない(NoteCard の翻訳ブロックがインラインで表示するため)。
+  async translateNote(accountId: string, noteId: string) {
+    return await unwrapAcc(accountId, commands.translateNote(accountId, noteId));
+  }
+
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
   async setNotify(config: NotifyConfig) {
     if (config.desktop && !(await isPermissionGranted())) {

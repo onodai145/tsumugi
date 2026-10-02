@@ -1,11 +1,19 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
   import { SEARCH_ENGINE_PRESETS, DEFAULT_SEARCH_ENGINE_URL } from "../../lib/searchEngine";
+  import { TRANSLATE_LANG_PRESETS, normalizeTranslateLang } from "../../lib/translateLang";
   import { Button } from "$lib/components/ui/button";
 
   let searchEngineUrl = $state(app.ui.searchEngineUrl ?? DEFAULT_SEARCH_ENGINE_URL);
   let urlPreviewEnabled = $state(app.ui.urlPreviewEnabled ?? true);
   let summalyProxyUrl = $state(app.ui.summalyProxyUrl ?? "");
+  let translateTargetLang = $state(normalizeTranslateLang(app.ui.translateTargetLang));
+  // プリセットに無い保存値は、保存で上書きして消さないよう選択肢の末尾に足す。
+  const translateLangOptions = $derived(
+    TRANSLATE_LANG_PRESETS.some((p) => p.code === translateTargetLang)
+      ? TRANSLATE_LANG_PRESETS
+      : [...TRANSLATE_LANG_PRESETS, { code: translateTargetLang, label: translateTargetLang }],
+  );
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -22,6 +30,7 @@
         searchEngineUrl: searchEngineUrl.trim() || DEFAULT_SEARCH_ENGINE_URL,
         urlPreviewEnabled,
         summalyProxyUrl: summalyProxyUrl.trim(),
+        translateTargetLang: normalizeTranslateLang(translateTargetLang),
       });
       saved = true;
     } catch (e) {
@@ -75,6 +84,23 @@
   <p class="mb-0 mt-0 text-xs text-muted-foreground">
     設定すると、リンクプレビュー対象のURLは接続先インスタンスではなく指定したプロキシへ直接送信されます。
     信頼できるプロキシのみを指定してください。
+  </p>
+</div>
+
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
+  <label class="text-muted-foreground" for="translate-target-lang">翻訳先言語</label>
+  <select
+    id="translate-target-lang"
+    class="w-fit rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground"
+    bind:value={translateTargetLang}
+  >
+    {#each translateLangOptions as o (o.code)}
+      <option value={o.code}>{o.label}</option>
+    {/each}
+  </select>
+  <p class="mb-0 mt-0 text-xs text-muted-foreground">
+    ノートのメニューの「翻訳」で使う言語です。翻訳は接続先サーバーの翻訳機能（DeepL / LibreTranslate）で行われるため、
+    サーバー側で翻訳が設定されている場合のみ使えます。
   </p>
 </div>
 
