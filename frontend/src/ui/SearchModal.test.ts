@@ -205,3 +205,162 @@ describe("SearchModal", () => {
     );
   });
 });
+
+describe("SearchModal サーバー検索", () => {
+  const ADV_BASE = "詳細条件を指定（ユーザー・インスタンス）";
+  const ADV_WITH_DATE = "詳細条件を指定（ユーザー・インスタンス・日時）";
+  const NO_DATE_NOTE = "日時範囲の指定は Misskey 2025.7.0 以降のサーバーで利用できます";
+
+  function mockServer(opts: { dateRange?: boolean; capsFail?: boolean; notes?: Note[] } = {}) {
+    app.accounts = [makeAccount()];
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_search_capabilities") {
+        return opts.capsFail
+          ? Promise.reject(new Error("boom"))
+          : Promise.resolve({ dateRange: opts.dateRange ?? false });
+      }
+      if (cmd === "search_server_notes") return Promise.resolve(opts.notes ?? []);
+      if (cmd === "search_cache_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+  }
+
+  const calledCommands = () => invokeMock.mock.calls.map((c) => c[0]);
+
+  it("サーバーを選ぶとTQLタブが隠れ、キーワードが空白だけの間は検索できない", async () => {
+    mockServer();
+    const { getByText, queryByText, getByTestId, getByPlaceholderText } = render(SearchModal, {
+      props: { onclose: () => {} },
+    });
+    const submit = () => getByTestId("search-submit") as HTMLButtonElement;
+    const keyword = getByPlaceholderText("本文に含まれる語");
+
+    expect(queryByText("エキスパート(TQL)")).toBeTruthy();
+    expect(submit().disabled).toBe(false); // キャッシュ検索は条件なしでも検索できる
+
+    await fireEvent.click(getByText("サーバー"));
+    expect(queryByText("エキスパート(TQL)")).toBeNull();
+    expect(submit().disabled).toBe(true);
+
+    await fireEvent.input(keyword, { target: { value: "  " } });
+    expect(submit().disabled).toBe(true);
+
+    await fireEvent.input(keyword, { target: { value: "rust" } });
+    expect(submit().disabled).toBe(false);
+  });
+
+  it("サーバー検索はsearch_server_notesを条件付きで呼び、キャッシュ検索は呼ばない", async () => {
+    mockServer({ notes: [makeNote("n1", 100, "from server")] });
+    const { getByText, getByTestId, getByPlaceholderText } = render(SearchModal, {
+      props: { onclose: () => {} },
+    });
+    await fireEvent.click(getByText("サーバー"));
+    await fireEvent.input(getByPlaceholderText("本文に含まれる語"), { target: { value: " rust " } });
+    await fireEvent.click(getByText(ADV_BASE));
+    await fireEvent.input(getByPlaceholderText(/^@user@host/), { target: { value: "@bob@example.com" } });
+    await fireEvent.input(getByPlaceholderText(/^misskey\.example/), { target: { value: "example.com" } });
+    await fireEvent.click(getByTestId("search-submit"));
+
+    await waitFor(() => expect(getByText("from server")).toBeTruthy());
+    expect(invokeMock).toHaveBeenCalledWith("search_server_notes", {
+      accountId: "acc1",
+      query: "rust",
+      acct: "@bob@example.com",
+      host: "example.com",
+      sinceDate: null,
+      untilDate: null,
+      untilId: null,
+      limit: 20,
+    });
+    expect(calledCommands()).not.toContain("search_cache_notes");
+  });
+
+  it("日時対応のサーバーでは日時欄が出て、選んだ日時が秒でsearch_server_notesへ渡る", async () => {
+    mockServer({ dateRange: true });
+    const { getByText, findByText, getByTestId, getByPlaceholderText } = render(SearchModal, {
+      props: { onclose: () => {} },
+    });
+    await fireEvent.click(getByText("サーバー"));
+    await fireEvent.click(await findByText(ADV_WITH_DATE));
+    await findByText("日時（開始）");
+
+    // flatpickrは素のinputにインスタンス(_flatpickr)を載せる。setDate(.., true)でonChangeが走る。
+    // ModalはportalでbodyへDOMを移すため、render()のcontainerではなくdocumentから探す。
+    const [fromInput, toInput] = Array.from(
+      document.querySelectorAll<HTMLInputElement>("input[placeholder='未指定']"),
+    );
+    const from = new Date(2026, 0, 2, 3, 4, 0);
+    const to = new Date(2026, 0, 3, 23, 59, 0);
+    type Fp = { _flatpickr: { setDate(d: Date, t: boolean): void } };
+    (fromInput as unknown as Fp)._flatpickr.setDate(from, true);
+    (toInput as unknown as Fp)._flatpickr.setDate(to, true);
+
+    await fireEvent.input(getByPlaceholderText("本文に含まれる語"), { target: { value: "rust" } });
+    await fireEvent.click(getByTestId("search-submit"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "search_server_notes",
+        expect.objectContaining({
+          sinceDate: Math.floor(from.getTime() / 1000),
+          untilDate: Math.floor(to.getTime() / 1000),
+        }),
+      ),
+    );
+  });
+
+  it("日時非対応のサーバーでは日時欄を出さず、非対応の注記を出す", async () => {
+    mockServer({ dateRange: false });
+    const { getByText, findByText, queryByText } = render(SearchModal, { props: { onclose: () => {} } });
+    await fireEvent.click(getByText("サーバー"));
+    await fireEvent.click(getByText(ADV_BASE));
+
+    await findByText(NO_DATE_NOTE);
+    expect(queryByText("日時（開始）")).toBeNull();
+  });
+
+  it("能力の取得に失敗したら日時欄も注記も出さない", async () => {
+    mockServer({ capsFail: true });
+    const { getByText, queryByText } = render(SearchModal, { props: { onclose: () => {} } });
+    await fireEvent.click(getByText("サーバー"));
+    await fireEvent.click(getByText(ADV_BASE));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("get_search_capabilities", { accountId: "acc1" }),
+    );
+    await new Promise((r) => setTimeout(r, 0)); // 失敗したPromiseの処理を流す
+    expect(queryByText("日時（開始）")).toBeNull();
+    expect(queryByText(NO_DATE_NOTE)).toBeNull();
+  });
+
+  it("検索対象を切り替えると結果がクリアされる", async () => {
+    mockServer({ notes: [makeNote("n1", 100, "from server")] });
+    const { getByText, queryByText, findByText, getByTestId, getByPlaceholderText } = render(SearchModal, {
+      props: { onclose: () => {} },
+    });
+    await fireEvent.click(getByText("サーバー"));
+    await fireEvent.input(getByPlaceholderText("本文に含まれる語"), { target: { value: "rust" } });
+    await fireEvent.click(getByTestId("search-submit"));
+    await findByText("from server");
+
+    await fireEvent.click(getByText("キャッシュ"));
+    expect(queryByText("from server")).toBeNull();
+  });
+
+  it("サーバー検索中にアカウントを変えると結果がクリアされる", async () => {
+    mockServer({ notes: [makeNote("n1", 100, "from server")] });
+    const second: Account = { ...makeAccount(), id: "acc2", username: "carol" };
+    app.accounts = [makeAccount(), second];
+    const { getByText, queryByText, findByText, getByTestId, getByPlaceholderText } = render(SearchModal, {
+      props: { onclose: () => {} },
+    });
+    await fireEvent.click(getByText("サーバー"));
+    await fireEvent.input(getByPlaceholderText("本文に含まれる語"), { target: { value: "rust" } });
+    await fireEvent.click(getByTestId("search-submit"));
+    await findByText("from server");
+
+    await fireEvent.click(getByTestId("account-select-trigger"));
+    await fireEvent.click(getByTestId("account-select-option-acc2"));
+    await waitFor(() => expect(queryByText("from server")).toBeNull());
+  });
+});

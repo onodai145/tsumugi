@@ -30,6 +30,14 @@
   let dateToFp: FlatpickrInstance | undefined;
   let tqlText = $state("");
   let tqlErr = $state<string | null>(null);
+  // 検索対象。サーバー検索(Issue #430)は Misskey の notes/search に問い合わせる。
+  let scope = $state<"cache" | "server">("cache");
+  // サーバーが対応する検索機能。取得前・取得失敗は null（日時欄は出さない）。
+  let caps = $state<{ dateRange: boolean } | null>(null);
+  let capsGen = 0;
+  // サーバー検索は簡単モード固定（notes/search はTQLを受け付けない）。
+  const showGuided = $derived(scope === "server" || uiMode === "guided");
+  const dateVisible = $derived(scope === "cache" || caps?.dateRange === true);
 
   // flatpickrをSvelteのバインディングなしに素のinputへ被せるアクション。fpインスタンスは
   // クリアボタン(fp.clear())から使えるよう呼び出し元に返す。defaultHour/defaultMinuteは
@@ -107,6 +115,18 @@
     tqlErr = await app.validateFilter({ kind: "tql", value: tqlText });
   }
 
+  // サーバー検索の条件。日時は秒（Rust側でミリ秒へ変換する）。日時欄が出ていないときは
+  // 下の $effect が dateFrom/dateTo を null に戻すので、そのまま使える。
+  function serverParams() {
+    return {
+      query: keyword.trim(),
+      acct: userAcct.trim() || undefined,
+      host: host.trim() || undefined,
+      sinceDate: dateFrom ? Math.floor(dateFrom.getTime() / 1000) : undefined,
+      untilDate: dateTo ? Math.floor(dateTo.getTime() / 1000) : undefined,
+    };
+  }
+
   async function loadMore() {
     if (busy || done) return;
     busy = true;
@@ -114,8 +134,15 @@
     const myGen = requestGen;
     try {
       const untilId = notes.length > 0 ? notes[notes.length - 1].id : undefined;
-      const filter: FilterQuery = { kind: "tql", value: currentPredicate() };
-      const page = await app.searchCacheNotes(accountId, filter, untilId, 20);
+      const page =
+        scope === "server"
+          ? await app.searchServerNotes(accountId, serverParams(), untilId, 20)
+          : await app.searchCacheNotes(
+              accountId,
+              { kind: "tql", value: currentPredicate() } satisfies FilterQuery,
+              untilId,
+              20,
+            );
       if (myGen !== requestGen) return;
       if (page.length === 0) done = true;
       const seen = new Set(notes.map((n) => n.id));
@@ -129,14 +156,32 @@
     }
   }
 
-  function runSearch(e: Event) {
-    e.preventDefault();
-    if (uiMode === "expert" && tqlErr) return;
+  function resetResults() {
     requestGen++;
     notes = [];
     busy = false;
     done = false;
     err = null;
+    searched = false;
+  }
+
+  // サーバー検索はキーワード必須（notes/search の query は必須）。キャッシュ検索は従来どおり
+  // エキスパートモードでTQLエラーがある間だけ不可。
+  function canSearch(): boolean {
+    if (scope === "server") return keyword.trim() !== "";
+    return !(uiMode === "expert" && tqlErr);
+  }
+
+  function setScope(next: "cache" | "server") {
+    if (scope === next) return;
+    scope = next;
+    resetResults();
+  }
+
+  function runSearch(e: Event) {
+    e.preventDefault();
+    if (!canSearch()) return;
+    resetResults();
     searched = true;
     void loadMore();
   }
@@ -149,6 +194,38 @@
       void loadMore();
     }
   }
+
+  // サーバー検索のときだけ、問い合わせ先アカウントのサーバーが対応する検索機能を取得する。
+  // 取得失敗は握りつぶして caps=null のまま（日時欄も注記も出さない）。
+  $effect(() => {
+    const id = accountId;
+    const gen = ++capsGen;
+    caps = null;
+    if (scope !== "server") return;
+    app.getSearchCapabilities(id).then(
+      (c) => {
+        if (gen === capsGen) caps = c;
+      },
+      () => {},
+    );
+  });
+
+  // 日時欄が出ていない間は、残っている日時の値を捨てる（古い値を送らないため）。
+  $effect(() => {
+    if (!dateVisible) {
+      dateFrom = null;
+      dateTo = null;
+    }
+  });
+
+  // サーバー検索は問い合わせ先がアカウントのサーバーなので、アカウントを変えたら結果を作り直す。
+  // キャッシュ検索の結果はアカウントに依存しないため従来どおり保持する。
+  let prevAccountId: string | undefined;
+  $effect(() => {
+    const id = accountId;
+    if (scope === "server" && prevAccountId !== undefined && id !== prevAccountId) resetResults();
+    prevAccountId = id;
+  });
 </script>
 
 <Modal title="検索" {onclose} width="620px">
@@ -159,30 +236,57 @@
   <div class="-mx-4 -mb-4 flex max-h-[calc(84vh-3rem)] flex-col overflow-hidden rounded-b-[11px]">
     <form onsubmit={runSearch} class="flex flex-none flex-col gap-2.5 px-4">
       <div class="flex flex-col gap-1 text-sm">
-        <span class="text-muted-foreground">アカウント（検索結果の操作に使用。検索条件には影響しません）</span>
+        <span class="text-muted-foreground"
+          >{scope === "server"
+            ? "アカウント（このアカウントのサーバーに検索を問い合わせます）"
+            : "アカウント（検索結果の操作に使用。検索条件には影響しません）"}</span
+        >
         <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel />
       </div>
 
-      <div class="flex items-center gap-0 self-start overflow-hidden rounded-lg border border-border text-sm">
+      <div
+        class="flex items-center gap-0 self-start overflow-hidden rounded-lg border border-border text-sm"
+        role="group"
+        aria-label="検索対象"
+      >
         <button
           type="button"
-          class={uiMode === "guided"
+          class={scope === "cache"
             ? "border-r border-border bg-primary px-3.5 py-1.5 text-primary-foreground"
             : "border-r border-border bg-muted px-3.5 py-1.5 text-foreground"}
-          onclick={() => (uiMode = "guided")}
-        >簡単</button>
+          onclick={() => setScope("cache")}
+        >キャッシュ</button>
         <button
           type="button"
-          class={uiMode === "expert"
+          class={scope === "server"
             ? "bg-primary px-3.5 py-1.5 text-primary-foreground"
             : "bg-muted px-3.5 py-1.5 text-foreground"}
-          onclick={switchToExpert}
-        >エキスパート(TQL)</button>
+          onclick={() => setScope("server")}
+        >サーバー</button>
       </div>
 
-      {#if uiMode === "guided"}
+      {#if scope === "cache"}
+        <div class="flex items-center gap-0 self-start overflow-hidden rounded-lg border border-border text-sm">
+          <button
+            type="button"
+            class={uiMode === "guided"
+              ? "border-r border-border bg-primary px-3.5 py-1.5 text-primary-foreground"
+              : "border-r border-border bg-muted px-3.5 py-1.5 text-foreground"}
+            onclick={() => (uiMode = "guided")}
+          >簡単</button>
+          <button
+            type="button"
+            class={uiMode === "expert"
+              ? "bg-primary px-3.5 py-1.5 text-primary-foreground"
+              : "bg-muted px-3.5 py-1.5 text-foreground"}
+            onclick={switchToExpert}
+          >エキスパート(TQL)</button>
+        </div>
+      {/if}
+
+      {#if showGuided}
         <label class="flex flex-col gap-1 text-sm">
-          <span class="text-muted-foreground">キーワード</span>
+          <span class="text-muted-foreground">{scope === "server" ? "キーワード（必須）" : "キーワード"}</span>
           <input
             class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
             placeholder="本文に含まれる語"
@@ -194,7 +298,9 @@
           type="button"
           class="self-start text-xs text-muted-foreground underline"
           onclick={() => (showAdvanced = !showAdvanced)}
-        >{showAdvanced ? "詳細条件を隠す" : "詳細条件を指定（ユーザー・インスタンス・日時）"}</button>
+        >{showAdvanced
+          ? "詳細条件を隠す"
+          : `詳細条件を指定（ユーザー・インスタンス${dateVisible ? "・日時" : ""}）`}</button>
 
         {#if showAdvanced}
           <label class="flex flex-col gap-1 text-sm">
@@ -209,10 +315,13 @@
             <span class="text-muted-foreground">インスタンス</span>
             <input
               class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-              placeholder="misskey.example（空欄で全インスタンス対象）"
+              placeholder={scope === "server"
+                ? "misskey.example（空欄で全インスタンス。自インスタンスは . かホスト名）"
+                : "misskey.example（空欄で全インスタンス対象）"}
               bind:value={host}
             />
           </label>
+          {#if dateVisible}
           <div class="flex gap-2.5">
             <label class="flex flex-1 flex-col gap-1 text-sm">
               <span class="text-muted-foreground">日時（開始）</span>
@@ -263,6 +372,12 @@
               </div>
             </label>
           </div>
+          {/if}
+          {#if scope === "server" && caps && !caps.dateRange}
+            <p class="mb-0 mt-0 text-xs text-muted-foreground">
+              日時範囲の指定は Misskey 2025.7.0 以降のサーバーで利用できます
+            </p>
+          {/if}
         {/if}
       {:else}
         <label class="flex flex-col gap-1 text-sm">
@@ -278,7 +393,7 @@
         {#if tqlErr}<p class="mb-0 mt-0 text-sm text-destructive break-words">TQLエラー: {tqlErr}</p>{/if}
       {/if}
 
-      <Button type="submit" disabled={busy || (uiMode === "expert" && !!tqlErr)} data-testid="search-submit"
+      <Button type="submit" disabled={busy || !canSearch()} data-testid="search-submit"
         >検索</Button
       >
     </form>
