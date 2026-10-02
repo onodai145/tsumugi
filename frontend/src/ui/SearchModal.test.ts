@@ -363,4 +363,40 @@ describe("SearchModal サーバー検索", () => {
     await fireEvent.click(getByTestId("account-select-option-acc2"));
     await waitFor(() => expect(queryByText("from server")).toBeNull());
   });
+
+  it("検索後に入力欄を書き換えても、追加読み込みは検索時点の条件で続ける", async () => {
+    app.accounts = [makeAccount()];
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_search_capabilities") return Promise.resolve({ dateRange: false });
+      if (cmd === "search_server_notes" && args?.untilId == null) {
+        return Promise.resolve([makeNote("n1", 200, "page1")]);
+      }
+      if (cmd === "search_server_notes" && args?.untilId === "n1") {
+        return Promise.resolve([makeNote("n2", 100, "page2")]);
+      }
+      return Promise.resolve([]);
+    });
+    const { getByText, getByTestId, getByPlaceholderText, findByText } = render(SearchModal, {
+      props: { onclose: () => {} },
+    });
+    await fireEvent.click(getByText("サーバー"));
+    const keyword = getByPlaceholderText("本文に含まれる語");
+    await fireEvent.input(keyword, { target: { value: "rust" } });
+    await fireEvent.click(getByTestId("search-submit"));
+    await findByText("page1");
+
+    // Enterは押さずに欄だけ書き換える（空にしてもエラーにならず、元の条件で続くこと）
+    await fireEvent.input(keyword, { target: { value: "" } });
+    const list = document.querySelector('[data-testid="search-results-scroll"]') as HTMLElement;
+    Object.defineProperty(list, "scrollTop", { value: 500, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(list, "scrollHeight", { value: 1200, configurable: true });
+    await fireEvent.scroll(list);
+
+    await findByText("page2");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "search_server_notes",
+      expect.objectContaining({ query: "rust", untilId: "n1" }),
+    );
+  });
 });

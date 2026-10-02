@@ -79,6 +79,12 @@
   let err = $state<string | null>(null);
   let searched = $state(false);
   let requestGen = 0;
+  // 検索ボタンを押した時点の条件。追加読み込み・再試行は入力欄の現在値ではなくこれを使う
+  // （欄を書き換えてからスクロールすると、別条件の結果が前の結果に連結されるため）。
+  type ActiveSearch =
+    | { scope: "server"; params: ReturnType<typeof serverParams> }
+    | { scope: "cache"; filter: FilterQuery };
+  let active: ActiveSearch | null = null;
 
   // AddColumnModal.svelte の tqlStr() と同じエスケープ規則（本家パーサの読み方に合わせる）
   function tqlStr(s: string): string {
@@ -128,21 +134,17 @@
   }
 
   async function loadMore() {
-    if (busy || done) return;
+    if (busy || done || !active) return;
+    const search = active;
     busy = true;
     err = null;
     const myGen = requestGen;
     try {
       const untilId = notes.length > 0 ? notes[notes.length - 1].id : undefined;
       const page =
-        scope === "server"
-          ? await app.searchServerNotes(accountId, serverParams(), untilId, 20)
-          : await app.searchCacheNotes(
-              accountId,
-              { kind: "tql", value: currentPredicate() } satisfies FilterQuery,
-              untilId,
-              20,
-            );
+        search.scope === "server"
+          ? await app.searchServerNotes(accountId, search.params, untilId, 20)
+          : await app.searchCacheNotes(accountId, search.filter, untilId, 20);
       if (myGen !== requestGen) return;
       if (page.length === 0) done = true;
       const seen = new Set(notes.map((n) => n.id));
@@ -158,6 +160,7 @@
 
   function resetResults() {
     requestGen++;
+    active = null;
     notes = [];
     busy = false;
     done = false;
@@ -182,6 +185,10 @@
     e.preventDefault();
     if (!canSearch()) return;
     resetResults();
+    active =
+      scope === "server"
+        ? { scope: "server", params: serverParams() }
+        : { scope: "cache", filter: { kind: "tql", value: currentPredicate() } };
     searched = true;
     void loadMore();
   }
