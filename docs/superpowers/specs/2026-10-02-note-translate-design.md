@@ -37,9 +37,9 @@ Issue 本文は空（タイトル「翻訳機能」のみ）。以下は設計�
 ### Rust
 
 - `api/notes.rs`: `translate_note(client, note_id, target_lang) -> Result<Option<Translation>>`。
-  - 204 は `Ok(None)`。`client.post` が空ボディをデシリアライズできない場合は、空ボディ対応の経路を
-    `client.rs` 側に用意する（実装時に既存 `post` の挙動を確認して決める）。
-  - 400 `UNAVAILABLE` は専用のエラー（フロントで「このサーバーは翻訳に対応していません」と表示できる区別）にする。
+  - 204 は `Ok(None)`。`client.post` は空ボディを `null` として読むため、戻り値を `Option<Translation>` にすれば足りる（`client.rs` は変更しない）。
+  - 400 `UNAVAILABLE` は既存どおり `Error::Api`（detail に `UNAVAILABLE` を含む）で返す。`Error` は全コマンド共通の
+    公開型なので専用 variant は足さず、フロントが detail の `UNAVAILABLE` で「このサーバーは翻訳に対応していません」を出し分ける。
 - `api/meta.rs`: `fetch_translator_available(client) -> Result<bool>`。`fetch_server_version`（#430）と同様、
   `InstanceInfo` には足さず独立に取得する（`InstanceInfo` はキャッシュ DB 列・`User.instance` と共用のため）。
 - `domain/note.rs`（または適切な場所）: `Translation { source_lang: String, text: String }`（`specta::Type`、camelCase）。
@@ -58,8 +58,8 @@ Issue 本文は空（タイトル「翻訳機能」のみ）。以下は設計�
 
 - `ui/settings/ExternalIntegrationSection.svelte`: 「翻訳先言語」を追加する。
   - 言語コードのテキスト入力ではなく、主要言語のプリセット選択にする（`ja` / `en` / `zh` / `ko` / `fr` / `de` / `es` / `pt` / `ru` など）。
-    Misskey サーバーは DeepL / LibreTranslate の言語コードを受けるため、プリセットは両者で通る大文字小文字区別なしのコードにする。
-    どのコードをサーバーに渡すかの正規化は実装時に確認する（DeepL は `EN-US` 等を要求する場合がある）。
+    プリセットのコードはそのままサーバーへ渡す（変換しない）。DeepL が地域付きコード（`EN-US` 等）を要求する言語は
+    プリセットに含めず、含める場合は実インスタンスで通ることを確認してから入れる。
   - 既存の `setUiPrefs({ ...app.ui, ... })` の保存方式に合わせる。
 - `ui/NoteMenu.svelte`: 「翻訳」項目を追加する。
   - 表示条件: 対象ノート（純リノートはリノート先）に `text` があり、かつ `translatorAvailable` が true。
