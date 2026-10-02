@@ -283,6 +283,35 @@
   });
 
   let cwOpen = $state(false);
+
+  type TranslationState =
+    | { status: "loading" }
+    | { status: "done"; sourceLang: string; text: string }
+    | { status: "empty" }
+    | { status: "error"; unavailable: boolean };
+  let translation = $state<TranslationState | null>(null);
+  // 翻訳の読み込み中にノートが入れ替わっても古い結果を出さないための世代番号。
+  let translateSeq = 0;
+  // 仮想リスト等で別のノートに使い回されたら、翻訳ブロックを破棄する。
+  $effect(() => {
+    void inner.id;
+    translateSeq++;
+    translation = null;
+  });
+
+  async function startTranslate() {
+    if (!accountId) return;
+    const seq = ++translateSeq;
+    translation = { status: "loading" };
+    try {
+      const r = await app.translateNote(accountId, inner.id);
+      if (seq !== translateSeq) return;
+      translation = r ? { status: "done", sourceLang: r.sourceLang, text: r.text } : { status: "empty" };
+    } catch (e) {
+      if (seq !== translateSeq) return;
+      translation = { status: "error", unavailable: String(e).includes("UNAVAILABLE") };
+    }
+  }
   const VIS_ICON = { public: Globe, home: House, followers: Lock, specified: Mail } as const;
   const VIS_LABEL = { public: "公開", home: "ホーム", followers: "フォロワー", specified: "ダイレクト" } as const;
   // reactions: { key: count } を件数降順に
@@ -432,6 +461,25 @@
                 >
                   もっと見る
                 </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if translation}
+          <div class="mt-1 rounded-md border border-border bg-muted/50 px-2 py-1.5 text-sm" data-testid="note-translation">
+            {#if translation.status === "loading"}
+              <span class="text-muted-foreground">翻訳中…</span>
+            {:else if translation.status === "done"}
+              <div class="mb-0.5 text-xs text-muted-foreground">{translation.sourceLang} から翻訳</div>
+              <div class="whitespace-pre-wrap break-words leading-[1.42] [-webkit-user-select:text] select-text">{translation.text}</div>
+            {:else if translation.status === "empty"}
+              <span class="text-muted-foreground">翻訳結果がありません</span>
+            {:else}
+              <span class="text-destructive">{translation.unavailable ? "このサーバーは翻訳に対応していません" : "翻訳に失敗しました"}</span>
+            {/if}
+            {#if translation.status !== "loading"}
+              <div class="mt-1">
+                <button type="button" class="cw-toggle rounded-md border border-border px-2 py-px text-sm text-foreground" onclick={() => (translation = null)}>翻訳を閉じる</button>
               </div>
             {/if}
           </div>
@@ -589,7 +637,7 @@
                   onclick={(e) => e.stopPropagation()}
                   role="presentation"
                 >
-                  <NoteMenu {accountId} note={inner} pureRenoteOf={isPureRenote ? note : undefined} {tabId} listNoteId={tabId ? note.id : undefined} onclose={() => (noteMenuOpen = false)} />
+                  <NoteMenu {accountId} note={inner} pureRenoteOf={isPureRenote ? note : undefined} {tabId} listNoteId={tabId ? note.id : undefined} ontranslate={accountId ? startTranslate : undefined} onclose={() => (noteMenuOpen = false)} />
                 </div>
               </div>
             {/if}
