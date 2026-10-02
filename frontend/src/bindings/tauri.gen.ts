@@ -178,6 +178,13 @@ export const commands = {
 	 *  `filter` は cache ソースの where 句のみを渡す(source節は無し、常にキャッシュ全体が対象)。
 	 */
 	searchCacheNotes: (accountId: string, filter: FilterQuery, untilId: string | null, limit: number) => typedError<Note[], Error>(__TAURI_INVOKE("search_cache_notes", { accountId, filter, untilId, limit })),
+	/**  検索モーダル(Issue #430)用: アカウントの接続先サーバーが対応する検索機能を返す。 */
+	getSearchCapabilities: (accountId: string) => typedError<SearchCapabilities, Error>(__TAURI_INVOKE("get_search_capabilities", { accountId })),
+	/**
+	 *  検索モーダル(Issue #430)用: Misskey サーバーの `notes/search` による一回性の検索。
+	 *  `acct` は `@user@host` 形式（userId へ解決する）、日時は秒（日時範囲はサーバーが対応する場合のみ）。
+	 */
+	searchServerNotes: (accountId: string, query: string, acct: string | null, host: string | null, sinceDate: number | null, untilDate: number | null, untilId: string | null, limit: number) => typedError<Note[], Error>(__TAURI_INVOKE("search_server_notes", { accountId, query, acct, host, sinceDate, untilDate, untilId, limit })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -855,6 +862,16 @@ export type ReactionUser = {
 	user: User,
 	/**  Misskey形式キー（Unicode生 or :name@host:） */
 	reaction: string,
+};
+
+/**
+ *  接続先サーバーが対応する検索機能。フロントはこれを見て入力欄の出し分けをする。
+ *  将来 `/api.json` から実際の対応パラメータで判定する方式へ変えても、この型を介せば
+ *  呼び出し側(コマンド/フロント)は変更不要。
+ */
+export type SearchCapabilities = {
+	/**  日時範囲の指定に対応しているか。 */
+	dateRange: boolean,
 };
 
 /**

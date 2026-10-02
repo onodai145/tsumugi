@@ -2,12 +2,14 @@
 //! タブはソース種別＋フィルタを持ち、購読＋REST取得しフィルタ適用して表示する。
 //! 定義は SQLite に永続化し、起動時に list_groups/list_columns → resume_column で復元する。
 
-use crate::api::meta::{fetch_antennas, fetch_followed_channels, fetch_user_lists, resolve_user};
-use crate::api::notes::fetch_notes;
+use crate::api::meta::{
+    fetch_antennas, fetch_followed_channels, fetch_server_version, fetch_user_lists, resolve_user,
+};
+use crate::api::notes::{fetch_notes, search_notes, SearchParams};
 use crate::api::notifications::fetch_notifications;
 use crate::domain::{
-    Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note, Notification, PaneNode,
-    SourceItem, SplitDirection, User, UserList,
+    search_capabilities, Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note,
+    Notification, PaneNode, SearchCapabilities, SourceItem, SplitDirection, User, UserList,
 };
 use crate::error::{Error, Result};
 use crate::filter::{ast, eval::EvalContext, parser, sql, CompiledFilter};
@@ -24,6 +26,8 @@ const GAP_FILL_PAGE_SIZE: u32 = 100;
 const GAP_FILL_MAX_PAGES: u32 = 10;
 /// `collect_backfill_pages` の最大パス数(Issue #428)。画面へ返すノートが0件のときの内部再取得の上限。
 const BACKFILL_MAX_PASSES: u32 = 5;
+/// サーバー検索(Issue #430)で、ミュートにより1ページが全滅したときの内部再取得の最大パス数。
+const SEARCH_MAX_PASSES: u32 = 5;
 
 /// タブを開いた結果。所属グループも返す（新規グループの幅などをフロントへ）。
 #[derive(Debug, Serialize, Type)]
@@ -1617,6 +1621,191 @@ pub async fn search_cache_notes(
     .await
 }
 
+/// サーバー検索(Issue #430)の `host` 入力を API 用に正規化する。空は未指定、`.` と
+/// アカウント自身のホスト（大文字小文字・前後空白は無視）は Misskey の「ローカル」表記 `"."` にする。
+fn normalize_search_host(input: Option<&str>, account_host: &str) -> Option<String> {
+    let h = input?.trim();
+    if h.is_empty() {
+        return None;
+    }
+    if h == "." || h.eq_ignore_ascii_case(account_host) {
+        return Some(".".into());
+    }
+    Some(h.to_string())
+}
+
+/// サーバー検索の入力検証。`notes/search` は `query` 必須（空の挙動は未確認なので送らない）で、
+/// 日時範囲はサーバーが対応しているときだけ許可する。
+fn check_search_request(query: &str, has_date: bool, caps: &SearchCapabilities) -> Result<()> {
+    if query.trim().is_empty() {
+        return Err(Error::Invalid("search query is empty".into()));
+    }
+    if has_date && !caps.date_range {
+        return Err(Error::Invalid("date range search is not supported by this server".into()));
+    }
+    Ok(())
+}
+
+/// フロントから秒で受けた日時を API が使うミリ秒へ変換する。
+fn secs_to_ms(secs: u32) -> u64 {
+    u64::from(secs) * 1000
+}
+
+/// 開始日時だけが指定されたときに補う終了日時(ミリ秒)。Misskey の `makePaginationQuery` は
+/// `sinceId` だけだと昇順（開始に近い古い側から）で返すため、現在時刻の上限を置いて新しい順に揃える。
+/// 終了が指定済み、またはページング中（`untilId` が上限になる）なら補わない。
+fn effective_until_date_ms(
+    since_ms: Option<u64>,
+    until_ms: Option<u64>,
+    until_id: Option<&str>,
+    now_ms: u64,
+) -> Option<u64> {
+    if until_ms.is_some() {
+        until_ms
+    } else if since_ms.is_some() && until_id.is_none() {
+        Some(now_ms)
+    } else {
+        None
+    }
+}
+
+/// 1ページ分を取得してフィルタ(ミュート)をかける。生応答が `limit` 件ちょうどで全件除外された
+/// ときは、画面側が「これ以上なし」と誤判定しないよう、生の最後の id から最大 `SEARCH_MAX_PASSES`
+/// パス取り直す。生応答が `limit` 未満（最終ページ）や空なら、そのまま結果（空含む）を返す。
+async fn collect_unmuted_page<F, Fut>(
+    until_id: Option<String>,
+    limit: u32,
+    mut fetch: F,
+    filter: impl Fn(Vec<Note>) -> Vec<Note>,
+) -> Result<Vec<Note>>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<Note>>>,
+{
+    let mut until = until_id;
+    for _ in 0..SEARCH_MAX_PASSES {
+        let raw = fetch(until.clone()).await?;
+        let full = !raw.is_empty() && raw.len() as u32 >= limit;
+        let last_id = raw.last().map(|n| n.id.clone());
+        let kept = filter(raw);
+        if !kept.is_empty() || !full {
+            return Ok(kept);
+        }
+        until = last_id;
+    }
+    Ok(Vec::new())
+}
+
+/// サーバー検索の結果にキャッシュ検索(`search_cache_core`)と同じミュートを適用する。
+fn apply_search_mutes(
+    notes: Vec<Note>,
+    mute: &MuteConfig,
+    is_server_muted: impl Fn(&Note) -> bool,
+    is_word_muted: impl Fn(&Note) -> bool,
+) -> Vec<Note> {
+    notes
+        .into_iter()
+        .filter(|n| !crate::filter::mute::is_muted(n, mute) && !is_server_muted(n) && !is_word_muted(n))
+        .collect()
+}
+
+/// アカウントの接続先サーバーが対応する検索機能。バージョンは `AppState` にキャッシュし、
+/// 未取得なら `/api/meta` から取得する。取得失敗は非対応扱い（日時欄を隠す側に倒す）で、
+/// 失敗はキャッシュしないため次回また取りに行く。未登録アカウントだけはエラーを返す。
+async fn search_capabilities_for(state: &AppState, account_id: &str) -> Result<SearchCapabilities> {
+    if let Some(v) = state.server_version(account_id) {
+        return Ok(search_capabilities(Some(&v)));
+    }
+    let client = state.client_for(account_id)?;
+    match fetch_server_version(&client).await {
+        Ok(Some(v)) => {
+            state.set_server_version(account_id, v.clone());
+            Ok(search_capabilities(Some(&v)))
+        }
+        Ok(None) | Err(_) => Ok(search_capabilities(None)),
+    }
+}
+
+/// 検索モーダル(Issue #430)用: アカウントの接続先サーバーが対応する検索機能を返す。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_search_capabilities(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<SearchCapabilities> {
+    search_capabilities_for(&state, &account_id).await
+}
+
+/// 検索モーダル(Issue #430)用: Misskey サーバーの `notes/search` による一回性の検索。
+/// `acct` は `@user@host` 形式（userId へ解決する）、日時は秒（日時範囲はサーバーが対応する場合のみ）。
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn search_server_notes(
+    state: State<'_, AppState>,
+    account_id: String,
+    query: String,
+    acct: Option<String>,
+    host: Option<String>,
+    since_date: Option<u32>,
+    until_date: Option<u32>,
+    until_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<Note>> {
+    let has_date = since_date.is_some() || until_date.is_some();
+    // 日時指定が無ければ対応判定のためのネットワークアクセスを省く
+    let caps = if has_date {
+        search_capabilities_for(&state, &account_id).await?
+    } else {
+        search_capabilities(None)
+    };
+    check_search_request(&query, has_date, &caps)?;
+
+    let client = state.client_for(&account_id)?;
+    let user_id = match acct.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        Some(a) => Some(resolve_user(&client, a).await?.id),
+        None => None,
+    };
+    let since_ms = since_date.map(secs_to_ms);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    let params = SearchParams {
+        query: query.trim().to_string(),
+        user_id,
+        host: normalize_search_host(host.as_deref(), client.host()),
+        since_date_ms: since_ms,
+        until_date_ms: effective_until_date_ms(
+            since_ms,
+            until_date.map(secs_to_ms),
+            until_id.as_deref(),
+            now_ms,
+        ),
+        until_id: None,
+        limit,
+    };
+
+    let mute = state.mute.lock().unwrap().clone();
+    let client = &client;
+    collect_unmuted_page(
+        until_id,
+        limit,
+        |until| {
+            let p = SearchParams { until_id: until, ..params.clone() };
+            async move { search_notes(client, &p).await }
+        },
+        |raw| {
+            apply_search_mutes(
+                raw,
+                &mute,
+                |n| server_muted_note(&state, &account_id, n),
+                |n| state.is_word_muted(&account_id, n),
+            )
+        },
+    )
+    .await
+}
+
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
 /// フィルタ/ミュートを適用する。`cache` ソースが含まれる場合はローカルSQLite検索も合成する。
 /// 個別ソースの取得失敗は他ソースの結果を活かすため無視する（TQL§複数ソースは OR 合成のため）。
@@ -2605,5 +2794,154 @@ mod tests {
 
         let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
         assert_eq!(got.len(), 40);
+    }
+
+    #[test]
+    fn normalize_search_host_maps_own_host_and_dot_to_local() {
+        assert_eq!(normalize_search_host(None, "misskey.io"), None);
+        assert_eq!(normalize_search_host(Some(""), "misskey.io"), None);
+        assert_eq!(normalize_search_host(Some("   "), "misskey.io"), None);
+        assert_eq!(normalize_search_host(Some("."), "misskey.io"), Some(".".into()));
+        assert_eq!(normalize_search_host(Some("misskey.io"), "misskey.io"), Some(".".into()));
+        // 大文字小文字・前後空白は無視して自ホストと比較する
+        assert_eq!(normalize_search_host(Some("  Misskey.IO "), "misskey.io"), Some(".".into()));
+        assert_eq!(
+            normalize_search_host(Some(" example.com "), "misskey.io"),
+            Some("example.com".into())
+        );
+    }
+
+    #[test]
+    fn check_search_request_requires_keyword_and_capability_for_dates() {
+        let no_date = SearchCapabilities { date_range: false };
+        let with_date = SearchCapabilities { date_range: true };
+
+        assert!(check_search_request("rust", false, &no_date).is_ok());
+        assert!(check_search_request("rust", true, &with_date).is_ok());
+        assert!(matches!(check_search_request("", false, &with_date), Err(Error::Invalid(_))));
+        assert!(matches!(check_search_request("  \t", false, &with_date), Err(Error::Invalid(_))));
+        // 日時が指定されたのにサーバーが非対応なら拒否（UIが隠す前提の二重防御）
+        assert!(matches!(check_search_request("rust", true, &no_date), Err(Error::Invalid(_))));
+    }
+
+    #[test]
+    fn secs_to_ms_converts_without_overflow() {
+        assert_eq!(secs_to_ms(0), 0);
+        assert_eq!(secs_to_ms(1_700_000_000), 1_700_000_000_000);
+        assert_eq!(secs_to_ms(u32::MAX), 4_294_967_295_000);
+    }
+
+    #[test]
+    fn apply_search_mutes_drops_local_server_and_word_muted_notes_keeping_order() {
+        let mut spoiler = note("n1", 100);
+        spoiler.text = Some("spoiler content".into());
+        let notes = vec![spoiler, note("n2", 200), note("n3", 300), note("n4", 400)];
+        let mute = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+
+        let got = apply_search_mutes(notes, &mute, |n| n.id == "n2", |n| n.id == "n3");
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n4"]);
+    }
+
+    #[tokio::test]
+    async fn search_capabilities_for_uses_the_cached_version_without_network() {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory());
+        state.set_server_version("a1", "2026.9.1".into());
+        state.set_server_version("a2", "2025.4.1-io.12b-fb6fbea074".into());
+
+        assert!(search_capabilities_for(&state, "a1").await.unwrap().date_range);
+        assert!(!search_capabilities_for(&state, "a2").await.unwrap().date_range);
+    }
+
+    #[test]
+    fn effective_until_date_adds_an_upper_bound_only_when_since_is_alone() {
+        let now = 1_900_000_000_000;
+        // 開始だけ・ページング前: Misskey は sinceId だけだと昇順で返すので、現在時刻で上限を補い新しい順に揃える
+        assert_eq!(effective_until_date_ms(Some(1), None, None, now), Some(now));
+        // 終了が指定されていればそのまま
+        assert_eq!(effective_until_date_ms(Some(1), Some(5), None, now), Some(5));
+        assert_eq!(effective_until_date_ms(None, Some(5), None, now), Some(5));
+        // ページング中は untilId が上限なので補わない
+        assert_eq!(effective_until_date_ms(Some(1), None, Some("n9"), now), None);
+        // 開始も終了も無ければ何も足さない
+        assert_eq!(effective_until_date_ms(None, None, None, now), None);
+    }
+
+    fn muted_ids(ids: &'static [&'static str]) -> impl Fn(Vec<Note>) -> Vec<Note> {
+        move |notes| notes.into_iter().filter(|n| !ids.contains(&n.id.as_str())).collect()
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_refetches_past_a_fully_muted_full_page() {
+        let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
+        let got = collect_unmuted_page(
+            None,
+            2,
+            |until| {
+                calls.borrow_mut().push(until.clone());
+                async move {
+                    Ok(match until.as_deref() {
+                        None => vec![note("n3", 3), note("n2", 2)],
+                        _ => vec![note("n1", 1)],
+                    })
+                }
+            },
+            muted_ids(&["n3", "n2"]),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        // 2回目は生の最後のid(n2)を untilId にして取り直す
+        assert_eq!(*calls.borrow(), vec![None, Some("n2".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_returns_immediately_when_something_survives_or_page_is_short() {
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_u: Option<String>| {
+            calls.set(calls.get() + 1);
+            async { Ok(vec![note("n2", 2), note("n1", 1)]) }
+        };
+        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n2"])).await.unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        assert_eq!(calls.get(), 1);
+
+        // 生応答が limit 未満＝最終ページ。全部ミュートでも取り直さず空（終端）を返す
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_u: Option<String>| {
+            calls.set(calls.get() + 1);
+            async { Ok(vec![note("n1", 1)]) }
+        };
+        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n1"])).await.unwrap();
+        assert!(got.is_empty());
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_gives_up_after_the_pass_limit() {
+        let calls = std::cell::Cell::new(0u32);
+        let fetch = |_u: Option<String>| {
+            let n = calls.get();
+            calls.set(n + 1);
+            // 毎回 limit 件ちょうどで全件ミュート（untilId が前進することも確認できる id にする）
+            async move { Ok(vec![note(&format!("a{n}"), 2), note(&format!("b{n}"), 1)]) }
+        };
+        let keep_none = |_notes: Vec<Note>| Vec::new();
+        let got = collect_unmuted_page(None, 2, fetch, keep_none).await.unwrap();
+        assert!(got.is_empty());
+        assert_eq!(calls.get(), SEARCH_MAX_PASSES);
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_propagates_fetch_errors() {
+        let got = collect_unmuted_page(
+            None,
+            2,
+            |_u: Option<String>| async { Err::<Vec<Note>, _>(Error::Network("down".into())) },
+            muted_ids(&[]),
+        )
+        .await;
+        assert!(matches!(got, Err(Error::Network(_))));
     }
 }

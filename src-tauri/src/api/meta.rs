@@ -115,6 +115,21 @@ pub async fn fetch_meta(client: &MisskeyClient) -> Result<crate::domain::Instanc
     Ok(info.with_favicon_fallback(client.host()).with_theme_color_fallback())
 }
 
+/// `/api/meta` の `version` だけを読む。
+#[derive(Debug, Deserialize)]
+struct RawVersion {
+    #[serde(default)]
+    version: Option<String>,
+}
+
+/// 接続先サーバーの Misskey バージョン文字列（サーバーサイド検索の対応機能判定用、Issue #430）。
+/// `InstanceInfo` はリモートユーザーの `User.instance` やキャッシュDB列と共用のため、
+/// そこへは足さずここで独立に取得する。
+pub async fn fetch_server_version(client: &MisskeyClient) -> Result<Option<String>> {
+    let raw: RawVersion = client.post("meta", &json!({ "detail": false })).await?;
+    Ok(raw.version)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawMeta {
@@ -174,5 +189,30 @@ mod meta_info_tests {
         let info = info.with_favicon_fallback("misskey.omhnc.net").with_theme_color_fallback();
         assert_eq!(info.icon_url, Some("https://misskey.omhnc.net/favicon.ico".to_string()));
         assert_eq!(info.theme_color, Some("#777777".to_string()));
+    }
+
+    #[test]
+    fn raw_version_reads_version_and_ignores_other_fields() {
+        let raw: RawVersion =
+            serde_json::from_str(r#"{"version":"2026.9.1","name":"Misskey.io"}"#).unwrap();
+        assert_eq!(raw.version, Some("2026.9.1".to_string()));
+    }
+
+    #[test]
+    fn raw_version_defaults_missing_version_to_none() {
+        let raw: RawVersion = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(raw.version, None);
+    }
+
+    /// 実サーバーの `/api/meta` から version が取れること（認証不要）。
+    /// ネットワーク依存のため既定では実行しない: `cargo test --lib real_misskey_meta -- --ignored`
+    #[ignore]
+    #[tokio::test]
+    async fn real_misskey_meta_version_supports_date_range_search() {
+        let client = MisskeyClient::new(reqwest::Client::new(), "misskey.omhnc.net", None);
+        let version = fetch_server_version(&client).await.unwrap();
+        let caps = crate::domain::search_capabilities(version.as_deref());
+        assert!(version.is_some(), "version should be present");
+        assert!(caps.date_range, "misskey.omhnc.net is 2026.x so date range must be supported");
     }
 }

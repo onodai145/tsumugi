@@ -103,6 +103,9 @@ pub struct AppState {
     pub connections: ConnectionManager,
     /// host -> カスタム絵文字一覧（インスタンス単位でキャッシュ）
     pub emoji_cache: Mutex<HashMap<String, Vec<EmojiDef>>>,
+    /// account_id -> 接続先サーバーの Misskey バージョン文字列(`/api/meta`)。サーバーサイド検索
+    /// (Issue #430)の対応機能判定に使う。取得に成功した値だけ保存し、アプリ再起動まで再取得しない。
+    pub server_versions: Mutex<HashMap<String, String>>,
     /// ローカル NG（ミュート）設定。ストリーム/REST の受信ノートに適用する
     pub mute: Mutex<MuteConfig>,
     /// account_id -> サーバ側でミュート/ブロックしているユーザの userId 集合。
@@ -164,6 +167,7 @@ impl AppState {
             pending: Mutex::new(HashMap::new()),
             connections: ConnectionManager::default(),
             emoji_cache: Mutex::new(HashMap::new()),
+            server_versions: Mutex::new(HashMap::new()),
             mute: Mutex::new(mute),
             server_mutes: Mutex::new(HashMap::new()),
             server_word_mutes: Mutex::new(HashMap::new()),
@@ -209,6 +213,24 @@ impl AppState {
             .lock()
             .unwrap()
             .insert(account_id.to_string(), rules);
+    }
+
+    /// account の接続先サーバーのバージョン（取得済みの場合のみ）。
+    pub fn server_version(&self, account_id: &str) -> Option<String> {
+        self.server_versions.lock().unwrap().get(account_id).cloned()
+    }
+
+    /// account の接続先サーバーのバージョンを保存する。
+    pub fn set_server_version(&self, account_id: &str, version: String) {
+        self.server_versions
+            .lock()
+            .unwrap()
+            .insert(account_id.to_string(), version);
+    }
+
+    /// account のバージョンキャッシュを破棄する（アカウント削除時）。
+    pub fn forget_server_version(&self, account_id: &str) {
+        self.server_versions.lock().unwrap().remove(account_id);
     }
 
     #[cfg(test)]
@@ -278,6 +300,19 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::domain::Account;
+
+    #[test]
+    fn server_version_is_remembered_per_account_and_forgettable() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        assert_eq!(state.server_version("a1"), None);
+
+        state.set_server_version("a1", "2026.9.1".into());
+        assert_eq!(state.server_version("a1").as_deref(), Some("2026.9.1"));
+        assert_eq!(state.server_version("a2"), None);
+
+        state.forget_server_version("a1");
+        assert_eq!(state.server_version("a1"), None);
+    }
 
     #[test]
     fn restores_persisted_accounts_on_construction() {

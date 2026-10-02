@@ -1389,6 +1389,44 @@ class AppStore {
     }
   }
 
+  /// 検索モーダル(Issue #430)用: サーバー(Misskey notes/search)検索。日時は秒(unix epoch)で渡す。
+  /// 呼び出し元(SearchModal)が自前のエラー表示を持つため this.#fail()（バナー表示）は呼ばない。
+  async searchServerNotes(
+    accountId: string,
+    params: { query: string; acct?: string; host?: string; sinceDate?: number; untilDate?: number },
+    untilId?: string,
+    limit = 20,
+  ) {
+    try {
+      return await unwrapAcc(
+        accountId,
+        commands.searchServerNotes(
+          accountId,
+          params.query,
+          params.acct ?? null,
+          params.host ?? null,
+          params.sinceDate ?? null,
+          params.untilDate ?? null,
+          untilId ?? null,
+          limit,
+        ),
+      );
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// 検索モーダル(Issue #430)用: アカウントの接続先サーバーが対応する検索機能。
+  async getSearchCapabilities(accountId: string) {
+    try {
+      return await unwrapAcc(accountId, commands.getSearchCapabilities(accountId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
   async setNotify(config: NotifyConfig) {
     if (config.desktop && !(await isPermissionGranted())) {
