@@ -211,6 +211,16 @@ export const commands = {
 	favoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("favorite_note", { accountId, noteId })),
 	/**  お気に入り解除。 */
 	unfavoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unfavorite_note", { accountId, noteId })),
+	/**  NoteMenu の「翻訳」項目を出すか（Issue #440）。接続先サーバーで翻訳が使えるときだけ true。 */
+	getTranslatorAvailable: (accountId: string) => typedError<boolean, Error>(__TAURI_INVOKE("get_translator_available", { accountId })),
+	/**
+	 *  ノート本文を `UiPrefs.translate_target_lang` へ翻訳する（Issue #440）。結果なしは `None`。
+	 *  サーバーで翻訳が未設定なら `Error::Api`（message に `UNAVAILABLE` を含む）。
+	 */
+	translateNote: (accountId: string, noteId: string) => typedError<{
+	sourceLang: string,
+	text: string,
+} | null, Error>(__TAURI_INVOKE("translate_note", { accountId, noteId })),
 	/**  アンケートに投票する（choice は 0-based index）。 */
 	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
@@ -934,6 +944,12 @@ export type TqlEditMode =
 /**  where 述語のみ(簡単モードのfilter input) */
 "predicate";
 
+/**  `notes/translate` の翻訳結果（Issue #440）。`source_lang` は検出された翻訳元言語コード。 */
+export type Translation = {
+	sourceLang: string,
+	text: string,
+};
+
 /**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。 */
 export type UiPrefs = {
 	/**  "auto" | "light" | "dark" | "preset:<id>"(フロント側定義) | "custom:<CustomTheme.id>" */
@@ -1086,6 +1102,11 @@ export type UiPrefs = {
 	 *  適用時に行うため、Rust 側では不透明に永続化する。
 	 */
 	uiScale?: number,
+	/**
+	 *  ノート翻訳（Issue #440）の翻訳先言語コード。サーバーの `notes/translate` の `targetLang` へ
+	 *  そのまま渡す。空文字や空白のみの値は翻訳時に `ja` として扱う（`commands::note::effective_translate_lang`）。
+	 */
+	translateTargetLang?: string,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */

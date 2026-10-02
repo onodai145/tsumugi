@@ -2,7 +2,7 @@
 
 use crate::api::normalize::{RawNote, RawReactionUser};
 use crate::api::MisskeyClient;
-use crate::domain::{Note, ReactionUser, User, Visibility};
+use crate::domain::{Note, ReactionUser, Translation, User, Visibility};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -55,6 +55,22 @@ pub fn build_search_body(p: &SearchParams) -> serde_json::Value {
 /// サーバーサイド検索（`notes/search`）。
 pub async fn search_notes(client: &MisskeyClient, p: &SearchParams) -> Result<Vec<Note>> {
     fetch_notes(client, "notes/search", &build_search_body(p)).await
+}
+
+/// ノート翻訳（`notes/translate`、Issue #440）。結果なし（204、本文が空）は `Ok(None)`。
+/// `client.post` は空ボディを `null` として読むので、戻り値を `Option` にすれば 204 を受けられる。
+/// サーバーで翻訳が未設定だと 400 `UNAVAILABLE` で、`Error::Api` の detail にそのコードが入る。
+pub async fn translate_note(
+    client: &MisskeyClient,
+    note_id: &str,
+    target_lang: &str,
+) -> Result<Option<Translation>> {
+    client
+        .post(
+            "notes/translate",
+            &json!({ "noteId": note_id, "targetLang": target_lang }),
+        )
+        .await
 }
 
 
@@ -421,5 +437,72 @@ mod tests {
     fn build_search_body_omits_conditions_that_are_none() {
         let body = build_search_body(&SearchParams { query: "x".into(), limit: 10, ..Default::default() });
         assert_eq!(body, json!({ "query": "x", "limit": 10 }));
+    }
+
+    fn mock_client(uri: String) -> MisskeyClient {
+        MisskeyClient::new_with_api_base(reqwest::Client::new(), uri, None)
+    }
+
+    #[tokio::test]
+    async fn translate_note_parses_200() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/translate"))
+            .and(body_partial_json(json!({ "noteId": "n1", "targetLang": "ja" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "sourceLang": "EN",
+                "text": "こんにちは"
+            })))
+            .mount(&mock)
+            .await;
+
+        let t = translate_note(&mock_client(mock.uri()), "n1", "ja").await.unwrap();
+        assert_eq!(
+            t,
+            Some(crate::domain::Translation {
+                source_lang: "EN".into(),
+                text: "こんにちは".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn translate_note_returns_none_on_204() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/translate"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock)
+            .await;
+
+        let t = translate_note(&mock_client(mock.uri()), "n1", "ja").await.unwrap();
+        assert_eq!(t, None);
+    }
+
+    #[tokio::test]
+    async fn translate_note_unavailable_is_api_error_with_code() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/translate"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": { "code": "UNAVAILABLE", "message": "Translate of notes unavailable." }
+            })))
+            .mount(&mock)
+            .await;
+
+        let err = translate_note(&mock_client(mock.uri()), "n1", "ja").await.unwrap_err();
+        match err {
+            crate::error::Error::Api(detail) => assert!(detail.contains("UNAVAILABLE"), "{detail}"),
+            other => panic!("expected Api, got {other:?}"),
+        }
     }
 }

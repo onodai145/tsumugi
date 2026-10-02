@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/svelte";
+import { tick } from "svelte";
+import { cleanup, render, waitFor } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
 import { app } from "../lib/store.svelte";
 
@@ -784,5 +785,155 @@ describe("キーボード選択移動時のみスクロールする(Issue #363)"
     await rerender({ note, selected: true, selectionMoveSeq: 1 });
 
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "nearest" });
+  });
+});
+
+describe("ノート翻訳", () => {
+  // app はファイル全体で共有されるシングルトンなので、spy とアカウントは afterEach で必ず戻す。
+  let availSpy: ReturnType<typeof vi.spyOn> | null = null;
+  let translateSpy: ReturnType<typeof vi.spyOn> | null = null;
+  afterEach(() => {
+    app.accounts.length = 0;
+    availSpy?.mockRestore();
+    translateSpy?.mockRestore();
+    availSpy = null;
+    translateSpy = null;
+  });
+
+  function setup(available: boolean, translateImpl?: (accountId: string, noteId: string) => Promise<unknown>) {
+    app.accounts.push({
+      id: "acc1",
+      host: "misskey.example",
+      username: "me",
+      userId: "u1",
+      displayName: "Me",
+      avatarUrl: null,
+    });
+    availSpy = vi.spyOn(app, "getTranslatorAvailable").mockResolvedValue(available);
+    translateSpy = vi
+      .spyOn(app, "translateNote")
+      .mockImplementation((translateImpl ?? (async () => ({ sourceLang: "EN", text: "こんにちは" }))) as never);
+  }
+
+  it("翻訳できないサーバーでは「翻訳」項目を出さない", async () => {
+    setup(false);
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note: makeNote({ text: "hello" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await waitFor(() => expect(availSpy).toHaveBeenCalled());
+    expect(queryByText("翻訳")).toBeNull();
+  });
+
+  it("本文のないノートでは「翻訳」項目を出さない", async () => {
+    setup(true);
+    const { getByLabelText, queryByText } = render(NoteCard, {
+      props: { note: makeNote({ text: null }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await waitFor(() => expect(availSpy).toHaveBeenCalled());
+    expect(queryByText("翻訳")).toBeNull();
+  });
+
+  it("翻訳すると本文の下に検出元言語と翻訳文が出て、閉じられる", async () => {
+    setup(true);
+    const { getByLabelText, findByText, getByTestId, queryByTestId, getByText } = render(NoteCard, {
+      props: { note: makeNote({ id: "n-tr-1", text: "hello" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("こんにちは"));
+    expect(getByTestId("note-translation").textContent).toContain("EN");
+    expect(translateSpy).toHaveBeenCalledWith("acc1", "n-tr-1");
+
+    await getByText("翻訳を閉じる").click();
+    expect(queryByTestId("note-translation")).toBeNull();
+  });
+
+  it("結果なし(null)はエラーではなく「翻訳結果がありません」と表示する", async () => {
+    setup(true, async () => null);
+    const { getByLabelText, findByText, getByTestId } = render(NoteCard, {
+      props: { note: makeNote({ text: "hello" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("翻訳結果がありません"));
+  });
+
+  it("サーバー未対応(UNAVAILABLE)と一般エラーで文言を出し分ける", async () => {
+    setup(true, async () => {
+      throw new Error("api: notes/translate: UNAVAILABLE Translate of notes unavailable.");
+    });
+    const first = render(NoteCard, { props: { note: makeNote({ text: "hello" }), accountId: "acc1" } });
+    await first.getByLabelText("その他").click();
+    await (await first.findByText("翻訳")).click();
+    await waitFor(() =>
+      expect(first.getByTestId("note-translation").textContent).toContain("このサーバーは翻訳に対応していません"),
+    );
+    cleanup();
+
+    translateSpy!.mockImplementation((async () => {
+      throw new Error("network: timeout");
+    }) as never);
+    const second = render(NoteCard, { props: { note: makeNote({ text: "hello" }), accountId: "acc1" } });
+    await second.getByLabelText("その他").click();
+    await (await second.findByText("翻訳")).click();
+    await waitFor(() => expect(second.getByTestId("note-translation").textContent).toContain("翻訳に失敗しました"));
+  });
+
+  it("翻訳文の <b> やMFM記法は解釈せず、そのまま文字として表示する", async () => {
+    setup(true, async () => ({ sourceLang: "EN", text: "<b>bold</b> $[spin x]" }));
+    const { getByLabelText, findByText, getByTestId } = render(NoteCard, {
+      props: { note: makeNote({ text: "hello" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("<b>bold</b> $[spin x]"));
+    expect(getByTestId("note-translation").querySelector("b")).toBeNull();
+  });
+
+  it("純リノートではリノート先のノートを翻訳する", async () => {
+    setup(true);
+    const target = makeNote({ id: "n-target", text: "original" });
+    const rn = makeNote({ id: "n-rn", text: null, renoteId: "n-target", renote: target });
+    const { getByLabelText, findByText } = render(NoteCard, { props: { note: rn, accountId: "acc1" } });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+    await waitFor(() => expect(translateSpy).toHaveBeenCalledWith("acc1", "n-target"));
+  });
+
+  it("同じidの新しいノートオブジェクトに差し替わっても(リアクション更新など)、表示中の翻訳は消えない", async () => {
+    setup(true);
+    const { getByLabelText, findByText, getByTestId, rerender } = render(NoteCard, {
+      props: { note: makeNote({ id: "n-same", text: "hello" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("こんにちは"));
+
+    await rerender({ note: makeNote({ id: "n-same", text: "hello", reactions: { "👍": 1 } }), accountId: "acc1" });
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+
+    expect(getByTestId("note-translation").textContent).toContain("こんにちは");
+  });
+
+  it("翻訳の読み込み中に別のノートへ入れ替わったら、古い結果を新しいノートの下に出さない", async () => {
+    let resolveFirst!: (v: unknown) => void;
+    setup(true, () => new Promise((r) => (resolveFirst = r)));
+    const { getByLabelText, findByText, queryByTestId, rerender } = render(NoteCard, {
+      props: { note: makeNote({ id: "n-old", text: "old" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+
+    await rerender({ note: makeNote({ id: "n-new", text: "new" }), accountId: "acc1" });
+    resolveFirst({ sourceLang: "EN", text: "古い翻訳" });
+    // 解決後のPromise連鎖とSvelteのDOM反映(flush)を待ってから、何も出ていないことを確認する。
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+
+    expect(queryByTestId("note-translation")).toBeNull();
   });
 });

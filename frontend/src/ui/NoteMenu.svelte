@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { Note, Clip } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
-  import { Star, Paperclip, ChevronRight, Trash2, Copy, Repeat2, ArrowDownToLine } from "@lucide/svelte";
+  import { Star, Paperclip, ChevronRight, Trash2, Copy, Repeat2, ArrowDownToLine, Languages } from "@lucide/svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
   let {
@@ -10,6 +11,7 @@
     pureRenoteOf,
     tabId,
     listNoteId,
+    ontranslate,
     onclose,
   }: {
     accountId: string;
@@ -19,6 +21,8 @@
     tabId?: string;
     /// カラムの一覧に並んでいるノートのid(純リノートではリノート自身。`note` はリノート先になる)。
     listNoteId?: string;
+    /// 渡されたときだけ「翻訳」項目を出す（Issue #440）。実際の翻訳と結果表示は呼び出し側（NoteCard）が持つ。
+    ontranslate?: () => void;
     onclose: () => void;
   } = $props();
 
@@ -28,6 +32,23 @@
   );
   let confirmDeleteOpen = $state(false);
   let confirmUndoRenoteOpen = $state(false);
+
+  // 接続先サーバーで翻訳が使えるか(Issue #440)。取得できるまでは項目を出さない。
+  let translatorAvailable = $state(false);
+  onMount(() => {
+    let cancelled = false;
+    void app.getTranslatorAvailable(accountId).then((v) => {
+      if (!cancelled) translatorAvailable = v;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function translate() {
+    ontranslate?.();
+    onclose();
+  }
 
   let clipSubmenuOpen = $state(false);
   let clips = $state<Clip[] | null>(null);
@@ -128,6 +149,12 @@
     <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={copyText}>
       <Copy size={16} />
       内容をコピー
+    </button>
+  {/if}
+  {#if note.text && ontranslate && translatorAvailable}
+    <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={translate}>
+      <Languages size={16} />
+      翻訳
     </button>
   {/if}
   {#if tabId && listNoteId}

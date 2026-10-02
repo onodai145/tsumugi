@@ -28,7 +28,7 @@ pub use clip::Clip;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::{SourceItem, UserList};
 pub use mute::MuteConfig;
-pub use note::{DriveFile, Note, Poll, PollChoice, Visibility};
+pub use note::{DriveFile, Note, Poll, PollChoice, Translation, Visibility};
 pub use notification::Notification;
 pub use notify::NotifyConfig;
 pub use pane::{Edge, PaneChild, PaneNode, SplitDirection};
