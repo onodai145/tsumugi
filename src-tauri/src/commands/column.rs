@@ -26,6 +26,8 @@ const GAP_FILL_PAGE_SIZE: u32 = 100;
 const GAP_FILL_MAX_PAGES: u32 = 10;
 /// `collect_backfill_pages` の最大パス数(Issue #428)。画面へ返すノートが0件のときの内部再取得の上限。
 const BACKFILL_MAX_PASSES: u32 = 5;
+/// サーバー検索(Issue #430)で、ミュートにより1ページが全滅したときの内部再取得の最大パス数。
+const SEARCH_MAX_PASSES: u32 = 5;
 
 /// タブを開いた結果。所属グループも返す（新規グループの幅などをフロントへ）。
 #[derive(Debug, Serialize, Type)]
@@ -1649,6 +1651,51 @@ fn secs_to_ms(secs: u32) -> u64 {
     u64::from(secs) * 1000
 }
 
+/// 開始日時だけが指定されたときに補う終了日時(ミリ秒)。Misskey の `makePaginationQuery` は
+/// `sinceId` だけだと昇順（開始に近い古い側から）で返すため、現在時刻の上限を置いて新しい順に揃える。
+/// 終了が指定済み、またはページング中（`untilId` が上限になる）なら補わない。
+fn effective_until_date_ms(
+    since_ms: Option<u64>,
+    until_ms: Option<u64>,
+    until_id: Option<&str>,
+    now_ms: u64,
+) -> Option<u64> {
+    if until_ms.is_some() {
+        until_ms
+    } else if since_ms.is_some() && until_id.is_none() {
+        Some(now_ms)
+    } else {
+        None
+    }
+}
+
+/// 1ページ分を取得してフィルタ(ミュート)をかける。生応答が `limit` 件ちょうどで全件除外された
+/// ときは、画面側が「これ以上なし」と誤判定しないよう、生の最後の id から最大 `SEARCH_MAX_PASSES`
+/// パス取り直す。生応答が `limit` 未満（最終ページ）や空なら、そのまま結果（空含む）を返す。
+async fn collect_unmuted_page<F, Fut>(
+    until_id: Option<String>,
+    limit: u32,
+    mut fetch: F,
+    filter: impl Fn(Vec<Note>) -> Vec<Note>,
+) -> Result<Vec<Note>>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<Note>>>,
+{
+    let mut until = until_id;
+    for _ in 0..SEARCH_MAX_PASSES {
+        let raw = fetch(until.clone()).await?;
+        let full = !raw.is_empty() && raw.len() as u32 >= limit;
+        let last_id = raw.last().map(|n| n.id.clone());
+        let kept = filter(raw);
+        if !kept.is_empty() || !full {
+            return Ok(kept);
+        }
+        until = last_id;
+    }
+    Ok(Vec::new())
+}
+
 /// サーバー検索の結果にキャッシュ検索(`search_cache_core`)と同じミュートを適用する。
 fn apply_search_mutes(
     notes: Vec<Note>,
@@ -1719,24 +1766,44 @@ pub async fn search_server_notes(
         Some(a) => Some(resolve_user(&client, a).await?.id),
         None => None,
     };
+    let since_ms = since_date.map(secs_to_ms);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
     let params = SearchParams {
         query: query.trim().to_string(),
         user_id,
         host: normalize_search_host(host.as_deref(), client.host()),
-        since_date_ms: since_date.map(secs_to_ms),
-        until_date_ms: until_date.map(secs_to_ms),
-        until_id,
+        since_date_ms: since_ms,
+        until_date_ms: effective_until_date_ms(
+            since_ms,
+            until_date.map(secs_to_ms),
+            until_id.as_deref(),
+            now_ms,
+        ),
+        until_id: None,
         limit,
     };
-    let raw = search_notes(&client, &params).await?;
 
     let mute = state.mute.lock().unwrap().clone();
-    Ok(apply_search_mutes(
-        raw,
-        &mute,
-        |n| server_muted_note(&state, &account_id, n),
-        |n| state.is_word_muted(&account_id, n),
-    ))
+    let client = &client;
+    collect_unmuted_page(
+        until_id,
+        limit,
+        |until| {
+            let p = SearchParams { until_id: until, ..params.clone() };
+            async move { search_notes(client, &p).await }
+        },
+        |raw| {
+            apply_search_mutes(
+                raw,
+                &mute,
+                |n| server_muted_note(&state, &account_id, n),
+                |n| state.is_word_muted(&account_id, n),
+            )
+        },
+    )
+    .await
 }
 
 /// 解決済みソース群から REST 初期/過去ページを取得し、id重複除去+created_at降順マージの上、
@@ -2784,5 +2851,97 @@ mod tests {
 
         assert!(search_capabilities_for(&state, "a1").await.unwrap().date_range);
         assert!(!search_capabilities_for(&state, "a2").await.unwrap().date_range);
+    }
+
+    #[test]
+    fn effective_until_date_adds_an_upper_bound_only_when_since_is_alone() {
+        let now = 1_900_000_000_000;
+        // 開始だけ・ページング前: Misskey は sinceId だけだと昇順で返すので、現在時刻で上限を補い新しい順に揃える
+        assert_eq!(effective_until_date_ms(Some(1), None, None, now), Some(now));
+        // 終了が指定されていればそのまま
+        assert_eq!(effective_until_date_ms(Some(1), Some(5), None, now), Some(5));
+        assert_eq!(effective_until_date_ms(None, Some(5), None, now), Some(5));
+        // ページング中は untilId が上限なので補わない
+        assert_eq!(effective_until_date_ms(Some(1), None, Some("n9"), now), None);
+        // 開始も終了も無ければ何も足さない
+        assert_eq!(effective_until_date_ms(None, None, None, now), None);
+    }
+
+    fn muted_ids(ids: &'static [&'static str]) -> impl Fn(Vec<Note>) -> Vec<Note> {
+        move |notes| notes.into_iter().filter(|n| !ids.contains(&n.id.as_str())).collect()
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_refetches_past_a_fully_muted_full_page() {
+        let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
+        let got = collect_unmuted_page(
+            None,
+            2,
+            |until| {
+                calls.borrow_mut().push(until.clone());
+                async move {
+                    Ok(match until.as_deref() {
+                        None => vec![note("n3", 3), note("n2", 2)],
+                        _ => vec![note("n1", 1)],
+                    })
+                }
+            },
+            muted_ids(&["n3", "n2"]),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        // 2回目は生の最後のid(n2)を untilId にして取り直す
+        assert_eq!(*calls.borrow(), vec![None, Some("n2".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_returns_immediately_when_something_survives_or_page_is_short() {
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_u: Option<String>| {
+            calls.set(calls.get() + 1);
+            async { Ok(vec![note("n2", 2), note("n1", 1)]) }
+        };
+        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n2"])).await.unwrap();
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        assert_eq!(calls.get(), 1);
+
+        // 生応答が limit 未満＝最終ページ。全部ミュートでも取り直さず空（終端）を返す
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_u: Option<String>| {
+            calls.set(calls.get() + 1);
+            async { Ok(vec![note("n1", 1)]) }
+        };
+        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n1"])).await.unwrap();
+        assert!(got.is_empty());
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_gives_up_after_the_pass_limit() {
+        let calls = std::cell::Cell::new(0u32);
+        let fetch = |_u: Option<String>| {
+            let n = calls.get();
+            calls.set(n + 1);
+            // 毎回 limit 件ちょうどで全件ミュート（untilId が前進することも確認できる id にする）
+            async move { Ok(vec![note(&format!("a{n}"), 2), note(&format!("b{n}"), 1)]) }
+        };
+        let keep_none = |_notes: Vec<Note>| Vec::new();
+        let got = collect_unmuted_page(None, 2, fetch, keep_none).await.unwrap();
+        assert!(got.is_empty());
+        assert_eq!(calls.get(), SEARCH_MAX_PASSES);
+    }
+
+    #[tokio::test]
+    async fn collect_unmuted_page_propagates_fetch_errors() {
+        let got = collect_unmuted_page(
+            None,
+            2,
+            |_u: Option<String>| async { Err::<Vec<Note>, _>(Error::Network("down".into())) },
+            muted_ids(&[]),
+        )
+        .await;
+        assert!(matches!(got, Err(Error::Network(_))));
     }
 }
