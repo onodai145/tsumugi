@@ -5,15 +5,17 @@ use crate::api::drive::{
     upload_bytes as api_upload_bytes,
 };
 use crate::api::hashtags::search_hashtags as api_search_hashtags;
-use crate::api::meta::list_emojis;
+use crate::api::meta::{fetch_translator_available, list_emojis};
 use crate::api::notes::{
     create_favorite, create_note, create_reaction, delete_favorite, delete_note, delete_reaction,
-    get_reactions, get_renotes, renote as api_renote, vote_poll as api_vote_poll, NoteDraft,
-    VisibilityInput,
+    get_reactions, get_renotes, renote as api_renote, translate_note as api_translate_note,
+    vote_poll as api_vote_poll, NoteDraft, VisibilityInput,
 };
 use crate::api::url_preview::fetch_url_preview as fetch_url_preview_api;
 use crate::api::users::search_users as api_search_users;
-use crate::domain::{DriveFile, EmojiDef, Note, ReactionUser, SourceItem, UrlPreview, User};
+use crate::domain::{
+    DriveFile, EmojiDef, Note, ReactionUser, SourceItem, Translation, UiPrefs, UrlPreview, User,
+};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use serde::Serialize;
@@ -158,6 +160,57 @@ pub async fn unfavorite_note(
 ) -> Result<()> {
     let client = state.client_for(&account_id)?;
     delete_favorite(&client, &note_id).await
+}
+
+/// 翻訳先言語。未設定・空白のみのときは既定の `ja`（Issue #440）。
+pub(crate) fn effective_translate_lang(prefs: &UiPrefs) -> String {
+    let lang = prefs.translate_target_lang.trim();
+    if lang.is_empty() {
+        "ja".to_string()
+    } else {
+        lang.to_string()
+    }
+}
+
+/// アカウントの接続先サーバーでノート翻訳が使えるか。値は `AppState` にキャッシュし、未取得なら
+/// `/api/meta` から取得する。取得失敗は「使えない」扱いで、失敗はキャッシュしない（次回また取りに行く）。
+/// 未登録アカウントだけはエラーを返す。
+async fn translator_available_for(state: &AppState, account_id: &str) -> Result<bool> {
+    if let Some(v) = state.translator_available(account_id) {
+        return Ok(v);
+    }
+    let client = state.client_for(account_id)?;
+    match fetch_translator_available(&client).await {
+        Ok(v) => {
+            state.set_translator_available(account_id, v);
+            Ok(v)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// NoteMenu の「翻訳」項目を出すか（Issue #440）。接続先サーバーで翻訳が使えるときだけ true。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_translator_available(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<bool> {
+    translator_available_for(&state, &account_id).await
+}
+
+/// ノート本文を `UiPrefs.translate_target_lang` へ翻訳する（Issue #440）。結果なしは `None`。
+/// サーバーで翻訳が未設定なら `Error::Api`（message に `UNAVAILABLE` を含む）。
+#[tauri::command]
+#[specta::specta]
+pub async fn translate_note(
+    state: State<'_, AppState>,
+    account_id: String,
+    note_id: String,
+) -> Result<Option<Translation>> {
+    let lang = effective_translate_lang(&state.settings.load_ui()?);
+    let client = state.client_for(&account_id)?;
+    api_translate_note(&client, &note_id, &lang).await
 }
 
 /// アンケートに投票する（choice は 0-based index）。
@@ -487,6 +540,21 @@ pub async fn fetch_url_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_translate_lang_falls_back_to_ja_when_blank() {
+        let mut prefs = crate::domain::UiPrefs::default();
+        assert_eq!(effective_translate_lang(&prefs), "ja");
+
+        prefs.translate_target_lang = "".into();
+        assert_eq!(effective_translate_lang(&prefs), "ja");
+
+        prefs.translate_target_lang = "   ".into();
+        assert_eq!(effective_translate_lang(&prefs), "ja");
+
+        prefs.translate_target_lang = " en ".into();
+        assert_eq!(effective_translate_lang(&prefs), "en");
+    }
 
     fn test_note(id: &str, my_reaction: Option<&str>) -> Note {
         use crate::domain::{User, Visibility};

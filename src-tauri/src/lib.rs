@@ -83,6 +83,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::get_note_renotes,
             commands::note::favorite_note,
             commands::note::unfavorite_note,
+            commands::note::get_translator_available,
+            commands::note::translate_note,
             commands::note::vote_poll,
             commands::note::list_custom_emojis,
             commands::note::upload_file,
