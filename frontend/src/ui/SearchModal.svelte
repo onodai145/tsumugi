@@ -251,45 +251,48 @@
         <AccountSelect bind:value={accountId} accounts={app.accounts} showLabel />
       </div>
 
-      <div
-        class="flex items-center gap-0 self-start overflow-hidden rounded-lg border border-border text-sm"
-        role="group"
-        aria-label="検索対象"
-      >
-        <button
-          type="button"
-          class={scope === "cache"
-            ? "border-r border-border bg-primary px-3.5 py-1.5 text-primary-foreground"
-            : "border-r border-border bg-muted px-3.5 py-1.5 text-foreground"}
-          onclick={() => setScope("cache")}
-        >キャッシュ</button>
-        <button
-          type="button"
-          class={scope === "server"
-            ? "bg-primary px-3.5 py-1.5 text-primary-foreground"
-            : "bg-muted px-3.5 py-1.5 text-foreground"}
-          onclick={() => setScope("server")}
-        >サーバー</button>
-      </div>
-
-      {#if scope === "cache"}
-        <div class="flex items-center gap-0 self-start overflow-hidden rounded-lg border border-border text-sm">
+      <!-- 検索対象と簡単/エキスパートの切替は、縦に2段積まず1行に並べる（狭い幅では折り返す） -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div
+          class="flex items-center gap-0 overflow-hidden rounded-lg border border-border text-sm"
+          role="group"
+          aria-label="検索対象"
+        >
           <button
             type="button"
-            class={uiMode === "guided"
+            class={scope === "cache"
               ? "border-r border-border bg-primary px-3.5 py-1.5 text-primary-foreground"
               : "border-r border-border bg-muted px-3.5 py-1.5 text-foreground"}
-            onclick={() => (uiMode = "guided")}
-          >簡単</button>
+            onclick={() => setScope("cache")}
+          >キャッシュ</button>
           <button
             type="button"
-            class={uiMode === "expert"
+            class={scope === "server"
               ? "bg-primary px-3.5 py-1.5 text-primary-foreground"
               : "bg-muted px-3.5 py-1.5 text-foreground"}
-            onclick={switchToExpert}
-          >エキスパート(TQL)</button>
+            onclick={() => setScope("server")}
+          >サーバー</button>
         </div>
-      {/if}
+
+        {#if scope === "cache"}
+          <div class="flex items-center gap-0 overflow-hidden rounded-lg border border-border text-sm">
+            <button
+              type="button"
+              class={uiMode === "guided"
+                ? "border-r border-border bg-primary px-3.5 py-1.5 text-primary-foreground"
+                : "border-r border-border bg-muted px-3.5 py-1.5 text-foreground"}
+              onclick={() => (uiMode = "guided")}
+            >簡単</button>
+            <button
+              type="button"
+              class={uiMode === "expert"
+                ? "bg-primary px-3.5 py-1.5 text-primary-foreground"
+                : "bg-muted px-3.5 py-1.5 text-foreground"}
+              onclick={switchToExpert}
+            >エキスパート(TQL)</button>
+          </div>
+        {/if}
+      </div>
 
       {#if showGuided}
         <label class="flex flex-col gap-1 text-sm">

@@ -399,4 +399,14 @@ describe("SearchModal サーバー検索", () => {
       expect.objectContaining({ query: "rust", untilId: "n1" }),
     );
   });
+
+  it("検索対象の切替と簡単/エキスパートの切替は同じ行に並ぶ", async () => {
+    mockServer();
+    const { getByRole, getByText } = render(SearchModal, { props: { onclose: () => {} } });
+    const row = getByRole("group", { name: "検索対象" }).parentElement as HTMLElement;
+    // 親がフォーム全体ではなく、切替だけを並べる専用の行であること（縦積みになっていない）
+    expect(row.tagName).not.toBe("FORM");
+    expect(row.contains(getByText("簡単"))).toBe(true);
+    expect(row.contains(getByText("エキスパート(TQL)"))).toBe(true);
+  });
 });
