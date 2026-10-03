@@ -5,6 +5,7 @@ mod debug_bridge;
 mod domain;
 mod error;
 mod events;
+mod fence;
 mod filter;
 mod mobile_intent;
 mod session;

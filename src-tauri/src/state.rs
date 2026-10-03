@@ -1,6 +1,7 @@
 //! Tauri が管理するアプリ状態（command から `State<AppState>` で参照）。
 
 use crate::domain::{EmojiDef, MuteConfig, Note};
+use crate::fence::ColumnFence;
 use crate::filter::mute::WordMuteRule;
 use crate::session::{AccountManager, SecretStore};
 use crate::sound::SoundPlayer;
@@ -133,6 +134,9 @@ pub struct AppState {
     pub sound: SoundPlayer,
     /// キャッシュhit/fallback回数の集計(Issue #241)。Backstageの「メトリクス」タブ用。
     pub cache_metrics: CacheMetrics,
+    /// カラムごとの世代とロック。`update_column` / `close_column` と、実行中の REST 取得の
+    /// キャッシュ書き込みの競合を防ぐ(Issue #446)。
+    pub column_fence: ColumnFence,
 }
 
 impl AppState {
@@ -185,6 +189,7 @@ impl AppState {
             gap_fill_in_flight: Mutex::new(HashSet::new()),
             sound,
             cache_metrics: CacheMetrics::default(),
+            column_fence: ColumnFence::default(),
         }
     }
 
