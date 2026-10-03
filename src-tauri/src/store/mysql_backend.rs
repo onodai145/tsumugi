@@ -1549,6 +1549,46 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
+    async fn extend_fetch_boundaries_moves_to_empty_string_and_never_back() {
+        let s = backend().await;
+        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n300")]).await.unwrap();
+
+        // 既存行を ""(枯渇済み)へ延長できる
+        s.extend_fetch_boundaries("col1", &[b(0, "")]).await.unwrap();
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, ""), b(1, "n300")]);
+
+        // 枯渇済みは、後から通常のIDで延長しても戻らない
+        s.extend_fetch_boundaries("col1", &[b(0, "n1")]).await.unwrap();
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, ""), b(1, "n300")]);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn prune_removes_every_source_row_when_multi_source_column_fully_pruned() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("old", 100)]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, ""), b(2, "old")]).await.unwrap();
+
+        assert_eq!(s.prune(0, 1, 0).await.unwrap(), 1);
+
+        assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
+    }
+
+    /// 重複した source_idx は主キー違反で失敗し、トランザクションごとロールバックされて既存行が残る。
+    #[tokio::test]
+    #[ignore]
+    async fn replace_fetch_boundaries_rejects_duplicate_source_idx_and_rolls_back() {
+        let s = backend().await;
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+
+        let result = s.replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")]).await;
+
+        assert!(result.is_err());
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2")]);
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn ensure_schema_migrates_legacy_fetch_boundary_table() {
         let container = Mysql::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(3306).await.unwrap();

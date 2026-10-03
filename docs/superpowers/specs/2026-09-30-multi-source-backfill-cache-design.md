@@ -181,3 +181,10 @@ return fetch.notes
 ## 実装ボリュームの見立て
 
 変更は `store/note_cache.rs`（trait + `delete_matching`）、`store/db.rs`（スキーマ + マイグレーション）、`store/sqlite_backend.rs` / `store/postgres_backend.rs` / `store/mysql_backend.rs`（実装・スキーマ・prune・テスト）、`commands/column.rs`、`state.rs`（コメント）。フロントエンド・TS バインディングの変更はない（Tauri コマンドの署名は変えない）。
+
+## 後続の変更(Issue #429)
+
+上記の `fetch_backfill` の判定は、レビュー指摘への対応で次の2点が変わっている。本文は当時の設計のまま残す。
+
+- `cache_backfill_page(boundary, until_id, cached, raw_loaded, limit)` は、有効境界が `""`(全ソース枯渇済み)かつ `load_cached_before` の生の読み出し件数 `raw_loaded` が `limit` 未満なら、`cached.len()` が足りなくてもキャッシュだけで返す(0件も可)。フィルタ後の件数ではなく生の件数で判定するのは、ミュート等で間引かれて短くなっただけのページを末尾到達と取り違えないため。`prune` は `""` の行も生存最古IDへ引き上げるので、キャッシュが削られた後に完全扱いが残ることはない。
+- `get_fetch_boundaries` の失敗は「境界未確定」ではなく `FallbackOther` に計上する(空扱いでAPIへ落ちる動作は変わらない)。`FallbackBoundaryUnset` はDBエラーでは増えない。
