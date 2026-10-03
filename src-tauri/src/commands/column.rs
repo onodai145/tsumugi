@@ -1441,9 +1441,11 @@ async fn commit_backfill_writes(
     extend: &[(u32, String)],
 ) -> Option<Result<()>> {
     fence
-        .write_if_current(column_id, epoch, || async {
+        .write_if_current(column_id, epoch, |boundaries_ok| async move {
             cache_fetched(cache, column_id, fetch).await?;
-            if !extend.is_empty() {
+            // 境界の世代が古い(取得中に set_mute が境界を捨てた)なら、旧ミュートの結果に基づく
+            // 延長を書かない。`extend` は行が無ければ挿入するので、書くと捨てた境界が復活する(Issue #452)。
+            if boundaries_ok && !extend.is_empty() {
                 let _ = cache.extend_fetch_boundaries(column_id, extend).await;
             }
             Ok::<(), Error>(())
@@ -1467,10 +1469,14 @@ async fn commit_initial_writes(
     on_current: impl FnOnce(),
 ) -> Result<()> {
     fence
-        .write_if_current(column_id, epoch, || async move {
+        .write_if_current(column_id, epoch, |boundaries_ok| async move {
             cache_fetched(cache, column_id, fetch).await?;
-            if let Some(entries) = boundaries {
-                let _ = cache.replace_fetch_boundaries(column_id, entries).await;
+            // 境界の世代が古いなら、旧ミュートの結果に基づく境界を書かない。未確定のままなら、
+            // 次回の backfill は API 経由になるので安全(Issue #452)。
+            if boundaries_ok {
+                if let Some(entries) = boundaries {
+                    let _ = cache.replace_fetch_boundaries(column_id, entries).await;
+                }
             }
             on_current();
             Ok::<(), Error>(())
@@ -1481,6 +1487,9 @@ async fn commit_initial_writes(
 
 /// ギャップ埋めの書き込み: 境界の引き上げと、収集したノートのキャッシュ。`epoch` が古ければ
 /// 何も書かず `false` を返す。呼び出し元は `false` なら `ColumnGapFill` イベントも出さない(Issue #446)。
+/// 境界の世代が古くても、引き上げは飛ばさない: 引き上げは、ロックの中で読んだ最新の境界の既存の行を
+/// 保守的な方向へ動かすだけで、`set_mute` が捨てた後の空の状態からは何も書かない。飛ばすと、
+/// 打ち切られたギャップが境界で覆われないまま残る(Issue #452)。
 async fn commit_gap_fill_writes(
     fence: &ColumnFence,
     cache: &NoteCacheStore,
@@ -1489,7 +1498,7 @@ async fn commit_gap_fill_writes(
     gap: &GapFillResult,
 ) -> bool {
     fence
-        .write_if_current(column_id, epoch, || async {
+        .write_if_current(column_id, epoch, |_boundaries_ok| async {
             apply_gap_fill_boundaries(cache, column_id, gap).await;
             if !gap.notes.is_empty() {
                 let _ = cache.cache_notes(column_id, &gap.notes).await;
@@ -3319,5 +3328,97 @@ mod tests {
         assert!(!written);
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
         assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+    }
+
+    /// `set_mute` が行うこと(境界の書きロックの中で、全カラムの境界を捨てる)を模す。
+    async fn simulate_set_mute(fence: &ColumnFence, cache: &NoteCacheStore) {
+        fence
+            .invalidate_boundaries(|| async { cache.clear_all_fetch_boundaries().await.unwrap() })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_caches_notes_but_does_not_resurrect_boundaries_after_set_mute() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        let epoch = fence.begin("c1"); // 旧ミュートで取得を始めた
+        simulate_set_mute(&fence, &cache).await;
+
+        let written =
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+
+        assert!(matches!(written, Some(Ok(()))));
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1); // ノートは書かれる
+        // `extend` は行が無ければ挿入するので、飛ばさないと、捨てた境界が復活する
+        assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_extends_boundaries_when_the_epoch_was_begun_after_set_mute() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        simulate_set_mute(&fence, &cache).await;
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        let epoch = fence.begin("c1"); // ミュート変更の後に取得を始めた(対照)
+
+        commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")])
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n300")]);
+    }
+
+    #[tokio::test]
+    async fn commit_initial_writes_keeps_notes_and_streams_but_skips_boundaries_after_set_mute() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1"); // 旧ミュートでカラムを開き始めた
+        simulate_set_mute(&fence, &cache).await;
+        let opened = std::cell::Cell::new(false);
+
+        let written = commit_initial_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_of(&["n400"]),
+            Some(&[pair(0, "n100")]),
+            || opened.set(true),
+        )
+        .await;
+
+        assert!(written.is_ok(), "ミュートを変えても、カラムは開ける(Err にしない)");
+        assert!(opened.get(), "ストリームは開く");
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
+        // 旧ミュートの結果に基づく境界は書かない。未確定のままなら、次回の backfill は API 経由になる
+        assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commit_gap_fill_writes_does_not_resurrect_cleared_boundaries_after_set_mute() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+        simulate_set_mute(&fence, &cache).await; // 境界は空
+
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+
+        assert!(written);
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
+        // 引き上げは既存の行にしか効かない(`prev` が空なら何も書かない)ので、復活しない
+        assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commit_gap_fill_writes_still_raises_boundaries_when_only_the_boundary_epoch_is_stale() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+        simulate_set_mute(&fence, &cache).await;
+        // ミュート変更の後に、別の取得が作った行
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
+
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+
+        assert!(written);
+        // 引き上げを飛ばすと、打ち切られたギャップが境界で覆われないまま残る
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n450")]);
     }
 }
