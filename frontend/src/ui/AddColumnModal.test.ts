@@ -50,6 +50,7 @@ function makeTab(kind: ColumnKind, filter: FilterQuery): TabView {
     fillingGap: false,
     selectedNoteId: null,
     selectionMoveSeq: 0,
+    epoch: 0,
   };
 }
 
