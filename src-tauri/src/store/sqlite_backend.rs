@@ -782,6 +782,19 @@ mod tests {
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
     }
 
+    /// 重複した source_idx は主キー違反で失敗する。トランザクションごとロールバックされ、
+    /// 既存の境界は DELETE されずに残る(doc に明記した挙動)。
+    #[tokio::test]
+    async fn replace_fetch_boundaries_rejects_duplicate_source_idx_and_rolls_back() {
+        let s = store();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+
+        let result = s.replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")]).await;
+
+        assert!(result.is_err());
+        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2")]);
+    }
+
     #[tokio::test]
     async fn extend_fetch_boundaries_moves_each_source_older_only_and_inserts_absent() {
         let s = store();
