@@ -17,7 +17,7 @@ cargo tauri build             # release build with frontend embedded (frontendDi
 cd src-tauri && cargo test    # Rust tests (real Misskey connectivity tests are #[ignore])
 cd src-tauri && cargo test <test_name>   # run a single test
 cd src-tauri && cargo test --lib postgres_ -- --ignored                # Postgres real-DB tests (Docker required)
-cd src-tauri && cargo test --lib mysql_ -- --ignored --test-threads=2  # keep parallelism low: full parallelism OOMed back when every test leaked its container (not re-checked since the drop fix). Each test's `TestBackend` guard removes its container and anonymous volume on drop, even on panic; only a killed run leaves leftovers — remove those mysql:8.1/postgres containers by ID with `docker rm -fv <id>` — `-v` is required: both images declare an anonymous VOLUME, so plain `docker rm -f` orphans one volume per container (`docker volume ls -f dangling=true`)
+cd src-tauri && cargo test --lib mysql_ -- --ignored --test-threads=2  # keep parallelism low: full parallelism starts one DB container per test at once and OOMs (dropping containers at test end doesn't lower that peak). Each test's `TestBackend` guard removes its container and anonymous volume on drop, even on panic; only a killed run leaves leftovers — remove those mysql:8.1/postgres containers by ID with `docker rm -fv <id>` — `-v` is required: both images declare an anonymous VOLUME, so plain `docker rm -f` orphans one volume per container (`docker volume ls -f dangling=true`)
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
 cd frontend  && pnpm test                # Vitest unit tests
 
