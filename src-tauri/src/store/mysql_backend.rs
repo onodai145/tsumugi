@@ -1097,7 +1097,7 @@ async fn search_cache_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testcontainers_modules::{mysql::Mysql, testcontainers::runners::AsyncRunner};
+    use testcontainers_modules::{mysql::Mysql, testcontainers::{runners::AsyncRunner, ContainerAsync}};
 
     /// Docker上の使い捨てMySQLへ接続し、スキーマが2回適用してもエラーにならず
     /// (冪等)、テーブルが実際に作成されることを確認する。CI常時実行はしない方針
@@ -1292,13 +1292,26 @@ mod tests {
         }
     }
 
-    async fn backend() -> MySqlBackend {
+    /// 実DBテスト用のバックエンド。コンテナを一緒に持ち、drop でコンテナと匿名ボリュームを消す。
+    /// フィールドは宣言順に drop されるので、接続プールを閉じてからコンテナを消す。
+    struct TestBackend {
+        backend: MySqlBackend,
+        _container: ContainerAsync<Mysql>,
+    }
+
+    impl std::ops::Deref for TestBackend {
+        type Target = MySqlBackend;
+        fn deref(&self) -> &MySqlBackend {
+            &self.backend
+        }
+    }
+
+    async fn backend() -> TestBackend {
         let container = Mysql::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(3306).await.unwrap();
         let params = MySqlConnectParams { host: "127.0.0.1".into(), port, database: "test".into(), user: "root".into(), password: "".into() };
         let backend = MySqlBackend::connect(&params).await.unwrap();
-        std::mem::forget(container);
-        backend
+        TestBackend { backend, _container: container }
     }
 
     fn b(idx: u32, id: &str) -> (u32, String) {

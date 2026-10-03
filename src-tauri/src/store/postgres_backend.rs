@@ -1120,7 +1120,7 @@ async fn search_cache_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testcontainers_modules::{postgres::Postgres, testcontainers::runners::AsyncRunner};
+    use testcontainers_modules::{postgres::Postgres, testcontainers::{runners::AsyncRunner, ContainerAsync}};
 
     /// Docker上の使い捨てPostgresへ接続し、スキーマが2回適用してもエラーにならず
     /// (冪等)、テーブルが実際に作成されることを確認する。CI常時実行はしない方針
@@ -1265,13 +1265,26 @@ mod tests {
         }
     }
 
-    async fn backend() -> PostgresBackend {
+    /// 実DBテスト用のバックエンド。コンテナを一緒に持ち、drop でコンテナと匿名ボリュームを消す。
+    /// フィールドは宣言順に drop されるので、接続プールを閉じてからコンテナを消す。
+    struct TestBackend {
+        backend: PostgresBackend,
+        _container: ContainerAsync<Postgres>,
+    }
+
+    impl std::ops::Deref for TestBackend {
+        type Target = PostgresBackend;
+        fn deref(&self) -> &PostgresBackend {
+            &self.backend
+        }
+    }
+
+    async fn backend() -> TestBackend {
         let container = Postgres::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(5432).await.unwrap();
         let params = PostgresConnectParams { host: "127.0.0.1".into(), port, database: "postgres".into(), user: "postgres".into(), password: "postgres".into() };
         let backend = PostgresBackend::connect(&params).await.unwrap();
-        std::mem::forget(container);
-        backend
+        TestBackend { backend, _container: container }
     }
 
     fn b(idx: u32, id: &str) -> (u32, String) {
