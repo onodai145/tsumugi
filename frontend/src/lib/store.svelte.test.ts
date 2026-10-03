@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupView, TabView } from "./store.svelte";
-import type { Note, Notification, User } from "../bindings/tauri.gen";
+import type { ColumnKind, FilterQuery, Note, Notification, User } from "../bindings/tauri.gen";
 
 // store.svelte.ts が起動時に @tauri-apps/plugin-os の platform() を呼ぶため、
 // Tauri ランタイム外(jsdom/node)で import が失敗しないようスタブする（NoteCard.test.ts と同じ構成）。
@@ -108,6 +108,7 @@ function makeNotificationOnlyTab(note: Note): TabView {
     fillingGap: false,
     selectedNoteId: null,
     selectionMoveSeq: 0,
+    epoch: 0,
   };
 }
 
@@ -382,6 +383,7 @@ function makeNormalTab(overrides: Partial<TabView> = {}): TabView {
     fillingGap: false,
     selectedNoteId: null,
     selectionMoveSeq: 0,
+    epoch: 0,
     ...overrides,
   };
 }
@@ -470,6 +472,7 @@ function makeNoteTab(notes: Note[], overrides: Partial<TabView> = {}): TabView {
     fillingGap: false,
     selectedNoteId: null,
     selectionMoveSeq: 0,
+    epoch: 0,
     ...overrides,
   };
 }
@@ -1182,5 +1185,119 @@ describe("タブ編集で名前だけ変えた場合はノートを保持する(
     await app.updateColumn("tab1", { type: "home" }, { kind: "keywords", value: ["foo"] }, undefined);
 
     expect(invokeMock.mock.calls[0][0]).toBe("update_column");
+  });
+});
+
+describe("updateColumn をまたぐ backfill の結果は捨てる(Issue #446)", () => {
+  const opened = (tabId: string) => ({
+    column: {
+      id: tabId,
+      accountId: ACCOUNT_ID,
+      kind: { type: "local" },
+      order: 0,
+      filter: { kind: "keywords", value: [] },
+      notifyDesktop: false,
+      notifySound: false,
+      notifySoundChoice: "",
+      groupId: "group1",
+      title: null,
+    },
+    group: { id: "group1", order: 0, width: 400, auto: false },
+    notes: [] as Note[],
+    notifications: [],
+  });
+
+  /// 最初の fetch_backfill の応答を、テスト側が好きなタイミングで返せるようにする。
+  /// 2回目以降は空で即座に返す(ループ中のページ取得がテストを止めないように)。
+  function deferFirstBackfill(tabId: string) {
+    let resolveFirst!: (notes: Note[]) => void;
+    let calls = 0;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "fetch_backfill") {
+        calls += 1;
+        if (calls === 1) return new Promise<Note[]>((resolve) => (resolveFirst = resolve));
+        return [];
+      }
+      if (cmd === "update_column") return opened(tabId);
+      if (cmd === "rename_column") return null;
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    return { resolveFirst: (notes: Note[]) => resolveFirst(notes) };
+  }
+
+  const local: ColumnKind = { type: "local" };
+  const keywords: FilterQuery = { kind: "keywords", value: [] };
+
+  it("loadMore: updateColumn をまたいで返った結果は tab.notes に足さない", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n0002", createdAt: 2 })]);
+    app.groups = [makeGroup([tab])];
+    const backfill = deferFirstBackfill(tab.id);
+
+    const pending = app.loadMore(tab.id);
+    await app.updateColumn(tab.id, local, keywords);
+    backfill.resolveFirst([makeNote({ id: "n0001", createdAt: 1 })]);
+    await pending;
+
+    const live = app.groups[0].tabs[0];
+    expect(live.epoch).toBe(1);
+    expect(live.notes).toEqual([]); // updateColumn が差し替えた一覧へ、旧フィルタの結果は混ざらない
+  });
+
+  it("loadMore: updateColumn が無ければ従来どおり結果を足す", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n0002", createdAt: 2 })]);
+    app.groups = [makeGroup([tab])];
+    const backfill = deferFirstBackfill(tab.id);
+
+    const pending = app.loadMore(tab.id);
+    backfill.resolveFirst([makeNote({ id: "n0001", createdAt: 1 })]);
+    await pending;
+
+    expect(app.groups[0].tabs[0].notes.map((n) => n.id)).toEqual(["n0002", "n0001"]);
+  });
+
+  it("loadMore: 名前だけの変更は epoch を進めず、進行中の結果を捨てない", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n0002", createdAt: 2 })]);
+    app.groups = [makeGroup([tab])];
+    const backfill = deferFirstBackfill(tab.id);
+
+    const pending = app.loadMore(tab.id);
+    await app.updateColumn(tab.id, tab.kind, tab.filter, "新しい名前"); // ソース/フィルタは同じ
+    backfill.resolveFirst([makeNote({ id: "n0001", createdAt: 1 })]);
+    await pending;
+
+    const live = app.groups[0].tabs[0];
+    expect(live.epoch).toBe(0);
+    expect(live.notes.map((n) => n.id)).toEqual(["n0002", "n0001"]);
+  });
+
+  it("fillRemainingGap: updateColumn をまたいだ結果は混ぜず、ギャップマーカーも消さない", async () => {
+    const marker = { boundaryId: "n0005", targetId: "n0001" };
+    const tab = makeNoteTab([makeNote({ id: "n0005", createdAt: 5 })], { gapMarker: marker });
+    app.groups = [makeGroup([tab])];
+    const backfill = deferFirstBackfill(tab.id);
+
+    const pending = app.fillRemainingGap(tab.id);
+    await app.updateColumn(tab.id, local, keywords);
+    // targetId(n0001)に到達する結果。ガードが無いとマーカーが「埋まった」として消える
+    backfill.resolveFirst([makeNote({ id: "n0001", createdAt: 1 })]);
+    await pending;
+
+    const live = app.groups[0].tabs[0];
+    expect(live.notes).toEqual([]);
+    expect(live.gapMarker).toEqual(marker);
+  });
+
+  it("fillGapBelow: updateColumn をまたいだ結果は一覧に混ぜない", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n0005", createdAt: 5 }), makeNote({ id: "n0003", createdAt: 3 })]);
+    app.groups = [makeGroup([tab])];
+    const backfill = deferFirstBackfill(tab.id);
+
+    const pending = app.fillGapBelow(tab.id, "n0005");
+    await app.updateColumn(tab.id, local, keywords);
+    backfill.resolveFirst([makeNote({ id: "n0004", createdAt: 4 })]);
+    await pending;
+
+    expect(app.groups[0].tabs[0].notes).toEqual([]);
   });
 });

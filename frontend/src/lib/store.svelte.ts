@@ -78,6 +78,9 @@ export interface TabView {
   /// (スクロールでの追加読み込みとギャップ埋め継続を同時に走らせても問題ないが、
   /// ボタンの二重クリックだけは防ぎたいため)。
   fillingGap: boolean;
+  /// `updateColumn` がタブの内容(ソース/フィルタ)を差し替えるたびに増える世代カウンタ(Issue #446)。
+  /// backfill 系の非同期処理は呼び出し前の値を控え、結果が返った時に変わっていたら捨てる。
+  epoch: number;
   selectedNoteId: string | null;
   /// 矢印キー(note.next/note.prev)で選択を動かすたびに増える世代カウンタ。
   /// NoteCard はこれが変化した時だけ scrollIntoView する(タブの再マウントや
@@ -409,6 +412,7 @@ class AppStore {
       fillingGap: false,
       selectedNoteId: null,
       selectionMoveSeq: 0,
+      epoch: 0,
     };
   }
 
@@ -1231,6 +1235,7 @@ class AppStore {
     const opened = await unwrap(commands.updateColumn(tabId, kind, filter, name));
     const tab = this.#findTab(tabId);
     if (tab) {
+      tab.epoch += 1;
       const acc = this.accounts.find((a) => a.id === opened.column.accountId);
       const src = kindLabel(opened.column.kind);
       tab.kind = opened.column.kind;
@@ -1823,7 +1828,10 @@ class AppStore {
       } else {
         if (tab.notes.length === 0) return;
         const oldest = tab.notes[tab.notes.length - 1].id;
+        const epoch = tab.epoch;
         const older = await unwrap(commands.fetchBackfill(tab.id, oldest, false));
+        // 取得中に updateColumn で内容が差し替わっていたら、旧フィルタの結果は捨てる(Issue #446)。
+        if (tab.epoch !== epoch) return;
         const known = new Set(tab.notes.map((n) => n.id));
         const fresh = older.filter((n) => !known.has(n.id));
         // 同上(Issue #239): MAX_NOTESで切り捨てない。
@@ -1862,12 +1870,15 @@ class AppStore {
     const tab = this.#findTab(tabId);
     if (!tab || !tab.gapMarker || tab.fillingGap) return;
     tab.fillingGap = true;
+    const epoch = tab.epoch;
     const { targetId } = tab.gapMarker;
     let boundaryId = tab.gapMarker.boundaryId;
     try {
       for (let page = 0; page < GAP_CONTINUE_MAX_PAGES; page++) {
         // ギャップ区間 (targetId, boundaryId) は未取得なので、キャッシュ優先を避けて必ずAPIから取る(Issue #427)。
         const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId, true));
+        // 取得中に updateColumn で内容が差し替わっていたら、結果を混ぜず、ギャップマーカーも触らない(Issue #446)。
+        if (tab.epoch !== epoch) return;
         if (fetched.length === 0) break;
         this.#mergeBackfilled(tab, fetched);
 
@@ -1896,10 +1907,12 @@ class AppStore {
     if (index < 0) return;
     const targetId = tab.notes[index + 1]?.id ?? null;
     tab.fillingGap = true;
+    const epoch = tab.epoch;
     let boundaryId = noteId;
     try {
       for (let page = 0; page < GAP_CONTINUE_MAX_PAGES; page++) {
         const fetched = await unwrap(commands.fetchBackfill(tabId, boundaryId, true));
+        if (tab.epoch !== epoch) return;
         if (fetched.length === 0) break;
         this.#mergeBackfilled(tab, fetched);
 
