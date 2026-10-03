@@ -1441,7 +1441,7 @@ async fn commit_backfill_writes(
     extend: &[(u32, String)],
 ) -> Option<Result<()>> {
     fence
-        .write_if_current(column_id, epoch, || async {
+        .write_if_current(column_id, epoch, |_boundaries_ok| async {
             cache_fetched(cache, column_id, fetch).await?;
             if !extend.is_empty() {
                 let _ = cache.extend_fetch_boundaries(column_id, extend).await;
@@ -1467,7 +1467,7 @@ async fn commit_initial_writes(
     on_current: impl FnOnce(),
 ) -> Result<()> {
     fence
-        .write_if_current(column_id, epoch, || async move {
+        .write_if_current(column_id, epoch, |_boundaries_ok| async move {
             cache_fetched(cache, column_id, fetch).await?;
             if let Some(entries) = boundaries {
                 let _ = cache.replace_fetch_boundaries(column_id, entries).await;
@@ -1489,7 +1489,7 @@ async fn commit_gap_fill_writes(
     gap: &GapFillResult,
 ) -> bool {
     fence
-        .write_if_current(column_id, epoch, || async {
+        .write_if_current(column_id, epoch, |_boundaries_ok| async {
             apply_gap_fill_boundaries(cache, column_id, gap).await;
             if !gap.notes.is_empty() {
                 let _ = cache.cache_notes(column_id, &gap.notes).await;
