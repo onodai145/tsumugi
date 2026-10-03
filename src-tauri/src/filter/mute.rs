@@ -69,6 +69,25 @@ pub enum WordMuteRule {
     Regex(regex::Regex),
 }
 
+impl WordMuteRule {
+    /// ルールの安定した文字列表現(Issue #454)。サーバー側ミュートの前回の集合を保存して、
+    /// 「前回あって今回無いルール」(=解除)を検出するために使う。
+    /// - `Words`: 語の順序と大文字小文字に依らない(AND は順序に依らず、照合は大小無視のため)。
+    ///   区切り文字(`\\u{1f}`)で連結するので、`"ab"` と `"a","b"` は区別される。
+    /// - `Regex`: パターン文字列。`i` フラグは `RegexBuilder::case_insensitive` で適用され、
+    ///   `as_str()` には残らないので、`i` フラグだけを外した変更は区別できない(既知の制限)。
+    pub fn key(&self) -> String {
+        match self {
+            WordMuteRule::Words(words) => {
+                let mut lowered: Vec<String> = words.iter().map(|w| w.to_lowercase()).collect();
+                lowered.sort();
+                format!("w:{}", lowered.join("\u{1f}"))
+            }
+            WordMuteRule::Regex(re) => format!("r:{}", re.as_str()),
+        }
+    }
+}
+
 /// text/cw が word-mute ルール群のいずれかに該当するか(OR)。
 pub fn is_word_muted(text: Option<&str>, cw: Option<&str>, rules: &[WordMuteRule]) -> bool {
     if rules.is_empty() {
@@ -267,5 +286,39 @@ mod tests {
     fn word_note_mute_false_when_neither_matches() {
         let rules = vec![WordMuteRule::Words(vec!["bad".into()])];
         assert!(!is_word_note_muted(&note("clean text", "a", None), &rules));
+    }
+
+    #[test]
+    fn word_rule_key_ignores_word_order_and_case() {
+        let a = WordMuteRule::Words(vec!["Foo".into(), "bar".into()]);
+        let b = WordMuteRule::Words(vec!["BAR".into(), "foo".into()]);
+
+        assert_eq!(a.key(), b.key());
+    }
+
+    #[test]
+    fn word_rule_key_distinguishes_different_rules() {
+        let one = WordMuteRule::Words(vec!["foo".into()]);
+        let two = WordMuteRule::Words(vec!["foo".into(), "bar".into()]);
+
+        assert_ne!(one.key(), two.key());
+    }
+
+    #[test]
+    fn word_rule_key_does_not_confuse_one_joined_word_with_two_words() {
+        let joined = WordMuteRule::Words(vec!["ab".into()]);
+        let split = WordMuteRule::Words(vec!["a".into(), "b".into()]);
+
+        assert_ne!(joined.key(), split.key());
+    }
+
+    #[test]
+    fn word_rule_key_keeps_regex_and_words_apart() {
+        let words = WordMuteRule::Words(vec!["foo".into()]);
+        let re = WordMuteRule::Regex(regex::Regex::new("foo").unwrap());
+
+        assert_ne!(words.key(), re.key());
+        assert!(words.key().starts_with("w:"));
+        assert_eq!(re.key(), "r:foo");
     }
 }
