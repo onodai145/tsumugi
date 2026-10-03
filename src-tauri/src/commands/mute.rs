@@ -206,11 +206,26 @@ pub async fn get_mute(state: State<'_, AppState>) -> Result<MuteConfig> {
 #[tauri::command]
 #[specta::specta]
 pub async fn set_mute(state: State<'_, AppState>, config: MuteConfig) -> Result<()> {
+    apply_mute_config(&state, config).await
+}
+
+/// ミュート設定を保存して差し替え、全カラムの backfill 境界を捨てる(`set_mute` の本体)。
+///
+/// `state.mute` の差し替えは、境界を捨てる**前**に行う。書き込み側は、ミュート設定を読む前に
+/// 世代を控えるので、境界の世代が進んだ時点で、新しい設定がすでに反映されている(Issue #452)。
+/// 境界を捨てる処理は、境界の書きロックの中で行う。実行中の取得が、旧ミュートの結果に基づく境界を
+/// 直後に書き込んで復活させないため(`ColumnFence::invalidate_boundaries`)。
+async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
     state.settings.save_mute(&config)?;
     *state.mute.lock().unwrap() = config;
     // ミュート解除方向の変更は、除外済み(=キャッシュされていない)ノートを読み直せないため
     // キャッシュ提供パスでは反映できない。境界を捨てて次回backfillをAPI経由に倒す(Issue #228)。
-    let _ = state.cache.clear_all_fetch_boundaries().await;
+    state
+        .column_fence
+        .invalidate_boundaries(|| async {
+            let _ = state.cache.clear_all_fetch_boundaries().await;
+        })
+        .await;
     Ok(())
 }
 
@@ -461,6 +476,31 @@ mod tests {
         assert!(!state.is_word_muted("acc1", &note("nothing matches")));
         // 未同期の別アカウントには影響しない
         assert!(!state.is_word_muted("other-acc", &note("foo and bar here")));
+    }
+
+    #[tokio::test]
+    async fn apply_mute_config_clears_boundaries_and_stales_earlier_boundary_epochs() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.cache.replace_fetch_boundaries("c1", &[(0, "n500".to_string())]).await.unwrap();
+        let epoch = state.column_fence.begin("c1"); // 旧ミュートで取得を始めた
+
+        apply_mute_config(&state, MuteConfig::default()).await.unwrap();
+
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+        let boundaries_ok = state.column_fence.write_if_current("c1", &epoch, |ok| async move { ok }).await;
+        assert_eq!(boundaries_ok, Some(false), "旧ミュートで控えた境界の世代は古くなる");
+    }
+
+    #[tokio::test]
+    async fn apply_mute_config_replaces_the_mute_config() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let config = MuteConfig { ng_words: vec!["secret".to_string()], ..MuteConfig::default() };
+
+        apply_mute_config(&state, config.clone()).await.unwrap();
+
+        // 新しい設定が `state.mute` に反映される。差し替えが境界を捨てる前に行われる順序(書き込み側の
+        // 不変条件)は、このテストでは検証できない。`apply_mute_config` のコードの順序で守る
+        assert_eq!(*state.mute.lock().unwrap(), config);
     }
 }
 
