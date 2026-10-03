@@ -12,7 +12,7 @@
 |---|---|---|
 | `fetch_backfill` | `extend_fetch_boundaries`(開始時に読んだ境界の写しから `plan_boundary_extend` で作った延長) | `extend` は行が無ければ挿入するので、捨てた境界が復活する |
 | `open_stream_and_fetch` | `replace_fetch_boundaries` | 旧ミュートでフィルタした結果を、完全な範囲として書く |
-| ギャップ埋め(起動時・再接続時) | `apply_gap_fill_boundaries` | 旧ミュートで集めた結果に基づく境界の引き上げ |
+| ギャップ埋め(起動時・再接続時) | `apply_gap_fill_boundaries`(ロックの外の `begin` と、中での読み書きが分かれていた) | 最新の境界ではなく古い写しに基づく書き込みになりうる。ただし、境界を**読み取ってから書く**までを、`set_mute` と排他にすれば守れる(後述) |
 
 境界が復活すると、キャッシュ優先の backfill が、旧ミュート設定で除外されたノートを欠いたキャッシュを「完全」として返す。ミュートを解除したのに、解除したユーザーのノートが上スクロールで出てこない状態になりうる。窓は取得の往復1回分で狭い。コードの読解による推定で、再現は確認していない。
 
@@ -28,7 +28,7 @@
 
 ### 方針: 境界の書き込みだけを守る
 
-ミュート変更で無効になるのは、「境界より新しい範囲は完全」という主張だけである。キャッシュしたノートは、読み出し時にミュートを再適用するので、書いてよい。したがって、境界の世代が古い書き込みは、**境界の書き込みだけを飛ばし**、ノートのキャッシュ、ノートの返却、ストリームを開く処理、`ColumnGapFill` イベントは、そのまま行う。境界が未確定のままなら、次回の backfill は API 経由になるので安全である。
+ミュート変更で無効になるのは、「境界より新しい範囲は完全」という主張だけである。キャッシュしたノートは、読み出し時にミュートを再適用するので、書いてよい。したがって、境界の世代が古い書き込みは、**古い情報から作った境界(`fetch_backfill` の `extend` と `open_stream_and_fetch` の `replace`)の書き込みだけを飛ばし**、ノートのキャッシュ、ノートの返却、ストリームを開く処理、`ColumnGapFill` イベントは、そのまま行う。境界が未確定のままなら、次回の backfill は API 経由になるので安全である。
 
 カラム定義の変更(#446)のように「全部捨てる」にすると、カラムを開いている最中にミュートを変えたとき、`open_stream_and_fetch` が失敗して、カラムが開けなくなる。競合そのものより悪い結果なので採らない。
 
@@ -72,11 +72,11 @@ where F: FnOnce() -> Fut, Fut: Future<Output = T>;
 
 ### `commit_*` ヘルパー(`src-tauri/src/commands/column.rs`)
 
-`write_if_current` の `f` が受け取る `boundaries_ok` が偽なら、境界の書き込みだけを飛ばす。
+`write_if_current` の `f` が受け取る `boundaries_ok` が偽なら、**古い情報から作った境界**の書き込みだけを飛ばす。
 
 - `commit_backfill_writes`: `extend_fetch_boundaries` を飛ばす(ノートの `cache_notes` は行う)。
 - `commit_initial_writes`: `replace_fetch_boundaries` を飛ばす(ノートのキャッシュと `on_current` は行う)。
-- `commit_gap_fill_writes`: `apply_gap_fill_boundaries` を飛ばす(ノートのキャッシュは行い、`true` を返す)。
+- `commit_gap_fill_writes`: **飛ばさない**。`apply_gap_fill_boundaries` は、ロックの中で最新の境界を読み、既存の行を新しい側(保守的な方向)へ動かすだけで、`clear` 後の空の状態からは何も書かない(`prev` が空なら `None`)。したがって、`set_mute` との排他(境界のロック)だけで、境界を復活させない。しかも、境界の世代が古いことを理由に引き上げを飛ばすと、打ち切られたギャップが境界で覆われないまま残り(#432)、キャッシュ優先の backfill が穴をまたいでしまう。
 
 ヘルパーの外向きの引数と戻り値は変わらない。
 
@@ -102,7 +102,9 @@ where F: FnOnce() -> Fut, Fut: Future<Output = T>;
 - `commit_*` のテスト(実際の `NoteCacheStore`、SQLite のメモリ DB): `set_mute` 相当(`invalidate_boundaries` の中で境界を `clear`)の後に、境界の世代が古い書き込みをして、次を確認する。
   - ノートは書かれる。
   - 境界は復活しない(`clear` 後の空のまま)。
-  - `commit_initial_writes` の `on_current` は走る。`commit_gap_fill_writes` は `true` を返す。
+  - `commit_initial_writes` の `on_current` は走る。
+  - `commit_gap_fill_writes` は、境界の世代が古くても、`clear` 後の空の状態からは何も書かず(復活しない)、`true` を返す。ノートは書かれる。
+  - `commit_gap_fill_writes` は、境界の世代だけが古く、別の書き込みが `clear` 後に作った行がある場合、引き上げを**行う**(ギャップを覆うため)。
   - 境界の世代が現在の書き込みは、従来どおり境界を書く(対照)。
 - 世代を進める操作を外すと、上のテストが落ちること(変異確認)。
 
