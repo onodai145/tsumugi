@@ -140,9 +140,11 @@ pub async fn add_column(
         group_id: group.id.clone(),
         title: None,
     };
+    let epoch = state.column_fence.begin(&column.id);
     state.settings.upsert_column(&column)?;
 
-    let (notes, notifications) = open_stream_and_fetch(&app, &state, &column, resolved, host, token).await?;
+    let (notes, notifications) =
+        open_stream_and_fetch(&app, &state, &column, resolved, host, token, &epoch).await?;
     Ok(OpenedColumn {
         column,
         group,
@@ -268,11 +270,17 @@ pub async fn update_column(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    state.settings.upsert_column(&column)?;
-
-    // 既存ストリームを閉じ、旧フィルタで貯めたキャッシュを捨てる
-    state.connections.close(&column_id);
-    state.cache.clear_column_notes(&column_id).await?;
+    // 新しい定義の保存・既存ストリームのクローズ・旧フィルタで貯めたキャッシュの破棄を、世代を進める
+    // ロックの中で行う。実行中の取得は、世代が古くなって書き込みを捨てる(Issue #446)。
+    let (epoch, cleared) = state
+        .column_fence
+        .invalidate(&column_id, || async {
+            state.settings.upsert_column(&column)?;
+            state.connections.close(&column_id);
+            state.cache.clear_column_notes(&column_id).await
+        })
+        .await;
+    cleared?;
 
     let group = state
         .settings
@@ -282,7 +290,7 @@ pub async fn update_column(
         .ok_or_else(|| Error::Invalid(format!("unknown group: {}", column.group_id)))?;
     let (host, token) = state.host_token(&column.account_id)?;
     let (notes, notifications) =
-        open_stream_and_fetch(&app, &state, &column, resolved, host, token).await?;
+        open_stream_and_fetch(&app, &state, &column, resolved, host, token, &epoch).await?;
 
     Ok(OpenedColumn {
         column,
@@ -300,6 +308,8 @@ pub async fn resume_column(
     state: State<'_, AppState>,
     column_id: String,
 ) -> Result<OpenedColumn> {
+    // カラム定義を読む前に世代を控える(Issue #446)。
+    let epoch = state.column_fence.begin(&column_id);
     let column = load_column(&state, &column_id)?;
     let group = state
         .settings
@@ -333,7 +343,7 @@ pub async fn resume_column(
     };
 
     let (fresh_notes, notifications) = if notes.is_empty() {
-        open_stream_and_fetch(&app, &state, &column, resolved, host, token).await?
+        open_stream_and_fetch(&app, &state, &column, resolved, host, token, &epoch).await?
     } else {
         // キャッシュがある: まずキャッシュを即返して体感速度を維持し、閉じていた間のギャップ埋めは
         // バックグラウンドで行って ColumnGapFill イベントでまとめて反映する（1件ずつ ColumnNote を
@@ -364,12 +374,14 @@ pub async fn resume_column(
                         dropped_floor: None,
                     });
                 // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
-                // 残るので、空判定の前に行う(Issue #432)。
-                apply_gap_fill_boundaries(&state.cache, &column_id, &gap_result).await;
+                // 残るので、空判定の前に行う(Issue #432)。取得中に update_column / close_column が
+                // 走っていた(世代が古い)なら、何も書かず、イベントも出さない(Issue #446)。
+                if !commit_gap_fill_writes(&state.column_fence, &state.cache, &column_id, &epoch, &gap_result).await {
+                    return;
+                }
                 if gap_result.notes.is_empty() {
                     return;
                 }
-                let _ = state.cache.cache_notes(&column_id, &gap_result.notes).await;
                 let _ = crate::events::ColumnGapFill {
                     column_id,
                     notes: gap_result.notes,
@@ -452,6 +464,9 @@ pub async fn fetch_backfill(
     until_id: String,
     bypass_cache: bool,
 ) -> Result<Vec<Note>> {
+    // カラム定義を読む前に世代を控える。取得中に update_column / close_column が走ったら、
+    // 下の書き込みは捨てられる(Issue #446)。
+    let epoch = state.column_fence.begin(&column_id);
     let column = load_column(&state, &column_id)?;
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
 
@@ -497,15 +512,18 @@ pub async fn fetch_backfill(
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    cache_fetched(&state.cache, &column.id, &fetch).await?;
-    if cache_eligible {
-        // ソースごとに、既存の境界と連続している場合のみ延長する(plan_boundary_extend)。
-        // 境界未確定のソースは連続性を検証できないので延長せず、カラム開き直し時の
-        // open_stream_and_fetch が改めて確定させる。
-        let entries = plan_boundary_extend(&boundaries, &until_id, &fetch.source_outcomes);
-        if !entries.is_empty() {
-            let _ = state.cache.extend_fetch_boundaries(&column.id, &entries).await;
-        }
+    // ソースごとに、既存の境界と連続している場合のみ延長する(plan_boundary_extend)。
+    // 境界未確定のソースは連続性を検証できないので延長せず、カラム開き直し時の
+    // open_stream_and_fetch が改めて確定させる。
+    let extend = if cache_eligible {
+        plan_boundary_extend(&boundaries, &until_id, &fetch.source_outcomes)
+    } else {
+        vec![]
+    };
+    // 取得中に update_column / close_column が走っていた(世代が古い)なら、何も書かず空で返す(Issue #446)。
+    match commit_backfill_writes(&state.column_fence, &state.cache, &column.id, &epoch, &fetch, &extend).await {
+        None => return Ok(vec![]),
+        Some(written) => written?,
     }
     Ok(fetch.notes)
 }
@@ -566,7 +584,13 @@ pub async fn move_tab(
 pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Result<()> {
     state.connections.close(&column_id);
     state.settings.delete_column(&column_id)?;
-    state.cache.clear_column_notes(&column_id).await?;
+    // 世代を進めてから消し、以降の実行中の取得は書き込みを捨てる(孤児データを作らない, Issue #446)。
+    let (_, cleared) = state
+        .column_fence
+        .invalidate(&column_id, || async { state.cache.clear_column_notes(&column_id).await })
+        .await;
+    state.column_fence.remove(&column_id);
+    cleared?;
     state.settings.delete_empty_groups()?;
     Ok(())
 }
@@ -790,6 +814,7 @@ async fn open_stream_and_fetch(
     resolved: Option<ResolvedSources>,
     host: String,
     token: String,
+    epoch: &Epoch,
 ) -> Result<(Vec<Note>, Vec<Notification>)> {
     if matches!(column.kind, ColumnKind::Notifications) {
         let client = state.client_for(&column.account_id)?;
@@ -811,10 +836,14 @@ async fn open_stream_and_fetch(
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    cache_fetched(&state.cache, &column.id, &fetch).await?;
-    if backfill_cache_eligible(&resolved) {
-        let entries = plan_boundary_initial(&fetch.source_outcomes);
-        let _ = state.cache.replace_fetch_boundaries(&column.id, &entries).await;
+    let boundaries = backfill_cache_eligible(&resolved).then(|| plan_boundary_initial(&fetch.source_outcomes));
+    // 取得中に update_column / close_column が走っていた(世代が古い)なら、何も書かず、ストリームも
+    // 開かない。後続の update_column が自分の定義で開き直す(Issue #446)。
+    match commit_initial_writes(&state.column_fence, &state.cache, &column.id, epoch, &fetch, boundaries.as_deref())
+        .await
+    {
+        None => return Ok((vec![], vec![])),
+        Some(written) => written?,
     }
     open_streams_only(app, state, column, &resolved, host, token);
     Ok((fetch.notes, vec![]))
@@ -1097,6 +1126,8 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
         // 同一カラムの前回ギャップ埋めが実行中(フラッピング再接続対策)。
         return;
     };
+    // カラム定義を読む前に世代を控える(Issue #446)。
+    let epoch = state.column_fence.begin(column_id);
     let Ok(column) = load_column(&state, column_id) else {
         return;
     };
@@ -1130,12 +1161,14 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
         return;
     };
     // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
-    // 残るので、空判定の前に行う(Issue #432)。
-    apply_gap_fill_boundaries(&state.cache, &column.id, &gap_result).await;
+    // 残るので、空判定の前に行う(Issue #432)。取得中に update_column / close_column が
+    // 走っていた(世代が古い)なら、何も書かず、イベントも出さない(Issue #446)。
+    if !commit_gap_fill_writes(&state.column_fence, &state.cache, &column.id, &epoch, &gap_result).await {
+        return;
+    }
     if gap_result.notes.is_empty() {
         return;
     }
-    let _ = state.cache.cache_notes(&column.id, &gap_result.notes).await;
     let _ = crate::events::ColumnGapFill {
         column_id: column.id.clone(),
         notes: gap_result.notes,
