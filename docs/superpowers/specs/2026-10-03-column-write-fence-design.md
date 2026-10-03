@@ -93,9 +93,9 @@ impl ColumnFence {
 
 - `fetch_backfill`: 先頭で `begin`。`cache_fetched` と、境界の延長(`extend_fetch_boundaries`)を、1つの `write_if_current` の中で実行する。`None`(古い)なら、取得したノートを返さず `Ok(vec![])` を返す。
 - 起動時のギャップ埋め(`resume_column` の `spawn` 内)と `gap_fill_on_reconnect`: `begin` は `load_column` の前。`apply_gap_fill_boundaries` と `cache_notes` を `write_if_current` の中で実行する。`None` なら `ColumnGapFill` イベントも出さない。
-- `open_stream_and_fetch`: 呼び出し元(`add_column` / `update_column` / `resume_column`)が `load_column` の前に `begin` した `Epoch` を引数で受け取る(private 関数のシグネチャ変更)。`cache_fetched` と `replace_fetch_boundaries` を `write_if_current` の中で実行する。`None`(古い)なら、書き込まず、`open_streams_only` も呼ばず、`Ok((vec![], vec![]))` を返す。世代が進んだということは、後続の `update_column`(または `close_column`)が、自分の定義でカラムを開き直す(閉じる)ので、この呼び出しが古い定義のストリームを開いてはならない。
+- `open_stream_and_fetch`: 呼び出し元(`add_column` / `update_column` / `resume_column`)が `load_column` の前に `begin` した `Epoch`(`update_column` は `invalidate` が返したもの)を引数で受け取る(private 関数のシグネチャ変更)。`cache_fetched` と `replace_fetch_boundaries` に加えて、**ストリームを開く処理(`open_streams_only`)も、同じ `write_if_current` のロックの中で**実行する。ロックの外で開くと、`close_column` / `update_column` と競合して、削除済み・旧定義のカラムのストリームが閉じられずに残り、ライブノートが孤児として書かれ続ける(最終レビュー指摘)。`None`(古い)なら、書き込まず、ストリームも開かず、`Err(Error::Invalid(..))` を返す。「空の成功」を返すと、並行した `update_column` で、古い定義と空のノートがフロントに適用されてしまう。世代が進んだということは、後続の `update_column`(または `close_column`)が自分の定義でカラムを開き直す(閉じる)ので、この呼び出しが古い定義のストリームを開いてはならない。
 - `update_column`: `upsert_column`、`state.connections.close`、`clear_column_notes` をこの順に `invalidate` の `f` の中で実行する(`upsert_column` が失敗したら、ストリームを閉じる前に中断する)。`invalidate` が返した `Epoch` を、後続の `open_stream_and_fetch` に渡す。
-- `close_column`: `invalidate` の中で `clear_column_notes` を実行し、その後 `remove` でエントリを消す。エントリが無い状態の書き込みは `None`(古い)になるので、実行中の backfill は孤児データを書かない。
+- `close_column`: `state.connections.close` と `clear_column_notes` を `invalidate` の中で実行し、その後 `remove` でエントリを消す(ストリームを閉じる処理もロックの中に置く。進行中の `open_stream_and_fetch` はストリームを開く処理も同じロックの中なので、閉じた後に開き直されない)。エントリが無い状態の書き込みは `None`(古い)になるので、実行中の backfill は孤児データを書かない。
 
 ### フロントエンド(`frontend/src/lib/store.svelte.ts`)
 
@@ -105,7 +105,7 @@ impl ColumnFence {
 
 ### エラーハンドリング
 
-- 「古い」は正常系として扱う(`Ok(vec![])`)。新しい `Error` の variant は作らず、TS バインディングは変わらない。
+- `fetch_backfill` の「古い」は正常系として `Ok(vec![])` を返す。`open_stream_and_fetch` の「古い」は、画面に古い定義を適用させないため、既存の `Error::Invalid` による明示的な失敗にする。新しい `Error` の variant は作らず、TS バインディングは変わらない。
 - フロントは空の結果を、すでに「取得できる分がない」として扱える(`fillRemainingGap` は `fetched.length === 0` で `break`、`loadMore` は何も足さない)。
 
 ## 検討した代替案

@@ -16,7 +16,7 @@
 - 世代は `ColumnFence` のプロセス全体の単調増加カウンタから払い出す(`remove` で作り直したエントリで再利用されない)。
 - ロックを持つのは DB 書き込み(`f`)の間だけ。`fetch_and_filter_multi` や `fill_gap` などのネットワーク取得は、ロックの外で行う。`f` の中から別の `write_if_current` / `invalidate` を呼ばない(入れ子にしない)。
 - 書き込み側は、カラム定義(`load_column` / `resolve_sources`)を読む**前に** `begin` する(`add_column` は新規カラムなので、定義を組み立てた直後)。
-- 世代が古い `fetch_backfill` は `Ok(vec![])` を返す。古い `open_stream_and_fetch` は、書き込まず、ストリームも開かず、`Ok((vec![], vec![]))` を返す。古いギャップ埋めは、書き込まず、`ColumnGapFill` イベントも出さない。
+- 世代が古い `fetch_backfill` は `Ok(vec![])` を返す。古い `open_stream_and_fetch` は、書き込まず、ストリームも開かず、`Err(Error::Invalid(..))` を返す(最終レビュー後の変更。ストリームを開く処理は書き込みと同じロックの中で行い、`close_column` は `connections.close` も `invalidate` の中で行う。spec 参照)。古いギャップ埋めは、書き込まず、`ColumnGapFill` イベントも出さない。
 - コミットメッセージは件名のみ・本文なし(末尾の `Co-Authored-By` トレーラーは別)。`--no-verify` は使わない。コミットが失敗したら止まって報告する。
 - `main` には直接コミットしない。作業ブランチは `fix/column-write-fence-446`(作成済み)。push と PR 作成は、ユーザーの指示を受けてから行う。
 - UI 文言・ドキュメントは日本語。
