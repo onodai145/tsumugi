@@ -582,12 +582,16 @@ pub async fn move_tab(
 #[tauri::command]
 #[specta::specta]
 pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Result<()> {
-    state.connections.close(&column_id);
     state.settings.delete_column(&column_id)?;
-    // 世代を進めてから消し、以降の実行中の取得は書き込みを捨てる(孤児データを作らない, Issue #446)。
+    // ストリームを閉じる処理と clear を、世代を進めるロックの中で行う。進行中の open_stream_and_fetch は、
+    // ストリームを開く処理も同じロックの中なので、閉じた後に開き直すことも、書き込みを残すことも無い
+    // (孤児データとリークしたストリームを作らない, Issue #446)。
     let (_, cleared) = state
         .column_fence
-        .invalidate(&column_id, || async { state.cache.clear_column_notes(&column_id).await })
+        .invalidate(&column_id, || async {
+            state.connections.close(&column_id);
+            state.cache.clear_column_notes(&column_id).await
+        })
         .await;
     state.column_fence.remove(&column_id);
     cleared?;
@@ -837,15 +841,18 @@ async fn open_stream_and_fetch(
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
     let boundaries = backfill_cache_eligible(&resolved).then(|| plan_boundary_initial(&fetch.source_outcomes));
-    // 取得中に update_column / close_column が走っていた(世代が古い)なら、何も書かず、ストリームも
-    // 開かない。後続の update_column が自分の定義で開き直す(Issue #446)。
-    match commit_initial_writes(&state.column_fence, &state.cache, &column.id, epoch, &fetch, boundaries.as_deref())
-        .await
-    {
-        None => return Ok((vec![], vec![])),
-        Some(written) => written?,
-    }
-    open_streams_only(app, state, column, &resolved, host, token);
+    // 書き込みと、ストリームを開く処理を、同じロックの中で行う。取得中に update_column / close_column が
+    // 走っていた(世代が古い)なら、何も書かず、ストリームも開かず、Err を返す(Issue #446)。
+    commit_initial_writes(
+        &state.column_fence,
+        &state.cache,
+        &column.id,
+        epoch,
+        &fetch,
+        boundaries.as_deref(),
+        || open_streams_only(app, state, column, &resolved, host, token),
+    )
+    .await?;
     Ok((fetch.notes, vec![]))
 }
 
@@ -1445,7 +1452,11 @@ async fn commit_backfill_writes(
 }
 
 /// `open_stream_and_fetch` の書き込み: 初回取得ノートのキャッシュと、`boundaries`(Some の時)での
-/// 境界の置き換え。`epoch` が古ければ何も書かず `None` を返す(Issue #446)。
+/// 境界の置き換え。書き込みが成功したら、同じロックの中で `on_current`(ストリームを開く処理)を
+/// 実行する。ロックの外で開くと、`close_column` / `update_column` と競合して、削除済み・旧定義の
+/// カラムのストリームが開いたまま残る(Issue #446)。
+/// `epoch` が古ければ、何も書かず `on_current` も呼ばず、明示的な `Err` を返す。「空の成功」を返すと、
+/// 並行した `update_column` で古い定義と空のノートが画面に適用されてしまうため。
 async fn commit_initial_writes(
     fence: &ColumnFence,
     cache: &NoteCacheStore,
@@ -1453,16 +1464,19 @@ async fn commit_initial_writes(
     epoch: &Epoch,
     fetch: &FilteredFetch,
     boundaries: Option<&[(u32, String)]>,
-) -> Option<Result<()>> {
+    on_current: impl FnOnce(),
+) -> Result<()> {
     fence
-        .write_if_current(column_id, epoch, || async {
+        .write_if_current(column_id, epoch, || async move {
             cache_fetched(cache, column_id, fetch).await?;
             if let Some(entries) = boundaries {
                 let _ = cache.replace_fetch_boundaries(column_id, entries).await;
             }
+            on_current();
             Ok::<(), Error>(())
         })
         .await
+        .unwrap_or_else(|| Err(Error::Invalid(format!("column {column_id} was modified while it was being opened"))))
 }
 
 /// ギャップ埋めの書き込み: 境界の引き上げと、収集したノートのキャッシュ。`epoch` が古ければ
@@ -3191,10 +3205,18 @@ mod tests {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
         let epoch = fence.begin("c1");
 
-        let written =
-            commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), Some(&[pair(0, "n100")])).await;
+        let written = commit_initial_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_of(&["n400"]),
+            Some(&[pair(0, "n100")]),
+            || {},
+        )
+        .await;
 
-        assert!(matches!(written, Some(Ok(()))));
+        assert!(written.is_ok());
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
         assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n100")]);
     }
@@ -3205,7 +3227,7 @@ mod tests {
         cache.replace_fetch_boundaries("c1", &[pair(0, "n700")]).await.unwrap();
         let epoch = fence.begin("c1");
 
-        commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None).await;
+        commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None, || {}).await.unwrap();
 
         assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n700")]);
     }
@@ -3216,12 +3238,49 @@ mod tests {
         let slow = fence.begin("c1"); // 1回目の update_column の取得(遅い)
         simulate_update_column(&fence, &cache, "c1").await; // 2回目が先に終わった
 
-        let written =
-            commit_initial_writes(&fence, &cache, "c1", &slow, &fetch_of(&["n400"]), Some(&[pair(0, "n100")])).await;
+        let written = commit_initial_writes(
+            &fence,
+            &cache,
+            "c1",
+            &slow,
+            &fetch_of(&["n400"]),
+            Some(&[pair(0, "n100")]),
+            || {},
+        )
+        .await;
 
-        assert!(written.is_none());
+        // 古い取得は「空の成功」ではなく明示的な失敗にする(フロントが古い定義を適用しないように)
+        assert!(matches!(written, Err(Error::Invalid(_))));
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
         assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+    }
+
+    #[tokio::test]
+    async fn commit_initial_writes_runs_on_current_after_the_writes_when_current() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+        let opened = std::cell::Cell::new(false);
+
+        commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None, || opened.set(true))
+            .await
+            .unwrap();
+
+        assert!(opened.get(), "世代が現在ならストリームを開く処理(on_current)が走る");
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn commit_initial_writes_does_not_run_on_current_when_stale() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+        simulate_update_column(&fence, &cache, "c1").await;
+        let opened = std::cell::Cell::new(false);
+
+        let written =
+            commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None, || opened.set(true)).await;
+
+        assert!(written.is_err());
+        assert!(!opened.get(), "古い世代では、旧定義のストリームを開かない");
     }
 
     fn gap_with(notes: Vec<Note>) -> GapFillResult {
