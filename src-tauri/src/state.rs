@@ -28,8 +28,11 @@ pub enum BackfillOutcome {
     Hit,
     /// cache_eligibleだがいずれかのソースのbackfill境界(get_fetch_boundaries)が未確定でAPIへ。
     /// Issue #228のPR #237で残課題として記載された「実は機能が働いていない」ケースを可視化する。
+    /// 注意: 取得に失敗(`Failed`)し続けるソースの境界は確定しないため、このカウンタが増え続ける。
+    /// 例えばTQLにREST非対応のソースが入った場合。現状は全ソースがREST対応なので起きない(Issue #429)。
     FallbackBoundaryUnset,
     /// cache_eligibleだが境界は確定済み、範囲外/件数不足でAPIへ。
+    /// 境界の読み出し自体がDBエラーで失敗した場合もここに数える(「未確定」とは区別する)。
     FallbackOther,
 }
 

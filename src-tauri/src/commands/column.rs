@@ -455,16 +455,10 @@ pub async fn fetch_backfill(
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
 
     let cache_eligible = backfill_cache_eligible(&resolved);
-    let boundaries: std::collections::HashMap<u32, String> = if cache_eligible {
-        state
-            .cache
-            .get_fetch_boundaries(&column.id)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect()
+    let (boundaries, boundary_read_failed) = if cache_eligible {
+        read_boundaries(state.cache.get_fetch_boundaries(&column.id).await)
     } else {
-        std::collections::HashMap::new()
+        (std::collections::HashMap::new(), false)
     };
     if should_try_backfill_cache(cache_eligible, bypass_cache) {
         let effective = effective_boundary(&boundaries, resolved.kinds.len());
@@ -476,6 +470,7 @@ pub async fn fetch_backfill(
                 .unwrap_or_default(),
             _ => vec![],
         };
+        let raw_loaded = cached.len();
         // [E, until_id) の範囲外(=このセッションでは未検証)の行を除外する。
         // load_cached_before 自体は下限を持たないため、範囲内の件数が不足していても
         // セッションをまたいだ古いキャッシュ行で limit を満たしてしまう可能性がある。
@@ -491,15 +486,13 @@ pub async fn fetch_backfill(
                 && !server_muted_note(&state, &column.account_id, n)
                 && !state.is_word_muted(&column.account_id, n)
         });
-        if let Some(notes) = cache_backfill_page(effective.as_deref(), &until_id, cached, INITIAL_LIMIT) {
+        if let Some(notes) = cache_backfill_page(effective.as_deref(), &until_id, cached, raw_loaded, INITIAL_LIMIT) {
             state.cache_metrics.record_backfill(BackfillOutcome::Hit);
             return Ok(notes);
         }
-        state.cache_metrics.record_backfill(if effective.is_none() {
-            BackfillOutcome::FallbackBoundaryUnset
-        } else {
-            BackfillOutcome::FallbackOther
-        });
+        state
+            .cache_metrics
+            .record_backfill(backfill_fallback_outcome(boundary_read_failed, effective.as_deref()));
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
@@ -909,22 +902,52 @@ fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool,
     }
 }
 
+/// 境界の読み出し結果をマップにする。失敗時は空マップ(=全ソース未確定扱いでAPIへ落ちる。
+/// 延長もされないので安全)にし、失敗したことを第2要素で返す。
+fn read_boundaries(
+    result: Result<Vec<(u32, String)>>,
+) -> (std::collections::HashMap<u32, String>, bool) {
+    match result {
+        Ok(rows) => (rows.into_iter().collect(), false),
+        Err(e) => {
+            log::warn!("failed to read backfill fetch boundaries: {e}");
+            (std::collections::HashMap::new(), true)
+        }
+    }
+}
+
+/// キャッシュで賄えず API へ落ちたときの理由。境界の読み出し失敗は「未確定」と区別して
+/// `FallbackOther` に数える(DBエラーで `FallbackBoundaryUnset` が膨らむのを防ぐ)。
+fn backfill_fallback_outcome(boundary_read_failed: bool, effective: Option<&str>) -> BackfillOutcome {
+    if effective.is_none() && !boundary_read_failed {
+        BackfillOutcome::FallbackBoundaryUnset
+    } else {
+        BackfillOutcome::FallbackOther
+    }
+}
+
 /// backfill 要求(until_id より古いページ)をキャッシュのみで賄えるか判定する純粋関数。
 /// `boundary`(Some) は「これより新しいノートはAPI取得済みで完全」という境界。
 /// `cached` は呼び出し元が事前に `load_cached_before` で取得した結果。
 /// 境界が未確定、要求範囲が境界に届かない(未検証領域を含みうる)、
 /// またはキャッシュ件数が limit に満たない場合は None(=APIへフォールバックすべき)を返す。
+/// ただし境界が `""`(全ソース枯渇済み)でカラム全体が完全と分かっており、`load_cached_before` の
+/// 生の読み出し件数 `raw_loaded` が limit 未満(=キャッシュを読み尽くした)なら、件数不足でも
+/// キャッシュだけで返す。判定にフィルタ後の `cached.len()` は使わない: ミュート等で間引かれて
+/// 短くなっただけのページを末尾到達と取り違えないため。
 fn cache_backfill_page(
     boundary: Option<&str>,
     until_id: &str,
     cached: Vec<Note>,
+    raw_loaded: usize,
     limit: u32,
 ) -> Option<Vec<Note>> {
     let boundary = boundary?;
     if until_id <= boundary {
         return None;
     }
-    if cached.len() as u32 >= limit {
+    let column_exhausted = boundary.is_empty() && (raw_loaded as u32) < limit;
+    if column_exhausted || cached.len() as u32 >= limit {
         Some(cached)
     } else {
         None
@@ -2167,7 +2190,7 @@ mod tests {
     #[test]
     fn cache_backfill_page_none_when_boundary_unknown() {
         let cached = vec![note("n1", 10); 0]; // 空でも境界未確定なら常にAPIへ
-        let result = cache_backfill_page(None, "n999", cached, 20);
+        let result = cache_backfill_page(None, "n999", cached, 0, 20);
         assert!(result.is_none());
     }
 
@@ -2175,25 +2198,73 @@ mod tests {
     fn cache_backfill_page_none_when_until_id_at_or_before_boundary() {
         let cached = vec![note("n1", 10)];
         // until_id が境界と同じ、または境界より古い場合は「未検証の領域」を含みうるのでAPIへ
-        assert!(cache_backfill_page(Some("n500"), "n500", cached.clone(), 1).is_none());
-        assert!(cache_backfill_page(Some("n500"), "n400", cached, 1).is_none());
+        assert!(cache_backfill_page(Some("n500"), "n500", cached.clone(), 1, 1).is_none());
+        assert!(cache_backfill_page(Some("n500"), "n400", cached, 1, 1).is_none());
     }
 
     #[test]
     fn cache_backfill_page_none_when_cached_count_below_limit() {
         let cached = vec![note("n1", 10), note("n2", 20)];
-        let result = cache_backfill_page(Some("n001"), "n999", cached, 20);
+        let result = cache_backfill_page(Some("n001"), "n999", cached, 2, 20);
         assert!(result.is_none());
     }
 
     #[test]
     fn cache_backfill_page_some_when_within_boundary_and_enough_notes() {
         let cached = vec![note("n2", 20), note("n1", 10)];
-        let result = cache_backfill_page(Some("n001"), "n999", cached.clone(), 2);
+        let result = cache_backfill_page(Some("n001"), "n999", cached.clone(), 2, 2);
         assert_eq!(
             result.unwrap().iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
             cached.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn cache_backfill_page_some_when_every_source_exhausted_even_below_limit() {
+        // 有効境界が ""(全ソース枯渇済み)で、読み出しが limit 未満で尽きた = カラム全体が完全
+        let cached = vec![note("n2", 20), note("n1", 10)];
+        let result = cache_backfill_page(Some(""), "n999", cached.clone(), 2, 20);
+        assert_eq!(result.unwrap().len(), cached.len());
+        // 0件でも、末尾に達したという完全な答えとして返す
+        assert_eq!(cache_backfill_page(Some(""), "n999", vec![], 0, 20), Some(vec![]));
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_exhausted_but_page_was_full_before_filtering() {
+        // 読み出しが limit 件に達していれば、ミュート等で間引かれて短くなっただけで続きがありうる
+        let cached = vec![note("n2", 20), note("n1", 10)];
+        assert!(cache_backfill_page(Some(""), "n999", cached, 20, 20).is_none());
+    }
+
+    #[test]
+    fn cache_backfill_page_none_when_not_exhausted_even_if_read_ran_dry() {
+        // 通常の境界では、読み出しが尽きても境界より古い側の完全性は言えないのでAPIへ
+        let cached = vec![note("n2", 20), note("n1", 10)];
+        assert!(cache_backfill_page(Some("n001"), "n999", cached, 2, 20).is_none());
+    }
+
+    #[test]
+    fn backfill_fallback_outcome_classifies_unset_boundary_and_other() {
+        assert_eq!(backfill_fallback_outcome(false, None), BackfillOutcome::FallbackBoundaryUnset);
+        assert_eq!(backfill_fallback_outcome(false, Some("n100")), BackfillOutcome::FallbackOther);
+        assert_eq!(backfill_fallback_outcome(false, Some("")), BackfillOutcome::FallbackOther);
+    }
+
+    #[test]
+    fn backfill_fallback_outcome_counts_boundary_read_failure_as_other_not_unset() {
+        // 読み出し失敗で境界が空に見えても「未確定」ではない(DBエラーをメトリクスで区別する)
+        assert_eq!(backfill_fallback_outcome(true, None), BackfillOutcome::FallbackOther);
+    }
+
+    #[test]
+    fn read_boundaries_flags_error_and_falls_back_to_empty_map() {
+        let (map, failed) = read_boundaries(Ok(vec![(0, "n1".to_string()), (1, String::new())]));
+        assert!(!failed);
+        assert_eq!(map, bmap(&[(0, "n1"), (1, "")]));
+
+        let (map, failed) = read_boundaries(Err(Error::Invalid("db down".into())));
+        assert!(failed);
+        assert!(map.is_empty());
     }
 
     fn fetched(id: &str) -> SourceOutcome {

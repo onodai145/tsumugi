@@ -48,6 +48,9 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
     async fn update_note(&self, note: &Note) -> Result<()>;
     async fn clear_column_notes(&self, column_id: &str) -> Result<()>;
     async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>>;
+    /// `entries` に同じ `source_idx` を重複して渡すと主キー違反で `Err` になる。
+    /// トランザクション内で DELETE+INSERT するため、失敗時は全体がロールバックされ既存の境界は残る。
+    /// 重複を作らないのは呼び出し側の責務。
     async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()>;
     async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()>;
     async fn clear_all_fetch_boundaries(&self) -> Result<()>;
@@ -142,6 +145,8 @@ impl NoteCacheStore {
 
     /// カラムの境界を entries で置き換える(初回REST取得時に使う)。既存行は全削除してから挿入する。
     /// entries に含まれないソースは未確定になる。
+    /// entries に同じ source_idx を重複して渡すと主キー違反で `Err` になる。トランザクションは
+    /// ロールバックされ既存の境界は残る(重複を作らないのは呼び出し側の責務)。
     pub async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
         self.backend().replace_fetch_boundaries(column_id, entries).await
     }
