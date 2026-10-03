@@ -12,6 +12,7 @@ use crate::domain::{
     Notification, PaneNode, SearchCapabilities, SourceItem, SplitDirection, User, UserList,
 };
 use crate::error::{Error, Result};
+use crate::fence::{ColumnFence, Epoch};
 use crate::filter::{ast, eval::EvalContext, parser, sql, CompiledFilter};
 use crate::state::{AppState, BackfillOutcome};
 use crate::store::NoteCacheStore;
@@ -1386,6 +1387,69 @@ where
 /// `open_stream_and_fetch` の両方がこれを経由することで、書き込み対象を1か所に固定する。
 async fn cache_fetched(cache: &NoteCacheStore, column_id: &str, fetch: &FilteredFetch) -> Result<()> {
     cache.cache_notes(column_id, &fetch.cacheable).await
+}
+
+/// `fetch_backfill` の書き込み: 取得ノートのキャッシュと、ソースごとの境界の延長(`extend`)。
+/// `epoch` が古ければ(取得中に `update_column` / `close_column` が走った)何も書かず `None` を返す
+/// (Issue #446)。境界の延長の失敗は握りつぶす(更新できなくても従来の挙動に戻るだけ)。
+async fn commit_backfill_writes(
+    fence: &ColumnFence,
+    cache: &NoteCacheStore,
+    column_id: &str,
+    epoch: &Epoch,
+    fetch: &FilteredFetch,
+    extend: &[(u32, String)],
+) -> Option<Result<()>> {
+    fence
+        .write_if_current(column_id, epoch, || async {
+            cache_fetched(cache, column_id, fetch).await?;
+            if !extend.is_empty() {
+                let _ = cache.extend_fetch_boundaries(column_id, extend).await;
+            }
+            Ok::<(), Error>(())
+        })
+        .await
+}
+
+/// `open_stream_and_fetch` の書き込み: 初回取得ノートのキャッシュと、`boundaries`(Some の時)での
+/// 境界の置き換え。`epoch` が古ければ何も書かず `None` を返す(Issue #446)。
+async fn commit_initial_writes(
+    fence: &ColumnFence,
+    cache: &NoteCacheStore,
+    column_id: &str,
+    epoch: &Epoch,
+    fetch: &FilteredFetch,
+    boundaries: Option<&[(u32, String)]>,
+) -> Option<Result<()>> {
+    fence
+        .write_if_current(column_id, epoch, || async {
+            cache_fetched(cache, column_id, fetch).await?;
+            if let Some(entries) = boundaries {
+                let _ = cache.replace_fetch_boundaries(column_id, entries).await;
+            }
+            Ok::<(), Error>(())
+        })
+        .await
+}
+
+/// ギャップ埋めの書き込み: 境界の引き上げと、収集したノートのキャッシュ。`epoch` が古ければ
+/// 何も書かず `false` を返す。呼び出し元は `false` なら `ColumnGapFill` イベントも出さない(Issue #446)。
+async fn commit_gap_fill_writes(
+    fence: &ColumnFence,
+    cache: &NoteCacheStore,
+    column_id: &str,
+    epoch: &Epoch,
+    gap: &GapFillResult,
+) -> bool {
+    fence
+        .write_if_current(column_id, epoch, || async {
+            apply_gap_fill_boundaries(cache, column_id, gap).await;
+            if !gap.notes.is_empty() {
+                let _ = cache.cache_notes(column_id, &gap.notes).await;
+            }
+        })
+        .await
+        .is_some()
 }
 
 /// 1ページ分の生レスポンスから `SourceOutcome` を決める。
@@ -3014,5 +3078,154 @@ mod tests {
         )
         .await;
         assert!(matches!(got, Err(Error::Network(_))));
+    }
+
+    fn mem_cache() -> NoteCacheStore {
+        NoteCacheStore::new(crate::store::SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        ))
+    }
+
+    fn fetch_of(ids: &[&str]) -> FilteredFetch {
+        FilteredFetch {
+            notes: vec![],
+            cacheable: ids.iter().enumerate().map(|(i, id)| note(id, i as i64 + 1)).collect(),
+            source_outcomes: vec![],
+        }
+    }
+
+    fn pair(idx: u32, id: &str) -> (u32, String) {
+        (idx, id.to_string())
+    }
+
+    /// `update_column` が行うこと(新しい定義の保存の代わりに新フィルタ側の境界を置く + clear)を模す。
+    async fn simulate_update_column(fence: &ColumnFence, cache: &NoteCacheStore, column_id: &str) -> Epoch {
+        fence
+            .invalidate(column_id, || async {
+                cache.clear_column_notes(column_id).await.unwrap();
+                cache.replace_fetch_boundaries(column_id, &[pair(0, "n900")]).await.unwrap();
+            })
+            .await
+            .0
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_caches_notes_and_extends_boundaries_when_current() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        let epoch = fence.begin("c1");
+
+        let written =
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+
+        assert!(matches!(written, Some(Ok(()))));
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n300")]);
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_writes_nothing_after_update_column() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1"); // 旧定義で取得を始めた
+        simulate_update_column(&fence, &cache, "c1").await;
+
+        let written =
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+
+        assert!(written.is_none());
+        assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
+        // 旧フィルタの延長(n300)で、新フィルタの境界(n900)が古い方へ動かない
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_leaves_no_orphans_after_close() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+        fence.invalidate("c1", || async { cache.clear_column_notes("c1").await.unwrap() }).await;
+        fence.remove("c1"); // close_column
+
+        let written =
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+
+        assert!(written.is_none());
+        assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
+        assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commit_initial_writes_replaces_boundaries_when_current() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+
+        let written =
+            commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), Some(&[pair(0, "n100")])).await;
+
+        assert!(matches!(written, Some(Ok(()))));
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n100")]);
+    }
+
+    #[tokio::test]
+    async fn commit_initial_writes_keeps_boundaries_untouched_when_none_given() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n700")]).await.unwrap();
+        let epoch = fence.begin("c1");
+
+        commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None).await;
+
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n700")]);
+    }
+
+    #[tokio::test]
+    async fn commit_initial_writes_does_not_overwrite_a_newer_update_column() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let slow = fence.begin("c1"); // 1回目の update_column の取得(遅い)
+        simulate_update_column(&fence, &cache, "c1").await; // 2回目が先に終わった
+
+        let written =
+            commit_initial_writes(&fence, &cache, "c1", &slow, &fetch_of(&["n400"]), Some(&[pair(0, "n100")])).await;
+
+        assert!(written.is_none());
+        assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+    }
+
+    fn gap_with(notes: Vec<Note>) -> GapFillResult {
+        GapFillResult {
+            notes,
+            truncated: true,
+            boundary_id: None,
+            // 全ソースが追いついたが、limit で n450 以下を切り捨てた = 境界が n450 へ引き上がる
+            sources: vec![GapSourceState { oldest_fetched: None, reached_target: true }],
+            all_reached: true,
+            dropped_floor: Some("n450".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn commit_gap_fill_writes_caches_notes_and_raises_boundaries_when_current() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
+        let epoch = fence.begin("c1");
+
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+
+        assert!(written);
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n450")]);
+    }
+
+    #[tokio::test]
+    async fn commit_gap_fill_writes_writes_nothing_when_stale() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+        simulate_update_column(&fence, &cache, "c1").await;
+
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+
+        assert!(!written);
+        assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
     }
 }
