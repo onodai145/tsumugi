@@ -9,8 +9,40 @@ use crate::domain::{
 use crate::error::Result;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+/// サーバー側ミュートの前回の同期時点の集合(Issue #454)。ミュートの**解除**を検出して、
+/// キャッシュ優先の backfill の境界を捨てるために、アカウントごとに保存する。
+/// TS には出力しない(`Account` に足すとバインディングが変わるため、`SettingsData` の別マップに置く)。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ServerMuteSnapshot {
+    /// ミュート/ブロックしているユーザーID(ソート済み・重複なし)。
+    pub users: Vec<String>,
+    /// ワードミュートのルールの文字列表現(`WordMuteRule::key()`。ソート済み・重複なし)。
+    pub words: Vec<String>,
+}
+
+impl ServerMuteSnapshot {
+    pub fn new<U, W>(users: U, words: W) -> Self
+    where
+        U: IntoIterator<Item = String>,
+        W: IntoIterator<Item = String>,
+    {
+        Self {
+            users: users.into_iter().collect::<BTreeSet<_>>().into_iter().collect(),
+            words: words.into_iter().collect::<BTreeSet<_>>().into_iter().collect(),
+        }
+    }
+
+    /// `previous` にあって、`self` に無い要素(=ミュートの解除)があるか。追加だけなら偽。
+    /// 編集された1つのルールは「古いキーが消えた」ので、真になる(安全側)。
+    pub fn removed_any_since(&self, previous: &ServerMuteSnapshot) -> bool {
+        previous.users.iter().any(|u| !self.users.contains(u))
+            || previous.words.iter().any(|w| !self.words.contains(w))
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct SettingsData {
@@ -30,6 +62,9 @@ struct SettingsData {
     pane_layout: Option<PaneNode>,
     #[serde(default)]
     cache_backend: CacheBackendConfig,
+    /// アカウントID -> サーバー側ミュートの前回の同期時点の集合(Issue #454)。
+    #[serde(default)]
+    server_mute_snapshots: HashMap<String, ServerMuteSnapshot>,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -224,6 +259,18 @@ impl SettingsStore {
     pub fn save_mute(&self, cfg: &MuteConfig) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
         guard.mute = cfg.clone();
+        self.save(&guard)
+    }
+
+    // ---- サーバー側ミュートの前回の集合(Issue #454) ----
+
+    pub fn load_server_mute_snapshot(&self, account_id: &str) -> Result<Option<ServerMuteSnapshot>> {
+        Ok(self.data.lock().unwrap().server_mute_snapshots.get(account_id).cloned())
+    }
+
+    pub fn save_server_mute_snapshot(&self, account_id: &str, snapshot: &ServerMuteSnapshot) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        guard.server_mute_snapshots.insert(account_id.to_string(), snapshot.clone());
         self.save(&guard)
     }
 
@@ -590,6 +637,7 @@ pub fn migrate_from_legacy_sqlite(
             ui,
             pane_layout: None,
             cache_backend: CacheBackendConfig::default(),
+            server_mute_snapshots: HashMap::new(),
         }),
     };
     store.save(&store.data.lock().unwrap())?;
@@ -1105,5 +1153,50 @@ mod tests {
 
         std::fs::remove_file(&legacy_path).ok();
         std::fs::remove_file(&json_path).ok();
+    }
+
+    fn snap(users: &[&str], words: &[&str]) -> ServerMuteSnapshot {
+        ServerMuteSnapshot::new(
+            users.iter().map(|s| s.to_string()),
+            words.iter().map(|s| s.to_string()),
+        )
+    }
+
+    #[test]
+    fn server_mute_snapshot_is_sorted_and_deduplicated() {
+        let s = snap(&["u2", "u1", "u2"], &["w:b", "w:a"]);
+
+        assert_eq!(s.users, vec!["u1".to_string(), "u2".to_string()]);
+        assert_eq!(s.words, vec!["w:a".to_string(), "w:b".to_string()]);
+    }
+
+    #[test]
+    fn removed_any_since_detects_only_removals() {
+        let prev = snap(&["u1", "u2"], &["w:a"]);
+
+        assert!(!snap(&["u1", "u2"], &["w:a"]).removed_any_since(&prev), "変化なし");
+        assert!(!snap(&["u1", "u2", "u3"], &["w:a", "w:b"]).removed_any_since(&prev), "増えただけ");
+        assert!(snap(&["u1"], &["w:a"]).removed_any_since(&prev), "ユーザーが減った");
+        assert!(snap(&["u1", "u2"], &[]).removed_any_since(&prev), "ワードが減った");
+        assert!(snap(&["u1", "u3"], &["w:a"]).removed_any_since(&prev), "入れ替わりは、古い方が消えた = 解除");
+    }
+
+    #[test]
+    fn server_mute_snapshot_roundtrip_per_account() {
+        let s = store();
+        assert_eq!(s.load_server_mute_snapshot("a1").unwrap(), None);
+
+        s.save_server_mute_snapshot("a1", &snap(&["u1"], &["w:a"])).unwrap();
+        s.save_server_mute_snapshot("a2", &snap(&["u9"], &[])).unwrap();
+
+        assert_eq!(s.load_server_mute_snapshot("a1").unwrap(), Some(snap(&["u1"], &["w:a"])));
+        assert_eq!(s.load_server_mute_snapshot("a2").unwrap(), Some(snap(&["u9"], &[])));
+    }
+
+    #[test]
+    fn settings_json_without_server_mute_snapshots_still_loads() {
+        let data: SettingsData = serde_json::from_str(r#"{"accounts":[]}"#).unwrap();
+
+        assert!(data.server_mute_snapshots.is_empty());
     }
 }

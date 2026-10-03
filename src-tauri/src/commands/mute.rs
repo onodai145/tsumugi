@@ -4,6 +4,7 @@ use crate::api::mutes::{fetch_muted_and_blocked, fetch_muted_words};
 use crate::domain::{BackgroundKind, MuteConfig, NotifyConfig, UiPrefs};
 use crate::error::{Error, Result};
 use crate::state::AppState;
+use crate::store::settings::ServerMuteSnapshot;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use specta::Type;
@@ -371,16 +372,77 @@ async fn sync_server_mutes_core(
         blocked_users: ids.len() as u32,
         word_rules: word_rules.len() as u32,
     };
+    let snapshot = ServerMuteSnapshot::new(ids.iter().cloned(), word_rules.iter().map(|r| r.key()));
+    // メモリ上の集合の差し替えは、境界を捨てる前に行う。書き込み側は、ミュート設定を読む前に世代を
+    // 控えるので、境界の世代が進んだ時点で、新しい集合がすでに反映されている(Issue #454, #452)。
     state.set_server_mutes(account_id, ids);
     state.set_server_word_mutes(account_id, word_rules);
+    reflect_server_mute_change(state, account_id, snapshot).await;
     Ok(result)
+}
+
+/// サーバー側ミュートの**解除**を検出して、そのアカウントのカラムの backfill 境界を捨てる(Issue #454)。
+///
+/// キャッシュには、取得時のフィルタを通ったノートだけが入る。ミュートを解除しても、除外済みのノートは
+/// キャッシュに無く読み直せないので、境界を捨てて、次回の backfill を API 経由に倒す(ローカル NG の
+/// `set_mute` と同じ理由、Issue #228)。ミュートの追加は、提供時に再適用されるので、捨てない。
+///
+/// - 前回の保存値が無い(アップグレード直後、新しいアカウント)場合は、捨てずに保存だけする。
+/// - 境界の破棄が失敗したら、保存値を更新しない(次回の同期で、もう一度解除を検出して再試行する)。
+/// - 保存値の書き込みの失敗は、同期を失敗にしない(次回、もう一度検出するだけで、捨てるのは安全側)。
+async fn reflect_server_mute_change(state: &AppState, account_id: &str, snapshot: ServerMuteSnapshot) {
+    let previous = match state.settings.load_server_mute_snapshot(account_id) {
+        Ok(previous) => previous,
+        Err(e) => {
+            log::warn!("failed to load the server mute snapshot for {account_id}: {e}");
+            return;
+        }
+    };
+    if let Some(previous) = &previous {
+        if snapshot.removed_any_since(previous) {
+            if let Err(e) = clear_account_boundaries(state, account_id).await {
+                log::warn!("failed to clear backfill boundaries after a server mute was removed ({account_id}): {e}");
+                return;
+            }
+        }
+    }
+    if previous.as_ref() != Some(&snapshot) {
+        if let Err(e) = state.settings.save_server_mute_snapshot(account_id, &snapshot) {
+            log::warn!("failed to save the server mute snapshot for {account_id}: {e}");
+        }
+    }
+}
+
+/// そのアカウントの全カラムの境界を捨てる。境界の書きロックの中で行うので、実行中の取得が、
+/// 旧い集合の結果に基づく境界を、直後に書き込んで復活させない(`ColumnFence::invalidate_boundaries`)。
+/// 1件でも失敗したら、残りのカラムも実行した上で、最初のエラーを返す。
+async fn clear_account_boundaries(state: &AppState, account_id: &str) -> Result<()> {
+    let column_ids: Vec<String> = state
+        .settings
+        .load_columns()?
+        .into_iter()
+        .filter(|c| c.account_id == account_id)
+        .map(|c| c.id)
+        .collect();
+    state
+        .column_fence
+        .invalidate_boundaries(|| async {
+            let mut first_error = None;
+            for column_id in &column_ids {
+                if let Err(e) = state.cache.replace_fetch_boundaries(column_id, &[]).await {
+                    first_error.get_or_insert(e);
+                }
+            }
+            first_error.map_or(Ok(()), Err)
+        })
+        .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::api::MisskeyClient;
-    use crate::domain::{Note, User, Visibility};
+    use crate::domain::{Column, ColumnKind, FilterQuery, Note, User, Visibility};
     use crate::store::SettingsStore;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -501,6 +563,192 @@ mod tests {
         // 新しい設定が `state.mute` に反映される。差し替えが境界を捨てる前に行われる順序(書き込み側の
         // 不変条件)は、このテストでは検証できない。`apply_mute_config` のコードの順序で守る
         assert_eq!(*state.mute.lock().unwrap(), config);
+    }
+
+    /// `mute/list` / `blocking/list` / `i` を、指定のユーザーIDとワード群で返すモックに組み直す。
+    async fn mount_server_mutes(mock: &MockServer, muted_users: &[&str], words: serde_json::Value) {
+        mock.reset().await;
+        let rows: Vec<serde_json::Value> = muted_users
+            .iter()
+            .enumerate()
+            .map(|(i, u)| serde_json::json!({ "id": format!("r{i}"), "muteeId": u }))
+            .collect();
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(rows))
+            .mount(mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/i"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": words })))
+            .mount(mock)
+            .await;
+    }
+
+    /// acc1 のカラム c1・c2 と、acc2 のカラム c3 に、それぞれ境界(n500)がある状態の `AppState`。
+    async fn state_with_three_columns_and_boundaries() -> AppState {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        for (column_id, account_id) in [("c1", "acc1"), ("c2", "acc1"), ("c3", "acc2")] {
+            state
+                .settings
+                .upsert_column(&Column {
+                    id: column_id.into(),
+                    account_id: account_id.into(),
+                    kind: ColumnKind::Home,
+                    order: 0,
+                    filter: FilterQuery::Keywords(vec![]),
+                    notify_sound: false,
+                    notify_desktop: false,
+                    notify_sound_choice: String::new(),
+                    group_id: "g1".into(),
+                    title: None,
+                })
+                .unwrap();
+            state.cache.replace_fetch_boundaries(column_id, &[(0, "n500".to_string())]).await.unwrap();
+        }
+        state
+    }
+
+    async fn boundaries_of(state: &AppState, column_id: &str) -> Vec<(u32, String)> {
+        state.cache.get_fetch_boundaries(column_id).await.unwrap()
+    }
+
+    fn snap(users: &[&str], words: &[&str]) -> crate::store::settings::ServerMuteSnapshot {
+        crate::store::settings::ServerMuteSnapshot::new(
+            users.iter().map(|s| s.to_string()),
+            words.iter().map(|s| s.to_string()),
+        )
+    }
+
+    /// 捨てられていない境界(`state_with_three_columns_and_boundaries` が置いたもの)。
+    fn kept() -> Vec<(u32, String)> {
+        vec![(0, "n500".to_string())]
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_boundaries_and_saves_a_snapshot_on_the_first_sync() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        // 保存値が無い(アップグレード直後)ので、捨てずに保存だけする
+        for column_id in ["c1", "c2", "c3"] {
+            assert_eq!(boundaries_of(&state, column_id).await, kept());
+        }
+        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_boundaries_when_server_mutes_were_only_added() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!(["spoiler"])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!(["spoiler", "alpha"])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        for column_id in ["c1", "c2", "c3"] {
+            assert_eq!(boundaries_of(&state, column_id).await, kept(), "追加だけでは捨てない");
+        }
+        let saved = state.settings.load_server_mute_snapshot("acc1").unwrap().unwrap();
+        assert_eq!(saved.users, vec!["u1".to_string(), "u2".to_string()], "保存値は更新される");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_clears_only_the_syncing_accounts_boundaries_when_a_muted_user_was_removed() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await; // u2 のミュートを解除
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert!(boundaries_of(&state, "c1").await.is_empty());
+        assert!(boundaries_of(&state, "c2").await.is_empty());
+        assert_eq!(boundaries_of(&state, "c3").await, kept(), "他のアカウントのカラムは、そのまま");
+        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_clears_the_accounts_boundaries_when_a_muted_word_was_removed() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &[], serde_json::json!(["spoiler", "alpha"])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mount_server_mutes(&mock, &[], serde_json::json!(["spoiler"])).await; // "alpha" を解除
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert!(boundaries_of(&state, "c1").await.is_empty());
+        assert!(boundaries_of(&state, "c2").await.is_empty());
+        assert_eq!(boundaries_of(&state, "c3").await, kept());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_changes_nothing_when_the_fetch_fails() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mock.reset().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock)
+            .await;
+        let result = sync_server_mutes_core(&state, "acc1", &client).await;
+
+        assert!(result.is_err());
+        for column_id in ["c1", "c2", "c3"] {
+            assert_eq!(boundaries_of(&state, column_id).await, kept());
+        }
+        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1", "u2"], &[])));
+        assert!(state.is_server_muted("acc1", "u2"), "メモリ上のミュート集合も、そのまま");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_makes_earlier_boundary_epochs_stale_when_it_clears_boundaries() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        let epoch = state.column_fence.begin("c1"); // 旧い集合で取得を始めた(再認証のときのように)
+
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        let boundaries_ok = state.column_fence.write_if_current("c1", &epoch, |ok| async move { ok }).await;
+        assert_eq!(boundaries_ok, Some(false), "旧い集合で控えた境界の世代は、古くなる");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_saves_the_snapshot_even_when_the_account_has_no_columns() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
     }
 }
 
