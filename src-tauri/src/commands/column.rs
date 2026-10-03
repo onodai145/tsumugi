@@ -455,16 +455,10 @@ pub async fn fetch_backfill(
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
 
     let cache_eligible = backfill_cache_eligible(&resolved);
-    let boundaries: std::collections::HashMap<u32, String> = if cache_eligible {
-        state
-            .cache
-            .get_fetch_boundaries(&column.id)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect()
+    let (boundaries, boundary_read_failed) = if cache_eligible {
+        read_boundaries(state.cache.get_fetch_boundaries(&column.id).await)
     } else {
-        std::collections::HashMap::new()
+        (std::collections::HashMap::new(), false)
     };
     if should_try_backfill_cache(cache_eligible, bypass_cache) {
         let effective = effective_boundary(&boundaries, resolved.kinds.len());
@@ -496,11 +490,9 @@ pub async fn fetch_backfill(
             state.cache_metrics.record_backfill(BackfillOutcome::Hit);
             return Ok(notes);
         }
-        state.cache_metrics.record_backfill(if effective.is_none() {
-            BackfillOutcome::FallbackBoundaryUnset
-        } else {
-            BackfillOutcome::FallbackOther
-        });
+        state
+            .cache_metrics
+            .record_backfill(backfill_fallback_outcome(boundary_read_failed, effective.as_deref()));
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
@@ -907,6 +899,30 @@ fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool,
         sources: vec![],
         all_reached: all_sources_reached_target,
         dropped_floor,
+    }
+}
+
+/// 境界の読み出し結果をマップにする。失敗時は空マップ(=全ソース未確定扱いでAPIへ落ちる。
+/// 延長もされないので安全)にし、失敗したことを第2要素で返す。
+fn read_boundaries(
+    result: Result<Vec<(u32, String)>>,
+) -> (std::collections::HashMap<u32, String>, bool) {
+    match result {
+        Ok(rows) => (rows.into_iter().collect(), false),
+        Err(e) => {
+            log::warn!("failed to read backfill fetch boundaries: {e}");
+            (std::collections::HashMap::new(), true)
+        }
+    }
+}
+
+/// キャッシュで賄えず API へ落ちたときの理由。境界の読み出し失敗は「未確定」と区別して
+/// `FallbackOther` に数える(DBエラーで `FallbackBoundaryUnset` が膨らむのを防ぐ)。
+fn backfill_fallback_outcome(boundary_read_failed: bool, effective: Option<&str>) -> BackfillOutcome {
+    if effective.is_none() && !boundary_read_failed {
+        BackfillOutcome::FallbackBoundaryUnset
+    } else {
+        BackfillOutcome::FallbackOther
     }
 }
 
@@ -2225,6 +2241,30 @@ mod tests {
         // 通常の境界では、読み出しが尽きても境界より古い側の完全性は言えないのでAPIへ
         let cached = vec![note("n2", 20), note("n1", 10)];
         assert!(cache_backfill_page(Some("n001"), "n999", cached, 2, 20).is_none());
+    }
+
+    #[test]
+    fn backfill_fallback_outcome_classifies_unset_boundary_and_other() {
+        assert_eq!(backfill_fallback_outcome(false, None), BackfillOutcome::FallbackBoundaryUnset);
+        assert_eq!(backfill_fallback_outcome(false, Some("n100")), BackfillOutcome::FallbackOther);
+        assert_eq!(backfill_fallback_outcome(false, Some("")), BackfillOutcome::FallbackOther);
+    }
+
+    #[test]
+    fn backfill_fallback_outcome_counts_boundary_read_failure_as_other_not_unset() {
+        // 読み出し失敗で境界が空に見えても「未確定」ではない(DBエラーをメトリクスで区別する)
+        assert_eq!(backfill_fallback_outcome(true, None), BackfillOutcome::FallbackOther);
+    }
+
+    #[test]
+    fn read_boundaries_flags_error_and_falls_back_to_empty_map() {
+        let (map, failed) = read_boundaries(Ok(vec![(0, "n1".to_string()), (1, String::new())]));
+        assert!(!failed);
+        assert_eq!(map, bmap(&[(0, "n1"), (1, "")]));
+
+        let (map, failed) = read_boundaries(Err(Error::Invalid("db down".into())));
+        assert!(failed);
+        assert!(map.is_empty());
     }
 
     fn fetched(id: &str) -> SourceOutcome {
