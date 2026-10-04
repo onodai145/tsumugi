@@ -361,11 +361,18 @@ pub async fn sync_server_mutes(
 /// 受け取り、`client` も呼び出し側から渡すことで `tauri::State`(テストから構築不可)と
 /// `client_for`(登録済みアカウント+keyringが必要)の両方を経由せずに単体テスト可能にしている
 /// (`commands/column.rs::search_cache_core` と同じ狙い)。
+///
+/// 同じアカウントの同期は、取得より前に取る排他ロックで直列にする(Issue #456)。保存値の
+/// 「読み出し → 比較 → 書き込み」と、メモリ上の集合の差し替えが、並行した同期と交錯しない。
+/// ロックの順序は「同期ロック → 境界の書きロック(`clear_account_boundaries` の
+/// `invalidate_boundaries`)」で、逆順の経路は無い。
 async fn sync_server_mutes_core(
     state: &AppState,
     account_id: &str,
     client: &crate::api::MisskeyClient,
 ) -> Result<SyncMuteResult> {
+    let sync_lock = state.server_mute_sync_lock(account_id);
+    let _serialized = sync_lock.lock().await;
     let ids = fetch_muted_and_blocked(client).await?;
     let words = fetch_muted_words(client).await?;
     let result = SyncMuteResult {
@@ -786,6 +793,48 @@ mod tests {
             Some(snap(&[], &["r:/(unclosed/i"])),
             "保存値は変わらない(重複も除かれる)"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_waits_for_the_same_accounts_sync_lock_before_fetching() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let lock = state.server_mute_sync_lock("acc1");
+        let guard = lock.lock().await; // 別の同期が、同じアカウントで実行中
+
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            sync_server_mutes_core(&state, "acc1", &client),
+        )
+        .await;
+
+        assert!(blocked.is_err(), "ロックを持たれている間は完了しない");
+        assert!(mock.received_requests().await.unwrap().is_empty(), "取得より前にロックを待つ");
+        drop(guard);
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        assert!(!mock.received_requests().await.unwrap().is_empty(), "ロックを放すと取得が走る");
+        assert!(state.is_server_muted("acc1", "u1"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_of_another_account_is_not_blocked_by_a_held_sync_lock() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let lock = state.server_mute_sync_lock("acc1");
+        let _guard = lock.lock().await;
+
+        let done = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            sync_server_mutes_core(&state, "acc2", &client),
+        )
+        .await;
+
+        assert!(done.expect("別アカウントの同期は待たされない").is_ok());
+        assert!(state.is_server_muted("acc2", "u1"));
     }
 }
 
