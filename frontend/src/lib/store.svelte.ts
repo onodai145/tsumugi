@@ -1245,6 +1245,8 @@ class AppStore {
       tab.notes = opened.notes;
       tab.notifications = opened.notifications;
       tab.selectedNoteId = null;
+      // 旧定義のギャップは新しい一覧と無関係。新定義で出たギャップは stream イベントが立て直す(Issue #456)。
+      tab.gapMarker = null;
       tab.state = "connecting";
     }
     this.#captureInitial(tabId, opened.notes);
@@ -1815,7 +1817,10 @@ class AppStore {
       if (tab.kind.type === "notifications") {
         if (tab.notifications.length === 0) return;
         const oldest = tab.notifications[tab.notifications.length - 1].id;
+        const epoch = tab.epoch;
         const older = await unwrap(commands.fetchNotificationsBackfill(tab.id, oldest));
+        // 取得中に updateColumn で内容が差し替わっていたら、旧定義の結果は捨てる(Issue #456)。
+        if (tab.epoch !== epoch) return;
         const known = new Set(tab.notifications.map((n) => n.id));
         // MAX_NOTES で切り捨てない(Issue #239)。
         // slice(0, MAX_NOTES)(先頭=新しい方を残す)だと今取得した古い方がその場で
