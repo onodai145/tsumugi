@@ -62,7 +62,7 @@
 
   let scrollEl: HTMLDivElement | undefined;
   type CropperImageEl = HTMLElement & {
-    $rotate: (a: number) => void;
+    $rotate: (a: number | string) => void;
     $scale: (x: number, y?: number) => void;
     $zoom: (s: number, x?: number, y?: number) => void;
     $resetTransform: () => void;
@@ -321,7 +321,8 @@
       return;
     }
     el.$resetTransform();
-    el.$rotate(imageTransform.rotation);
+    // $rotate()は数値をラジアンとして扱うため、度の文字列で渡す(Issue #460)。
+    el.$rotate(`${imageTransform.rotation}deg`);
     el.$scale(imageTransform.flipH ? -1 : 1, imageTransform.flipV ? -1 : 1);
     if (isDefaultTransform) {
       dirtiedCropperItemIds.delete(current.id);
