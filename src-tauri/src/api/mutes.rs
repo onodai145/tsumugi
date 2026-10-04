@@ -55,21 +55,50 @@ async fn collect(
     Ok(())
 }
 
-/// `/i` から `mutedWords`(ソフトワードミュート)を取得し、ルール一覧にパースする(Issue #11)。
+/// `mutedWords` の1要素。`rule` は適用するルール(不正な正規表現では `None`)、`key` はサーバー側の
+/// 要素を表す安定した文字列で、`ServerMuteSnapshot::words` の要素になる(Issue #456)。
+/// キーをパース後のルールではなく生の要素から作るので、`i` フラグだけの変更を区別でき、
+/// 不正で落とされた正規表現も、サーバーに残っている間はキーが残る。
+#[derive(Debug)]
+pub(crate) struct MutedWordEntry {
+    pub rule: Option<WordMuteRule>,
+    pub key: String,
+}
+
+/// サーバー側ワードミュートの取得結果。`rules` は適用するルール、`keys` はスナップショット用のキー。
+pub struct MutedWords {
+    pub rules: Vec<WordMuteRule>,
+    pub keys: Vec<String>,
+}
+
+/// `/i` から `mutedWords`(ソフトワードミュート)を取得し、ルール一覧とキー一覧にパースする(Issue #11)。
 /// `hardMutedWords`/`mutedInstances` は対象外(サーバー側で既に配信が絞られている前提。
 /// 設計doc `docs/superpowers/specs/2026-09-03-server-word-mute-design.md` 参照)。
-pub async fn fetch_muted_words(client: &MisskeyClient) -> Result<Vec<WordMuteRule>> {
+pub async fn fetch_muted_words(client: &MisskeyClient) -> Result<MutedWords> {
     let raw: serde_json::Value = client.post("i", &json!({})).await?;
-    Ok(parse_muted_words(&raw))
+    let entries = parse_muted_word_entries(&raw);
+    let keys = entries.iter().map(|e| e.key.clone()).collect();
+    let rules = entries.into_iter().filter_map(|e| e.rule).collect();
+    Ok(MutedWords { rules, keys })
 }
 
 /// `/i` の生JSONから `mutedWords` フィールドだけを取り出し、ルール一覧にパースする純粋関数。
-/// Misskey の `mutedWords: (string | string[])[]` を変換する:
-/// - 配列要素([string]) → 複数語のANDグループ(空語は除去、全滅したグループは無視)
-/// - `/pattern/flags` 形式の文字列 → 正規表現ルール(`i` フラグのみ反映。コンパイル失敗は
-///   そのルールだけスキップして警告ログを出す)
-/// - それ以外の文字列 → 単語1個のANDグループ
+/// `parse_muted_word_entries` のルールだけを返す薄いラッパ。本番の経路は `fetch_muted_words` が
+/// エントリを直接使うので、テスト専用(ルールの変換だけを見るテストが使う)。
+#[cfg(test)]
 pub(crate) fn parse_muted_words(raw: &serde_json::Value) -> Vec<WordMuteRule> {
+    parse_muted_word_entries(raw).into_iter().filter_map(|e| e.rule).collect()
+}
+
+/// `/i` の生JSONから `mutedWords` を取り出し、要素ごとにルールとキーを作る純粋関数。
+/// Misskey の `mutedWords: (string | string[])[]` を変換する:
+/// - 配列要素([string]) → 複数語のANDグループ(空語は除去、全滅したグループは要素にしない)
+/// - `/pattern/flags` 形式の文字列 → 正規表現ルール(`i` フラグのみ反映。コンパイル失敗は
+///   `rule` を `None` にして警告ログを出す。キーは作る)
+/// - それ以外の文字列 → 単語1個のANDグループ(trim して空なら要素にしない)
+///
+/// 文字列でも配列でもない要素と、配列でない `mutedWords` は無視する。
+pub(crate) fn parse_muted_word_entries(raw: &serde_json::Value) -> Vec<MutedWordEntry> {
     let Some(arr) = raw.get("mutedWords").and_then(|v| v.as_array()) else {
         return Vec::new();
     };
@@ -83,11 +112,7 @@ pub(crate) fn parse_muted_words(raw: &serde_json::Value) -> Vec<WordMuteRule> {
                     .filter(|w| !w.is_empty())
                     .map(str::to_string)
                     .collect();
-                if words.is_empty() {
-                    None
-                } else {
-                    Some(WordMuteRule::Words(words))
-                }
+                words_entry(words)
             } else {
                 el.as_str().and_then(parse_word_element)
             }
@@ -95,14 +120,33 @@ pub(crate) fn parse_muted_words(raw: &serde_json::Value) -> Vec<WordMuteRule> {
         .collect()
 }
 
+/// ANDグループのキー。語を小文字にしてソートし、区切り文字(`\u{1f}`)で連結して `w:` を付ける。
+/// AND は順序に依らず、照合は大小無視のため、順序と大文字小文字に依らない。区切り文字で連結するので、
+/// `"ab"` と `"a","b"` は区別される。形式は #454 の `WordMuteRule::key()` と同じ(保存済みの値と比較できる)。
+fn words_key(words: &[String]) -> String {
+    let mut lowered: Vec<String> = words.iter().map(|w| w.to_lowercase()).collect();
+    lowered.sort();
+    format!("w:{}", lowered.join("\u{1f}"))
+}
+
+fn words_entry(words: Vec<String>) -> Option<MutedWordEntry> {
+    if words.is_empty() {
+        None
+    } else {
+        Some(MutedWordEntry { key: words_key(&words), rule: Some(WordMuteRule::Words(words)) })
+    }
+}
+
 /// 1つの文字列要素をパースする。`/pattern/flags` 構文なら正規表現、それ以外は単語1個のANDグループ。
-fn parse_word_element(s: &str) -> Option<WordMuteRule> {
+/// 正規表現のキーは、要素の文字列そのまま(`r:/pattern/flags`)。ルールが作れなくても、キーは作る。
+fn parse_word_element(s: &str) -> Option<MutedWordEntry> {
     if let Some((pattern, flags)) = try_parse_regex_syntax(s) {
+        let key = format!("r:{s}");
         if !is_valid_regex_flags(flags) {
             log::warn!("invalid muted word regex flags /{pattern}/{flags}: unrecognized flag character");
-            return None;
+            return Some(MutedWordEntry { rule: None, key });
         }
-        return match regex::RegexBuilder::new(pattern)
+        let rule = match regex::RegexBuilder::new(pattern)
             .case_insensitive(flags.contains('i'))
             .build()
         {
@@ -112,12 +156,13 @@ fn parse_word_element(s: &str) -> Option<WordMuteRule> {
                 None
             }
         };
+        return Some(MutedWordEntry { rule, key });
     }
     let s = s.trim();
     if s.is_empty() {
         None
     } else {
-        Some(WordMuteRule::Words(vec![s.to_string()]))
+        words_entry(vec![s.to_string()])
     }
 }
 
@@ -219,5 +264,96 @@ mod tests {
         assert_eq!(rules.len(), 1);
         let WordMuteRule::Regex(re) = &rules[0] else { panic!("expected Regex rule") };
         assert!(re.is_match("BIG SPOILER"));
+    }
+
+    fn keys_of(raw: serde_json::Value) -> Vec<String> {
+        parse_muted_word_entries(&raw).into_iter().map(|e| e.key).collect()
+    }
+
+    #[test]
+    fn word_key_format_is_unchanged_so_saved_snapshots_stay_comparable() {
+        assert_eq!(keys_of(json!({ "mutedWords": [["Foo", "bar"]] })), vec!["w:bar\u{1f}foo".to_string()]);
+    }
+
+    #[test]
+    fn word_key_ignores_word_order_and_case() {
+        let a = keys_of(json!({ "mutedWords": [["Foo", "bar"]] }));
+        let b = keys_of(json!({ "mutedWords": [["BAR", "foo"]] }));
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn word_key_distinguishes_different_groups() {
+        let one = keys_of(json!({ "mutedWords": [["foo"]] }));
+        let two = keys_of(json!({ "mutedWords": [["foo", "bar"]] }));
+
+        assert_ne!(one, two);
+    }
+
+    #[test]
+    fn word_key_does_not_confuse_one_joined_word_with_two_words() {
+        let joined = keys_of(json!({ "mutedWords": [["ab"]] }));
+        let split = keys_of(json!({ "mutedWords": [["a", "b"]] }));
+
+        assert_ne!(joined, split);
+    }
+
+    #[test]
+    fn plain_string_has_the_same_key_as_a_one_word_group() {
+        let plain = keys_of(json!({ "mutedWords": ["Foo"] }));
+        let group = keys_of(json!({ "mutedWords": [["foo"]] }));
+
+        assert_eq!(plain, group);
+    }
+
+    #[test]
+    fn regex_key_is_the_raw_element_and_stays_apart_from_words() {
+        let regex = keys_of(json!({ "mutedWords": ["/foo/i"] }));
+        let word = keys_of(json!({ "mutedWords": ["foo"] }));
+
+        assert_eq!(regex, vec!["r:/foo/i".to_string()]);
+        assert!(word[0].starts_with("w:"));
+    }
+
+    #[test]
+    fn regex_key_differs_when_only_the_i_flag_is_removed() {
+        let with_i = keys_of(json!({ "mutedWords": ["/x/i"] }));
+        let without = keys_of(json!({ "mutedWords": ["/x/"] }));
+
+        assert_ne!(with_i, without);
+    }
+
+    #[test]
+    fn invalid_regex_keeps_its_key_but_has_no_rule() {
+        let entries = parse_muted_word_entries(&json!({ "mutedWords": ["/(unclosed/i", "/r/anime"] }));
+
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.rule.is_none()));
+        assert_eq!(entries[0].key, "r:/(unclosed/i"); // コンパイル失敗
+        assert_eq!(entries[1].key, "r:/r/anime"); // 不正なフラグ文字
+    }
+
+    #[test]
+    fn elements_that_end_up_empty_produce_no_entry() {
+        let raw = json!({ "mutedWords": [["", "  "], "", "   ", []] });
+
+        assert!(parse_muted_word_entries(&raw).is_empty());
+    }
+
+    #[test]
+    fn a_lone_slash_and_an_empty_pattern_are_plain_words_not_regexes() {
+        let entries = parse_muted_word_entries(&json!({ "mutedWords": ["/", "//"] }));
+
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.key.starts_with("w:")));
+        assert!(entries.iter().all(|e| matches!(&e.rule, Some(WordMuteRule::Words(_)))));
+    }
+
+    #[test]
+    fn non_string_non_array_elements_and_a_non_array_field_are_ignored() {
+        assert!(parse_muted_word_entries(&json!({ "mutedWords": [1, null, { "a": 1 }, true] })).is_empty());
+        assert!(parse_muted_word_entries(&json!({ "mutedWords": "spoiler" })).is_empty());
+        assert!(parse_muted_word_entries(&json!({ "mutedWords": { "a": 1 } })).is_empty());
     }
 }

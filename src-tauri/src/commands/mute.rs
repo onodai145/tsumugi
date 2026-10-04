@@ -367,16 +367,16 @@ async fn sync_server_mutes_core(
     client: &crate::api::MisskeyClient,
 ) -> Result<SyncMuteResult> {
     let ids = fetch_muted_and_blocked(client).await?;
-    let word_rules = fetch_muted_words(client).await?;
+    let words = fetch_muted_words(client).await?;
     let result = SyncMuteResult {
         blocked_users: ids.len() as u32,
-        word_rules: word_rules.len() as u32,
+        word_rules: words.rules.len() as u32,
     };
-    let snapshot = ServerMuteSnapshot::new(ids.iter().cloned(), word_rules.iter().map(|r| r.key()));
+    let snapshot = ServerMuteSnapshot::new(ids.iter().cloned(), words.keys);
     // メモリ上の集合の差し替えは、境界を捨てる前に行う。書き込み側は、ミュート設定を読む前に世代を
     // 控えるので、境界の世代が進んだ時点で、新しい集合がすでに反映されている(Issue #454, #452)。
     state.set_server_mutes(account_id, ids);
-    state.set_server_word_mutes(account_id, word_rules);
+    state.set_server_word_mutes(account_id, words.rules);
     reflect_server_mute_change(state, account_id, snapshot).await;
     Ok(result)
 }
@@ -749,6 +749,43 @@ mod tests {
         sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
 
         assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_clears_the_accounts_boundaries_when_only_the_i_flag_of_a_regex_was_removed() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/i"])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/"])).await; // i を外した(一致が減る=解除)
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert!(boundaries_of(&state, "c1").await.is_empty());
+        assert!(boundaries_of(&state, "c2").await.is_empty());
+        assert_eq!(boundaries_of(&state, "c3").await, kept(), "他のアカウントのカラムは、そのまま");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_boundaries_when_an_invalid_regex_stays_on_the_server() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        // 以前のビルドでは妥当だったルールが、いまは不正で落ちる状況。保存値には、そのキーが残っている
+        state.settings.save_server_mute_snapshot("acc1", &snap(&[], &["r:/(unclosed/i"])).unwrap();
+        mount_server_mutes(&mock, &[], serde_json::json!(["/(unclosed/i", "/(unclosed/i"])).await; // 重複もある
+
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        for column_id in ["c1", "c2", "c3"] {
+            assert_eq!(boundaries_of(&state, column_id).await, kept(), "不正でも、サーバーに残っていれば解除ではない");
+        }
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&[], &["r:/(unclosed/i"])),
+            "保存値は変わらない(重複も除かれる)"
+        );
     }
 }
 
