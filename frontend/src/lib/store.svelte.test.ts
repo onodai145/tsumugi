@@ -1271,21 +1271,72 @@ describe("updateColumn をまたぐ backfill の結果は捨てる(Issue #446)",
     expect(live.notes.map((n) => n.id)).toEqual(["n0002", "n0001"]);
   });
 
-  it("fillRemainingGap: updateColumn をまたいだ結果は混ぜず、ギャップマーカーも消さない", async () => {
+  it("loadMore(通知): updateColumn で通知から別種別に変わった後に返った結果は tab.notifications に足さない(Issue #456)", async () => {
+    const tab: TabView = { ...makeNotificationOnlyTab(makeNote({ id: "n0001" })), id: "tab1" };
+    app.groups = [makeGroup([tab])];
+    let resolveNotifications!: (list: Notification[]) => void;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "fetch_notifications_backfill") {
+        return new Promise<Notification[]>((resolve) => (resolveNotifications = resolve));
+      }
+      if (cmd === "update_column") return opened(tab.id);
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    const pending = app.loadMore(tab.id);
+    await app.updateColumn(tab.id, local, keywords); // 通知 → ローカル(notifications は [] に差し替わる)
+    resolveNotifications([makeNotification({ id: "notif0" })]);
+    await pending;
+
+    const live = app.groups[0].tabs[0];
+    expect(live.epoch).toBe(1);
+    expect(live.notifications).toEqual([]); // 旧通知カラムの結果が、差し替え後のタブへ混ざらない
+  });
+
+  it("updateColumn: 内容が変わると旧定義の gapMarker を消す(Issue #456)", async () => {
+    const tab = makeNoteTab([makeNote({ id: "n0005", createdAt: 5 })], { gapMarker: { boundaryId: "n0005", targetId: "n0001" } });
+    app.groups = [makeGroup([tab])];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "update_column") return opened(tab.id);
+      if (cmd === "capture_notes") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.updateColumn(tab.id, local, keywords);
+
+    expect(app.groups[0].tabs[0].gapMarker).toBeNull();
+  });
+
+  it("updateColumn: 名前だけの変更は gapMarker を消さない(Issue #456)", async () => {
+    const marker = { boundaryId: "n0005", targetId: "n0001" };
+    const tab = makeNoteTab([makeNote({ id: "n0005", createdAt: 5 })], { gapMarker: marker });
+    app.groups = [makeGroup([tab])];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "rename_column") return null;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    await app.updateColumn(tab.id, tab.kind, tab.filter, "新しい名前"); // ソース/フィルタは同じ
+
+    expect(app.groups[0].tabs[0].gapMarker).toEqual(marker);
+  });
+
+  it("fillRemainingGap: updateColumn をまたいだ結果は混ぜず、取得中に消えたギャップマーカーを復活させない", async () => {
     const marker = { boundaryId: "n0005", targetId: "n0001" };
     const tab = makeNoteTab([makeNote({ id: "n0005", createdAt: 5 })], { gapMarker: marker });
     app.groups = [makeGroup([tab])];
     const backfill = deferFirstBackfill(tab.id);
 
     const pending = app.fillRemainingGap(tab.id);
-    await app.updateColumn(tab.id, local, keywords);
-    // targetId(n0001)に到達する結果。ガードが無いとマーカーが「埋まった」として消える
+    await app.updateColumn(tab.id, local, keywords); // 旧定義の marker はここで消える(Issue #456)
+    // targetId(n0001)に到達する結果。ガードが無いと旧 marker を基にした更新が走る
     backfill.resolveFirst([makeNote({ id: "n0001", createdAt: 1 })]);
     await pending;
 
     const live = app.groups[0].tabs[0];
     expect(live.notes).toEqual([]);
-    expect(live.gapMarker).toEqual(marker);
+    expect(live.gapMarker).toBeNull();
   });
 
   it("fillGapBelow: updateColumn をまたいだ結果は一覧に混ぜない", async () => {
