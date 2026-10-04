@@ -67,3 +67,22 @@ export function toggleFlipH(t: ImageTransform): ImageTransform {
 export function toggleFlipV(t: ImageTransform): ImageTransform {
   return { ...t, flipV: !t.flipV };
 }
+
+/// 変形後の画像の外接矩形がコンテナをはみ出している(=パンする意味がある)かどうか。
+/// matrixはCropper.jsのtransformイベントのdetail.matrix([a, b, c, d, e, f]のCSS行列)、
+/// naturalは<cropper-image>の自然サイズ(画像はこのサイズの箱に行列を掛けて描画される)。
+/// 倍率の絶対値(a>1)で見ると、contain フィットで1未満に縮んだ大きい画像はいくら拡大しても
+/// 判定が立たず、90度回転でaが0、反転でaが負になる。そのため外接矩形のサイズで判定する。
+/// フィット時は一辺がコンテナとちょうど等しくなるので、丸め誤差ぶんのtolerancePxを許す。
+export function isImageOverflowing(
+  matrix: readonly number[],
+  natural: { width: number; height: number },
+  container: { width: number; height: number },
+  tolerancePx = 1,
+): boolean {
+  if (natural.width <= 0 || natural.height <= 0) return false;
+  const [a, b, c, d] = matrix;
+  const boundsWidth = Math.abs(a) * natural.width + Math.abs(c) * natural.height;
+  const boundsHeight = Math.abs(b) * natural.width + Math.abs(d) * natural.height;
+  return boundsWidth > container.width + tolerancePx || boundsHeight > container.height + tolerancePx;
+}

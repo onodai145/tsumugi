@@ -17,6 +17,7 @@
     fileName,
     initialImageTransform,
     isImage,
+    isImageOverflowing,
     isRevealed,
     isVideo,
     nextIndex,
@@ -67,6 +68,7 @@
     $zoom: (s: number, x?: number, y?: number) => void;
     $resetTransform: () => void;
     $ready: (callback?: (image: HTMLImageElement) => unknown) => Promise<HTMLImageElement>;
+    $image?: HTMLImageElement;
   };
   // <cropper-image>へのbind:thisは、かつて`item.id === current.id`の時だけ単一の
   // cropperImageEl変数へ代入するgetter/setterだった。しかしScroll Snap構造上、
@@ -340,16 +342,27 @@
     applyImageTransform();
   });
 
-  // ズーム時のみパンを有効化する。translatable属性は既定でoffにしておき、
-  // Cropper.jsのtransformイベント(detail.matrix、[a,b,c,d,e,f]のCSS行列でaがX方向スケール)を
-  // 見てscale>1の間だけonにする(等倍時にドラッグがスワイプナビゲーションと競合しないように)。
+  // 画像が表示領域をはみ出している間(拡大中)だけパンを有効化する。translatable属性は既定で
+  // offにしておき、等倍(フィット)時にドラッグがスワイプナビゲーションと競合しないようにする。
+  // 判定はCropper.jsのtransformイベント(detail.matrix、[a,b,c,d,e,f]のCSS行列)と画像の
+  // 自然サイズから求めた外接矩形で行う(isImageOverflowing参照)。かつてはmatrix[0](a)>1で
+  // 判定していたが、contain フィットで倍率が1未満になる大きい画像は拡大してもaが1を超えず、
+  // 90度回転でa=0・反転でa<0にもなるため、パンが有効にならなかった(Issue #459)。
+  // 単一ポインタのドラッグがパン(ACTION_MOVE)として扱われるには、action="move"を持つ
+  // <cropper-handle>が必要(テンプレート側参照)。
   // ontransformは各<cropper-image>要素自身に個別にバインドされているため、
   // e.currentTargetは常にイベントを発火させた(=操作されている)その要素そのものであり、
   // currentCropperImageElのような別変数の取り違えは原理上起こらない。
   function onCropperImageTransform(e: Event) {
     const detail = (e as CustomEvent<{ matrix: number[] }>).detail;
-    const scale = detail.matrix[0];
-    (e.currentTarget as CropperImageEl).toggleAttribute("translatable", scale > 1 + 1e-6);
+    const el = e.currentTarget as CropperImageEl;
+    const canvas = el.parentElement;
+    const overflowing = isImageOverflowing(
+      detail.matrix,
+      { width: el.$image?.naturalWidth ?? 0, height: el.$image?.naturalHeight ?? 0 },
+      { width: canvas?.clientWidth ?? 0, height: canvas?.clientHeight ?? 0 },
+    );
+    el.toggleAttribute("translatable", overflowing);
   }
 
   // <cropper-image>のonerror属性は原理上発火しない: Cropper.jsは実際の<img>要素を自身の
@@ -520,6 +533,11 @@
                 class="h-full w-full"
                 ontransform={onCropperImageTransform}
               ></cropper-image>
+              <!-- 単一ポインタ(マウス・1本指)のドラッグはドラッグ開始位置の要素のaction属性で
+                   種別が決まり、無指定だとACTION_NONEでパンされない。画像上のドラッグを
+                   ACTION_MOVEにするため全面を覆うmoveハンドルを置く(実際に動くのは
+                   <cropper-image>がtranslatableの間のみ)。 -->
+              <cropper-handle action="move" plain></cropper-handle>
             </cropper-canvas>
           {/if}
         {:else if isVideo(item)}
@@ -690,6 +708,11 @@
   /* <media-gesture>(映像クリックで再生/一時停止)の判定領域サイズ・位置。MediaGrid.svelteと
      同じ理由(デフォルトテーマ未使用のためbase.cssにサイズ指定が無い)で、<media-provider>
      いっぱいに広げる。pointer-events: noneはVidstack本体がonAttachで付与済み。 */
+  /* moveハンドルは既定でcursor: moveだが、パンできない(はみ出していない)間は出さない。 */
+  :global(cropper-canvas:not(:has(cropper-image[translatable])) cropper-handle[action="move"]) {
+    cursor: default;
+  }
+
   :global([data-media-gesture]) {
     position: absolute;
     inset: 0;
