@@ -59,7 +59,7 @@ fn normalize_acct(s: &str) -> String {
     }
 }
 
-/// サーバ側ワードミュート(`mutedWords`)の1ルール。`api::mutes::parse_muted_words` が
+/// サーバ側ワードミュート(`mutedWords`)の1ルール。`api::mutes::parse_muted_word_entries` が
 /// `/i` の生JSONから構築する(Issue #11)。
 #[derive(Debug, Clone)]
 pub enum WordMuteRule {

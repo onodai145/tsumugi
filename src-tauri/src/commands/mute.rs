@@ -504,9 +504,9 @@ mod tests {
 
     /// `sync_server_mutes_core` の結合テスト(Issue #11)。実HTTP経由(wiremockモック)で
     /// `mute/list`/`blocking/list`/`i` を叩き、レスポンスが `AppState` まで正しく届いて
-    /// `is_word_muted` が実際に効くことを検証する。`parse_muted_words` 単体の網羅は
-    /// `api::mutes::tests` 側の8ケースに任せ、ここでは「実HTTPレスポンス→state反映」という
-    /// 単体テストでは埋まらない結合部分だけを見る。
+    /// `is_word_muted` が実際に効くことを検証する。`mutedWords` の要素ごとのパース(ルールとキー。
+    /// `parse_muted_word_entries`)の網羅は `api::mutes::tests` 側に任せ、ここでは
+    /// 「実HTTPレスポンス→state反映」という単体テストでは埋まらない結合部分だけを見る。
     #[tokio::test(flavor = "multi_thread")]
     async fn sync_server_mutes_core_populates_state_from_real_http_responses() {
         let mock = MockServer::start().await;
@@ -793,6 +793,24 @@ mod tests {
             Some(snap(&[], &["r:/(unclosed/i"])),
             "保存値は変わらない(重複も除かれる)"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_boundaries_and_the_snapshot_when_the_same_valid_regex_is_synced_twice() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/i"])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        let first = state.settings.load_server_mute_snapshot("acc1").unwrap();
+
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap(); // サーバーは変わっていない
+
+        for column_id in ["c1", "c2", "c3"] {
+            assert_eq!(boundaries_of(&state, column_id).await, kept(), "同じ集合の再同期では捨てない");
+        }
+        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), first);
+        assert_eq!(first, Some(snap(&[], &["r:/spoiler/i"])));
     }
 
     #[tokio::test(flavor = "multi_thread")]
