@@ -111,6 +111,20 @@ describe("MediaViewer", () => {
     });
   });
 
+  // 回帰テスト(Issue #460): Cropper.jsの$rotate()は数値をラジアンとして扱うため、度数の
+  // 90をそのまま渡すと90ラジアン回転になっていた。度で渡すには"90deg"のような文字列にする。
+  it("回転ボタンは度単位の角度(\"90deg\"等)で$rotateを呼ぶ", async () => {
+    const { getByLabelText } = render(MediaViewer, {
+      props: { files: [file({ id: "a", name: "a.png" })], startIndex: 0, revealed: {}, onclose: () => {} },
+    });
+    const image = document.querySelector("cropper-image") as HTMLElement & { $rotate: (a: number | string) => void };
+    const rotate = vi.spyOn(image, "$rotate");
+    await fireEvent.click(getByLabelText("右回転"));
+    expect(rotate).toHaveBeenLastCalledWith("90deg");
+    await fireEvent.click(getByLabelText("左回転"));
+    expect(rotate).toHaveBeenLastCalledWith("0deg");
+  });
+
   it("Escapeキーでoncloseが呼ばれる", async () => {
     const onclose = vi.fn();
     render(MediaViewer, {
