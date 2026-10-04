@@ -68,6 +68,49 @@ describe("MediaViewer", () => {
     expect(getByLabelText("次へ").className).toContain("[@media(hover:none)]:opacity-100");
   });
 
+  // 回帰テスト(Issue #459): 画像をパンできなかった。
+  // 1) 単一ポインタのドラッグはaction="move"のハンドル上でないとACTION_MOVEにならない。
+  // 2) translatableの判定がmatrix[0]>1だったため、containフィットで倍率が1未満の大きい画像は
+  //    拡大してもパンが有効にならなかった。
+  describe("画像のパン(Issue #459)", () => {
+    function setup() {
+      render(MediaViewer, {
+        props: { files: [file({ id: "a", name: "a.png" })], startIndex: 0, revealed: {}, onclose: () => {} },
+      });
+      const canvas = document.querySelector("cropper-canvas") as HTMLElement;
+      const image = document.querySelector("cropper-image") as HTMLElement;
+      Object.defineProperty(canvas, "clientWidth", { value: 1200, configurable: true });
+      Object.defineProperty(canvas, "clientHeight", { value: 800, configurable: true });
+      const img = (image as HTMLElement & { $image: HTMLImageElement }).$image;
+      Object.defineProperty(img, "naturalWidth", { value: 4000, configurable: true });
+      Object.defineProperty(img, "naturalHeight", { value: 3000, configurable: true });
+      return { canvas, image };
+    }
+    const transform = (image: HTMLElement, matrix: number[]) =>
+      image.dispatchEvent(new CustomEvent("transform", { detail: { matrix } }));
+
+    it("各画像のcropper-canvasにaction=moveのハンドルがある", () => {
+      const { canvas } = setup();
+      expect(canvas.querySelector('cropper-handle[action="move"]')).not.toBeNull();
+    });
+
+    it("フィット倍率(<1)のままならtranslatableを付けず、はみ出すまで拡大したら付ける", () => {
+      const { image } = setup();
+      transform(image, [800 / 3000, 0, 0, 800 / 3000, 0, 0]);
+      expect(image.hasAttribute("translatable")).toBe(false);
+      transform(image, [0.5, 0, 0, 0.5, 0, 0]);
+      expect(image.hasAttribute("translatable")).toBe(true);
+      transform(image, [800 / 3000, 0, 0, 800 / 3000, 0, 0]);
+      expect(image.hasAttribute("translatable")).toBe(false);
+    });
+
+    it("90度回転してa=0でも、はみ出していればtranslatableが付く", () => {
+      const { image } = setup();
+      transform(image, [0, 1, -1, 0, 0, 0]);
+      expect(image.hasAttribute("translatable")).toBe(true);
+    });
+  });
+
   // 回帰テスト(Issue #460): Cropper.jsの$rotate()は数値をラジアンとして扱うため、度数の
   // 90をそのまま渡すと90ラジアン回転になっていた。度で渡すには"90deg"のような文字列にする。
   it("回転ボタンは度単位の角度(\"90deg\"等)で$rotateを呼ぶ", async () => {

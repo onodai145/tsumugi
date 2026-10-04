@@ -3,6 +3,7 @@ import type { DriveFile } from "../bindings/tauri.gen";
 import {
   deriveViewItems,
   initialImageTransform,
+  isImageOverflowing,
   isRevealed,
   nextIndex,
   playerSrc,
@@ -115,5 +116,44 @@ describe("playerSrc", () => {
   it("Vidstackが認識する動画MIMEと音声MIMEはそのまま渡す", () => {
     expect(playerSrc(file({ mimeType: "video/webm", url: "u" }))).toEqual({ src: "u", type: "video/webm" });
     expect(playerSrc(file({ mimeType: "audio/mpeg", url: "u" }))).toEqual({ src: "u", type: "audio/mpeg" });
+  });
+});
+
+describe("isImageOverflowing", () => {
+  const natural = { width: 4000, height: 3000 };
+  const container = { width: 1200, height: 800 };
+  // Cropper.jsのCSS行列は[a, b, c, d, e, f]。a=d=s, b=c=0がscale s。
+  const scale = (s: number) => [s, 0, 0, s, 0, 0];
+  const rotate90 = (s: number) => [0, s, -s, 0, 0, 0];
+
+  it("contain でフィットした初期状態(倍率が1未満)ははみ出していない", () => {
+    expect(isImageOverflowing(scale(800 / 3000), natural, container)).toBe(false);
+  });
+
+  it("フィットより大きくなったら、倍率が1未満でもはみ出している", () => {
+    expect(isImageOverflowing(scale(0.4), natural, container)).toBe(true);
+  });
+
+  it("自然サイズより小さい画像を拡大してフィットした状態(倍率が1超)もはみ出していない", () => {
+    const small = { width: 300, height: 200 };
+    expect(isImageOverflowing(scale(4), small, container)).toBe(false);
+  });
+
+  it("90度回転後は縦横が入れ替わった外接サイズで判定する(a=0でもはみ出し判定できる)", () => {
+    expect(isImageOverflowing(rotate90(1), natural, container)).toBe(true);
+    expect(isImageOverflowing(rotate90(800 / 4000), natural, container)).toBe(false);
+  });
+
+  it("反転(aが負)でも符号に依らず判定する", () => {
+    expect(isImageOverflowing([-0.4, 0, 0, 0.4, 0, 0], natural, container)).toBe(true);
+    expect(isImageOverflowing([-800 / 3000, 0, 0, 800 / 3000, 0, 0], natural, container)).toBe(false);
+  });
+
+  it("フィット時の丸め誤差(1px以内)ははみ出しとみなさない", () => {
+    expect(isImageOverflowing(scale(800.5 / 3000), natural, container)).toBe(false);
+  });
+
+  it("自然サイズが未取得(0)の間は常にはみ出していない", () => {
+    expect(isImageOverflowing(scale(5), { width: 0, height: 0 }, container)).toBe(false);
   });
 });
