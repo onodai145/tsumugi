@@ -130,6 +130,7 @@ impl SettingsStore {
         let mut guard = self.data.lock().unwrap();
         guard.accounts.retain(|a| a.id != account_id);
         guard.columns.retain(|c| c.account_id != account_id);
+        guard.server_mute_snapshots.remove(account_id);
         self.save(&guard)
     }
 
@@ -717,6 +718,20 @@ mod tests {
         s.delete_account("a1").unwrap();
         assert!(s.load_accounts().unwrap().is_empty());
         assert!(s.load_columns().unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_account_removes_only_that_accounts_server_mute_snapshot() {
+        let s = store();
+        s.upsert_account(&account("a1")).unwrap();
+        s.upsert_account(&account("a2")).unwrap();
+        s.save_server_mute_snapshot("a1", &snap(&["u1"], &["w:a"])).unwrap();
+        s.save_server_mute_snapshot("a2", &snap(&["u9"], &[])).unwrap();
+
+        s.delete_account("a1").unwrap();
+
+        assert_eq!(s.load_server_mute_snapshot("a1").unwrap(), None);
+        assert_eq!(s.load_server_mute_snapshot("a2").unwrap(), Some(snap(&["u9"], &[])));
     }
 
     #[test]

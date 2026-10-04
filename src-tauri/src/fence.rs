@@ -82,6 +82,13 @@ impl ColumnFence {
     /// ロックを取り、`f`(新しい定義の保存と clear)を実行し、**その後で**カラムの世代を進める。
     /// 進めた後の世代を返す(`f` が失敗しても進める。定義が中途半端に更新されうるため)。
     /// 返す `Epoch` の境界の世代は、その時点のもの。
+    ///
+    /// 境界の世代を `f` の実行**後**に読んでも安全な理由(Issue #456): 呼び出し側は、この関数が返った
+    /// 後に、ミュート設定を読んで取得する。`set_mute` / サーバー側ミュートの同期は、ミュート設定を
+    /// 差し替えてから `invalidate_boundaries` で世代を進める。したがって、ここで読んだ世代が、その
+    /// 進行を含んでいれば、後続のミュート設定の読みは新しい設定を見る。含んでいなければ、後で
+    /// 世代が進んだ時点で `boundaries_ok` が偽になり、境界の書き込みが飛ばされる。どちらでも、
+    /// 旧い設定の結果に基づく境界は書かれない。(`begin` が、設定を読む前に世代を控えるのと同じ向き。)
     /// `f` の実行中に `begin` した処理は旧い世代を控えるので、`f` が終わった後の書き込みで捨てられる。
     pub async fn invalidate<F, Fut, T>(&self, column_id: &str, f: F) -> (Epoch, T)
     where
@@ -108,6 +115,12 @@ impl ColumnFence {
         let result = f().await;
         self.boundary_gen.store(self.issue(), Ordering::SeqCst);
         result
+    }
+
+    /// そのカラムのエントリがあるか(テスト用)。
+    #[cfg(test)]
+    pub(crate) fn tracks(&self, column_id: &str) -> bool {
+        self.columns.lock().unwrap().contains_key(column_id)
     }
 
     /// エントリを消す(`close_column` が `invalidate` の後に呼ぶ)。以降、そのカラムの
@@ -161,6 +174,18 @@ mod tests {
 
         assert_eq!(fence.write_if_current("c1", &first, |_| async { 1 }).await, None);
         assert_eq!(fence.write_if_current("c1", &second, |_| async { 2 }).await, Some(2));
+    }
+
+    #[test]
+    fn tracks_reports_whether_an_entry_exists() {
+        let fence = ColumnFence::default();
+        assert!(!fence.tracks("c1"));
+
+        fence.begin("c1");
+        assert!(fence.tracks("c1"));
+
+        fence.remove("c1");
+        assert!(!fence.tracks("c1"));
     }
 
     #[tokio::test]

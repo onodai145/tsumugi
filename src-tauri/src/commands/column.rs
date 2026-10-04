@@ -308,9 +308,7 @@ pub async fn resume_column(
     state: State<'_, AppState>,
     column_id: String,
 ) -> Result<OpenedColumn> {
-    // カラム定義を読む前に世代を控える(Issue #446)。
-    let epoch = state.column_fence.begin(&column_id);
-    let column = load_column(&state, &column_id)?;
+    let (epoch, column) = begin_and_load_column(&state, &column_id)?;
     let group = state
         .settings
         .load_groups()?
@@ -464,10 +462,9 @@ pub async fn fetch_backfill(
     until_id: String,
     bypass_cache: bool,
 ) -> Result<Vec<Note>> {
-    // カラム定義を読む前に世代を控える。取得中に update_column / close_column が走ったら、
+    // 世代はカラム定義を読む前に控える。取得中に update_column / close_column が走ったら、
     // 下の書き込みは捨てられる(Issue #446)。
-    let epoch = state.column_fence.begin(&column_id);
-    let column = load_column(&state, &column_id)?;
+    let (epoch, column) = begin_and_load_column(&state, &column_id)?;
     let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
 
     let cache_eligible = backfill_cache_eligible(&resolved);
@@ -728,6 +725,21 @@ pub async fn resolve_user_acct(
 }
 
 // ---- helpers ----
+
+/// カラム定義を読む**前**に世代を控え(Issue #446)、定義を読む。世代を控えるのが先という不変条件を
+/// 1か所に集めたもの。未知のカラムID(閉じた後の取得など)では、`begin` が作ったエントリを消す。
+/// 消さないと、閉じたカラムへの取得のたびにエントリが残る。実行中の書き込みは古い扱いになるが、
+/// 存在しないカラムなので問題ない。
+fn begin_and_load_column(state: &AppState, column_id: &str) -> Result<(Epoch, Column)> {
+    let epoch = state.column_fence.begin(column_id);
+    match load_column(state, column_id) {
+        Ok(column) => Ok((epoch, column)),
+        Err(e) => {
+            state.column_fence.remove(column_id);
+            Err(e)
+        }
+    }
+}
 
 fn load_column(state: &AppState, column_id: &str) -> Result<Column> {
     state
@@ -1133,9 +1145,7 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
         // 同一カラムの前回ギャップ埋めが実行中(フラッピング再接続対策)。
         return;
     };
-    // カラム定義を読む前に世代を控える(Issue #446)。
-    let epoch = state.column_fence.begin(column_id);
-    let Ok(column) = load_column(&state, column_id) else {
+    let Ok((epoch, column)) = begin_and_load_column(&state, column_id) else {
         return;
     };
     if matches!(column.kind, ColumnKind::Notifications) {
@@ -3420,5 +3430,40 @@ mod tests {
         assert!(written);
         // 引き上げを飛ばすと、打ち切られたギャップが境界で覆われないまま残る
         assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n450")]);
+    }
+
+    fn test_column(id: &str) -> Column {
+        Column {
+            id: id.into(),
+            account_id: "a1".into(),
+            kind: ColumnKind::Home,
+            order: 0,
+            filter: FilterQuery::Keywords(vec![]),
+            notify_sound: false,
+            notify_desktop: false,
+            notify_sound_choice: String::new(),
+            group_id: "g1".into(),
+            title: None,
+        }
+    }
+
+    #[test]
+    fn begin_and_load_column_keeps_the_fence_entry_for_a_known_column() {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory());
+        state.settings.upsert_column(&test_column("c1")).unwrap();
+
+        let (_epoch, column) = begin_and_load_column(&state, "c1").unwrap();
+
+        assert_eq!(column.id, "c1");
+        assert!(state.column_fence.tracks("c1"));
+    }
+
+    #[test]
+    fn begin_and_load_column_leaves_no_fence_entry_for_an_unknown_column() {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory());
+
+        assert!(begin_and_load_column(&state, "closed").is_err());
+
+        assert!(!state.column_fence.tracks("closed"));
     }
 }
