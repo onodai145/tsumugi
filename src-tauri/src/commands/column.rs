@@ -522,16 +522,13 @@ pub async fn fetch_backfill(
     }
 
     let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
-    // ソースごとに、既存の境界と連続している場合のみ延長する(plan_boundary_extend)。
+    // 境界の延長は、ソースごとに、既存の境界と連続している場合のみ行う(plan_boundary_extend)。
     // 境界未確定のソースは連続性を検証できないので延長せず、カラム開き直し時の
-    // open_stream_and_fetch が改めて確定させる。
-    let extend = if cache_eligible {
-        plan_boundary_extend(&boundaries, &until_id, &fetch.source_outcomes)
-    } else {
-        vec![]
-    };
+    // open_stream_and_fetch が改めて確定させる。計画は、ここ(ロックの外)の古い境界ではなく、
+    // commit_backfill_writes がロックの中で読む最新の境界から作る(Issue #456)。
+    let extend_until = cache_eligible.then_some(until_id.as_str());
     // 取得中に update_column / close_column が走っていた(世代が古い)なら、何も書かず空で返す(Issue #446)。
-    match commit_backfill_writes(&state.column_fence, &state.cache, &column.id, &epoch, &fetch, &extend).await {
+    match commit_backfill_writes(&state.column_fence, &state.cache, &column.id, &epoch, &fetch, extend_until).await {
         None => return Ok(vec![]),
         Some(written) => written?,
     }
@@ -1457,28 +1454,48 @@ async fn cache_fetched(cache: &NoteCacheStore, column_id: &str, fetch: &Filtered
     cache.cache_notes(column_id, &fetch.cacheable).await
 }
 
-/// `fetch_backfill` の書き込み: 取得ノートのキャッシュと、ソースごとの境界の延長(`extend`)。
+/// `fetch_backfill` の書き込み: 取得ノートのキャッシュと、ソースごとの境界の延長。
 /// `epoch` が古ければ(取得中に `update_column` / `close_column` が走った)何も書かず `None` を返す
 /// (Issue #446)。境界の延長の失敗は握りつぶす(更新できなくても従来の挙動に戻るだけ)。
+///
+/// 境界の延長は、**ロックの中で読んだ最新の境界**から計画する(`extend_until` は、キャッシュ対象の
+/// カラムで `Some(until_id)`)。取得の前にロックの外で読んだ境界から計画すると、取得中に、同じ世代の
+/// ギャップ埋めが境界を新しい方へ引き上げた場合に、その引き上げを古い方へ広げ戻して、未取得の区間を
+/// 「完全」と主張してしまう(Issue #456)。
 async fn commit_backfill_writes(
     fence: &ColumnFence,
     cache: &NoteCacheStore,
     column_id: &str,
     epoch: &Epoch,
     fetch: &FilteredFetch,
-    extend: &[(u32, String)],
+    extend_until: Option<&str>,
 ) -> Option<Result<()>> {
     fence
         .write_if_current(column_id, epoch, |boundaries_ok| async move {
             cache_fetched(cache, column_id, fetch).await?;
             // 境界の世代が古い(取得中に set_mute が境界を捨てた)なら、旧ミュートの結果に基づく
-            // 延長を書かない。`extend` は行が無ければ挿入するので、書くと捨てた境界が復活する(Issue #452)。
-            if boundaries_ok && !extend.is_empty() {
-                let _ = cache.extend_fetch_boundaries(column_id, extend).await;
+            // 延長を書かない(Issue #452)。
+            if boundaries_ok {
+                if let Some(until_id) = extend_until {
+                    extend_boundaries_in_lock(cache, column_id, until_id, &fetch.source_outcomes).await;
+                }
             }
             Ok::<(), Error>(())
         })
         .await
+}
+
+/// カラムのロックの中で、最新の境界を読み、`plan_boundary_extend` の計画で延長する。境界を読めなければ、
+/// 延長を飛ばす(保守的)。計画に入るのは、既存の行があるソースだけなので、境界の行は挿入されない。
+async fn extend_boundaries_in_lock(cache: &NoteCacheStore, column_id: &str, until_id: &str, outcomes: &[SourceOutcome]) {
+    let Ok(prev) = cache.get_fetch_boundaries(column_id).await else {
+        return;
+    };
+    let prev: std::collections::HashMap<u32, String> = prev.into_iter().collect();
+    let plan = plan_boundary_extend(&prev, until_id, outcomes);
+    if !plan.is_empty() {
+        let _ = cache.extend_fetch_boundaries(column_id, &plan).await;
+    }
 }
 
 /// `open_stream_and_fetch` の書き込み: 初回取得ノートのキャッシュと、`boundaries`(Some の時)での
@@ -3180,6 +3197,10 @@ mod tests {
         }
     }
 
+    fn fetch_with_outcomes(ids: &[&str], outcomes: Vec<SourceOutcome>) -> FilteredFetch {
+        FilteredFetch { source_outcomes: outcomes, ..fetch_of(ids) }
+    }
+
     fn pair(idx: u32, id: &str) -> (u32, String) {
         (idx, id.to_string())
     }
@@ -3202,7 +3223,7 @@ mod tests {
         let epoch = fence.begin("c1");
 
         let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
 
         assert!(matches!(written, Some(Ok(()))));
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
@@ -3216,7 +3237,7 @@ mod tests {
         simulate_update_column(&fence, &cache, "c1").await;
 
         let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
 
         assert!(written.is_none());
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
@@ -3232,7 +3253,7 @@ mod tests {
         fence.remove("c1"); // close_column
 
         let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
 
         assert!(written.is_none());
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
@@ -3375,7 +3396,7 @@ mod tests {
         simulate_set_mute(&fence, &cache).await;
 
         let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")]).await;
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
 
         assert!(matches!(written, Some(Ok(()))));
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1); // ノートは書かれる
@@ -3390,7 +3411,7 @@ mod tests {
         cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
         let epoch = fence.begin("c1"); // ミュート変更の後に取得を始めた(対照)
 
-        commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), &[pair(0, "n300")])
+        commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600"))
             .await
             .unwrap()
             .unwrap();
@@ -3650,5 +3671,124 @@ mod tests {
         close_column_core(&state, "ghost").await.unwrap();
 
         assert!(!state.column_fence.tracks("ghost"));
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_does_not_insert_a_boundary_for_a_source_without_a_row() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1"); // 境界の行が、まだ無い(set_mute が捨てた後など)
+
+        let written = commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n600"),
+        )
+        .await;
+
+        assert!(matches!(written, Some(Ok(()))));
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1, "ノートは書かれる");
+        assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "行が無いソースは、延長で挿入しない");
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_skips_the_extension_when_the_boundaries_cannot_be_read() {
+        let fence = ColumnFence::default();
+        // 境界のテーブルを失った DB。`get_fetch_boundaries` が実際の SQL エラーになる(ノートの表は生きている)
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
+        conn.execute("DROP TABLE column_source_boundary", []).unwrap();
+        let cache = NoteCacheStore::new(crate::store::SqliteBackend::new(conn));
+        let epoch = fence.begin("c1");
+
+        let written = commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n600"),
+        )
+        .await;
+
+        assert!(matches!(written, Some(Ok(()))), "境界を読めなくても、ノートのキャッシュは成功する");
+        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn commit_backfill_writes_plans_the_extension_from_the_boundary_read_inside_the_lock() {
+        use std::sync::Arc;
+        use tokio::sync::{mpsc, Semaphore};
+
+        let fence = Arc::new(ColumnFence::default());
+        let cache = Arc::new(mem_cache());
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n100")]).await.unwrap();
+        let fetch_epoch = fence.begin("c1"); // fetch_backfill が、境界 n100 のもとで取得を始めた
+        let gap_epoch = fence.begin("c1"); // 並行するギャップ埋め
+        let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+        let gate = Arc::new(Semaphore::new(0));
+        let gap_fill = {
+            let (fence, cache, gate) = (Arc::clone(&fence), Arc::clone(&cache), Arc::clone(&gate));
+            tokio::spawn(async move {
+                fence
+                    .write_if_current("c1", &gap_epoch, |_| async move {
+                        ready_tx.send(()).unwrap();
+                        gate.acquire().await.unwrap().forget();
+                        // 打ち切られたギャップ埋めが、境界を n350 へ引き上げる(完全と言える範囲を縮める)
+                        cache.replace_fetch_boundaries("c1", &[pair(0, "n350")]).await.unwrap();
+                    })
+                    .await
+            })
+        };
+        ready_rx.recv().await.unwrap(); // ギャップ埋めが、カラムのロックを持った
+        let commit = {
+            let (fence, cache) = (Arc::clone(&fence), Arc::clone(&cache));
+            tokio::spawn(async move {
+                commit_backfill_writes(
+                    &fence,
+                    &cache,
+                    "c1",
+                    &fetch_epoch,
+                    &fetch_with_outcomes(&["n80"], vec![fetched("n60")]),
+                    Some("n120"), // 古い境界 n100 に対しては、連続している
+                )
+                .await
+            })
+        };
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await; // commit が、ロックの待ちに入る
+        gate.add_permits(1); // ギャップ埋めが、境界を引き上げて、ロックを放す
+
+        gap_fill.await.unwrap();
+        let written = commit.await.unwrap();
+
+        assert!(matches!(written, Some(Ok(()))));
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n350")],
+            "ロックの中で読んだ最新の境界(n350)に対しては、n120 は連続でない。引き上げた境界を、古い写しで広げない"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_backfill_extends_a_contiguous_boundary() {
+        let mock = MockServer::start().await;
+        mount_one_note_page(&mock).await; // ノート n9 の1ページ
+        let app = tauri::test::mock_app();
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Local)).unwrap();
+        state.cache.replace_fetch_boundaries("c1", &[(0, "n95".to_string())]).await.unwrap();
+        app.manage(state);
+
+        let notes = fetch_backfill(app.state::<AppState>(), "c1".into(), "n99".into(), true).await.unwrap();
+
+        assert_eq!(notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n9"]);
+        let boundaries = app.state::<AppState>().cache.get_fetch_boundaries("c1").await.unwrap();
+        assert_eq!(boundaries.len(), 1);
+        assert!(
+            boundaries[0].1.as_str() < "n95",
+            "n99 は境界 n95 と連続しているので、境界が古い方へ延長される: {boundaries:?}"
+        );
     }
 }
