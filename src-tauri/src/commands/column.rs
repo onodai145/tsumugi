@@ -260,6 +260,10 @@ pub async fn update_column(
 
 /// `update_column` の本体。`AppHandle` / `State` を引数に取らない形(`R: Runtime` ジェネリック)にして、
 /// `mock_app()` からテストできるようにしている(`sync_server_mutes_core` と同じ狙い。Issue #456)。
+///
+/// 既知の制限(Issue #456。設計は docs/superpowers/specs/2026-10-05-fetch-backfill-boundary-race-design.md):
+/// `invalidate` の後の失敗(キャッシュ DB の書き込み、通知カラムの初回取得)は、新定義が保存され、
+/// ストリームが閉じたまま `Err` を返す。画面は旧定義のままで、再編集で直る。
 async fn update_column_core<R: Runtime>(
     app: &AppHandle<R>,
     state: &AppState,
@@ -283,6 +287,16 @@ async fn update_column_core<R: Runtime>(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
+    // どちらも読むだけで、`invalidate` の結果に依存しない(グループとアカウントは、更新で変わらない)。
+    // `invalidate` の後に置くと、失敗したときに、新定義が保存され、ストリームが閉じ、キャッシュが消えた後に
+    // `Err` を返してしまう(Issue #456)。
+    let group = state
+        .settings
+        .load_groups()?
+        .into_iter()
+        .find(|g| g.id == column.group_id)
+        .ok_or_else(|| Error::Invalid(format!("unknown group: {}", column.group_id)))?;
+    let (host, token) = state.host_token(&column.account_id)?;
     // 新しい定義の保存・既存ストリームのクローズ・旧フィルタで貯めたキャッシュの破棄を、世代を進める
     // ロックの中で行う。実行中の取得は、世代が古くなって書き込みを捨てる(Issue #446)。
     let (epoch, cleared) = state
@@ -295,13 +309,6 @@ async fn update_column_core<R: Runtime>(
         .await;
     cleared?;
 
-    let group = state
-        .settings
-        .load_groups()?
-        .into_iter()
-        .find(|g| g.id == column.group_id)
-        .ok_or_else(|| Error::Invalid(format!("unknown group: {}", column.group_id)))?;
-    let (host, token) = state.host_token(&column.account_id)?;
     let (notes, notifications) =
         open_stream_and_fetch(app, state, &column, resolved, host, token, &epoch).await?;
 
@@ -3790,5 +3797,70 @@ mod tests {
             boundaries[0].1.as_str() < "n95",
             "n99 は境界 n95 と連続しているので、境界が古い方へ延長される: {boundaries:?}"
         );
+    }
+
+    /// `update_column_core` が `Err` を返したあと、定義・境界・世代・ストリームが変わっていないこと。
+    async fn assert_update_left_nothing_changed(state: &AppState, original_kind: &ColumnKind, before: &Epoch) {
+        let saved = state.settings.load_columns().unwrap();
+        assert_eq!(saved[0].kind, *original_kind, "定義は旧定義のまま");
+        assert_eq!(
+            state.cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![(0, "n100".to_string())],
+            "キャッシュ(境界)は破棄されない"
+        );
+        let still_current = state.column_fence.write_if_current("c1", before, |_| async {}).await;
+        assert!(still_current.is_some(), "世代は進まない(実行中の取得を捨てない)");
+        assert_eq!(state.connections.open_count(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_column_core_changes_nothing_when_the_group_is_unknown() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await;
+        let state = command_state(&mock);
+        let column = Column { group_id: "ghost".into(), ..command_column("c1", ColumnKind::Home) };
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap();
+        let before = state.column_fence.begin("c1");
+        let app = tauri::test::mock_app();
+
+        let result = update_column_core(
+            app.handle(),
+            &state,
+            "c1".into(),
+            ColumnKind::Tag { tag: "foo".into() },
+            FilterQuery::Keywords(vec![]),
+            None,
+        )
+        .await;
+
+        assert!(matches!(result, Err(Error::Invalid(_))));
+        assert_update_left_nothing_changed(&state, &ColumnKind::Home, &before).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_column_core_changes_nothing_when_the_account_is_not_registered() {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory()); // アカウントを登録しない
+        state
+            .settings
+            .upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 400, auto: false })
+            .unwrap();
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
+        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap();
+        let before = state.column_fence.begin("c1");
+        let app = tauri::test::mock_app();
+
+        let result = update_column_core(
+            app.handle(),
+            &state,
+            "c1".into(),
+            ColumnKind::Tag { tag: "foo".into() },
+            FilterQuery::Keywords(vec![]),
+            None,
+        )
+        .await;
+
+        assert!(matches!(result, Err(Error::Invalid(_))));
+        assert_update_left_nothing_changed(&state, &ColumnKind::Home, &before).await;
     }
 }
