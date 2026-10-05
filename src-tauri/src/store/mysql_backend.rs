@@ -1650,4 +1650,54 @@ mod tests {
             .unwrap();
         assert_eq!(v, "n50");
     }
+
+    /// 境界の書きロックの中で `clear_all_fetch_boundaries` を実行しても、実DBで詰まらず、全カラムの境界が
+    /// 空になり、古い世代の書き込みが境界を復活させない(Issue #456。#453 の最終レビュー指摘)。
+    #[tokio::test]
+    #[ignore]
+    async fn clear_all_fetch_boundaries_inside_the_boundary_write_lock_completes_and_blocks_stale_writes() {
+        use crate::fence::ColumnFence;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let s = Arc::new(backend().await);
+        let fence = Arc::new(ColumnFence::default());
+        let columns = ["c1", "c2", "c3", "c4"];
+        for c in columns {
+            set0(&s, c, "n500").await;
+        }
+        // 読みロックを持ったまま DB に書く、実行中の取得。書きロックを待たせるために、書く前に少し待つ
+        let mut writers = Vec::new();
+        for c in columns {
+            let epoch = fence.begin(c);
+            let (s, fence) = (Arc::clone(&s), Arc::clone(&fence));
+            writers.push(tokio::spawn(async move {
+                fence
+                    .write_if_current(c, &epoch, |boundaries_ok| async move {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        if boundaries_ok {
+                            s.extend_fetch_boundaries(c, &[b(0, "n100")]).await.unwrap();
+                        }
+                    })
+                    .await
+            }));
+        }
+        let late_epoch = fence.begin("c1"); // invalidate_boundaries より前に控える
+
+        let cleared = tokio::time::timeout(
+            Duration::from_secs(30), // デッドロック検出の上限。正常なら、ほぼ即座に終わる
+            fence.invalidate_boundaries(|| async { s.clear_all_fetch_boundaries().await }),
+        )
+        .await;
+
+        assert!(cleared.expect("書きロックの中の clear_all_fetch_boundaries が詰まらない").is_ok());
+        for writer in writers {
+            writer.await.unwrap();
+        }
+        for c in columns {
+            assert!(s.get_fetch_boundaries(c).await.unwrap().is_empty(), "{c} の境界が空になる");
+        }
+        let late = fence.write_if_current("c1", &late_epoch, |boundaries_ok| async move { boundaries_ok }).await;
+        assert_eq!(late, Some(false), "invalidate_boundaries より前に控えた世代の境界の書き込みは、古い扱い");
+    }
 }
