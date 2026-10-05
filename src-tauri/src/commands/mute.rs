@@ -895,6 +895,57 @@ mod tests {
         assert_eq!(*state.mute.lock().unwrap(), config);
         assert_eq!(state.settings.load_mute().unwrap(), config);
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_the_snapshot_when_discarding_boundaries_fails() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let mut state = state_with_three_columns_and_boundaries().await;
+        // 境界のテーブルを失った DB に差し替える。`replace_fetch_boundaries` が実際の SQL エラーになる
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
+        conn.execute("DROP TABLE column_source_boundary", []).unwrap();
+        state.cache = crate::store::NoteCacheStore::new(crate::store::SqliteBackend::new(conn));
+        state.settings.save_server_mute_snapshot("acc1", &snap(&["u1", "u2"], &[])).unwrap();
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await; // u2 のミュートを解除
+
+        let result = sync_server_mutes_core(&state, "acc1", &client).await;
+
+        assert!(result.is_ok(), "境界を捨てられなくても、同期自体は成功する");
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&["u1", "u2"], &[])),
+            "境界を捨てられなかったので、保存値は前回のまま(次回の同期で、解除を再検出する)"
+        );
+        assert!(state.is_server_muted("acc1", "u1"));
+        assert!(!state.is_server_muted("acc1", "u2"), "メモリ上の集合は、新しい集合に差し替わっている");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_server_mutes_command_returns_an_error_for_an_unknown_account() {
+        let app = tauri::test::mock_app();
+        app.manage(AppState::new_for_test(SettingsStore::new_in_memory()));
+
+        let result = sync_server_mutes(app.state::<AppState>(), "ghost".into()).await;
+
+        assert!(matches!(result, Err(Error::Invalid(_))));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_server_mutes_command_applies_the_server_mutes_through_the_state_extractor() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!(["spoiler"])).await;
+        let app = tauri::test::mock_app();
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.register_test_account("acc1");
+        state.set_test_api_base(mock.uri());
+        app.manage(state);
+
+        let result = sync_server_mutes(app.state::<AppState>(), "acc1".into()).await.unwrap();
+
+        assert_eq!(result.blocked_users, 1);
+        assert_eq!(result.word_rules, 1);
+        assert!(app.state::<AppState>().is_server_muted("acc1", "u1"));
+    }
 }
 
 #[cfg(test)]
