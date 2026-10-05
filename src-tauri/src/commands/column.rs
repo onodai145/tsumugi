@@ -3750,7 +3750,7 @@ mod tests {
                     &cache,
                     "c1",
                     &fetch_epoch,
-                    &fetch_with_outcomes(&["n80"], vec![fetched("n60")]),
+                    &fetch_with_outcomes(&["n080"], vec![fetched("n060")]), // id は文字列比較なので、桁数を揃える
                     Some("n120"), // 古い境界 n100 に対しては、連続している
                 )
                 .await
