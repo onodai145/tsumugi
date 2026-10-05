@@ -1653,12 +1653,18 @@ mod tests {
 
     /// 境界の書きロックの中で `clear_all_fetch_boundaries` を実行しても、実DBで詰まらず、全カラムの境界が
     /// 空になり、古い世代の書き込みが境界を復活させない(Issue #456。#453 の最終レビュー指摘)。
+    ///
+    /// 順序は、時間ではなく、合図(`mpsc` と `Semaphore`)で決める。読みロックを持つ書き込みが
+    /// DB に書く直前で止まっている間に、`invalidate_boundaries` が書きロックを要求し、待たされる。
+    /// その後で書き込みを放すと、書き込みが先に完了し(`boundaries_ok` は真のまま)、`clear` はその後に走る。
+    /// 書きロックが無ければ、`clear` が書き込みより先に走り、後から入る書き込みが境界を復活させる。
     #[tokio::test]
     #[ignore]
     async fn clear_all_fetch_boundaries_inside_the_boundary_write_lock_completes_and_blocks_stale_writes() {
         use crate::fence::ColumnFence;
         use std::sync::Arc;
         use std::time::Duration;
+        use tokio::sync::{mpsc, Semaphore};
 
         let s = Arc::new(backend().await);
         let fence = Arc::new(ColumnFence::default());
@@ -1666,36 +1672,48 @@ mod tests {
         for c in columns {
             set0(&s, c, "n500").await;
         }
-        // 読みロックを持ったまま DB に書く、実行中の取得。書きロックを待たせるために、書く前に少し待つ
+        let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
+        let gate = Arc::new(Semaphore::new(0));
+        // 読みロックを持ったまま、DB に書く直前で止まる、実行中の取得
         let mut writers = Vec::new();
         for c in columns {
             let epoch = fence.begin(c);
-            let (s, fence) = (Arc::clone(&s), Arc::clone(&fence));
+            let (s, fence, ready_tx, gate) = (Arc::clone(&s), Arc::clone(&fence), ready_tx.clone(), Arc::clone(&gate));
             writers.push(tokio::spawn(async move {
                 fence
                     .write_if_current(c, &epoch, |boundaries_ok| async move {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        ready_tx.send(()).unwrap();
+                        gate.acquire().await.unwrap().forget();
                         if boundaries_ok {
                             s.extend_fetch_boundaries(c, &[b(0, "n100")]).await.unwrap();
                         }
+                        boundaries_ok
                     })
                     .await
             }));
         }
+        for _ in columns {
+            ready_rx.recv().await.unwrap(); // 全員が、読みロックを持った
+        }
         let late_epoch = fence.begin("c1"); // invalidate_boundaries より前に控える
 
-        let cleared = tokio::time::timeout(
-            Duration::from_secs(30), // デッドロック検出の上限。正常なら、ほぼ即座に終わる
-            fence.invalidate_boundaries(|| async { s.clear_all_fetch_boundaries().await }),
-        )
-        .await;
+        let invalidate = {
+            let (s, fence) = (Arc::clone(&s), Arc::clone(&fence));
+            tokio::spawn(async move { fence.invalidate_boundaries(|| async { s.clear_all_fetch_boundaries().await }).await })
+        };
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await; // invalidate_boundaries が、書きロックの待ちに入る
+        tokio::time::sleep(Duration::from_millis(200)).await; // 書きロックが無い実装なら、この間に clear が終わる
+        assert!(!invalidate.is_finished(), "書きロックは、読みロックを持つ実行中の書き込みの完了を待つ");
 
-        assert!(cleared.expect("書きロックの中の clear_all_fetch_boundaries が詰まらない").is_ok());
+        gate.add_permits(columns.len()); // 実行中の書き込みを放す
+        let cleared = tokio::time::timeout(Duration::from_secs(30), invalidate).await; // デッドロック検出の上限
+        assert!(cleared.expect("書きロックの中の clear_all_fetch_boundaries が詰まらない").unwrap().is_ok());
         for writer in writers {
-            writer.await.unwrap();
+            assert_eq!(writer.await.unwrap(), Some(true), "実行中の書き込みは、書きロックより先に完了する");
         }
         for c in columns {
-            assert!(s.get_fetch_boundaries(c).await.unwrap().is_empty(), "{c} の境界が空になる");
+            assert!(s.get_fetch_boundaries(c).await.unwrap().is_empty(), "{c}: 書き込みの後で clear が走り、空になる");
         }
         let late = fence.write_if_current("c1", &late_epoch, |boundaries_ok| async move { boundaries_ok }).await;
         assert_eq!(late, Some(false), "invalidate_boundaries より前に控えた世代の境界の書き込みは、古い扱い");
