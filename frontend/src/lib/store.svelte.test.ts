@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupView, TabView } from "./store.svelte";
-import type { ColumnKind, FilterQuery, Note, Notification, User } from "../bindings/tauri.gen";
+import type { Account, ColumnKind, FilterQuery, Note, Notification, User } from "../bindings/tauri.gen";
 
 // store.svelte.ts が起動時に @tauri-apps/plugin-os の platform() を呼ぶため、
 // Tauri ランタイム外(jsdom/node)で import が失敗しないようスタブする（NoteCard.test.ts と同じ構成）。
@@ -1350,5 +1350,144 @@ describe("updateColumn をまたぐ backfill の結果は捨てる(Issue #446)",
     await pending;
 
     expect(app.groups[0].tabs[0].notes).toEqual([]);
+  });
+});
+
+describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+  const account = (id: string): Account => ({
+    id,
+    host: "misskey.test",
+    username: `user_${id}`,
+    userId: `uid_${id}`,
+    displayName: id,
+    avatarUrl: null,
+  });
+  /// 呼ばれた `sync_server_mutes` の accountId(呼ばれた順)。
+  const syncedAccounts = () =>
+    invokeMock.mock.calls.filter(([cmd]) => cmd === "sync_server_mutes").map(([, args]) => (args as { accountId: string }).accountId);
+  const syncLogs = () => app.logs.filter((l) => l.text.includes("サーバのミュート/ブロックを同期"));
+  let syncResult: { blockedUsers: number; wordRules: number } | Error;
+
+  beforeEach(() => {
+    syncResult = { blockedUsers: 3, wordRules: 1 };
+    invokeMock.mockClear();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_accounts") return [];
+      if (cmd === "sync_server_mutes") {
+        if (syncResult instanceof Error) throw syncResult;
+        return syncResult;
+      }
+      return { status: "ok", data: null };
+    });
+    app.logs = [];
+    // 直前のテストの boot() が、this.ui.theme を undefined のまま残すことがある(#applyTheme が
+    // 例外を投げて、boot() が起動時の同期まで進まなくなる)。既知の値に戻しておく。
+    app.ui = { ...app.ui, theme: "auto" };
+  });
+
+  afterEach(() => {
+    app.teardown();
+    vi.useRealTimers();
+  });
+
+  /// フェイクタイマーで boot() し、その間の呼び出しを数えないよう、記録を空にする。
+  async function bootAndForgetCalls() {
+    vi.useFakeTimers();
+    const bootPromise = app.boot();
+    await vi.advanceTimersByTimeAsync(0);
+    await bootPromise.catch(() => {});
+    invokeMock.mockClear();
+    app.logs = [];
+  }
+
+  it("boot()の6時間後に、その時点の全アカウントで同期を呼ぶ(後から追加したアカウントも含む)", async () => {
+    await bootAndForgetCalls();
+    app.accounts = [account("acc1"), account("acc2")]; // boot() の後に増えた
+
+    await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
+
+    expect(syncedAccounts().sort()).toEqual(["acc1", "acc2"]);
+  });
+
+  it("発火時のアカウント一覧を使う(boot()の後に削除したアカウントは対象外)", async () => {
+    await bootAndForgetCalls();
+    app.accounts = [account("acc2")]; // boot() の時点で acc1 が居ても、発火時に居なければ対象外
+
+    await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
+
+    expect(syncedAccounts()).toEqual(["acc2"]);
+  });
+
+  it("アカウントが0件でも、何も呼ばず、例外も出ない", async () => {
+    await bootAndForgetCalls();
+    app.accounts = [];
+
+    await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
+
+    expect(syncedAccounts()).toEqual([]);
+  });
+
+  it("boot()を2回呼んでも、定期同期は多重にならない(1周期に、1アカウントあたり1回)", async () => {
+    vi.useFakeTimers();
+    for (let i = 0; i < 2; i++) {
+      const bootPromise = app.boot();
+      await vi.advanceTimersByTimeAsync(0);
+      await bootPromise.catch(() => {});
+    }
+    invokeMock.mockClear();
+    app.accounts = [account("acc1")];
+
+    await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
+
+    expect(syncedAccounts()).toEqual(["acc1"]);
+  });
+
+  it("定期実行は、成功しても、同期のログを出さない", async () => {
+    await bootAndForgetCalls();
+    app.accounts = [account("acc1")];
+
+    await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
+
+    expect(syncedAccounts()).toEqual(["acc1"]); // 同期は実際に走っている
+    expect(syncLogs()).toEqual([]);
+  });
+
+  it("定期実行の失敗は、警告ログを出す", async () => {
+    await bootAndForgetCalls();
+    app.accounts = [account("acc1")];
+    syncResult = new Error("boom");
+
+    await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
+
+    const warns = app.logs.filter((l) => l.level === "warn" && l.text.includes("サーバミュート同期に失敗"));
+    expect(warns).toHaveLength(1);
+  });
+
+  it("起動時の同期は、これまでどおり、成功のログを出す(quiet は定期実行だけ)", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_accounts") return [account("acc1")];
+      if (cmd === "get_ui_prefs") return { ...app.ui }; // boot() が、同期まで進めるように、妥当な設定を返す
+      if (cmd === "sync_server_mutes") return syncResult;
+      return { status: "ok", data: null };
+    });
+    vi.useFakeTimers();
+
+    const bootPromise = app.boot();
+    await vi.advanceTimersByTimeAsync(0);
+    await bootPromise.catch(() => {});
+
+    expect(syncedAccounts()).toEqual(["acc1"]); // boot() が、起動時の同期まで進んだ
+    expect(syncLogs().map((l) => l.text)).toEqual(["サーバのミュート/ブロックを同期: ユーザ3件・ワード1件"]);
+  });
+
+  it("teardown()の後は、同期が呼ばれない", async () => {
+    await bootAndForgetCalls();
+    app.accounts = [account("acc1")];
+
+    app.teardown();
+    await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
+
+    expect(syncedAccounts()).toEqual([]);
   });
 });

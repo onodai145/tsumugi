@@ -50,6 +50,7 @@ const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-
 const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1クリックあたりの取得ページ上限（Issue #148）
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // ノートキャッシュ間引きの間隔（6時間）
+const SERVER_MUTE_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // サーバー側ミュートの定期同期の間隔（6時間。Issue #456）
 
 /// タブ = 1タイムライン。
 export interface TabView {
@@ -200,6 +201,9 @@ class AppStore {
   #loggedUpdateVersion: string | null = null;
   // ノートキャッシュの間引き（Issue #6）。起動時と数時間おきに実行する。
   #pruneTimer: ReturnType<typeof setInterval> | null = null;
+  // サーバー側ミュート/ブロック・ワードミュートの定期同期（Issue #456）。Web側での変更を、次の起動や
+  // 再認証を待たずに反映する。ミュートはめったに変えないので、間隔は数時間。
+  #serverMuteSyncTimer: ReturnType<typeof setInterval> | null = null;
   // theme="auto"時、OSのprefers-color-scheme変化にライブ追従するためのmatchMediaリスナー解除関数。
   // #applyTheme が呼ばれるたびに前回分を解除してから張り直すことで、リスナーの多重登録を防ぐ。
   #themeMediaCleanup: (() => void) | null = null;
@@ -245,6 +249,10 @@ class AppStore {
     if (this.#updateCheckTimer !== null) {
       clearInterval(this.#updateCheckTimer);
       this.#updateCheckTimer = null;
+    }
+    if (this.#serverMuteSyncTimer !== null) {
+      clearInterval(this.#serverMuteSyncTimer);
+      this.#serverMuteSyncTimer = null;
     }
     // devのHMRで古いインスタンスが破棄される際、背景動画用のblob: URLを解放する
     // (#loadBackgroundVideoBlob参照)。放置するとリロードごとにメモリが積み上がる。
@@ -341,6 +349,9 @@ class AppStore {
     void this.#pruneNoteCache();
     if (this.#pruneTimer !== null) clearInterval(this.#pruneTimer);
     this.#pruneTimer = setInterval(() => void this.#pruneNoteCache(), PRUNE_INTERVAL_MS);
+
+    if (this.#serverMuteSyncTimer !== null) clearInterval(this.#serverMuteSyncTimer);
+    this.#serverMuteSyncTimer = setInterval(() => void this.#syncAllServerMutes(), SERVER_MUTE_SYNC_INTERVAL_MS);
 
     if (this.#clockTimer !== null) clearInterval(this.#clockTimer);
     this.#clockTimer = setInterval(() => (this.now = Date.now()), 5_000);
@@ -1141,11 +1152,18 @@ class AppStore {
     await this.#syncServerMutes(account.id);
   }
 
+  /// 定期同期の1回分。発火時点の全アカウントを同期する(アカウントの追加・削除に追従する)。
+  /// 成功のログは出さない(quiet)。失敗の警告は、`#syncServerMutes` が出す。
+  async #syncAllServerMutes() {
+    await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id, { quiet: true })));
+  }
+
   /// サーバ側ミュート/ブロック・ワードミュート(mutedWords)を同期（失敗しても致命的でないのでログのみ）。
-  async #syncServerMutes(accountId: string) {
+  /// `quiet` のときは、成功時のログを出さない(定期実行で、Backstage のログが埋まるのを避ける)。
+  async #syncServerMutes(accountId: string, options: { quiet?: boolean } = {}) {
     try {
       const result = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
-      if (result.blockedUsers > 0 || result.wordRules > 0) {
+      if (!options.quiet && (result.blockedUsers > 0 || result.wordRules > 0)) {
         this.#log(
           "info",
           `サーバのミュート/ブロックを同期: ユーザ${result.blockedUsers}件・ワード${result.wordRules}件`,
