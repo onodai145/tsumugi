@@ -127,8 +127,9 @@ pub struct AppState {
     server_mute_sync_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// テスト専用: `client_for` が返すクライアントの API ベースの上書き(`wiremock` の `uri()`)。
     /// 本番のクライアントは `https://{host}/api` 固定で、モック HTTP に向けられないため。
+    /// 設定は `set_test_api_base` 経由だけ。全アカウント共通の上書きで、アカウントごとに別のモックは使えない。
     #[cfg(test)]
-    pub(crate) test_api_base: Mutex<Option<String>>,
+    test_api_base: Mutex<Option<String>>,
     pub settings: SettingsStore,
     pub drafts: DraftStore,
     pub cache: NoteCacheStore,
@@ -358,13 +359,15 @@ impl AppState {
     }
 
     /// テスト用: 以降の `client_for` を、指定の API ベース(`wiremock` の `uri()`)へ向ける。
+    /// 全アカウント共通の上書き。呼び忘れると、`client_for` は実際の `https://{host}/api`(実 DNS)へ向かう。
     #[cfg(test)]
     pub(crate) fn set_test_api_base(&self, base: String) {
         *self.test_api_base.lock().unwrap() = Some(base);
     }
 
-    /// テスト用: アカウント(host `misskey.test`)とトークンを登録し、`host_token` / `client_for` が
-    /// 通る状態にする。
+    /// テスト用: アカウント(host は固定で `misskey.test`)とトークンを登録し、`host_token` /
+    /// `client_for` が通る状態にする。HTTP をモックに向けるには、`set_test_api_base` も呼ぶこと
+    /// (呼ばないと、`client_for` は `https://misskey.test/api` へ向かう)。
     #[cfg(test)]
     pub(crate) fn register_test_account(&self, account_id: &str) {
         self.accounts.lock().unwrap().upsert(crate::domain::Account {

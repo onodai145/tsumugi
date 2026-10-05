@@ -222,6 +222,7 @@ async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
 /// 世代を控えるので、境界の世代が進んだ時点で、新しい設定がすでに反映されている(Issue #452)。
 /// 境界を捨てる処理は、境界の書きロックの中で行う。実行中の取得が、旧ミュートの結果に基づく境界を
 /// 直後に書き込んで復活させないため(`ColumnFence::invalidate_boundaries`)。
+///
 /// `clear_boundaries` の失敗は無視する(現状の挙動)。
 async fn apply_mute_config_with<F, Fut>(state: &AppState, config: MuteConfig, clear_boundaries: F) -> Result<()>
 where
