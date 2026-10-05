@@ -1495,8 +1495,12 @@ async fn commit_backfill_writes(
 /// カラムのロックの中で、最新の境界を読み、`plan_boundary_extend` の計画で延長する。境界を読めなければ、
 /// 延長を飛ばす(保守的)。計画に入るのは、既存の行があるソースだけなので、境界の行は挿入されない。
 async fn extend_boundaries_in_lock(cache: &NoteCacheStore, column_id: &str, until_id: &str, outcomes: &[SourceOutcome]) {
-    let Ok(prev) = cache.get_fetch_boundaries(column_id).await else {
-        return;
+    let prev = match cache.get_fetch_boundaries(column_id).await {
+        Ok(prev) => prev,
+        Err(e) => {
+            log::warn!("skipping the backfill boundary extension: failed to read the boundaries of column {column_id}: {e}");
+            return;
+        }
     };
     let prev: std::collections::HashMap<u32, String> = prev.into_iter().collect();
     let plan = plan_boundary_extend(&prev, until_id, outcomes);
@@ -3244,11 +3248,12 @@ mod tests {
         simulate_update_column(&fence, &cache, "c1").await;
 
         let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
+            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n950")).await;
 
         assert!(written.is_none());
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
-        // 旧フィルタの延長(n300)で、新フィルタの境界(n900)が古い方へ動かない
+        // until_id(n950)は新フィルタの境界(n900)と連続しているので、書き込まれていれば、旧フィルタの延長(n300)で
+        // 新フィルタの境界(n900)が古い方へ動く。世代が古いので、動かない
         assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
     }
 
