@@ -211,12 +211,24 @@ pub async fn set_mute(state: State<'_, AppState>, config: MuteConfig) -> Result<
 }
 
 /// ミュート設定を保存して差し替え、全カラムの backfill 境界を捨てる(`set_mute` の本体)。
+async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
+    apply_mute_config_with(state, config, || state.cache.clear_all_fetch_boundaries()).await
+}
+
+/// `apply_mute_config` の中核。境界を捨てる処理を `clear_boundaries` として受け取り、順序をテストで
+/// 固定できるようにしている(Issue #456)。
 ///
 /// `state.mute` の差し替えは、境界を捨てる**前**に行う。書き込み側は、ミュート設定を読む前に
 /// 世代を控えるので、境界の世代が進んだ時点で、新しい設定がすでに反映されている(Issue #452)。
 /// 境界を捨てる処理は、境界の書きロックの中で行う。実行中の取得が、旧ミュートの結果に基づく境界を
 /// 直後に書き込んで復活させないため(`ColumnFence::invalidate_boundaries`)。
-async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
+///
+/// `clear_boundaries` の失敗は無視する(現状の挙動)。
+async fn apply_mute_config_with<F, Fut>(state: &AppState, config: MuteConfig, clear_boundaries: F) -> Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
     state.settings.save_mute(&config)?;
     *state.mute.lock().unwrap() = config;
     // ミュート解除方向の変更は、除外済み(=キャッシュされていない)ノートを読み直せないため
@@ -224,7 +236,7 @@ async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
     state
         .column_fence
         .invalidate_boundaries(|| async {
-            let _ = state.cache.clear_all_fetch_boundaries().await;
+            let _ = clear_boundaries().await;
         })
         .await;
     Ok(())
@@ -853,6 +865,87 @@ mod tests {
 
         assert!(done.expect("別アカウントの同期は待たされない").is_ok());
         assert!(state.is_server_muted("acc2", "u1"));
+    }
+
+    #[tokio::test]
+    async fn apply_mute_config_replaces_state_mute_before_clearing_boundaries() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let config = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+        let seen_when_clearing = std::sync::Mutex::new(None);
+
+        apply_mute_config_with(&state, config.clone(), || async {
+            // 境界を捨てる時点で、新しい設定がすでに反映されていること(Issue #452)
+            *seen_when_clearing.lock().unwrap() = Some(state.mute.lock().unwrap().clone());
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(seen_when_clearing.lock().unwrap().as_ref(), Some(&config));
+        assert_eq!(state.settings.load_mute().unwrap(), config, "保存もされる");
+    }
+
+    #[tokio::test]
+    async fn apply_mute_config_still_applies_and_saves_when_clearing_boundaries_fails() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let config = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+
+        let result = apply_mute_config_with(&state, config.clone(), || async { Err(Error::Invalid("db down".into())) }).await;
+
+        assert!(result.is_ok(), "境界を捨てる処理の失敗は無視する(現状の挙動)");
+        assert_eq!(*state.mute.lock().unwrap(), config);
+        assert_eq!(state.settings.load_mute().unwrap(), config);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_the_snapshot_when_discarding_boundaries_fails() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let mut state = state_with_three_columns_and_boundaries().await;
+        // 境界のテーブルを失った DB に差し替える。`replace_fetch_boundaries` が実際の SQL エラーになる
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
+        conn.execute("DROP TABLE column_source_boundary", []).unwrap();
+        state.cache = crate::store::NoteCacheStore::new(crate::store::SqliteBackend::new(conn));
+        state.settings.save_server_mute_snapshot("acc1", &snap(&["u1", "u2"], &[])).unwrap();
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await; // u2 のミュートを解除
+
+        let result = sync_server_mutes_core(&state, "acc1", &client).await;
+
+        assert!(result.is_ok(), "境界を捨てられなくても、同期自体は成功する");
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&["u1", "u2"], &[])),
+            "境界を捨てられなかったので、保存値は前回のまま(次回の同期で、解除を再検出する)"
+        );
+        assert!(state.is_server_muted("acc1", "u1"));
+        assert!(!state.is_server_muted("acc1", "u2"), "メモリ上の集合は、新しい集合に差し替わっている");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_server_mutes_command_returns_an_error_for_an_unknown_account() {
+        let app = tauri::test::mock_app();
+        app.manage(AppState::new_for_test(SettingsStore::new_in_memory()));
+
+        let result = sync_server_mutes(app.state::<AppState>(), "ghost".into()).await;
+
+        assert!(matches!(result, Err(Error::Invalid(_))));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_server_mutes_command_applies_the_server_mutes_through_the_state_extractor() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!(["spoiler"])).await;
+        let app = tauri::test::mock_app();
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.register_test_account("acc1");
+        state.set_test_api_base(mock.uri());
+        app.manage(state);
+
+        let result = sync_server_mutes(app.state::<AppState>(), "acc1".into()).await.unwrap();
+
+        assert_eq!(result.blocked_users, 1);
+        assert_eq!(result.word_rules, 1);
+        assert!(app.state::<AppState>().is_server_muted("acc1", "u1"));
     }
 }
 

@@ -125,6 +125,11 @@ pub struct AppState {
     /// 取得から保存値の書き込みまで直列にする(Issue #456)。必要になったときに作る。
     /// ロックの順序は「このロック → 境界の書きロック(`ColumnFence::invalidate_boundaries`)」のみ。
     server_mute_sync_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// テスト専用: `client_for` が返すクライアントの API ベースの上書き(`wiremock` の `uri()`)。
+    /// 本番のクライアントは `https://{host}/api` 固定で、モック HTTP に向けられないため。
+    /// 設定は `set_test_api_base` 経由だけ。全アカウント共通の上書きで、アカウントごとに別のモックは使えない。
+    #[cfg(test)]
+    test_api_base: Mutex<Option<String>>,
     pub settings: SettingsStore,
     pub drafts: DraftStore,
     pub cache: NoteCacheStore,
@@ -187,6 +192,8 @@ impl AppState {
             server_mutes: Mutex::new(HashMap::new()),
             server_word_mutes: Mutex::new(HashMap::new()),
             server_mute_sync_locks: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            test_api_base: Mutex::new(None),
             settings,
             drafts,
             cache,
@@ -340,11 +347,41 @@ impl AppState {
     /// account_id から host + token を引き、REST クライアントを構築する。
     pub fn client_for(&self, account_id: &str) -> crate::error::Result<crate::api::MisskeyClient> {
         let (host, token) = self.host_token(account_id)?;
+        #[cfg(test)]
+        if let Some(base) = self.test_api_base.lock().unwrap().clone() {
+            return Ok(crate::api::MisskeyClient::new_with_api_base(self.http.clone(), base, Some(token)));
+        }
         Ok(crate::api::MisskeyClient::new(
             self.http.clone(),
             host,
             Some(token),
         ))
+    }
+
+    /// テスト用: 以降の `client_for` を、指定の API ベース(`wiremock` の `uri()`)へ向ける。
+    /// 全アカウント共通の上書き。呼び忘れると、`client_for` は実際の `https://{host}/api`(実 DNS)へ向かう。
+    #[cfg(test)]
+    pub(crate) fn set_test_api_base(&self, base: String) {
+        *self.test_api_base.lock().unwrap() = Some(base);
+    }
+
+    /// テスト用: アカウント(host は固定で `misskey.test`)とトークンを登録し、`host_token` /
+    /// `client_for` が通る状態にする。HTTP をモックに向けるには、`set_test_api_base` も呼ぶこと
+    /// (呼ばないと、`client_for` は `https://misskey.test/api` へ向かう)。
+    #[cfg(test)]
+    pub(crate) fn register_test_account(&self, account_id: &str) {
+        self.accounts.lock().unwrap().upsert(crate::domain::Account {
+            id: account_id.into(),
+            host: "misskey.test".into(),
+            username: "me".into(),
+            user_id: "u1".into(),
+            display_name: "Me".into(),
+            avatar_url: None,
+            instance: None,
+            is_cat: false,
+            avatar_blurhash: None,
+        });
+        self.secrets.set(account_id, "token").unwrap();
     }
 }
 
