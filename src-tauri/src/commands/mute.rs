@@ -361,22 +361,29 @@ pub async fn sync_server_mutes(
 /// 受け取り、`client` も呼び出し側から渡すことで `tauri::State`(テストから構築不可)と
 /// `client_for`(登録済みアカウント+keyringが必要)の両方を経由せずに単体テスト可能にしている
 /// (`commands/column.rs::search_cache_core` と同じ狙い)。
+///
+/// 同じアカウントの同期は、取得より前に取る排他ロックで直列にする(Issue #456)。保存値の
+/// 「読み出し → 比較 → 書き込み」と、メモリ上の集合の差し替えが、並行した同期と交錯しない。
+/// ロックの順序は「同期ロック → 境界の書きロック(`clear_account_boundaries` の
+/// `invalidate_boundaries`)」で、逆順の経路は無い。
 async fn sync_server_mutes_core(
     state: &AppState,
     account_id: &str,
     client: &crate::api::MisskeyClient,
 ) -> Result<SyncMuteResult> {
+    let sync_lock = state.server_mute_sync_lock(account_id);
+    let _serialized = sync_lock.lock().await;
     let ids = fetch_muted_and_blocked(client).await?;
-    let word_rules = fetch_muted_words(client).await?;
+    let words = fetch_muted_words(client).await?;
     let result = SyncMuteResult {
         blocked_users: ids.len() as u32,
-        word_rules: word_rules.len() as u32,
+        word_rules: words.rules.len() as u32,
     };
-    let snapshot = ServerMuteSnapshot::new(ids.iter().cloned(), word_rules.iter().map(|r| r.key()));
+    let snapshot = ServerMuteSnapshot::new(ids.iter().cloned(), words.keys);
     // メモリ上の集合の差し替えは、境界を捨てる前に行う。書き込み側は、ミュート設定を読む前に世代を
     // 控えるので、境界の世代が進んだ時点で、新しい集合がすでに反映されている(Issue #454, #452)。
     state.set_server_mutes(account_id, ids);
-    state.set_server_word_mutes(account_id, word_rules);
+    state.set_server_word_mutes(account_id, words.rules);
     reflect_server_mute_change(state, account_id, snapshot).await;
     Ok(result)
 }
@@ -497,9 +504,9 @@ mod tests {
 
     /// `sync_server_mutes_core` の結合テスト(Issue #11)。実HTTP経由(wiremockモック)で
     /// `mute/list`/`blocking/list`/`i` を叩き、レスポンスが `AppState` まで正しく届いて
-    /// `is_word_muted` が実際に効くことを検証する。`parse_muted_words` 単体の網羅は
-    /// `api::mutes::tests` 側の8ケースに任せ、ここでは「実HTTPレスポンス→state反映」という
-    /// 単体テストでは埋まらない結合部分だけを見る。
+    /// `is_word_muted` が実際に効くことを検証する。`mutedWords` の要素ごとのパース(ルールとキー。
+    /// `parse_muted_word_entries`)の網羅は `api::mutes::tests` 側に任せ、ここでは
+    /// 「実HTTPレスポンス→state反映」という単体テストでは埋まらない結合部分だけを見る。
     #[tokio::test(flavor = "multi_thread")]
     async fn sync_server_mutes_core_populates_state_from_real_http_responses() {
         let mock = MockServer::start().await;
@@ -749,6 +756,103 @@ mod tests {
         sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
 
         assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_clears_the_accounts_boundaries_when_only_the_i_flag_of_a_regex_was_removed() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/i"])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/"])).await; // i を外した(一致が減る=解除)
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert!(boundaries_of(&state, "c1").await.is_empty());
+        assert!(boundaries_of(&state, "c2").await.is_empty());
+        assert_eq!(boundaries_of(&state, "c3").await, kept(), "他のアカウントのカラムは、そのまま");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_boundaries_when_an_invalid_regex_stays_on_the_server() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        // 以前のビルドでは妥当だったルールが、いまは不正で落ちる状況。保存値には、そのキーが残っている
+        state.settings.save_server_mute_snapshot("acc1", &snap(&[], &["r:/(unclosed/i"])).unwrap();
+        mount_server_mutes(&mock, &[], serde_json::json!(["/(unclosed/i", "/(unclosed/i"])).await; // 重複もある
+
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        for column_id in ["c1", "c2", "c3"] {
+            assert_eq!(boundaries_of(&state, column_id).await, kept(), "不正でも、サーバーに残っていれば解除ではない");
+        }
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&[], &["r:/(unclosed/i"])),
+            "保存値は変わらない(重複も除かれる)"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_keeps_boundaries_and_the_snapshot_when_the_same_valid_regex_is_synced_twice() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/i"])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        let first = state.settings.load_server_mute_snapshot("acc1").unwrap();
+
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap(); // サーバーは変わっていない
+
+        for column_id in ["c1", "c2", "c3"] {
+            assert_eq!(boundaries_of(&state, column_id).await, kept(), "同じ集合の再同期では捨てない");
+        }
+        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), first);
+        assert_eq!(first, Some(snap(&[], &["r:/spoiler/i"])));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_waits_for_the_same_accounts_sync_lock_before_fetching() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let lock = state.server_mute_sync_lock("acc1");
+        let guard = lock.lock().await; // 別の同期が、同じアカウントで実行中
+
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            sync_server_mutes_core(&state, "acc1", &client),
+        )
+        .await;
+
+        assert!(blocked.is_err(), "ロックを持たれている間は完了しない");
+        assert!(mock.received_requests().await.unwrap().is_empty(), "取得より前にロックを待つ");
+        drop(guard);
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        assert!(!mock.received_requests().await.unwrap().is_empty(), "ロックを放すと取得が走る");
+        assert!(state.is_server_muted("acc1", "u1"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_of_another_account_is_not_blocked_by_a_held_sync_lock() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let lock = state.server_mute_sync_lock("acc1");
+        let _guard = lock.lock().await;
+
+        let done = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            sync_server_mutes_core(&state, "acc2", &client),
+        )
+        .await;
+
+        assert!(done.expect("別アカウントの同期は待たされない").is_ok());
+        assert!(state.is_server_muted("acc2", "u1"));
     }
 }
 

@@ -20,7 +20,7 @@ use std::sync::Mutex;
 pub struct ServerMuteSnapshot {
     /// ミュート/ブロックしているユーザーID(ソート済み・重複なし)。
     pub users: Vec<String>,
-    /// ワードミュートのルールの文字列表現(`WordMuteRule::key()`。ソート済み・重複なし)。
+    /// ワードミュートの要素を表すキー(`api::mutes::MutedWordEntry::key`。ソート済み・重複なし)。
     pub words: Vec<String>,
 }
 

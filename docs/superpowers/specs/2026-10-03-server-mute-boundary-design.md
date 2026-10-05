@@ -44,6 +44,8 @@ Misskey 側でミュート(ユーザー、ワードミュート)を解除して�
 
 既知の制限: `i` フラグは `RegexBuilder::case_insensitive` で適用されるので、`as_str()` に残らない。パターンが同じで、`i` フラグだけを外した(一致が減る)場合は、解除として検出できない。極端な端の例として、制限として受け入れる(カラムの編集、またはローカル NG の保存で直る)。
 
+→ Issue #456 P2 で解消した(キーを生の `mutedWords` 要素から作る。`docs/superpowers/specs/2026-10-04-server-mute-sync-correctness-design.md`)。
+
 ### 同期の流れ(`src-tauri/src/commands/mute.rs` の `sync_server_mutes_core`)
 
 1. ユーザー(`fetch_muted_and_blocked`)とワード(`fetch_muted_words`)を取得する。どちらかの失敗は、何も変えずに `Err`(現状どおり)。

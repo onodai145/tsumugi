@@ -9,7 +9,7 @@ use crate::store::{DraftStore, NoteCacheStore, SettingsStore};
 use crate::stream::ConnectionManager;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// REST/WebSocket 双方で送る User-Agent。
 pub const USER_AGENT: &str = concat!(
@@ -121,6 +121,10 @@ pub struct AppState {
     /// account_id -> サーバ側ワードミュート(mutedWords)のルール一覧。
     /// server_mutes と同じタイミングで同期し、ノート本文/CWの追加フィルタに使う(Issue #11)。
     pub server_word_mutes: Mutex<HashMap<String, Vec<WordMuteRule>>>,
+    /// account_id -> サーバー側ミュート同期の排他ロック。同じアカウントの `sync_server_mutes_core` を、
+    /// 取得から保存値の書き込みまで直列にする(Issue #456)。必要になったときに作る。
+    /// ロックの順序は「このロック → 境界の書きロック(`ColumnFence::invalidate_boundaries`)」のみ。
+    server_mute_sync_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub settings: SettingsStore,
     pub drafts: DraftStore,
     pub cache: NoteCacheStore,
@@ -182,6 +186,7 @@ impl AppState {
             mute: Mutex::new(mute),
             server_mutes: Mutex::new(HashMap::new()),
             server_word_mutes: Mutex::new(HashMap::new()),
+            server_mute_sync_locks: Mutex::new(HashMap::new()),
             settings,
             drafts,
             cache,
@@ -225,6 +230,23 @@ impl AppState {
             .lock()
             .unwrap()
             .insert(account_id.to_string(), rules);
+    }
+
+    /// account のサーバー側ミュート同期の排他ロック。同じアカウントには同じ `Arc` を返す。
+    pub fn server_mute_sync_lock(&self, account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(
+            self.server_mute_sync_locks
+                .lock()
+                .unwrap()
+                .entry(account_id.to_string())
+                .or_default(),
+        )
+    }
+
+    /// account の同期ロックのエントリを破棄する(アカウント削除時)。実行中の同期は `Arc` を持つので、
+    /// そのまま完了する。
+    pub fn forget_server_mute_sync_lock(&self, account_id: &str) {
+        self.server_mute_sync_locks.lock().unwrap().remove(account_id);
     }
 
     /// account の接続先サーバーのバージョン（取得済みの場合のみ）。
@@ -463,5 +485,27 @@ mod tests {
 
         assert_eq!(m.resume_hit(), 2);
         assert_eq!(m.resume_fallback(), 1);
+    }
+
+    #[test]
+    fn server_mute_sync_lock_is_shared_per_account_and_separate_across_accounts() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let a1 = state.server_mute_sync_lock("a1");
+        let a1_again = state.server_mute_sync_lock("a1");
+        let a2 = state.server_mute_sync_lock("a2");
+
+        assert!(std::sync::Arc::ptr_eq(&a1, &a1_again));
+        assert!(!std::sync::Arc::ptr_eq(&a1, &a2));
+    }
+
+    #[test]
+    fn forget_server_mute_sync_lock_drops_the_entry() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let before = state.server_mute_sync_lock("a1");
+
+        state.forget_server_mute_sync_lock("a1");
+
+        assert!(!std::sync::Arc::ptr_eq(&before, &state.server_mute_sync_lock("a1")));
     }
 }
