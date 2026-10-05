@@ -211,12 +211,23 @@ pub async fn set_mute(state: State<'_, AppState>, config: MuteConfig) -> Result<
 }
 
 /// ミュート設定を保存して差し替え、全カラムの backfill 境界を捨てる(`set_mute` の本体)。
+async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
+    apply_mute_config_with(state, config, || state.cache.clear_all_fetch_boundaries()).await
+}
+
+/// `apply_mute_config` の中核。境界を捨てる処理を `clear_boundaries` として受け取り、順序をテストで
+/// 固定できるようにしている(Issue #456)。
 ///
 /// `state.mute` の差し替えは、境界を捨てる**前**に行う。書き込み側は、ミュート設定を読む前に
 /// 世代を控えるので、境界の世代が進んだ時点で、新しい設定がすでに反映されている(Issue #452)。
 /// 境界を捨てる処理は、境界の書きロックの中で行う。実行中の取得が、旧ミュートの結果に基づく境界を
 /// 直後に書き込んで復活させないため(`ColumnFence::invalidate_boundaries`)。
-async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
+/// `clear_boundaries` の失敗は無視する(現状の挙動)。
+async fn apply_mute_config_with<F, Fut>(state: &AppState, config: MuteConfig, clear_boundaries: F) -> Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
     state.settings.save_mute(&config)?;
     *state.mute.lock().unwrap() = config;
     // ミュート解除方向の変更は、除外済み(=キャッシュされていない)ノートを読み直せないため
@@ -224,7 +235,7 @@ async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
     state
         .column_fence
         .invalidate_boundaries(|| async {
-            let _ = state.cache.clear_all_fetch_boundaries().await;
+            let _ = clear_boundaries().await;
         })
         .await;
     Ok(())
@@ -853,6 +864,36 @@ mod tests {
 
         assert!(done.expect("別アカウントの同期は待たされない").is_ok());
         assert!(state.is_server_muted("acc2", "u1"));
+    }
+
+    #[tokio::test]
+    async fn apply_mute_config_replaces_state_mute_before_clearing_boundaries() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let config = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+        let seen_when_clearing = std::sync::Mutex::new(None);
+
+        apply_mute_config_with(&state, config.clone(), || async {
+            // 境界を捨てる時点で、新しい設定がすでに反映されていること(Issue #452)
+            *seen_when_clearing.lock().unwrap() = Some(state.mute.lock().unwrap().clone());
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(seen_when_clearing.lock().unwrap().as_ref(), Some(&config));
+        assert_eq!(state.settings.load_mute().unwrap(), config, "保存もされる");
+    }
+
+    #[tokio::test]
+    async fn apply_mute_config_still_applies_and_saves_when_clearing_boundaries_fails() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        let config = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+
+        let result = apply_mute_config_with(&state, config.clone(), || async { Err(Error::Invalid("db down".into())) }).await;
+
+        assert!(result.is_ok(), "境界を捨てる処理の失敗は無視する(現状の挙動)");
+        assert_eq!(*state.mute.lock().unwrap(), config);
+        assert_eq!(state.settings.load_mute().unwrap(), config);
     }
 }
 
