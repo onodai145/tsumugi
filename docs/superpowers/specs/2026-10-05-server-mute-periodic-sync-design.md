@@ -56,6 +56,11 @@ Rust 側は、すでに次が揃っている。
 
 - **Rust 側のスケジューラ(`tokio` の `interval` を `setup` で起動)**: 認証済みのアカウントの列挙、アカウントの追加・削除への追従、停止(`teardown`)を、新たに作る必要がある。フロントには、同じ作りの先例(新バージョン確認、キャッシュ間引き)があり、`this.accounts` を参照できる。フロントのタイマーが、変更が小さい。
 - **ウィンドウがフォーカスされたときに同期する**: 実装が増え、フォーカスの度に通信が走る。ミュートの変更頻度に見合わない。
+- **ストリーミング(push)で、変更を受け取る**: Misskey のソース(`misskey-dev/misskey` の `develop`)で確認した。
+  - ワードミュート: `i/update`(`packages/backend/src/server/api/endpoints/i/update.ts`)が、更新後に `main` ストリームへ `meUpdated`(`MeDetailed`。`mutedWords` を含む)を流す(`GlobalEventService.ts` の `MainEventTypes`)。公式ドキュメント(`misskey-hub.net` の `main` チャンネルのページ)は、`meUpdated` を載せていない(古いと見られる)。
+  - ユーザーのミュート/ブロック: `mute` / `unmute` / `blockingCreated` / `blockingDeleted` は、サーバー内部のイベント(`InternalEventTypes`)で、クライアント向けには流れない。
+  - したがって、push だけでは、ユーザーのミュート/ブロックの変更を受け取れず、ポーリングが必要。push で補えるのは、ワードミュートの反映を早めることだけ。`meUpdated` を受けるには、アカウントごとに `main` を購読し続ける必要がある(いまは、通知カラムのあるアカウントだけが `main` を購読する。`stream/connection.rs`)。`meUpdated` はプロフィールの更新の度に飛ぶので、受けるたびに同期が走る。`stream/connection.rs` と購読の変更が要るので、最適化として、後続の候補にする。
+  - 確認の限界: ソースは、ページの要約を取得して確認した(原文を直接は読んでいない)。`develop` ブランチの内容で、使っているインスタンスのバージョンや、互換の別実装(Sharkey など)で同じかは、確認していない。リポジトリの OpenAPI スナップショット(`2025.4.1-io.12b`)の `MeDetailed` に、`mutedWords` が含まれることは確認した。
 - **ETag などの条件付きリクエストで、変更が無ければ省く**: 6時間間隔の通信量なら、省く必要が無い(対応の有無も、調べていない)。
 
 ## テスト
@@ -78,3 +83,4 @@ Vitest。既存の `boot()` とフェイクタイマーのテスト(`store.svelt
 
 - 同期間隔の設定化。
 - 同期の結果に応じた、表示済みノートの再フィルタ。
+- ワードミュートだけ、`meUpdated`(`main` ストリーム)を契機に、即時に同期する(上記「検討した代替案」参照)。
