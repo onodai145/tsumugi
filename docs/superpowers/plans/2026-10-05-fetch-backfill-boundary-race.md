@@ -25,7 +25,7 @@
 - 境界の行が無いソースは、延長で**挿入されない**(`extend_fetch_boundaries` は行が無ければ挿入するので、計画に入れない責務が `plan_boundary_extend` にある。Task 1 のテスト)。
 - 境界を読めなかったとき(DB の失敗)、延長を飛ばし、ノートのキャッシュは成功して `Some(Ok(()))` を返すこと(Task 1 のテスト)。
 - 取得中にギャップ埋めが境界を引き上げたとき、`fetch_backfill` の延長が、引き上げた境界を古い方へ広げないこと(Task 1 の並行テスト)。
-- 未知のグループ、未登録のアカウントで `update_column_core` が `Err` を返したとき、定義・境界・世代・ストリームのどれも変わらないこと(Task 2 のテスト)。
+- 未知のグループ、未登録のアカウントで `update_column_core` が `Err` を返したとき、定義・境界・世代のどれも変わらないこと(Task 2 のテスト。ストリームは、`open_count()` の実効性が無いので検証しない)。
 
 ---
 
@@ -354,7 +354,8 @@ git commit -m "fix: fetch_backfillの境界の延長を、ロックの中で読�
         );
         let still_current = state.column_fence.write_if_current("c1", before, |_| async {}).await;
         assert!(still_current.is_some(), "世代は進まない(実行中の取得を捨てない)");
-        assert_eq!(state.connections.open_count(), 0);
+        // ストリームが閉じないことは、ここでは検証しない(`open_count()` はアカウント単位の接続数で、
+        // 事前に接続を開かないテストでは、旧い順序でも 0 のままになる)。
     }
 
     #[tokio::test(flavor = "multi_thread")]

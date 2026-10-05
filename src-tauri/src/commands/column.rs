@@ -3407,7 +3407,7 @@ mod tests {
 
         assert!(matches!(written, Some(Ok(()))));
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1); // ノートは書かれる
-        // `extend` は行が無ければ挿入するので、飛ばさないと、捨てた境界が復活する
+        // ロックの中で読む境界は、捨てた後なので空で、延長は計画されない(復活しない)
         assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
     }
 
@@ -3701,6 +3701,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn commit_backfill_writes_does_not_extend_a_boundary_rebuilt_after_set_mute_by_an_older_epoch() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        let epoch = fence.begin("c1"); // 旧ミュートで取得を始めた
+        simulate_set_mute(&fence, &cache).await;
+        // set_mute の後に、新ミュートで開き直されたカラムが、境界を作り直した(open_stream_and_fetch)。
+        // ロックの中で読む境界は空ではないので、`boundaries_ok` のガードが無いと、旧ミュートの結果で延長してしまう
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+
+        let written = commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n600"), // 作り直された境界 n500 に対して、連続している
+        )
+        .await;
+
+        assert!(matches!(written, Some(Ok(()))));
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n500")],
+            "旧ミュートの結果に基づく延長は、作り直された境界を動かさない(Issue #452)"
+        );
+    }
+
+    #[tokio::test]
     async fn commit_backfill_writes_skips_the_extension_when_the_boundaries_cannot_be_read() {
         let fence = ColumnFence::default();
         // 境界のテーブルを失った DB。`get_fetch_boundaries` が実際の SQL エラーになる(ノートの表は生きている)
@@ -3763,8 +3791,10 @@ mod tests {
                 .await
             })
         };
-        tokio::task::yield_now().await;
-        tokio::task::yield_now().await; // commit が、ロックの待ちに入る
+        // commit が、ロックの待ちに入るまで待つ。ロックの外で境界を読む実装(変異)が、先に境界を読み終える
+        // 時間も兼ねる(`get_fetch_boundaries` は別スレッドで動くので、`yield_now` では足りない)。
+        // 正しい実装は、待ち時間の長さによらず通る。
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         gate.add_permits(1); // ギャップ埋めが、境界を引き上げて、ロックを放す
 
         gap_fill.await.unwrap();
@@ -3810,7 +3840,8 @@ mod tests {
         );
         let still_current = state.column_fence.write_if_current("c1", before, |_| async {}).await;
         assert!(still_current.is_some(), "世代は進まない(実行中の取得を捨てない)");
-        assert_eq!(state.connections.open_count(), 0);
+        // ストリームが閉じないことは、ここでは検証しない: `open_count()` はアカウント単位の接続数で、事前に
+        // 接続を開いていないテストでは、`invalidate` の後で失敗する旧い順序でも 0 のままになるため。
     }
 
     #[tokio::test(flavor = "multi_thread")]
