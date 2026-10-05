@@ -3522,10 +3522,22 @@ mod tests {
             .await;
     }
 
+    /// すべての POST に、ノート1件のページを返す(書き込みが漏れたときに、キャッシュに入るものがあるように)。
+    async fn mount_one_note_page(mock: &MockServer) {
+        let page = serde_json::json!([{
+            "id": "n9",
+            "createdAt": "2026-07-05T12:00:00.000Z",
+            "text": "hello",
+            "user": { "id": "u1", "username": "alice", "host": null },
+            "visibility": "home"
+        }]);
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200).set_body_json(page)).mount(mock).await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn open_stream_and_fetch_returns_an_error_and_writes_nothing_when_the_epoch_is_stale() {
         let mock = MockServer::start().await;
-        mount_empty_pages(&mock).await;
+        mount_one_note_page(&mock).await; // 現行の世代なら、n9 がキャッシュされ、境界が書かれる
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
@@ -3546,7 +3558,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn open_stream_and_fetch_succeeds_for_a_current_epoch() {
         let mock = MockServer::start().await;
-        mount_empty_pages(&mock).await;
+        mount_one_note_page(&mock).await;
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Tag { tag: "foo".into() }); // ストリームを開かないソース
         state.settings.upsert_column(&column).unwrap();
@@ -3558,7 +3570,8 @@ mod tests {
         let result = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &current).await;
 
         let (notes, notifications) = result.unwrap();
-        assert!(notes.is_empty() && notifications.is_empty());
+        assert_eq!(notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n9"], "ページが実際にパースされて流れる");
+        assert!(notifications.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
