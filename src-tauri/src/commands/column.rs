@@ -255,12 +255,25 @@ pub async fn update_column(
     filter: FilterQuery,
     title: Option<String>,
 ) -> Result<OpenedColumn> {
-    let mut column = load_column(&state, &column_id)?;
+    update_column_core(&app, &state, column_id, kind, filter, title).await
+}
+
+/// `update_column` の本体。`AppHandle` / `State` を引数に取らない形(`R: Runtime` ジェネリック)にして、
+/// `mock_app()` からテストできるようにしている(`sync_server_mutes_core` と同じ狙い。Issue #456)。
+async fn update_column_core<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    column_id: String,
+    kind: ColumnKind,
+    filter: FilterQuery,
+    title: Option<String>,
+) -> Result<OpenedColumn> {
+    let mut column = load_column(state, &column_id)?;
     let is_notif = matches!(kind, ColumnKind::Notifications);
     let resolved = if is_notif {
         None
     } else {
-        Some(resolve_sources(&state, &column.account_id, &kind, &filter).await?)
+        Some(resolve_sources(state, &column.account_id, &kind, &filter).await?)
     };
 
     column.kind = kind;
@@ -290,7 +303,7 @@ pub async fn update_column(
         .ok_or_else(|| Error::Invalid(format!("unknown group: {}", column.group_id)))?;
     let (host, token) = state.host_token(&column.account_id)?;
     let (notes, notifications) =
-        open_stream_and_fetch(&app, &state, &column, resolved, host, token, &epoch).await?;
+        open_stream_and_fetch(app, state, &column, resolved, host, token, &epoch).await?;
 
     Ok(OpenedColumn {
         column,
@@ -579,18 +592,23 @@ pub async fn move_tab(
 #[tauri::command]
 #[specta::specta]
 pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Result<()> {
-    state.settings.delete_column(&column_id)?;
+    close_column_core(&state, &column_id).await
+}
+
+/// `close_column` の本体。`State` を引数に取らない形にして、テストできるようにしている(Issue #456)。
+async fn close_column_core(state: &AppState, column_id: &str) -> Result<()> {
+    state.settings.delete_column(column_id)?;
     // ストリームを閉じる処理と clear を、世代を進めるロックの中で行う。進行中の open_stream_and_fetch は、
     // ストリームを開く処理も同じロックの中なので、閉じた後に開き直すことも、書き込みを残すことも無い
     // (孤児データとリークしたストリームを作らない, Issue #446)。
     let (_, cleared) = state
         .column_fence
-        .invalidate(&column_id, || async {
-            state.connections.close(&column_id);
-            state.cache.clear_column_notes(&column_id).await
+        .invalidate(column_id, || async {
+            state.connections.close(column_id);
+            state.cache.clear_column_notes(column_id).await
         })
         .await;
-    state.column_fence.remove(&column_id);
+    state.column_fence.remove(column_id);
     cleared?;
     state.settings.delete_empty_groups()?;
     Ok(())
@@ -823,8 +841,8 @@ async fn resolve_sources(
 }
 
 /// タブのストリームを開き、初期ページ(ノート or 通知)を取得する。
-async fn open_stream_and_fetch(
-    app: &AppHandle,
+async fn open_stream_and_fetch<R: Runtime>(
+    app: &AppHandle<R>,
     state: &AppState,
     column: &Column,
     resolved: Option<ResolvedSources>,
@@ -870,8 +888,8 @@ async fn open_stream_and_fetch(
 
 /// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
 /// 複数ソースは column_id を共有しつつ sub_key を分けて同一カラムへ多重購読させる。
-fn open_streams_only(
-    app: &AppHandle,
+fn open_streams_only<R: Runtime>(
+    app: &AppHandle<R>,
     state: &AppState,
     column: &Column,
     resolved: &ResolvedSources,
@@ -2074,6 +2092,8 @@ fn filter_notifications(
 mod tests {
     use super::*;
     use crate::domain::{User, Visibility};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn note(id: &str, created_at: i64) -> Note {
         Note {
@@ -3465,5 +3485,157 @@ mod tests {
         assert!(begin_and_load_column(&state, "closed").is_err());
 
         assert!(!state.column_fence.tracks("closed"));
+    }
+
+    /// `acc1` を登録し、API を `mock` へ向け、グループ `g1` を持つ `AppState`。
+    fn command_state(mock: &MockServer) -> AppState {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory());
+        state.register_test_account("acc1");
+        state.set_test_api_base(mock.uri());
+        state
+            .settings
+            .upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 400, auto: false })
+            .unwrap();
+        state
+    }
+
+    fn command_column(id: &str, kind: ColumnKind) -> Column {
+        Column {
+            id: id.into(),
+            account_id: "acc1".into(),
+            kind,
+            order: 0,
+            filter: FilterQuery::Keywords(vec![]),
+            notify_sound: false,
+            notify_desktop: false,
+            notify_sound_choice: String::new(),
+            group_id: "g1".into(),
+            title: None,
+        }
+    }
+
+    /// すべての POST に、空のページを返す。
+    async fn mount_empty_pages(mock: &MockServer) {
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(mock)
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn open_stream_and_fetch_returns_an_error_and_writes_nothing_when_the_epoch_is_stale() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        let app = tauri::test::mock_app();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let (host, token) = state.host_token("acc1").unwrap();
+        let stale = state.column_fence.begin("c1");
+        state.column_fence.invalidate("c1", || async {}).await; // 取得中に update_column / close_column が走った
+
+        let result = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &stale).await;
+
+        assert!(matches!(result, Err(Error::Invalid(_))), "古ければ、空の成功ではなく Err を返す");
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
+        assert!(state.cache.load_cached("c1", 10).await.unwrap().is_empty(), "ノートを書かない");
+        assert_eq!(state.connections.open_count(), 0, "ストリームを開かない");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn open_stream_and_fetch_succeeds_for_a_current_epoch() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Tag { tag: "foo".into() }); // ストリームを開かないソース
+        state.settings.upsert_column(&column).unwrap();
+        let app = tauri::test::mock_app();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let (host, token) = state.host_token("acc1").unwrap();
+        let current = state.column_fence.begin("c1");
+
+        let result = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &current).await;
+
+        let (notes, notifications) = result.unwrap();
+        assert!(notes.is_empty() && notifications.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_column_core_saves_the_new_definition_clears_the_cache_and_stales_earlier_epochs() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await;
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
+        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap(); // 旧定義で貯めた境界
+        let in_flight = state.column_fence.begin("c1"); // 旧定義で取得を始めた
+        let app = tauri::test::mock_app();
+
+        let opened = update_column_core(
+            app.handle(),
+            &state,
+            "c1".into(),
+            ColumnKind::Tag { tag: "foo".into() },
+            FilterQuery::Keywords(vec![]),
+            Some("新しい名前".into()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(opened.column.kind, ColumnKind::Tag { tag: "foo".into() });
+        let saved = state.settings.load_columns().unwrap();
+        assert_eq!(saved[0].kind, ColumnKind::Tag { tag: "foo".into() });
+        assert_eq!(saved[0].title.as_deref(), Some("新しい名前"));
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "旧定義の境界は消える");
+        let late = state.column_fence.write_if_current("c1", &in_flight, |_| async {}).await;
+        assert!(late.is_none(), "旧定義の取得の書き込みは捨てられる");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_column_core_returns_an_error_for_an_unknown_column() {
+        let mock = MockServer::start().await;
+        let state = command_state(&mock);
+        let app = tauri::test::mock_app();
+
+        let result = update_column_core(
+            app.handle(),
+            &state,
+            "ghost".into(),
+            ColumnKind::Home,
+            FilterQuery::Keywords(vec![]),
+            None,
+        )
+        .await;
+
+        assert!(matches!(result, Err(Error::Invalid(_))));
+        assert!(!state.column_fence.tracks("ghost"), "未知のカラムのエントリを作らない");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn close_column_core_removes_the_column_clears_the_cache_and_stales_earlier_epochs() {
+        let mock = MockServer::start().await;
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
+        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap();
+        let in_flight = state.column_fence.begin("c1");
+
+        close_column_core(&state, "c1").await.unwrap();
+
+        assert!(state.settings.load_columns().unwrap().is_empty());
+        assert!(state.settings.load_groups().unwrap().is_empty(), "空になったグループも消える");
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+        assert!(!state.column_fence.tracks("c1"), "フェンスのエントリが残らない");
+        let late = state.column_fence.write_if_current("c1", &in_flight, |_| async {}).await;
+        assert!(late.is_none(), "閉じる前の取得の書き込みは捨てられる");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn close_column_core_leaves_no_fence_entry_for_an_unknown_column() {
+        let mock = MockServer::start().await;
+        let state = command_state(&mock);
+
+        close_column_core(&state, "ghost").await.unwrap();
+
+        assert!(!state.column_fence.tracks("ghost"));
     }
 }
