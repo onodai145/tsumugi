@@ -1389,6 +1389,9 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
   afterEach(() => {
     app.teardown();
     vi.useRealTimers();
+    // boot() が書き換えるので、後ろに足されるテストへ漏らさない
+    app.accounts = [];
+    app.groups = [];
   });
 
   /// フェイクタイマーで boot() し、その間の呼び出しを数えないよう、記録を空にする。
@@ -1464,6 +1467,8 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
     expect(warns).toHaveLength(1);
   });
 
+  // このテストが見るのは、boot() が起動時の同期を呼んで、成功のログを出すところまで。同期の後の boot() は、
+  // モックの形が足りず(list_groups が配列でない)途中で失敗するが、このテストの関心の外(失敗は握りつぶす)。
   it("起動時の同期は、これまでどおり、成功のログを出す(quiet は定期実行だけ)", async () => {
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "list_accounts") return [account("acc1")];
