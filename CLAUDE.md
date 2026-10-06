@@ -20,6 +20,7 @@ cd src-tauri && cargo test --lib postgres_ -- --ignored                # Postgre
 cd src-tauri && cargo test --lib mysql_ -- --ignored --test-threads=2  # keep parallelism low: full parallelism starts one DB container per test at once and OOMs (dropping containers at test end doesn't lower that peak). Each test's `TestBackend` guard removes its container and anonymous volume on drop, even on panic; only a killed run leaves leftovers — remove those mysql:8.1/postgres containers by ID with `docker rm -fv <id>` — `-v` is required: both images declare an anonymous VOLUME, so plain `docker rm -f` orphans one volume per container (`docker volume ls -f dangling=true`)
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
 cd frontend  && pnpm test                # Vitest unit tests
+cd frontend  && npx vitest run <path>   # single file — `pnpm test -- <path>` ignores the path and runs the whole suite
 
 scripts/release.sh X.Y.Z      # bump version in package.json/Cargo.toml/tauri.conf.json/Cargo.lock and the README.md download links, generate CHANGELOG.md, create release/vX.Y.Z branch + commit — never hand-edit these version fields with sed
 ```
@@ -69,6 +70,8 @@ If the build fails during Gradle configuration with `A problem occurred configur
 - `bindings/tauri.gen.ts` — **generated**, do not hand-edit; regenerate via `cargo test` or `cargo tauri dev`.
 
 `frontend/index.html` sets `<meta name="referrer" content="no-referrer">` so external images (avatars, emoji, Instance Ticker icons) aren't 403'd by Cloudflare-style hotlink rules (Issue #411). An embed that needs a Referer (e.g. the `UrlPreviewCard` player iframe) must set its own `referrerpolicy`.
+
+WebKitGTK layout quirk (Issue #166): when an `overflow:auto` box that needs a horizontal scrollbar (e.g. the code-block `pre`) is first laid out lazily, the scrollbar's height isn't propagated to its parent, so the next sibling (the note footer) stays overlapped by the scrollbar. Forcing a synchronous layout right after DOM insertion fixes it — `CodeBlock.svelte` reads `offsetHeight` for this. When investigating similar bugs, don't read geometry (`getBoundingClientRect` etc.) right after inserting a node: that read itself triggers the heal and masks the bug.
 
 ### progenitor is not used for REST codegen
 Misskey's OpenAPI spec (`/api-doc.json`, snapshotted at `src-tauri/openapi/misskey-api-doc.json`) is **3.1.0**. `progenitor` depends on the `openapiv3` crate, which only supports OpenAPI 3.0.x, so it fails to parse Misskey's spec (nullable fields expressed as `type: ["string", "null"]`). This was tried and rejected during Phase 1 — see `docs/design/misskey-multicolumn-client-design.md` §6.1. The REST client is fully hand-written instead (`src-tauri/src/api/`); don't reintroduce a progenitor build step without re-validating against the current spec.
