@@ -22,9 +22,26 @@ Issue #57 / PR #64 でクリップボード**画像**(スクリーンショッ�
 - `get_files()` は `["file:///home/.../xxx.mp4"]` を返した(**非画像ファイルで動作を確認**)。
 - `get_files()` の戻り値は `file://` URI 文字列のままで、パスへのデコードは呼び出し側の責務。
 - Wayland バックエンドは内部で `wl-clipboard-rs`(`ext-data-control` / `wlr-data-control` プロトコル必須)を使う。`wl-clipboard-rs` は既に `Cargo.lock` に存在する(arboard 経由)。
-- `text/plain` も同時にクリップボードに入っていた。従来の `handlePaste`(`text/plain` が非空なら介入しない)ではファイル貼り付けが素通りする。
+- OS クリップボードには `text/plain` も同時に入っていた。ただし WebKitGTK は DOM 側にこれを見せない(後述の「`clipboardData` の実測」参照)。WebView 実装によっては両方見える可能性があるため、`handlePaste` は `text/plain` の有無に依存しない判定にする。
 
 未検証: GNOME(Mutter)の Wayland、X11、Windows、macOS、Dolphin 等の他ファイルマネージャ。
+
+### `clipboardData` の実測(2026-10-06、WebKitGTK 2.52.6、Xvfb + `GDK_BACKEND=x11`)
+
+最小の WebKit2 4.1 ハーネス(textarea の `paste` イベントで `clipboardData` を読む)に、GTK の selection API で OS クリップボードのターゲットを偽装して貼り付けた結果。
+
+| OS クリップボードのターゲット | `types` | `getData("text/plain")` | `getData("text/uri-list")` | `files.length` |
+|---|---|---|---|---|
+| `text/uri-list` のみ | `["text/uri-list"]` | 空 | 空 | 0 |
+| `text/uri-list` + `text/plain` + `UTF8_STRING` + `x-special/gnome-copied-files` | `["text/uri-list"]` | **空(隠される)** | 空 | 0 |
+| `text/plain` + `UTF8_STRING` のみ | `[]` | 本文 | 空 | 0 |
+
+分かったこと:
+- `text/uri-list` が OS クリップボードにあると、`types` に `text/uri-list` が**見える**(同期判定に使える)。
+- ただし `text/uri-list` があると `text/plain` は DOM から**見えなくなる**。URI の中身も `getData` では読めない。つまり、ファイル参照が付いたコピーでは DOM 経由でテキストを復元できない。
+- `text/plain` のみのとき `types` は空だが `getData("text/plain")` は取れる(`types` は `text/plain` の有無の判定には使えない)。
+
+未検証: 実 Wayland セッションの WebKitGTK(ハーネスは X11)、WKWebView(macOS)、WebView2(Windows)。実 Wayland は手動確認でデバッグブリッジを使って確認する。
 
 ## スコープ
 
@@ -64,6 +81,20 @@ pub async fn read_clipboard_files() -> Result<Vec<String>>
 - ファイル参照が無い場合は `Ok(vec![])` を返し、エラーにしない(#57 の `Error::Invalid` による「画像なし」シグナルとは異なり、「ファイルが無い」は通常の分岐であるため)。
 - クリップボードの初期化・読み取り失敗(data-control 非対応のコンポジタ等)も `Ok(vec![])` として扱い、`log::warn` で理由を出す(パスやトークンはログに出さない)。ユーザーにはエラーを表示せず、画像 → テキストのフォールバックに進ませる。
 
+### コマンド `read_clipboard_text`
+
+`commands/note.rs` に置き、`specta_builder()` に登録する。`read_clipboard_image` と同じく `tauri-plugin-clipboard-manager` の `ClipboardExt::read_text()` を `spawn_blocking` 内で呼ぶ。
+
+```rust
+#[tauri::command]
+#[specta::specta]
+pub async fn read_clipboard_text(app: AppHandle) -> Result<String>
+```
+
+- クリップボードにテキストが無い、または読み取りに失敗した場合は `Ok(String::new())` を返す(エラーにしない)。
+- 用途は、`handlePaste` がテキストを復元する場合に限る(`text/uri-list` が付いたコピーでは DOM から `text/plain` を取れないため)。
+- 新規依存・権限の追加は不要(Rust 側からプラグインを呼ぶため。フロントの `@tauri-apps/plugin-clipboard-manager` は導入しない)。
+
 ### `file_uris_to_paths`
 
 - `url::Url::parse` → `to_file_path()` でパーセントデコードとプラットフォーム別パス変換(日本語・空白・`%` 入りのファイル名、Windows の `file:///C:/...`)を任せる。
@@ -95,15 +126,15 @@ shouldInterceptPaste(types: readonly string[], plainText: string): boolean
 
 1. `commands.readClipboardFiles()` が 1 件以上返す → 各パスを `addLocalAttachment(path)` に渡す(画像拡張子はプレビュー付き)。
 2. 空なら従来どおり `commands.readClipboardImage()`(#57 の挙動。`invalid` は黙って無視)。
-3. どちらも無く、元の `plainText` が非空だった場合(例: ブラウザで URL をコピーすると `text/uri-list` が付くが `file://` ではない)→ 止めたテキストを `document.execCommand("insertText", false, plainText)` でカーソル位置に挿入し直す(undo 履歴も保たれる)。
+3. どちらも無い場合 → `commands.readClipboardText()` でテキストを読み、非空なら `document.execCommand("insertText", false, text)` でカーソル位置に挿入し直す(undo 履歴も保たれる)。例: ブラウザで URL をコピーして `text/uri-list` が付いているが `file://` ではない場合や、ファイル参照が得られなかった場合。この場合 `text/plain` は DOM から見えないため、`clipboardData` ではなく Rust 側から読む。
 
 ファイルを画像より優先するのは、画像ファイルをコピーした場合に元のファイル名と形式のまま添付でき、生ピクセルから PNG へ再エンコードされないため。
 
-### 未検証の前提とフォールバック
+### `types` の前提と未検証部分
 
-`clipboardData.types` に `text/uri-list` が実際に見えるかは、WebKitGTK / WKWebView / WebView2 のいずれでも**未検証**(#57 の調査では、画像は WebKitGTK で `types` が空だった)。実装計画の最初のタスクで確認する(`dbus-run-session` + Xvfb 上で `xclip -t text/uri-list` で偽装し、debug bridge で `paste` イベントの `types` を読む)。
+`clipboardData.types` に `text/uri-list` が見えることは、WebKitGTK(X11 ハーネス)で確認済み(上記「`clipboardData` の実測」)。実 Wayland セッション、WKWebView、WebView2 では未検証で、手動確認時にデバッグブリッジで `paste` イベントの `types` を読んで確かめる。
 
-見えなければ、フォールバックとして「常に `preventDefault` して Rust で全判定し、テキストは `insertText` で戻す」方式に切り替える。この場合、通常のテキスト貼り付けにも IPC が 1 往復入る。
+`text/uri-list` が `types` に見えない WebView があった場合(Windows/macOS で顕在化しうる)は、その環境ではファイル貼り付けが働かず従来どおりの動作に留まる(退行はしない)。対処が必要になった時点で、「常に `preventDefault` して Rust で全判定する」方式を別 Issue で検討する。
 
 ## セキュリティ上の考慮
 
@@ -117,6 +148,7 @@ shouldInterceptPaste(types: readonly string[], plainText: string): boolean
 ## テスト方針
 
 - Rust(単体): `file_uris_to_paths` を、空白・日本語・`%` 記号入りのファイル名、複数 URI、`file://` 以外、ホスト付き URI、存在しないパス、ディレクトリ、空文字列で検証する(一時ディレクトリに実ファイルを作る)。Windows のドライブレター形式は `#[cfg(windows)]` のテスト。クリップボード I/O 自体は OS 依存のため単体テスト対象外。
+- Rust: `read_clipboard_text` は OS クリップボード依存のため単体テスト対象外。
 - フロント(Vitest): `shouldInterceptPaste` の真理値表を検証する。
 - 型チェック: `cargo test`(bindings 再生成を含む)と `pnpm check`。
 
@@ -125,5 +157,6 @@ shouldInterceptPaste(types: readonly string[], plainText: string): boolean
 1. 動画ファイルをコピーして Ctrl+V → 添付欄に出る(投稿前にアップロードされていない)→ 投稿できる。
 2. 画像ファイルをコピーして Ctrl+V → サムネイル付きで元のファイル名のまま添付される。
 3. 複数ファイルを同時にコピーして Ctrl+V → 全件が添付される。
-4. スクリーンショット画像の貼り付け(#57)、通常のテキスト貼り付け、ブラウザで URL をコピーして貼り付け → 従来どおり動く。
-5. ディレクトリのみをコピーして貼り付け → 添付はされず、従来どおりクリップボードの `text/plain`(パス等)が本文に挿入される(ファイル参照が得られない場合は常に従来のテキスト貼り付けに劣化する、という設計どおりの挙動)。
+4. スクリーンショット画像の貼り付け(#57)、通常のテキスト貼り付け、ブラウザで URL をコピーして貼り付け → 従来どおり動く(URL は `text/uri-list` が付く場合も本文に挿入される)。
+5. ディレクトリのみをコピーして貼り付け → 添付はされず、クリップボードのテキスト(パス等)が `read_clipboard_text` 経由で本文に挿入される(ファイル参照が得られない場合はテキスト貼り付けに劣化する、という設計どおりの挙動)。
+6. 実 Wayland セッションで、デバッグブリッジから `paste` イベントの `types` を読み、`text/uri-list` が見えることを確認する(上記「`types` の前提と未検証部分」)。
