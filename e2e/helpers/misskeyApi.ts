@@ -206,3 +206,60 @@ export async function deleteNote(token: string, noteId: string): Promise<void> {
     throw new Error(`deleteNote: notes/delete failed ${res.status}: ${await res.text()}`);
   }
 }
+
+/** `/api/users/show` でusernameからuserIdを引く。 */
+export async function getUserId(token: string, username: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/users/show`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, username }),
+  });
+  if (!res.ok) {
+    throw new Error(`getUserId: users/show failed ${res.status}: ${await res.text()}`);
+  }
+  return ((await res.json()) as { id: string }).id;
+}
+
+/** `/api/mute/create` でユーザーをサーバー側ミュートする。 */
+export async function muteUser(token: string, userId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/mute/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, userId }),
+  });
+  if (!res.ok) {
+    throw new Error(`muteUser: mute/create failed ${res.status}: ${await res.text()}`);
+  }
+}
+
+/** `/api/mute/delete` でサーバー側ミュートを解除する。 */
+export async function unmuteUser(token: string, userId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/mute/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, userId }),
+  });
+  if (!res.ok) {
+    throw new Error(`unmuteUser: mute/delete failed ${res.status}: ${await res.text()}`);
+  }
+}
+
+/** 任意のユーザーでサインインしてアクセストークンを得る(`signInAsSeededUser`の汎用版)。 */
+export async function signInAs(username: string, password: string): Promise<string> {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const res = await fetch(`${BASE_URL}/api/signin-flow`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    if (res.status === 429 && attempt < 4) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+      continue;
+    }
+    if (!res.ok) throw new Error(`signInAs: signin-flow failed ${res.status}: ${await res.text()}`);
+    const body = (await res.json()) as { finished?: boolean; i?: string };
+    if (!body.finished || !body.i) throw new Error(`signInAs: unexpected response: ${JSON.stringify(body)}`);
+    return body.i;
+  }
+  throw new Error("signInAs: unreachable");
+}
