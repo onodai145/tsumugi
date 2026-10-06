@@ -79,7 +79,7 @@ pub async fn read_clipboard_files() -> Result<Vec<String>>
 - デスクトップ: `tauri::async_runtime::spawn_blocking` 内で `ClipboardContext::new()` → `get_files()` を呼び、純粋関数 `file_uris_to_paths(uris: &[String]) -> Vec<String>` で実パスに変換して返す。
 - モバイル(`cfg(any(target_os = "android", target_os = "ios"))`): `Ok(vec![])` を返す(コマンド登録は全プラットフォーム共通のため関数自体は残す)。
 - ファイル参照が無い場合は `Ok(vec![])` を返し、エラーにしない(#57 の `Error::Invalid` による「画像なし」シグナルとは異なり、「ファイルが無い」は通常の分岐であるため)。
-- クリップボードの初期化・読み取り失敗(data-control 非対応のコンポジタ等)も `Ok(vec![])` として扱い、`log::warn` で理由を出す(パスやトークンはログに出さない)。ユーザーにはエラーを表示せず、画像 → テキストのフォールバックに進ませる。
+- クリップボードの初期化・読み取り失敗(data-control 非対応のコンポジタ等)も `Ok(vec![])` として扱い、`log::debug` で理由を出す(パスやトークンはログに出さない)。`get_files` は「クリップボードにファイル参照が無い」だけでもエラーを返しうる(画像貼り付けのたびに発生する日常的な状況)ため、`warn` にするとログが汚れる。ユーザーにはエラーを表示せず、画像 → テキストのフォールバックに進ませる。
 
 ### コマンド `read_clipboard_text`
 
