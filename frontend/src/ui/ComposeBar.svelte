@@ -20,6 +20,7 @@
   import { getCaretCoordinates } from "../lib/caretPosition";
   import { searchHashtagItems, searchMentionItems } from "../lib/mfmSearch";
   import { pickComposePlaceholder } from "../lib/composePlaceholder";
+  import { shouldInterceptPaste } from "../lib/pasteIntent";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -548,20 +549,44 @@
     attachments = attachments.filter((a) => a.id !== id);
   }
 
+  // 貼り付け: ファイルマネージャでコピーしたファイル参照(Issue #117)→ クリップボード画像(#57)→
+  // テキストの優先順位で試す。preventDefault は同期的に呼ぶ必要があるため、横取りするかは
+  // DOM から同期的に取れる情報だけで判定する(shouldInterceptPaste)。
   async function handlePaste(e: ClipboardEvent) {
-    if (e.clipboardData?.getData("text/plain")) return;
+    const types = Array.from(e.clipboardData?.types ?? []);
+    const plain = e.clipboardData?.getData("text/plain") ?? "";
+    if (!shouldInterceptPaste(types, plain)) return;
     e.preventDefault();
-    const r = await commands.readClipboardImage();
-    if (r.status === "error") {
-      if (r.error.kind !== "invalid") err = formatError(r.error);
+
+    // IPC 失敗(status: "error")は「ファイルが無い」として扱い、エラー表示せず次へ進む。
+    const files = await commands.readClipboardFiles();
+    if (files.status === "ok" && files.data.length > 0) {
+      for (const p of files.data) await addLocalAttachment(p);
       return;
     }
-    const blob = new Blob([new Uint8Array(r.data.bytes)], { type: "image/png" });
-    const previewUrl = URL.createObjectURL(blob);
-    attachments = [
-      ...attachments,
-      { kind: "clipboard", id: crypto.randomUUID(), name: r.data.filename, bytes: r.data.bytes, previewUrl },
-    ];
+
+    const r = await commands.readClipboardImage();
+    if (r.status === "ok") {
+      const blob = new Blob([new Uint8Array(r.data.bytes)], { type: "image/png" });
+      const previewUrl = URL.createObjectURL(blob);
+      attachments = [
+        ...attachments,
+        { kind: "clipboard", id: crypto.randomUUID(), name: r.data.filename, bytes: r.data.bytes, previewUrl },
+      ];
+      return;
+    }
+    if (r.error.kind !== "invalid") {
+      err = formatError(r.error);
+      return;
+    }
+
+    // ファイルも画像も無かった。止めてしまったテキストを復元する。text/uri-list が付いたコピーでは
+    // WebKitGTK が DOM から text/plain を隠すため、clipboardData ではなく Rust 側から読む。
+    const t = await commands.readClipboardText();
+    if (t.status === "ok" && t.data) {
+      textarea?.focus();
+      document.execCommand("insertText", false, t.data);
+    }
   }
 
   function computePollExpiresAt(): number | null {

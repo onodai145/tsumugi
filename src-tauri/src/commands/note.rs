@@ -355,6 +355,54 @@ pub async fn read_clipboard_image(app: AppHandle) -> Result<ClipboardImage> {
     Ok(ClipboardImage { filename, bytes: png_bytes })
 }
 
+/// ファイルマネージャでコピーしたファイルのパス一覧を返す(アップロードはしない。Issue #117)。
+/// 取得したパスはフロントが `addLocalAttachment` に渡し、投稿時に既存の `upload_file` で
+/// アップロードされる。ファイル参照が無い・読み取りに失敗した・モバイルの場合は空配列を返す
+/// (「ファイルが無い」は通常の分岐であり、`read_clipboard_image` の `Error::Invalid` のような
+/// エラーシグナルにはしない)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_clipboard_files() -> Result<Vec<String>> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let read = tauri::async_runtime::spawn_blocking(|| -> std::result::Result<Vec<String>, String> {
+            use clipboard_rs::Clipboard;
+            let ctx = clipboard_rs::ClipboardContext::new().map_err(|e| e.to_string())?;
+            ctx.get_files().map_err(|e| e.to_string())
+        })
+        .await;
+        match read {
+            Ok(Ok(uris)) => Ok(file_uris_to_paths(&uris)),
+            // 「クリップボードにファイル参照が無い」だけでも Err になりうる(画像貼り付けのたびに
+            // 起きる日常的な状況)ため warn にはしない。
+            Ok(Err(e)) => {
+                log::debug!("クリップボードのファイル参照を読めませんでした: {e}");
+                Ok(Vec::new())
+            }
+            Err(e) => {
+                log::debug!("クリップボード読み取りタスクが失敗しました: {e}");
+                Ok(Vec::new())
+            }
+        }
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+/// クリップボードのテキストを返す。無い・読み取りに失敗した場合は空文字列(エラーにしない)。
+/// `text/uri-list` が付いたコピーでは WebKitGTK が DOM に `text/plain` を見せないため、
+/// `handlePaste` が止めたテキストを復元するときにだけ使う(Issue #117)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_clipboard_text(app: AppHandle) -> Result<String> {
+    let text = tauri::async_runtime::spawn_blocking(move || app.clipboard().read_text().unwrap_or_default())
+        .await
+        .unwrap_or_default();
+    Ok(text)
+}
+
 /// 添付ファイル(画像/動画等)を上限サイズまで超えていないか調べつつダウンロードし、
 /// 指定パスへ保存する（メディアビューワーの「保存」ボタン用）。
 /// ドライブの添付URLは公開直リンクのため、認証トークンは不要。
@@ -470,6 +518,46 @@ fn clipboard_filename(millis: i64) -> String {
     let dt = chrono::DateTime::from_timestamp_millis(millis)
         .unwrap_or_else(|| chrono::DateTime::from_timestamp_millis(0).expect("timestamp 0 is valid"));
     format!("clipboard-{}.png", dt.format("%Y%m%d-%H%M%S-%3f"))
+}
+
+/// `clipboard-rs` の `get_files()` が返す一覧を、実在する通常ファイルの絶対パスへ変換する(Issue #117)。
+///
+/// 戻り値の形式は OS で異なる: Linux(Wayland/X11)は `file://` URI、macOS(`NSURL.path()`)と
+/// Windows(`CF_HDROP`)は生の絶対パス(`/Users/me/a.png` / `C:\Users\me\a.png`)。両方を受け付ける。
+/// それ以外・ホスト付き(リモート)・UNC・変換できないもの・存在しないパス・ディレクトリは
+/// 黙って除外する(Misskey のドライブにフォルダはアップロードできないため)。
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+fn file_uris_to_paths(entries: &[String]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            let path = if entry.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("file:")) {
+                let url = url::Url::parse(entry).ok()?;
+                // 空ホストと localhost は許可。それ以外(file://host/... や Windows の UNC)は除外する。
+                if !matches!(url.host_str(), None | Some("") | Some("localhost")) {
+                    return None;
+                }
+                url.to_file_path().ok()?
+            } else {
+                // 生パス。`C:\...` は URL としては scheme `c` と解釈されてしまうため、URI 判定は
+                // 上の `file:` 接頭辞だけで行い、それ以外は絶対パスかどうかだけを見る。
+                // UNC(`\\host\share\...`)はリモートへの SMB 接続を誘発しうるため除外する。
+                if entry.starts_with("\\\\") {
+                    return None;
+                }
+                let p = std::path::PathBuf::from(entry);
+                if !p.is_absolute() {
+                    return None;
+                }
+                p
+            };
+            if !path.is_file() {
+                return None;
+            }
+            path.into_os_string().into_string().ok()
+        })
+        .collect()
 }
 
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。
@@ -719,5 +807,107 @@ mod tests {
     #[test]
     fn ensure_extension_leaves_filename_unchanged_when_type_undetectable() {
         assert_eq!(ensure_extension("100006972".to_string(), &[0, 1, 2, 3]), "100006972");
+    }
+
+    /// `file_uris_to_paths` 用に、テストごとに一意な一時ディレクトリを作る。
+    fn clipboard_files_tmp_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("tsumugi-clipboard-files-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn file_uri(path: &std::path::Path) -> String {
+        url::Url::from_file_path(path).unwrap().to_string()
+    }
+
+    #[test]
+    fn file_uris_to_paths_decodes_space_japanese_and_percent_names() {
+        let dir = clipboard_files_tmp_dir();
+        let names = ["a b.txt", "日本語の動画.mp4", "100%.png"];
+        let mut uris = Vec::new();
+        let mut expected = Vec::new();
+        for n in names {
+            let p = dir.join(n);
+            std::fs::write(&p, b"x").unwrap();
+            uris.push(file_uri(&p));
+            expected.push(p.to_str().unwrap().to_string());
+        }
+        assert_eq!(file_uris_to_paths(&uris), expected);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_accepts_absolute_path_of_current_exe() {
+        // Windows のドライブレター付きパス(`file:///C:/...`)も含め、どの OS でも
+        // 「実在する絶対パス → URI → パス」の往復が一致することを確かめる。
+        let exe = std::env::current_exe().unwrap();
+        let got = file_uris_to_paths(&[file_uri(&exe)]);
+        assert_eq!(got, vec![exe.to_str().unwrap().to_string()]);
+    }
+
+    #[test]
+    fn file_uris_to_paths_accepts_localhost_host() {
+        let dir = clipboard_files_tmp_dir();
+        let p = dir.join("a.txt");
+        std::fs::write(&p, b"x").unwrap();
+        // `file:///tmp/a.txt` を `file://localhost/tmp/a.txt` に書き換える(Unix のみ意味がある形)。
+        #[cfg(unix)]
+        {
+            let uri = file_uri(&p).replacen("file://", "file://localhost", 1);
+            assert_eq!(file_uris_to_paths(&[uri]), vec![p.to_str().unwrap().to_string()]);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_skips_non_file_remote_missing_directory_and_garbage() {
+        let dir = clipboard_files_tmp_dir();
+        let ok = dir.join("ok.txt");
+        std::fs::write(&ok, b"x").unwrap();
+        let subdir = dir.join("sub");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let missing = dir.join("missing.txt");
+
+        let uris = vec![
+            "https://example.com/a.png".to_string(),
+            "ftp://example.com/a.png".to_string(),
+            "file://example.com/tmp/remote.txt".to_string(),
+            file_uri(&missing),
+            file_uri(&subdir),
+            "".to_string(),
+            "   ".to_string(),
+            "not a uri".to_string(),
+            file_uri(&ok),
+        ];
+        assert_eq!(file_uris_to_paths(&uris), vec![ok.to_str().unwrap().to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_accepts_raw_absolute_paths_from_windows_and_macos() {
+        // clipboard-rs の get_files() は、macOS では NSURL.path()、Windows では CF_HDROP 由来の
+        // 生パス(`/Users/me/a.png` / `C:\Users\me\a.png`)を返し、file:// URI ではない。
+        // Linux(Wayland/X11)だけが file:// URI を返す。
+        let dir = clipboard_files_tmp_dir();
+        let ok = dir.join("日本語 a.png");
+        std::fs::write(&ok, b"x").unwrap();
+        let subdir = dir.join("sub");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let missing = dir.join("missing.png");
+
+        let uris = vec![
+            ok.to_str().unwrap().to_string(),
+            subdir.to_str().unwrap().to_string(),
+            missing.to_str().unwrap().to_string(),
+            "relative/path/a.png".to_string(),
+            "a.png".to_string(),
+        ];
+        assert_eq!(file_uris_to_paths(&uris), vec![ok.to_str().unwrap().to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_empty_input_returns_empty() {
+        assert!(file_uris_to_paths(&[]).is_empty());
     }
 }

@@ -417,3 +417,76 @@ describe("ComposeBar 下書き", () => {
     });
   });
 });
+
+describe("ComposeBar 貼り付け(Issue #117)", () => {
+  function paste(textarea: HTMLElement, types: string[], plain = "") {
+    return fireEvent.paste(textarea, { clipboardData: { types, getData: (t: string) => (t === "text/plain" ? plain : "") } });
+  }
+
+  // files に { kind, message } を渡すと IPC 失敗を模す。Tauri の実エラーはプレーンオブジェクトで
+  // reject される(生成 bindings の typedError は Error インスタンスだけを再 throw するため、
+  // new Error(...) を reject させると status: "error" にならない)。
+  function mockClipboard(opts: { files?: string[] | { kind: string; message: string }; text?: string }) {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      if (cmd === "read_clipboard_files") {
+        return opts.files && !Array.isArray(opts.files) ? Promise.reject(opts.files) : Promise.resolve(opts.files ?? []);
+      }
+      if (cmd === "read_clipboard_image") return Promise.reject({ kind: "invalid", message: "no image" });
+      if (cmd === "read_clipboard_text") return Promise.resolve(opts.text ?? "");
+      if (cmd === "read_attachment_preview") return Promise.resolve("data:image/png;base64,xx");
+      return Promise.resolve(null);
+    });
+  }
+
+  const clipboardCalls = () =>
+    invokeMock.mock.calls.map((c) => c[0] as string).filter((c) => c.startsWith("read_clipboard_"));
+
+  it("ファイル参照を貼り付けると、複数ファイルが順序どおり添付される", async () => {
+    mockClipboard({ files: ["/home/u/a b.mp4", "/home/u/日本語.png"] });
+    const { getByTestId } = render(ComposeBar);
+    await paste(getByTestId("compose-textarea"), ["text/uri-list"]);
+    await waitFor(() => expect(screen.getAllByTitle("削除")).toHaveLength(2));
+    // 画像拡張子のファイルだけプレビューが読まれ、動画は拡張子バッジになる
+    expect(invokeMock).toHaveBeenCalledWith("read_attachment_preview", expect.objectContaining({ path: "/home/u/日本語.png" }));
+    expect(invokeMock).not.toHaveBeenCalledWith("read_attachment_preview", expect.objectContaining({ path: "/home/u/a b.mp4" }));
+    expect(screen.getByText("MP4")).toBeTruthy();
+    // ファイルが取れた場合は画像・テキストの読み取りに進まない
+    expect(clipboardCalls()).toEqual(["read_clipboard_files"]);
+  });
+
+  it("通常のテキスト貼り付けは横取りせず、Rust への IPC も発生しない", async () => {
+    mockClipboard({});
+    const { getByTestId } = render(ComposeBar);
+    await paste(getByTestId("compose-textarea"), [], "hello");
+    await Promise.resolve();
+    expect(clipboardCalls()).toEqual([]);
+  });
+
+  it("ファイルが得られず text/uri-list だけ付いている場合(URL コピー等)はテキストを復元する", async () => {
+    mockClipboard({ files: [], text: "https://example.com/" });
+    // jsdom には execCommand("insertText") が無いため、呼び出し内容で検証する
+    const exec = vi.fn().mockReturnValue(true);
+    (document as unknown as { execCommand: unknown }).execCommand = exec;
+    const { getByTestId } = render(ComposeBar);
+    await paste(getByTestId("compose-textarea"), ["text/uri-list"]);
+    await waitFor(() => expect(exec).toHaveBeenCalledWith("insertText", false, "https://example.com/"));
+    expect(clipboardCalls()).toEqual(["read_clipboard_files", "read_clipboard_image", "read_clipboard_text"]);
+    expect(screen.queryAllByTitle("削除")).toHaveLength(0);
+  });
+
+  it("read_clipboard_files の IPC が失敗してもエラー表示せず画像・テキストへ進む", async () => {
+    mockClipboard({ files: { kind: "network", message: "boom" }, text: "" });
+    const { getByTestId } = render(ComposeBar);
+    await paste(getByTestId("compose-textarea"), ["text/uri-list"]);
+    await waitFor(() => expect(clipboardCalls()).toEqual(["read_clipboard_files", "read_clipboard_image", "read_clipboard_text"]));
+    expect(screen.queryByText(/boom/)).toBeNull();
+  });
+
+  it("本文が空でファイルも無ければ従来どおり画像を試す(#57)", async () => {
+    mockClipboard({ files: [] });
+    const { getByTestId } = render(ComposeBar);
+    await paste(getByTestId("compose-textarea"), []);
+    await waitFor(() => expect(clipboardCalls()).toContain("read_clipboard_image"));
+  });
+});
