@@ -355,6 +355,54 @@ pub async fn read_clipboard_image(app: AppHandle) -> Result<ClipboardImage> {
     Ok(ClipboardImage { filename, bytes: png_bytes })
 }
 
+/// ファイルマネージャでコピーしたファイルのパス一覧を返す(アップロードはしない。Issue #117)。
+/// 取得したパスはフロントが `addLocalAttachment` に渡し、投稿時に既存の `upload_file` で
+/// アップロードされる。ファイル参照が無い・読み取りに失敗した・モバイルの場合は空配列を返す
+/// (「ファイルが無い」は通常の分岐であり、`read_clipboard_image` の `Error::Invalid` のような
+/// エラーシグナルにはしない)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_clipboard_files() -> Result<Vec<String>> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let read = tauri::async_runtime::spawn_blocking(|| -> std::result::Result<Vec<String>, String> {
+            use clipboard_rs::Clipboard;
+            let ctx = clipboard_rs::ClipboardContext::new().map_err(|e| e.to_string())?;
+            ctx.get_files().map_err(|e| e.to_string())
+        })
+        .await;
+        match read {
+            Ok(Ok(uris)) => Ok(file_uris_to_paths(&uris)),
+            // 「クリップボードにファイル参照が無い」だけでも Err になりうる(画像貼り付けのたびに
+            // 起きる日常的な状況)ため warn にはしない。
+            Ok(Err(e)) => {
+                log::debug!("クリップボードのファイル参照を読めませんでした: {e}");
+                Ok(Vec::new())
+            }
+            Err(e) => {
+                log::debug!("クリップボード読み取りタスクが失敗しました: {e}");
+                Ok(Vec::new())
+            }
+        }
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+/// クリップボードのテキストを返す。無い・読み取りに失敗した場合は空文字列(エラーにしない)。
+/// `text/uri-list` が付いたコピーでは WebKitGTK が DOM に `text/plain` を見せないため、
+/// `handlePaste` が止めたテキストを復元するときにだけ使う(Issue #117)。
+#[tauri::command]
+#[specta::specta]
+pub async fn read_clipboard_text(app: AppHandle) -> Result<String> {
+    let text = tauri::async_runtime::spawn_blocking(move || app.clipboard().read_text().unwrap_or_default())
+        .await
+        .unwrap_or_default();
+    Ok(text)
+}
+
 /// 添付ファイル(画像/動画等)を上限サイズまで超えていないか調べつつダウンロードし、
 /// 指定パスへ保存する（メディアビューワーの「保存」ボタン用）。
 /// ドライブの添付URLは公開直リンクのため、認証トークンは不要。

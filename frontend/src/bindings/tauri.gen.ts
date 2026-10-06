@@ -245,6 +245,20 @@ export const commands = {
 	 */
 	readClipboardImage: () => typedError<ClipboardImage, Error>(__TAURI_INVOKE("read_clipboard_image")),
 	/**
+	 *  ファイルマネージャでコピーしたファイルのパス一覧を返す(アップロードはしない。Issue #117)。
+	 *  取得したパスはフロントが `addLocalAttachment` に渡し、投稿時に既存の `upload_file` で
+	 *  アップロードされる。ファイル参照が無い・読み取りに失敗した・モバイルの場合は空配列を返す
+	 *  (「ファイルが無い」は通常の分岐であり、`read_clipboard_image` の `Error::Invalid` のような
+	 *  エラーシグナルにはしない)。
+	 */
+	readClipboardFiles: () => typedError<string[], Error>(__TAURI_INVOKE("read_clipboard_files")),
+	/**
+	 *  クリップボードのテキストを返す。無い・読み取りに失敗した場合は空文字列(エラーにしない)。
+	 *  `text/uri-list` が付いたコピーでは WebKitGTK が DOM に `text/plain` を見せないため、
+	 *  `handlePaste` が止めたテキストを復元するときにだけ使う(Issue #117)。
+	 */
+	readClipboardText: () => typedError<string, Error>(__TAURI_INVOKE("read_clipboard_text")),
+	/**
 	 *  ドライブのファイル一覧（添付ピッカー用）。folder_id: None はルート直下、
 	 *  until_id は直前に取得した最後のファイルIDを渡してページングする。
 	 */
