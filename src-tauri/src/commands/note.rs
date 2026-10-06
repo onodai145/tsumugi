@@ -520,22 +520,38 @@ fn clipboard_filename(millis: i64) -> String {
     format!("clipboard-{}.png", dt.format("%Y%m%d-%H%M%S-%3f"))
 }
 
-/// クリップボードの `file://` URI 一覧を、実在する通常ファイルの絶対パスへ変換する(Issue #117)。
-/// `file://` 以外・ホスト付き(リモート)・変換できないもの・存在しないパス・ディレクトリは
+/// `clipboard-rs` の `get_files()` が返す一覧を、実在する通常ファイルの絶対パスへ変換する(Issue #117)。
+///
+/// 戻り値の形式は OS で異なる: Linux(Wayland/X11)は `file://` URI、macOS(`NSURL.path()`)と
+/// Windows(`CF_HDROP`)は生の絶対パス(`/Users/me/a.png` / `C:\Users\me\a.png`)。両方を受け付ける。
+/// それ以外・ホスト付き(リモート)・UNC・変換できないもの・存在しないパス・ディレクトリは
 /// 黙って除外する(Misskey のドライブにフォルダはアップロードできないため)。
 #[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
-fn file_uris_to_paths(uris: &[String]) -> Vec<String> {
-    uris.iter()
-        .filter_map(|uri| {
-            let url = url::Url::parse(uri.trim()).ok()?;
-            if url.scheme() != "file" {
-                return None;
-            }
-            // 空ホストと localhost は許可。それ以外(file://host/... や Windows の UNC)は除外する。
-            if !matches!(url.host_str(), None | Some("") | Some("localhost")) {
-                return None;
-            }
-            let path = url.to_file_path().ok()?;
+fn file_uris_to_paths(entries: &[String]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            let path = if entry.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("file:")) {
+                let url = url::Url::parse(entry).ok()?;
+                // 空ホストと localhost は許可。それ以外(file://host/... や Windows の UNC)は除外する。
+                if !matches!(url.host_str(), None | Some("") | Some("localhost")) {
+                    return None;
+                }
+                url.to_file_path().ok()?
+            } else {
+                // 生パス。`C:\...` は URL としては scheme `c` と解釈されてしまうため、URI 判定は
+                // 上の `file:` 接頭辞だけで行い、それ以外は絶対パスかどうかだけを見る。
+                // UNC(`\\host\share\...`)はリモートへの SMB 接続を誘発しうるため除外する。
+                if entry.starts_with("\\\\") {
+                    return None;
+                }
+                let p = std::path::PathBuf::from(entry);
+                if !p.is_absolute() {
+                    return None;
+                }
+                p
+            };
             if !path.is_file() {
                 return None;
             }
@@ -862,6 +878,29 @@ mod tests {
             "   ".to_string(),
             "not a uri".to_string(),
             file_uri(&ok),
+        ];
+        assert_eq!(file_uris_to_paths(&uris), vec![ok.to_str().unwrap().to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_accepts_raw_absolute_paths_from_windows_and_macos() {
+        // clipboard-rs の get_files() は、macOS では NSURL.path()、Windows では CF_HDROP 由来の
+        // 生パス(`/Users/me/a.png` / `C:\Users\me\a.png`)を返し、file:// URI ではない。
+        // Linux(Wayland/X11)だけが file:// URI を返す。
+        let dir = clipboard_files_tmp_dir();
+        let ok = dir.join("日本語 a.png");
+        std::fs::write(&ok, b"x").unwrap();
+        let subdir = dir.join("sub");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let missing = dir.join("missing.png");
+
+        let uris = vec![
+            ok.to_str().unwrap().to_string(),
+            subdir.to_str().unwrap().to_string(),
+            missing.to_str().unwrap().to_string(),
+            "relative/path/a.png".to_string(),
+            "a.png".to_string(),
         ];
         assert_eq!(file_uris_to_paths(&uris), vec![ok.to_str().unwrap().to_string()]);
         std::fs::remove_dir_all(&dir).unwrap();

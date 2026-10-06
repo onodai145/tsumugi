@@ -20,7 +20,7 @@ Issue #57 / PR #64 でクリップボード**画像**(スクリーンショッ�
 - 環境: Hyprland(`WAYLAND_DISPLAY=wayland-1`, `XDG_SESSION_TYPE=wayland`)。
 - ファイルマネージャで動画ファイルをコピーした状態で `available_formats` は `text/uri-list`, `text/plain;charset=utf-8`, `UTF8_STRING`, `x-special/gnome-copied-files`。
 - `get_files()` は `["file:///home/.../xxx.mp4"]` を返した(**非画像ファイルで動作を確認**)。
-- `get_files()` の戻り値は `file://` URI 文字列のままで、パスへのデコードは呼び出し側の責務。
+- Linux(Wayland/X11)の `get_files()` の戻り値は `file://` URI 文字列のままで、パスへのデコードは呼び出し側の責務。macOS(`NSURL.path()`)と Windows(`CF_HDROP`)は `file://` ではなく**生の絶対パス**を返す(`clipboard-rs` 0.3.5 のソースで確認。実機は未検証)。
 - Wayland バックエンドは内部で `wl-clipboard-rs`(`ext-data-control` / `wlr-data-control` プロトコル必須)を使う。`wl-clipboard-rs` は既に `Cargo.lock` に存在する(arboard 経由)。
 - OS クリップボードには `text/plain` も同時に入っていた。ただし WebKitGTK は DOM 側にこれを見せない(後述の「`clipboardData` の実測」参照)。WebView 実装によっては両方見える可能性があるため、`handlePaste` は `text/plain` の有無に依存しない判定にする。
 
@@ -97,8 +97,9 @@ pub async fn read_clipboard_text(app: AppHandle) -> Result<String>
 
 ### `file_uris_to_paths`
 
-- `url::Url::parse` → `to_file_path()` でパーセントデコードとプラットフォーム別パス変換(日本語・空白・`%` 入りのファイル名、Windows の `file:///C:/...`)を任せる。
-- 次のものは黙って除外する: `file://` 以外のスキーム、ホスト付き URI(リモート)、変換失敗、**存在しないパス、ディレクトリ**(Misskey ドライブにフォルダはアップロードできないため。通常ファイルのみ残す)。
+- 入力が `file:` で始まる場合は URI として扱う: `url::Url::parse` → `to_file_path()` でパーセントデコードとプラットフォーム別パス変換(日本語・空白・`%` 入りのファイル名、Windows の `file:///C:/...`)を任せる。
+- それ以外は生パスとして扱い、**絶対パスのときだけ**受け入れる(macOS / Windows 向け。`C:\...` は URL としては scheme `c` と解釈されるため、URI 判定は `file:` 接頭辞だけで行う)。
+- 次のものは黙って除外する: `file:` でも絶対パスでもないもの(`https://` など)、ホスト付き URI(リモート)、Windows の UNC パス(`\\host\share\...`。リモートへの SMB 接続を誘発しうるため)、変換失敗、**存在しないパス、ディレクトリ**(Misskey ドライブにフォルダはアップロードできないため。通常ファイルのみ残す)。
 - 入力の CRLF・コメント行(`#` 始まり)・空行は `clipboard-rs` 側で除去済みだが、念のため空文字列は除外する。
 
 ### 権限
@@ -147,7 +148,7 @@ shouldInterceptPaste(types: readonly string[], plainText: string): boolean
 
 ## テスト方針
 
-- Rust(単体): `file_uris_to_paths` を、空白・日本語・`%` 記号入りのファイル名、複数 URI、`file://` 以外、ホスト付き URI、存在しないパス、ディレクトリ、空文字列で検証する(一時ディレクトリに実ファイルを作る)。Windows のドライブレター形式は `#[cfg(windows)]` のテスト。クリップボード I/O 自体は OS 依存のため単体テスト対象外。
+- Rust(単体): `file_uris_to_paths` を、空白・日本語・`%` 記号入りのファイル名、複数 URI、`file://` 以外、ホスト付き URI、存在しないパス、ディレクトリ、空文字列、および macOS/Windows 形式の生の絶対パス(相対パスは除外)で検証する(一時ディレクトリに実ファイルを作る)。Windows のドライブレター形式は `Url::from_file_path` の往復テストで OS 非依存に確認する。クリップボード I/O 自体は OS 依存のため単体テスト対象外。
 - Rust: `read_clipboard_text` は OS クリップボード依存のため単体テスト対象外。
 - フロント(Vitest): `shouldInterceptPaste` の真理値表を検証する。
 - 型チェック: `cargo test`(bindings 再生成を含む)と `pnpm check`。
