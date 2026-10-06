@@ -472,6 +472,30 @@ fn clipboard_filename(millis: i64) -> String {
     format!("clipboard-{}.png", dt.format("%Y%m%d-%H%M%S-%3f"))
 }
 
+/// クリップボードの `file://` URI 一覧を、実在する通常ファイルの絶対パスへ変換する(Issue #117)。
+/// `file://` 以外・ホスト付き(リモート)・変換できないもの・存在しないパス・ディレクトリは
+/// 黙って除外する(Misskey のドライブにフォルダはアップロードできないため)。
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+fn file_uris_to_paths(uris: &[String]) -> Vec<String> {
+    uris.iter()
+        .filter_map(|uri| {
+            let url = url::Url::parse(uri.trim()).ok()?;
+            if url.scheme() != "file" {
+                return None;
+            }
+            // 空ホストと localhost は許可。それ以外(file://host/... や Windows の UNC)は除外する。
+            if !matches!(url.host_str(), None | Some("") | Some("localhost")) {
+                return None;
+            }
+            let path = url.to_file_path().ok()?;
+            if !path.is_file() {
+                return None;
+            }
+            path.into_os_string().into_string().ok()
+        })
+        .collect()
+}
+
 /// カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。
 #[tauri::command]
 #[specta::specta]
@@ -719,5 +743,84 @@ mod tests {
     #[test]
     fn ensure_extension_leaves_filename_unchanged_when_type_undetectable() {
         assert_eq!(ensure_extension("100006972".to_string(), &[0, 1, 2, 3]), "100006972");
+    }
+
+    /// `file_uris_to_paths` 用に、テストごとに一意な一時ディレクトリを作る。
+    fn clipboard_files_tmp_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("tsumugi-clipboard-files-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn file_uri(path: &std::path::Path) -> String {
+        url::Url::from_file_path(path).unwrap().to_string()
+    }
+
+    #[test]
+    fn file_uris_to_paths_decodes_space_japanese_and_percent_names() {
+        let dir = clipboard_files_tmp_dir();
+        let names = ["a b.txt", "日本語の動画.mp4", "100%.png"];
+        let mut uris = Vec::new();
+        let mut expected = Vec::new();
+        for n in names {
+            let p = dir.join(n);
+            std::fs::write(&p, b"x").unwrap();
+            uris.push(file_uri(&p));
+            expected.push(p.to_str().unwrap().to_string());
+        }
+        assert_eq!(file_uris_to_paths(&uris), expected);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_accepts_absolute_path_of_current_exe() {
+        // Windows のドライブレター付きパス(`file:///C:/...`)も含め、どの OS でも
+        // 「実在する絶対パス → URI → パス」の往復が一致することを確かめる。
+        let exe = std::env::current_exe().unwrap();
+        let got = file_uris_to_paths(&[file_uri(&exe)]);
+        assert_eq!(got, vec![exe.to_str().unwrap().to_string()]);
+    }
+
+    #[test]
+    fn file_uris_to_paths_accepts_localhost_host() {
+        let dir = clipboard_files_tmp_dir();
+        let p = dir.join("a.txt");
+        std::fs::write(&p, b"x").unwrap();
+        // `file:///tmp/a.txt` を `file://localhost/tmp/a.txt` に書き換える(Unix のみ意味がある形)。
+        #[cfg(unix)]
+        {
+            let uri = file_uri(&p).replacen("file://", "file://localhost", 1);
+            assert_eq!(file_uris_to_paths(&[uri]), vec![p.to_str().unwrap().to_string()]);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_skips_non_file_remote_missing_directory_and_garbage() {
+        let dir = clipboard_files_tmp_dir();
+        let ok = dir.join("ok.txt");
+        std::fs::write(&ok, b"x").unwrap();
+        let subdir = dir.join("sub");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let missing = dir.join("missing.txt");
+
+        let uris = vec![
+            "https://example.com/a.png".to_string(),
+            "ftp://example.com/a.png".to_string(),
+            "file://example.com/tmp/remote.txt".to_string(),
+            file_uri(&missing),
+            file_uri(&subdir),
+            "".to_string(),
+            "   ".to_string(),
+            "not a uri".to_string(),
+            file_uri(&ok),
+        ];
+        assert_eq!(file_uris_to_paths(&uris), vec![ok.to_str().unwrap().to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_uris_to_paths_empty_input_returns_empty() {
+        assert!(file_uris_to_paths(&[]).is_empty());
     }
 }
