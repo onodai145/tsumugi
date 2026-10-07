@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, fireEvent, waitFor, screen } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { app } from "../lib/store.svelte";
 import { epochSecToLocalInput, localInputToEpochSec } from "../lib/schedule";
 
@@ -492,6 +493,16 @@ describe("ComposeBar 貼り付け(Issue #117)", () => {
   });
 });
 
+// 日時入力は flatpickr(読み取り専用のテキスト入力)なので、fireEvent.input ではなく
+// flatpickr のインスタンスに日時を入れる。値は datetime-local 形式 "YYYY-MM-DDTHH:mm"。
+type FlatpickrHost = { _flatpickr: { setDate(d: Date, triggerChange: boolean): void } };
+async function setDateTime(el: HTMLElement, value: string) {
+  (el as unknown as FlatpickrHost)._flatpickr.setDate(new Date(value), true);
+  await tick();
+}
+// 入力欄の表示値は "YYYY-MM-DD HH:mm"(flatpickr の dateFormat)。
+const toShown = (localInput: string) => localInput.replace("T", " ");
+
 describe("ComposeBar 予約投稿", () => {
   function mockCaps(available: boolean) {
     invokeMock.mockImplementation((cmd: string) => {
@@ -516,7 +527,7 @@ describe("ComposeBar 予約投稿", () => {
     const { findByTestId, getByTestId } = render(ComposeBar);
     await fireEvent.click(await findByTestId("compose-schedule-toggle"));
     const value = futureInput();
-    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value } });
+    await setDateTime(getByTestId("compose-schedule-input"), value);
     expect(getByTestId("compose-submit").textContent).toContain("予約");
 
     await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "あとで投稿" } });
@@ -541,7 +552,7 @@ describe("ComposeBar 予約投稿", () => {
     const { findByTestId, getByTestId, findByText } = render(ComposeBar);
     await fireEvent.click(await findByTestId("compose-schedule-toggle"));
     const past = epochSecToLocalInput(Math.floor((Date.now() - 86_400_000) / 1000));
-    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value: past } });
+    await setDateTime(getByTestId("compose-schedule-input"), past);
     await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "x" } });
     await fireEvent.click(getByTestId("compose-submit"));
     expect(await findByText("予約日時は現在より後にしてください")).toBeTruthy();
@@ -552,7 +563,7 @@ describe("ComposeBar 予約投稿", () => {
     mockCaps(true);
     const { findByTestId, getByTestId } = render(ComposeBar);
     await fireEvent.click(await findByTestId("compose-schedule-toggle"));
-    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value: futureInput() } });
+    await setDateTime(getByTestId("compose-schedule-input"), futureInput());
     await fireEvent.click(getByTestId("compose-schedule-clear"));
     expect(getByTestId("compose-submit").textContent).toContain("投稿");
   });
@@ -567,7 +578,7 @@ describe("ComposeBar 予約投稿", () => {
     });
     const { findByTestId, getByTestId, findByText } = render(ComposeBar);
     await fireEvent.click(await findByTestId("compose-schedule-toggle"));
-    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value: futureInput() } });
+    await setDateTime(getByTestId("compose-schedule-input"), futureInput());
     await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "x" } });
     await fireEvent.click(getByTestId("compose-submit"));
     expect(await findByText(/予約できる投稿数の上限/)).toBeTruthy();
@@ -645,7 +656,7 @@ describe("ComposeBar 予約投稿", () => {
   // Review Focus 4: 期間指定の投票は、投稿時刻ではなく予約日時を基準に締切を計算する
   async function setupPoll(ui: UiQueries, scheduleValue: string) {
     await fireEvent.click(await ui.findByTestId("compose-schedule-toggle"));
-    await fireEvent.input(ui.getByTestId("compose-schedule-input"), { target: { value: scheduleValue } });
+    await setDateTime(ui.getByTestId("compose-schedule-input"), scheduleValue);
     await fireEvent.input(ui.getByTestId("compose-textarea"), { target: { value: "投票つき" } });
     await fireEvent.click(ui.getByText("投票"));
     await fireEvent.input(ui.getByPlaceholderText("選択肢 1"), { target: { value: "A" } });
@@ -684,9 +695,7 @@ describe("ComposeBar 予約投稿", () => {
     await fireEvent.click(ui.getByText("日時を指定"));
     // 予約日時の1時間前を締切にする
     const before = epochSecToLocalInput((localInputToEpochSec(value) as number) - 3600);
-    await fireEvent.input(ui.container.querySelector("input[type=datetime-local]:not([data-testid])") as HTMLInputElement, {
-      target: { value: before },
-    });
+    await setDateTime(ui.getByTestId("compose-poll-expires-at"), before);
     await fireEvent.click(ui.getByTestId("compose-submit"));
 
     expect(await ui.findByText(/投票の締切/)).toBeTruthy();
@@ -718,7 +727,7 @@ describe("ComposeBar 予約投稿", () => {
     });
     const ui = render(ComposeBar);
     await fireEvent.click(await ui.findByTestId("compose-schedule-toggle"));
-    await fireEvent.input(ui.getByTestId("compose-schedule-input"), { target: { value: futureInput() } });
+    await setDateTime(ui.getByTestId("compose-schedule-input"), futureInput());
     expect(ui.getByTestId("compose-submit").textContent).toContain("予約");
 
     await switchAccount(ui, "acc2");
@@ -742,7 +751,7 @@ describe("ComposeBar 予約投稿", () => {
     });
     const ui = render(ComposeBar);
     await fireEvent.click(await ui.findByTestId("compose-schedule-toggle"));
-    await fireEvent.input(ui.getByTestId("compose-schedule-input"), { target: { value: futureInput() } });
+    await setDateTime(ui.getByTestId("compose-schedule-input"), futureInput());
     await fireEvent.input(ui.getByTestId("compose-textarea"), { target: { value: "x" } });
 
     await switchAccount(ui, "acc2");
@@ -765,7 +774,7 @@ describe("ComposeBar 予約投稿", () => {
     await fireEvent.click(await ui.findByTestId("scheduled-restore-s1"));
     await waitFor(() =>
       expect((ui.getByTestId("compose-schedule-input") as HTMLInputElement).value).toBe(
-        epochSecToLocalInput(futureSec),
+        toShown(epochSecToLocalInput(futureSec)),
       ),
     );
     expect(ui.getByTestId("compose-submit").textContent).toContain("予約");

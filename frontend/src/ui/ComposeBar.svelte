@@ -23,6 +23,7 @@
   import { shouldInterceptPaste } from "../lib/pasteIntent";
   import { epochSecToLocalInput, localInputToEpochSec, scheduleErrorMessage, validateSchedule } from "../lib/schedule";
   import ScheduledModal from "./ScheduledModal.svelte";
+  import DateTimeInput from "./DateTimeInput.svelte";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -1082,7 +1083,12 @@
           </Button>
         {/each}
         {#if pollExpiryMode === "at"}
-          <input type="datetime-local" bind:value={pollExpiresAt} class="rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground" />
+          <DateTimeInput
+            bind:value={pollExpiresAt}
+            placeholder="締切日時"
+            data-testid="compose-poll-expires-at"
+            class="w-40 rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground"
+          />
         {:else if pollExpiryMode === "after"}
           <input
             type="number"
@@ -1148,11 +1154,11 @@
           disabled={busy || !accountId}
         ><CalendarClock size={16} class="size-4" /></Button>
         {#if showSchedulePicker}
-          <input
-            type="datetime-local"
+          <DateTimeInput
             bind:value={scheduleAt}
+            placeholder="予約日時"
             data-testid="compose-schedule-input"
-            class="rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground"
+            class="w-40 rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground"
           />
           {#if scheduleAt}
             <Button
