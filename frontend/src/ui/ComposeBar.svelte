@@ -10,7 +10,7 @@
   import { commands, unwrap, unwrapAcc, formatError, vibrate } from "../lib/ipc";
   import { isMobilePlatform } from "../lib/platform";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { CalendarClock, FileText, ImagePlus, SmilePlus, X } from "@lucide/svelte";
+  import { CalendarClock, FileText, ImagePlus, ListChecks, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
   import { onDestroy, tick } from "svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
@@ -1176,11 +1176,11 @@
           {/if}
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             data-testid="compose-scheduled-list"
             onclick={() => (showScheduledModal = true)}
-          >予約一覧</Button>
+          ><ListChecks size={16} class="size-4" />予約一覧</Button>
         {/if}
       {/if}
       <Button

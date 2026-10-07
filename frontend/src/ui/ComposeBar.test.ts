@@ -568,6 +568,18 @@ describe("ComposeBar 予約投稿", () => {
     expect(getByTestId("compose-submit").textContent).toContain("投稿");
   });
 
+  it("「予約一覧」ボタンは枠付き(outline)でアイコンを持ち、クリックできると分かる見た目になっている", async () => {
+    mockCaps(true);
+    const { findByTestId, getByTestId } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
+    const btn = getByTestId("compose-scheduled-list");
+    // ghost は枠も背景も無く、ホバーするまで文字に見える。outline の枠と背景を持つこと
+    expect(btn.className).toContain("border-border");
+    expect(btn.className).toContain("bg-background");
+    expect(btn.querySelector("svg")).not.toBeNull();
+    expect(btn.textContent).toContain("予約一覧");
+  });
+
   it("サーバーの上限エラーは日本語で表示する", async () => {
     mockCaps(true);
     invokeMock.mockImplementation((cmd: string) => {
