@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, fireEvent, waitFor, screen } from "@testing-library/svelte";
 import { app } from "../lib/store.svelte";
+import { epochSecToLocalInput, localInputToEpochSec } from "../lib/schedule";
 
 // store.svelte.ts が起動時に @tauri-apps/plugin-os の platform() を呼ぶため、
 // Tauri ランタイム外(jsdom)で import が失敗しないようスタブする(NoteCard.test.tsと同じパターン)。
@@ -488,5 +489,89 @@ describe("ComposeBar 貼り付け(Issue #117)", () => {
     const { getByTestId } = render(ComposeBar);
     await paste(getByTestId("compose-textarea"), []);
     await waitFor(() => expect(clipboardCalls()).toContain("read_clipboard_image"));
+  });
+});
+
+describe("ComposeBar 予約投稿", () => {
+  function mockCaps(available: boolean) {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      if (cmd === "get_auto_draft") return Promise.resolve(null);
+      if (cmd === "get_schedule_capabilities") return Promise.resolve({ available });
+      if (cmd === "schedule_note") return Promise.resolve({ id: "d1" });
+      return Promise.resolve(null);
+    });
+  }
+  const futureInput = () => epochSecToLocalInput(Math.floor((Date.now() + 86_400_000) / 1000));
+
+  it("非対応サーバーでは予約ボタンを出さない", async () => {
+    mockCaps(false);
+    const { queryByTestId } = render(ComposeBar);
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_schedule_capabilities", { accountId: "acc1" }));
+    expect(queryByTestId("compose-schedule-toggle")).toBeNull();
+  });
+
+  it("対応サーバーで日時を設定すると投稿ボタンが「予約」になり、schedule_note を呼ぶ(post_note は呼ばない)", async () => {
+    mockCaps(true);
+    const { findByTestId, getByTestId } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
+    const value = futureInput();
+    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value } });
+    expect(getByTestId("compose-submit").textContent).toContain("予約");
+
+    await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "あとで投稿" } });
+    await fireEvent.click(getByTestId("compose-submit"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("schedule_note", {
+        accountId: "acc1",
+        draft: expect.objectContaining({ text: "あとで投稿" }),
+        scheduledAt: localInputToEpochSec(value),
+      }),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("post_note", expect.anything());
+    // 成功したら作成欄と予約日時がクリアされ、投稿ボタンも元に戻る
+    await waitFor(() => expect((getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe(""));
+    expect(getByTestId("compose-submit").textContent).toContain("投稿");
+  });
+
+  // Review Focus 3: 入力後に時間が経って過去になった場合はサーバーに送らない
+  it("過去の日時ではエラーを出し、schedule_note を呼ばない", async () => {
+    mockCaps(true);
+    const { findByTestId, getByTestId, findByText } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
+    const past = epochSecToLocalInput(Math.floor((Date.now() - 86_400_000) / 1000));
+    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value: past } });
+    await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "x" } });
+    await fireEvent.click(getByTestId("compose-submit"));
+    expect(await findByText("予約日時は現在より後にしてください")).toBeTruthy();
+    expect(invokeMock).not.toHaveBeenCalledWith("schedule_note", expect.anything());
+  });
+
+  it("予約日時を解除すると通常の投稿に戻る", async () => {
+    mockCaps(true);
+    const { findByTestId, getByTestId } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
+    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value: futureInput() } });
+    await fireEvent.click(getByTestId("compose-schedule-clear"));
+    expect(getByTestId("compose-submit").textContent).toContain("投稿");
+  });
+
+  it("サーバーの上限エラーは日本語で表示する", async () => {
+    mockCaps(true);
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_schedule_capabilities") return Promise.resolve({ available: true });
+      if (cmd === "schedule_note")
+        return Promise.reject({ kind: "api", message: "notes/drafts/create: TOO_MANY_SCHEDULED_NOTES x" });
+      return Promise.resolve(cmd === "list_drafts" ? [] : null);
+    });
+    const { findByTestId, getByTestId, findByText } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
+    await fireEvent.input(getByTestId("compose-schedule-input"), { target: { value: futureInput() } });
+    await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "x" } });
+    await fireEvent.click(getByTestId("compose-submit"));
+    expect(await findByText(/予約できる投稿数の上限/)).toBeTruthy();
+    // 失敗したので作成欄は残る
+    expect((getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe("x");
   });
 });
