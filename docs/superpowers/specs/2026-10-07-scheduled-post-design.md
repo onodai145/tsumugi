@@ -76,10 +76,10 @@ Issue: #60
 追加のみで、既存の型・シグネチャは変更しない。
 
 - `api/drafts.rs`(新規)
-  - `create_scheduled(client, draft: &NoteDraft, scheduled_at_ms: i64) -> Result<ScheduledNote>`: 既存 `NoteDraft`(`api/notes.rs`)に `scheduledAt` と `isActuallyScheduled: true` を足したリクエストを `notes/drafts/create` へ送る。
+  - `create_scheduled(client, draft: &NoteDraft, scheduled_at: i64) -> Result<ScheduledNote>`: 既存 `NoteDraft`(`api/notes.rs`)に `scheduledAt` と `isActuallyScheduled: true` を足したリクエストを `notes/drafts/create` へ送る。Rust の command 引数と `ScheduledNote.scheduled_at` は epoch 秒(既存の `Note.created_at`・`search_server_notes` と同じ)で、HTTP 境界でミリ秒に変換する(サーバー仕様の `scheduledAt` はミリ秒の整数のまま)。
   - `list_scheduled(client, until_id: Option<&str>, limit) -> Result<Vec<ScheduledNote>>`: `scheduled: true`。
   - `delete_draft(client, draft_id) -> Result<()>`。
-- `domain/scheduled.rs`(新規): `ScheduledNote`(`specta::Type`)。id、`scheduled_at`(ms)、本文、CW、公開範囲、添付(ID とサムネイル URL)、投票、返信/引用先の要約、チャンネル、`local_only`、`reaction_acceptance`。`normalize.rs` に `NoteDraft` レスポンスからの変換を追加する。
+- `domain/scheduled.rs`(新規): `ScheduledNote`(`specta::Type`)。id、`scheduled_at`(epoch 秒)、本文、CW、公開範囲、添付(ID とサムネイル URL)、投票、返信/引用先の要約、チャンネル、`local_only`、`reaction_acceptance`。`normalize.rs` に `NoteDraft` レスポンスからの変換を追加する。
 - `commands/scheduled.rs`(新規): `schedule_note` / `list_scheduled_notes` / `cancel_scheduled_note` / `get_schedule_capabilities`。`specta_builder()` と `commands/mod.rs` に登録し、`generates_frontend_bindings` テストにも新コマンド名を足す。
 - 添付は既存の投稿と同じく、送信時にアップロードしてから `fileIds` を渡す(`2026-07-20-upload-on-submit-design.md`)。予約専用の経路は作らない。
 
@@ -90,12 +90,12 @@ Issue: #60
 - 投稿ボタンの隣に予約ボタンを置く。`get_schedule_capabilities` が不可なら**非表示**。
 - 押すと日時ピッカーを開く。入力はローカルタイムゾーンの日時で、送信時にミリ秒へ変換する。
 - 日時が設定されている間は、投稿ボタンのラベルを「予約」に変え、押すと `schedule_note` を呼ぶ。日時の解除手段(ピッカー内のクリア)を用意する。
-- **クライアント側の検証**: 過去の日時は拒否する。さらに、投票の締切(`expires_at`)が予約日時以前の場合は、投稿後すぐ期限切れになるため拒否してメッセージを出す(本家のサーバー検証には無い、tsumugi 側の追加ガード)。
+- **クライアント側の検証**: 過去の日時は拒否する。さらに、投票の締切(`expires_at`)が予約日時以前の場合は、投稿後すぐ期限切れになるため拒否してメッセージを出す(本家のサーバー検証には無い、tsumugi 側の追加ガード)。投票の期間指定(N 時間後)は、予約日時を基準に締切を計算する。
 - 成功時は通常の投稿と同じく作成欄をクリアし、自動下書きも消す。成功を示すトースト等の通知は既存の流儀に合わせる。
 
 #### 予約一覧(`ScheduledModal.svelte` 新規、`Modal.svelte` ベース)
 
-- ComposeBar の予約ボタン付近から開く。アカウント別に表示する(アカウント切り替えは既存の `AccountSelect` を使う)。
+- ComposeBar の予約ボタン付近から開く。アカウント別に表示する。ComposeBar で選択中のアカウントの予約を表示する(切り替えは ComposeBar 側で行う)。
 - 各行に、本文の抜粋・予約日時・公開範囲を出す。`scheduledAt` が過去のものは「投稿に失敗」と明示する。
 - 操作は 2 つ。
   - **取り消し**: `cancel_scheduled_note`(=`drafts/delete`)。
