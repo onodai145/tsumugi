@@ -1908,21 +1908,30 @@ fn apply_search_mutes(
         .collect()
 }
 
-/// アカウントの接続先サーバーが対応する検索機能。バージョンは `AppState` にキャッシュし、
-/// 未取得なら `/api/meta` から取得する。取得失敗は非対応扱い（日時欄を隠す側に倒す）で、
-/// 失敗はキャッシュしないため次回また取りに行く。未登録アカウントだけはエラーを返す。
-async fn search_capabilities_for(state: &AppState, account_id: &str) -> Result<SearchCapabilities> {
+/// アカウントの接続先サーバーの Misskey バージョン。`AppState` にキャッシュし、未取得なら
+/// `/api/meta` から取得する。取得失敗は None(呼び出し側で非対応扱い)で、失敗はキャッシュしない
+/// ため次回また取りに行く。未登録アカウントだけはエラーを返す。
+pub(crate) async fn cached_server_version(
+    state: &AppState,
+    account_id: &str,
+) -> Result<Option<String>> {
     if let Some(v) = state.server_version(account_id) {
-        return Ok(search_capabilities(Some(&v)));
+        return Ok(Some(v));
     }
     let client = state.client_for(account_id)?;
     match fetch_server_version(&client).await {
         Ok(Some(v)) => {
             state.set_server_version(account_id, v.clone());
-            Ok(search_capabilities(Some(&v)))
+            Ok(Some(v))
         }
-        Ok(None) | Err(_) => Ok(search_capabilities(None)),
+        Ok(None) | Err(_) => Ok(None),
     }
+}
+
+/// アカウントの接続先サーバーが対応する検索機能。取得失敗は非対応扱い（日時欄を隠す側に倒す）。
+async fn search_capabilities_for(state: &AppState, account_id: &str) -> Result<SearchCapabilities> {
+    let version = cached_server_version(state, account_id).await?;
+    Ok(search_capabilities(version.as_deref()))
 }
 
 /// 検索モーダル(Issue #430)用: アカウントの接続先サーバーが対応する検索機能を返す。

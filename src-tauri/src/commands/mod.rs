@@ -9,6 +9,7 @@ pub mod draft;
 pub mod haptics;
 pub mod mute;
 pub mod note;
+pub mod scheduled;
 pub mod sound;
 pub mod user;
 

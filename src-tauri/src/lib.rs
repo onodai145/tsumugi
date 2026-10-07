@@ -75,6 +75,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::search_cache_notes,
             commands::column::get_search_capabilities,
             commands::column::search_server_notes,
+            commands::scheduled::get_schedule_capabilities,
+            commands::scheduled::schedule_note,
+            commands::scheduled::list_scheduled_notes,
+            commands::scheduled::cancel_scheduled_note,
             commands::note::post_note,
             commands::note::renote,
             commands::note::delete_note_cmd,
@@ -411,6 +415,15 @@ mod specta_export {
         // サーバーサイド検索(Issue #430)のコマンドと型
         assert!(ts.contains("searchServerNotes"), "missing searchServerNotes command");
         assert!(ts.contains("getSearchCapabilities"), "missing getSearchCapabilities command");
+        // 予約投稿(Issue #60)のコマンドと型
+        assert!(ts.contains("scheduleNote"), "missing scheduleNote command");
+        assert!(ts.contains("listScheduledNotes"), "missing listScheduledNotes command");
+        assert!(ts.contains("cancelScheduledNote"), "missing cancelScheduledNote command");
+        assert!(ts.contains("getScheduleCapabilities"), "missing getScheduleCapabilities command");
+        assert!(
+            ts.contains("scheduledAt: number") || ts.contains("scheduledAt:number"),
+            "ScheduledNote.scheduled_at should export as number (camelCase)"
+        );
         assert!(ts.contains("dateRange"), "SearchCapabilities.date_range should be camelCase");
         // serde(rename_all="camelCase") が specta 経由で TS に反映されていること
         assert!(
