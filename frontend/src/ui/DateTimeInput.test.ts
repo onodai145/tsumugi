@@ -12,12 +12,23 @@ type Fp = {
   _flatpickr: {
     setDate(d: Date | Date[], t: boolean): void;
     selectedDates: Date[];
+    minuteElement: HTMLInputElement;
+    mobileInput?: HTMLInputElement;
     config: { onChange: unknown[] };
   };
 };
 const fpOf = (el: HTMLElement) => (el as unknown as Fp)._flatpickr;
 
-afterEach(() => cleanup());
+const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36";
+const originalUA = Object.getOwnPropertyDescriptor(navigator, "userAgent");
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  // navigator 自身に定義した UA スタブを外し、jsdom 本来の getter に戻す
+  if (originalUA) Object.defineProperty(navigator, "userAgent", originalUA);
+  else delete (navigator as unknown as Record<string, unknown>).userAgent;
+});
 
 describe("DateTimeInput", () => {
   it("ネイティブの datetime-local ではなく、読み取り専用のテキスト入力を使う", () => {
@@ -83,5 +94,43 @@ describe("DateTimeInput", () => {
     expect(document.querySelectorAll(".flatpickr-calendar").length).toBe(1);
     unmount();
     expect(document.querySelectorAll(".flatpickr-calendar").length).toBe(0);
+  });
+
+  // 時刻の手入力は flatpickr の onChange が 300ms デバウンスされるため、onChange だけに頼ると
+  // 直後に「予約」を押したとき古い value を読んでしまう。onValueUpdate(同期)でも value を更新する。
+  it("分を手入力して blur すると、デバウンスを待たずに value へ反映される", async () => {
+    const { getByTestId } = render(Harness);
+    const fp = fpOf(getByTestId("dt"));
+    fp.setDate(new Date(2026, 4, 6, 9, 0), true);
+    await tick();
+    expect(getByTestId("bound").textContent).toBe("2026-05-06T09:00");
+    fp.minuteElement.value = "45";
+    fp.minuteElement.dispatchEvent(new Event("blur"));
+    await tick();
+    expect(getByTestId("bound").textContent).toBe("2026-05-06T09:45");
+  });
+
+  // Android の UA では flatpickr が isMobile になり、カレンダーを作らずネイティブ input(mobileInput)を使う。
+  describe("Android(isMobile)", () => {
+    it("初期値付きでマウント/アンマウントしても例外にならず、console.error も出ない", () => {
+      Object.defineProperty(navigator, "userAgent", { value: ANDROID_UA, configurable: true });
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { getByTestId, unmount } = render(Harness, { props: { initial: "2026-03-04T05:06" } });
+      const fp = fpOf(getByTestId("dt"));
+      expect(Array.isArray(fp)).toBe(false);
+      expect(fp.mobileInput?.value.startsWith("2026-03-04T05:06")).toBe(true);
+      expect(() => unmount()).not.toThrow();
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("ネイティブ input(mobileInput)で選ぶと value に反映される", async () => {
+      Object.defineProperty(navigator, "userAgent", { value: ANDROID_UA, configurable: true });
+      const { getByTestId } = render(Harness);
+      const fp = fpOf(getByTestId("dt"));
+      fp.mobileInput!.value = "2026-05-06T07:08";
+      fp.mobileInput!.dispatchEvent(new Event("change"));
+      await tick();
+      expect(getByTestId("bound").textContent).toBe("2026-05-06T07:08");
+    });
   });
 });

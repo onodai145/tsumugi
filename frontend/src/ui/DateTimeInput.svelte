@@ -37,6 +37,10 @@
     fp.setDate(v ? new Date(v) : [], false);
   });
 
+  // 時刻の手入力は onChange が 300ms 遅れるので、同期の onValueUpdate でも同じ更新をする
+  // (直後に「予約」を押しても最新の値が読める)。
+  const sync = (d: Date | null) => (value = d ? format(d) : "");
+
   function onCreate(f: FlatpickrInstance) {
     fp = f;
     if (value) f.setDate(new Date(value), false);
@@ -54,7 +58,8 @@
   use:datePicker={{
     defaultHour,
     defaultMinute,
-    onChange: (d) => (value = d ? format(d) : ""),
+    onChange: sync,
+    onValueUpdate: sync,
     onCreate,
   }}
 />

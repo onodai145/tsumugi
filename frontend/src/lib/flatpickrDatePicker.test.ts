@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Instance as FlatpickrInstance } from "flatpickr/dist/types/instance";
 import { datePicker } from "./flatpickrDatePicker";
 
-function mount(over: { defaultHour?: number; defaultMinute?: number } = {}) {
+function mount(
+  over: {
+    defaultHour?: number;
+    defaultMinute?: number;
+    onValueUpdate?: (d: Date | null) => void;
+  } = {},
+) {
   const node = document.createElement("input");
   document.body.appendChild(node);
   let fp!: FlatpickrInstance;
@@ -16,8 +22,18 @@ function mount(over: { defaultHour?: number; defaultMinute?: number } = {}) {
   return { node, fp, onChange, action };
 }
 
+const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36";
+const originalUA = Object.getOwnPropertyDescriptor(navigator, "userAgent");
+function stubUserAgent(ua: string) {
+  Object.defineProperty(navigator, "userAgent", { value: ua, configurable: true });
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
+  // navigator 自身に定義したスタブを外し、jsdom 本来の getter(prototype 側)に戻す
+  if (originalUA) Object.defineProperty(navigator, "userAgent", originalUA);
+  else delete (navigator as unknown as Record<string, unknown>).userAgent;
 });
 
 describe("datePicker", () => {
@@ -54,5 +70,37 @@ describe("datePicker", () => {
     expect(document.querySelectorAll(".flatpickr-calendar").length).toBe(1);
     action.destroy();
     expect(document.querySelectorAll(".flatpickr-calendar").length).toBe(0);
+  });
+
+  // flatpickr は UA に Android を含むと isMobile=true で build() を飛ばすが onReady は呼ぶ。
+  // ヘッダ入れ替えの onReady が currentYearElement(未生成)を触ると例外になり、インスタンスが [] になる。
+  it("Android(isMobile)でも onCreate に本物のインスタンスが渡り、console.error も出ない", () => {
+    stubUserAgent(ANDROID_UA);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { fp, action } = mount();
+    expect(Array.isArray(fp)).toBe(false);
+    expect(fp.isMobile).toBe(true);
+    expect(Array.isArray(fp.selectedDates)).toBe(true);
+    expect(typeof fp.setDate).toBe("function");
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(() => action.destroy()).not.toThrow();
+  });
+
+  it("onValueUpdate は setDate(d, true) と時刻欄の変更で Date が渡り、setDate(d, false) では呼ばれない", () => {
+    const onValueUpdate = vi.fn();
+    const { fp } = mount({ onValueUpdate });
+    const d = new Date(2026, 4, 6, 9, 0);
+    fp.setDate(d, false);
+    expect(onValueUpdate).not.toHaveBeenCalled();
+    fp.setDate(d, true);
+    expect(onValueUpdate).toHaveBeenLastCalledWith(d);
+    // 時刻欄の手入力: onChange は 300ms デバウンスされるが onValueUpdate は blur で同期的に呼ばれる
+    onValueUpdate.mockClear();
+    fp.minuteElement!.value = "45";
+    fp.minuteElement!.dispatchEvent(new Event("blur"));
+    expect(onValueUpdate).toHaveBeenCalledTimes(1);
+    const got = onValueUpdate.mock.calls[0][0] as Date;
+    expect(got.getHours()).toBe(9);
+    expect(got.getMinutes()).toBe(45);
   });
 });
