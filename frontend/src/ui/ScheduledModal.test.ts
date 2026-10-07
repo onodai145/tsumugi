@@ -117,4 +117,30 @@ describe("ScheduledModal", () => {
     // 2ページ目は30件未満なので、もう「さらに読み込む」は出ない
     expect(queryByTestId("scheduled-more")).toBeNull();
   });
+
+  it("1ページ目の取得に失敗したら、空表示は出さずエラーと再読み込みを出す", async () => {
+    invokeMock.mockRejectedValue({ kind: "network", message: "offline" });
+    const { findByText, findByTestId, queryByTestId } = render(ScheduledModal, {
+      accountId: "acc1",
+      onrestore: vi.fn(),
+      onclose: vi.fn(),
+    });
+    expect(await findByText(/offline/)).toBeTruthy();
+    expect(await findByTestId("scheduled-retry")).toBeTruthy();
+    // 「予約なし」と誤解して二重に予約しないよう、空表示は出さない
+    expect(queryByTestId("scheduled-empty")).toBeNull();
+  });
+
+  it("再読み込みに成功すると一覧が出てエラーが消える", async () => {
+    invokeMock.mockRejectedValueOnce({ kind: "network", message: "offline" }).mockResolvedValueOnce([note("a")]);
+    const { findByTestId, queryByText, queryByTestId } = render(ScheduledModal, {
+      accountId: "acc1",
+      onrestore: vi.fn(),
+      onclose: vi.fn(),
+    });
+    await fireEvent.click(await findByTestId("scheduled-retry"));
+    await findByTestId("scheduled-item-a");
+    expect(queryByText(/offline/)).toBeNull();
+    expect(queryByTestId("scheduled-retry")).toBeNull();
+  });
 });

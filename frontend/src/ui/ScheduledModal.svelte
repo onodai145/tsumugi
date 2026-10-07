@@ -29,6 +29,7 @@
 
   async function load() {
     loading = true;
+    err = null;
     try {
       const page = await unwrapAcc(accountId, commands.listScheduledNotes(accountId, cursor, PAGE_SIZE));
       items = [...items, ...page];
@@ -70,6 +71,11 @@
     {/if}
     {#if loading && items.length === 0}
       <div class="py-3 text-sm text-muted-foreground">読み込み中…</div>
+    {:else if err && items.length === 0}
+      <!-- 取得失敗を「予約なし」と誤解して二重に予約しないよう、空表示は出さず再読み込みだけ出す -->
+      <div class="flex justify-center py-2">
+        <Button type="button" variant="outline" size="sm" data-testid="scheduled-retry" onclick={load}>再読み込み</Button>
+      </div>
     {:else if items.length === 0}
       <div class="py-3 text-sm text-muted-foreground" data-testid="scheduled-empty">予約済みの投稿はありません</div>
     {:else}

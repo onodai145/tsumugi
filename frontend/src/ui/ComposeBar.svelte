@@ -21,7 +21,7 @@
   import { searchHashtagItems, searchMentionItems } from "../lib/mfmSearch";
   import { pickComposePlaceholder } from "../lib/composePlaceholder";
   import { shouldInterceptPaste } from "../lib/pasteIntent";
-  import { localInputToEpochSec, scheduleErrorMessage, validateSchedule } from "../lib/schedule";
+  import { epochSecToLocalInput, localInputToEpochSec, scheduleErrorMessage, validateSchedule } from "../lib/schedule";
   import ScheduledModal from "./ScheduledModal.svelte";
   import type {
     NoteDraft_Deserialize as NoteDraft,
@@ -139,7 +139,14 @@
     if (!id) return;
     // アカウント切り替え直後に古いアカウントの結果で上書きしないよう世代で弾く
     void app.getScheduleCapabilities(id).then((c) => {
-      if (gen === scheduleCapsGen) scheduleAvailable = c?.available ?? false;
+      if (gen !== scheduleCapsGen) return;
+      scheduleAvailable = c?.available ?? false;
+      // 非対応と確定したアカウントには予約日時を持ち越さない(UIが隠れて解除できなくなるため)。
+      // 対応アカウント同士の切り替えでは日時を保つので、アカウント変更のたびには消さない。
+      if (!scheduleAvailable) {
+        scheduleAt = "";
+        showSchedulePicker = false;
+      }
     });
   });
   let draftsLoading = $state(false);
@@ -736,6 +743,12 @@
       createdAt: 0,
       updatedAt: 0,
     });
+    // 予約時刻が未来なら日時も復元する(戻さないと、編集後に「投稿」で即時投稿されてしまう)。
+    // 過去(投稿に失敗したもの)は予約せず、通常の下書きと同じ扱いにする。
+    if (s.scheduledAt * 1000 > Date.now()) {
+      scheduleAt = epochSecToLocalInput(s.scheduledAt);
+      showSchedulePicker = true;
+    }
     showScheduledModal = false;
     try {
       await unwrapAcc(acc, commands.cancelScheduledNote(acc, s.id));
@@ -756,6 +769,12 @@
     }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
     if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
+    // 切り替え直後で予約対応の確認が終わっていない(または非対応)のに予約日時が残っている場合、
+    // 即時投稿にも予約にも倒さず止める。
+    if (scheduleAt && !scheduleAvailable) {
+      err = "このアカウントでは予約投稿を確認中、または利用できません。予約日時を解除するか、少し待ってからやり直してください";
+      return;
+    }
     const scheduledAtSec = scheduleAt ? localInputToEpochSec(scheduleAt) : null;
     if (scheduleAt && scheduledAtSec === null) {
       err = "予約日時が不正です";
@@ -1167,7 +1186,7 @@
         onclick={toggleDraftMenu}
         disabled={busy || !accountId}
       ><FileText size={16} class="size-4" /></Button>
-      <Button type="button" size="sm" disabled={busy} onclick={submit} data-testid="compose-submit">{busy ? "…" : scheduleAt ? "予約" : "投稿"}</Button>
+      <Button type="button" size="sm" disabled={busy} onclick={submit} data-testid="compose-submit">{busy ? "…" : scheduleAvailable && scheduleAt ? "予約" : "投稿"}</Button>
     </div>
   </div>
   </div>
@@ -1275,7 +1294,10 @@
 {/if}
 
 {#if showScheduledModal && accountId}
-  <ScheduledModal {accountId} onrestore={restoreScheduled} onclose={() => (showScheduledModal = false)} />
+  <!-- アカウントが変わったら別のアカウントの一覧を操作しないよう、モーダルごと作り直す -->
+  {#key accountId}
+    <ScheduledModal {accountId} onrestore={restoreScheduled} onclose={() => (showScheduledModal = false)} />
+  {/key}
 {/if}
 
 {#if showDrivePicker && accountId}
