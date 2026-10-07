@@ -574,4 +574,120 @@ describe("ComposeBar 予約投稿", () => {
     // 失敗したので作成欄は残る
     expect((getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe("x");
   });
+  // render() の戻り値型は render<Component> が絞り込まれていて関数引数に渡せないため、使う分だけ構造的に型付けする
+  type UiQueries = {
+    container: HTMLElement;
+    findByTestId(id: string): Promise<HTMLElement>;
+    getByTestId(id: string): HTMLElement;
+    getByText(text: string): HTMLElement;
+    getByPlaceholderText(text: string): HTMLElement;
+  };
+
+  const scheduledNote = (over: Record<string, unknown> = {}) => ({
+    id: "s1",
+    scheduledAt: Math.floor(Date.now() / 1000) + 3600,
+    text: "戻したい本文",
+    cw: null,
+    visibility: "home",
+    localOnly: false,
+    reactionAcceptance: "all",
+    channelId: null,
+    poll: null,
+    fileIds: [],
+    replyNote: null,
+    quoteNote: null,
+    ...over,
+  });
+
+  async function openScheduledList(ui: UiQueries) {
+    await fireEvent.click(await ui.findByTestId("compose-schedule-toggle"));
+    await fireEvent.click(ui.getByTestId("compose-scheduled-list"));
+  }
+
+  it("「作成欄に戻す」で内容を作成欄に読み込み、サーバー側の予約を削除する", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_schedule_capabilities") return Promise.resolve({ available: true });
+      if (cmd === "list_scheduled_notes") return Promise.resolve([scheduledNote()]);
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    const ui = render(ComposeBar);
+    await openScheduledList(ui);
+    await fireEvent.click(await ui.findByTestId("scheduled-restore-s1"));
+
+    await waitFor(() =>
+      expect((ui.getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe("戻したい本文"),
+    );
+    expect(invokeMock).toHaveBeenCalledWith("cancel_scheduled_note", { accountId: "acc1", draftId: "s1" });
+    // モーダルは閉じる
+    expect(ui.queryByTestId("scheduled-item-s1")).toBeNull();
+  });
+
+  // Review Focus 5: 削除だけ失敗しても作成欄の内容は残し、重複投稿の恐れを警告する
+  it("戻した後にサーバー側の削除が失敗したら、内容は残して重複の警告を出す", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_schedule_capabilities") return Promise.resolve({ available: true });
+      if (cmd === "list_scheduled_notes") return Promise.resolve([scheduledNote()]);
+      if (cmd === "cancel_scheduled_note") return Promise.reject({ kind: "network", message: "offline" });
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    const ui = render(ComposeBar);
+    await openScheduledList(ui);
+    await fireEvent.click(await ui.findByTestId("scheduled-restore-s1"));
+
+    expect(await ui.findByText(/重複/)).toBeTruthy();
+    expect((ui.getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe("戻したい本文");
+  });
+
+  // Review Focus 4: 期間指定の投票は、投稿時刻ではなく予約日時を基準に締切を計算する
+  async function setupPoll(ui: UiQueries, scheduleValue: string) {
+    await fireEvent.click(await ui.findByTestId("compose-schedule-toggle"));
+    await fireEvent.input(ui.getByTestId("compose-schedule-input"), { target: { value: scheduleValue } });
+    await fireEvent.input(ui.getByTestId("compose-textarea"), { target: { value: "投票つき" } });
+    await fireEvent.click(ui.getByText("投票"));
+    await fireEvent.input(ui.getByPlaceholderText("選択肢 1"), { target: { value: "A" } });
+    await fireEvent.input(ui.getByPlaceholderText("選択肢 2"), { target: { value: "B" } });
+  }
+
+  it("期間指定の投票は予約日時を基準に締切を計算する", async () => {
+    mockCaps(true);
+    const ui = render(ComposeBar);
+    const value = futureInput();
+    await setupPoll(ui, value);
+    await fireEvent.click(ui.getByText("期間を指定"));
+    await fireEvent.input(ui.container.querySelector("input[type=number]") as HTMLInputElement, {
+      target: { value: "2" },
+    });
+    // 単位は既定の「時間後」
+    await fireEvent.click(ui.getByTestId("compose-submit"));
+
+    const scheduledAt = localInputToEpochSec(value) as number;
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("schedule_note", {
+        accountId: "acc1",
+        draft: expect.objectContaining({
+          poll: expect.objectContaining({ expiresAt: scheduledAt * 1000 + 2 * 3_600_000 }),
+        }),
+        scheduledAt,
+      }),
+    );
+  });
+
+  it("日時指定の投票の締切が予約日時以前ならエラーを出し、schedule_note を呼ばない", async () => {
+    mockCaps(true);
+    const ui = render(ComposeBar);
+    const value = futureInput();
+    await setupPoll(ui, value);
+    await fireEvent.click(ui.getByText("日時を指定"));
+    // 予約日時の1時間前を締切にする
+    const before = epochSecToLocalInput((localInputToEpochSec(value) as number) - 3600);
+    await fireEvent.input(ui.container.querySelector("input[type=datetime-local]:not([data-testid])") as HTMLInputElement, {
+      target: { value: before },
+    });
+    await fireEvent.click(ui.getByTestId("compose-submit"));
+
+    expect(await ui.findByText(/投票の締切/)).toBeTruthy();
+    expect(invokeMock).not.toHaveBeenCalledWith("schedule_note", expect.anything());
+  });
 });
