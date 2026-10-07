@@ -71,6 +71,8 @@ If the build fails during Gradle configuration with `A problem occurred configur
 
 `frontend/index.html` sets `<meta name="referrer" content="no-referrer">` so external images (avatars, emoji, Instance Ticker icons) aren't 403'd by Cloudflare-style hotlink rules (Issue #411). An embed that needs a Referer (e.g. the `UrlPreviewCard` player iframe) must set its own `referrerpolicy`.
 
+WebKitGTK's native `<input type="datetime-local">` / `date` / `time` can't be used to pick a time (Issue #430, #60): use `ui/DateTimeInput.svelte` (or the `datePicker` action in `lib/flatpickrDatePicker.ts` when you need a `Date`) instead of a native date/time input — see `docs/design/style-guide.md` §12.
+
 WebKitGTK layout quirk (Issue #166): when an `overflow:auto` box that needs a horizontal scrollbar (e.g. the code-block `pre`) is first laid out lazily, the scrollbar's height isn't propagated to its parent, so the next sibling (the note footer) stays overlapped by the scrollbar. Forcing a synchronous layout right after DOM insertion fixes it — `CodeBlock.svelte` reads `offsetHeight` for this. When investigating similar bugs, don't read geometry (`getBoundingClientRect` etc.) right after inserting a node: that read itself triggers the heal and masks the bug.
 
 ### progenitor is not used for REST codegen

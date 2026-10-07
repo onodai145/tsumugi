@@ -112,6 +112,14 @@ lucideアイコン（`size={N}` prop）の指定値が `10/12/13/14/15/16/20` �
 `env(safe-area-inset-*)` を直接書かず、`app.css` の `--safe-top/right/bottom/left` を `var()` で参照する。
 E2E（`e2e/specs-mobile/`）がこれらの変数を上書きしてセーフエリア被りを検証するため。
 
-## 12. 今後
+## 12. 日時入力
+
+ネイティブの `<input type="datetime-local">` / `date` / `time` は使わない。WebKitGTK(Linux)のネイティブ UI は未成熟で、時刻を操作できない(Issue #430、予約投稿 #60 で確認)。
+
+- フォームの日時入力は `ui/DateTimeInput.svelte` を使う。値は `datetime-local` と同じ `"YYYY-MM-DDTHH:mm"`(ローカルタイムゾーン)、空は `""`。
+- `Date` オブジェクトで扱う場合(検索モーダルの日時範囲)は `lib/flatpickrDatePicker.ts` の `datePicker` アクションを使う。
+- カレンダーのテーマは `lib/flatpickrTheme.css` に集約している。個別に上書きしない。
+
+## 13. 今後
 
 本書はコンポーネント未移行の指針整備のみ。既存コンポーネントの一括修正は行っていないため、触れたファイルから本書のスケールに寄せていく。大規模な一括置換が必要と判断した場合は別issueを切る。
