@@ -1,9 +1,20 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import { tick } from "svelte";
 import Harness from "./DateTimeInputHarness.svelte";
 
-type Fp = { _flatpickr: { setDate(d: Date, t: boolean): void; selectedDates: Date[] } };
+// UTC より進んだゾーンに固定する。CI が UTC でも、ローカル成分と UTC 成分が食い違う状況
+// (0:30 JST は UTC では前日 15:30)を再現して Review Focus 1 を実効性のあるテストにする。
+// (tsconfig.app.json に node の型が無いため globalThis 経由で代入する)
+(globalThis as unknown as { process: { env: Record<string, string> } }).process.env.TZ = "Asia/Tokyo";
+
+type Fp = {
+  _flatpickr: {
+    setDate(d: Date | Date[], t: boolean): void;
+    selectedDates: Date[];
+    config: { onChange: unknown[] };
+  };
+};
 const fpOf = (el: HTMLElement) => (el as unknown as Fp)._flatpickr;
 
 afterEach(() => cleanup());
@@ -31,13 +42,29 @@ describe("DateTimeInput", () => {
   });
 
   // Review Focus 2: 外からの更新は表示にだけ反映し、書き戻しやループを起こさない
-  it("value を外から変えると表示が追従し、value は変わらない", async () => {
+  it("value を外から変えると表示が追従し、onChange は発火せず value も変わらない", async () => {
     const { getByTestId, component } = render(Harness);
+    const fp = fpOf(getByTestId("dt"));
+    // 書き戻しは同じ文字列を書くだけで値からは検出できないため、flatpickr の onChange フックで観測する
+    const spy = vi.fn();
+    fp.config.onChange.push(spy);
     component.setValue("2026-10-08T09:30");
     await tick();
     expect((getByTestId("dt") as HTMLInputElement).value).toBe("2026-10-08 09:30");
     expect(getByTestId("bound").textContent).toBe("2026-10-08T09:30");
-    expect(fpOf(getByTestId("dt")).selectedDates).toHaveLength(1);
+    expect(fp.selectedDates).toHaveLength(1);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("ユーザーが選んだ後、effect が setDate を呼び直さない(ループしない)", async () => {
+    const { getByTestId } = render(Harness);
+    const fp = fpOf(getByTestId("dt"));
+    fp.setDate(new Date(2026, 4, 6, 7, 8), true);
+    await tick();
+    const spy = vi.spyOn(fp, "setDate");
+    await tick();
+    expect(spy).not.toHaveBeenCalled();
+    expect(getByTestId("bound").textContent).toBe("2026-05-06T07:08");
   });
 
   // Review Focus 3

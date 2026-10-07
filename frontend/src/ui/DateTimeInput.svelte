@@ -43,6 +43,7 @@
   }
 </script>
 
+<!-- defaultHour / defaultMinute はピッカー生成時にだけ読まれる(アクションに update は無い) -->
 <input
   type="text"
   readonly
