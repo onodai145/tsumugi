@@ -59,9 +59,10 @@ describe("DateTimeInput", () => {
   it("ユーザーが選んだ後、effect が setDate を呼び直さない(ループしない)", async () => {
     const { getByTestId } = render(Harness);
     const fp = fpOf(getByTestId("dt"));
-    fp.setDate(new Date(2026, 4, 6, 7, 8), true);
-    await tick();
+    // 選択より前にスパイを付ける。選択で value が変わった後の effect 実行(tick で flush される)を観測するため。
     const spy = vi.spyOn(fp, "setDate");
+    fp.setDate(new Date(2026, 4, 6, 7, 8), true);
+    spy.mockClear(); // テスト自身の選択呼び出しは数えない
     await tick();
     expect(spy).not.toHaveBeenCalled();
     expect(getByTestId("bound").textContent).toBe("2026-05-06T07:08");
