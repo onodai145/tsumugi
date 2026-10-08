@@ -32,6 +32,7 @@ import type {
   Edge,
   TqlEditMode,
   TqlCompletionItem,
+  ScheduleCapabilities,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -1452,6 +1453,16 @@ class AppStore {
     }
   }
 
+  /// 予約投稿(Issue #60)に対応するサーバーか。取得に失敗しても非対応(false)にし、
+  /// ComposeBar を開くたびに誤ってエラーモーダルを出さないよう #logFailure は呼ばない。
+  async getScheduleCapabilities(accountId: string): Promise<ScheduleCapabilities> {
+    try {
+      return (await unwrapAcc(accountId, commands.getScheduleCapabilities(accountId))) ?? { available: false };
+    } catch {
+      return { available: false };
+    }
+  }
+
   /// NoteMenu の「翻訳」項目を出すか(Issue #440)。取得に失敗しても翻訳が使えない扱い(false)にし、
   /// メニューを開くたびに誤ってエラーモーダルを出さないよう #logFailure も呼ばない。
   async getTranslatorAvailable(accountId: string): Promise<boolean> {
@@ -1992,6 +2003,17 @@ class AppStore {
     try {
       await unwrapAcc(accountId, commands.postNote(accountId, draft));
       this.#log("success", "投稿しました");
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// 予約投稿(Issue #60)。`scheduledAt` は epoch 秒。
+  async scheduleNote(accountId: string, draft: NoteDraft, scheduledAt: number) {
+    try {
+      await unwrapAcc(accountId, commands.scheduleNote(accountId, draft, scheduledAt));
+      this.#log("success", "予約しました");
     } catch (e) {
       this.#logFailure(e);
       throw e;

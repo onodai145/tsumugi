@@ -7,6 +7,7 @@
 
 pub mod client;
 pub mod clips;
+pub mod drafts;
 pub mod drive;
 pub mod meta;
 pub mod mutes;

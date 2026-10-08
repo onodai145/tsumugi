@@ -10,7 +10,7 @@
   import { commands, unwrap, unwrapAcc, formatError, vibrate } from "../lib/ipc";
   import { isMobilePlatform } from "../lib/platform";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { FileText, ImagePlus, SmilePlus, X } from "@lucide/svelte";
+  import { CalendarClock, FileText, ImagePlus, ListChecks, SmilePlus, X } from "@lucide/svelte";
   import { portal } from "../lib/portal";
   import { onDestroy, tick } from "svelte";
   import ReactionPicker from "../input/ReactionPicker.svelte";
@@ -21,6 +21,9 @@
   import { searchHashtagItems, searchMentionItems } from "../lib/mfmSearch";
   import { pickComposePlaceholder } from "../lib/composePlaceholder";
   import { shouldInterceptPaste } from "../lib/pasteIntent";
+  import { epochSecToLocalInput, localInputToEpochSec, scheduleErrorMessage, validateSchedule } from "../lib/schedule";
+  import ScheduledModal from "./ScheduledModal.svelte";
+  import DateTimeInput from "./DateTimeInput.svelte";
   import type {
     NoteDraft_Deserialize as NoteDraft,
     VisibilityInput,
@@ -31,6 +34,7 @@
     Draft,
     DraftInput,
     DraftNoteSnapshot,
+    ScheduledNote,
   } from "../bindings/tauri.gen";
 
   // expanded: モバイルの投稿モーダルなど、常に複数行分の入力欄を確保したい文脈向け
@@ -123,6 +127,29 @@
   let draftMenuTrigger = $state<HTMLElement | null>(null);
   let draftMenuPos = $state<{ left: number; top: number } | null>(null);
   let manualDrafts = $state<Draft[]>([]);
+  // 予約投稿(Issue #60)。scheduleAt は datetime-local 文字列(空なら通常の投稿)。
+  let scheduleAvailable = $state(false);
+  let scheduleAt = $state("");
+  let showSchedulePicker = $state(false);
+  let showScheduledModal = $state(false);
+  let scheduleCapsGen = 0;
+  $effect(() => {
+    const id = accountId;
+    const gen = ++scheduleCapsGen;
+    scheduleAvailable = false;
+    if (!id) return;
+    // アカウント切り替え直後に古いアカウントの結果で上書きしないよう世代で弾く
+    void app.getScheduleCapabilities(id).then((c) => {
+      if (gen !== scheduleCapsGen) return;
+      scheduleAvailable = c?.available ?? false;
+      // 非対応と確定したアカウントには予約日時を持ち越さない(UIが隠れて解除できなくなるため)。
+      // 対応アカウント同士の切り替えでは日時を保つので、アカウント変更のたびには消さない。
+      if (!scheduleAvailable) {
+        scheduleAt = "";
+        showSchedulePicker = false;
+      }
+    });
+  });
   let draftsLoading = $state(false);
   /// 呼び出し中の手動下書きのID(投稿成功時にこれを自動削除する)。手動保存/新規入力/
   /// 自動下書き復元時はnullに戻す。
@@ -589,9 +616,9 @@
     }
   }
 
-  function computePollExpiresAt(): number | null {
+  function computePollExpiresAt(baseMs: number = Date.now()): number | null {
     if (pollExpiryMode === "at" && pollExpiresAt) return new Date(pollExpiresAt).getTime();
-    if (pollExpiryMode === "after") return Date.now() + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
+    if (pollExpiryMode === "after") return baseMs + pollAfterAmount * POLL_AFTER_UNIT_MS[pollAfterUnit];
     return null;
   }
 
@@ -695,6 +722,42 @@
     showDraftMenu = false;
   }
 
+  /// 予約一覧の「作成欄に戻す」。内容を作成欄に読み込んでから、サーバー側の予約を削除する。
+  /// 削除に失敗した場合、予約が残ったまま作成欄からも投稿できてしまう(重複)ため警告する。
+  async function restoreScheduled(s: ScheduledNote) {
+    if (!accountId) return;
+    const acc = accountId;
+    await loadDraft({
+      id: s.id,
+      accountId: acc,
+      kind: "auto",
+      text: s.text,
+      cw: s.cw,
+      visibility: s.visibility,
+      localOnly: s.localOnly,
+      reactionAcceptance: s.reactionAcceptance,
+      channelId: s.channelId,
+      poll: s.poll,
+      fileIds: s.fileIds,
+      replyNote: s.replyNote,
+      quoteNote: s.quoteNote,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    // 予約時刻が未来なら日時も復元する(戻さないと、編集後に「投稿」で即時投稿されてしまう)。
+    // 過去(投稿に失敗したもの)は予約せず、通常の下書きと同じ扱いにする。
+    if (s.scheduledAt * 1000 > Date.now()) {
+      scheduleAt = epochSecToLocalInput(s.scheduledAt);
+      showSchedulePicker = true;
+    }
+    showScheduledModal = false;
+    try {
+      await unwrapAcc(acc, commands.cancelScheduledNote(acc, s.id));
+    } catch (e) {
+      err = `作成欄には戻しましたが、サーバー側の予約を取り消せませんでした。このまま投稿すると重複します。予約一覧から取り消してください。\n${String(e)}`;
+    }
+  }
+
   async function submit() {
     err = null;
     if (!accountId) {
@@ -707,7 +770,30 @@
     }
     const choices = pollChoices.map((s) => s.trim()).filter(Boolean);
     if (!text.trim() && !quoteOf && choices.length === 0 && attachments.length === 0) return;
-    const expiresAt = computePollExpiresAt();
+    // 切り替え直後で予約対応の確認が終わっていない(または非対応)のに予約日時が残っている場合、
+    // 即時投稿にも予約にも倒さず止める。
+    if (scheduleAt && !scheduleAvailable) {
+      err = "このアカウントでは予約投稿を確認中、または利用できません。予約日時を解除するか、少し待ってからやり直してください";
+      return;
+    }
+    const scheduledAtSec = scheduleAt ? localInputToEpochSec(scheduleAt) : null;
+    if (scheduleAt && scheduledAtSec === null) {
+      err = "予約日時が不正です";
+      return;
+    }
+    // 期間指定(「N 時間後」)の投票は、予約なら予約日時を基準にする(投稿直後に期限切れにしない)
+    const expiresAt = computePollExpiresAt(scheduledAtSec !== null ? scheduledAtSec * 1000 : Date.now());
+    if (scheduledAtSec !== null) {
+      const check = validateSchedule(
+        scheduledAtSec,
+        Date.now(),
+        usePoll && choices.length >= 2 ? expiresAt : null,
+      );
+      if (!check.ok) {
+        err = check.message;
+        return;
+      }
+    }
 
     // 投稿処理(特にpost_noteの往復)がデバウンス(2000ms)より長くかかると、投稿完了後の
     // clear_auto_draftより後にこのタイマーのsave_auto_draftが届き、投稿済みなのに下書きが
@@ -750,7 +836,8 @@
         localOnly: useChannel || localOnly,
         reactionAcceptance,
       };
-      await app.postNote(accountId, draft);
+      if (scheduledAtSec !== null) await app.scheduleNote(accountId, draft, scheduledAtSec);
+      else await app.postNote(accountId, draft);
       if (isMobilePlatform && (app.ui.hapticsEnabled ?? true)) vibrate("medium");
       const draftToDelete = loadedDraftId;
       void unwrapAcc(accountId, commands.clearAutoDraft(accountId)).catch(() => {});
@@ -775,9 +862,11 @@
       attachments = [];
       replyTo = undefined;
       quoteOf = undefined;
+      scheduleAt = "";
+      showSchedulePicker = false;
       onPosted?.();
     } catch (e) {
-      err = String(e);
+      err = scheduledAtSec !== null ? scheduleErrorMessage(String(e)) : String(e);
     } finally {
       busy = false;
       uploadingAttachmentId = null;
@@ -994,7 +1083,12 @@
           </Button>
         {/each}
         {#if pollExpiryMode === "at"}
-          <input type="datetime-local" bind:value={pollExpiresAt} class="rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground" />
+          <DateTimeInput
+            bind:value={pollExpiresAt}
+            placeholder="締切日時"
+            data-testid="compose-poll-expires-at"
+            class="w-40 rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground"
+          />
         {:else if pollExpiryMode === "after"}
           <input
             type="number"
@@ -1049,6 +1143,46 @@
       </label>
     </div>
     <div class="flex flex-none flex-wrap items-center gap-1.5">
+      {#if scheduleAvailable}
+        <Button
+          type="button"
+          variant={scheduleAt ? "default" : "outline"}
+          size="icon-sm"
+          title="予約投稿"
+          data-testid="compose-schedule-toggle"
+          onclick={() => (showSchedulePicker = !showSchedulePicker)}
+          disabled={busy || !accountId}
+        ><CalendarClock size={16} class="size-4" /></Button>
+        {#if showSchedulePicker}
+          <DateTimeInput
+            bind:value={scheduleAt}
+            placeholder="予約日時"
+            data-testid="compose-schedule-input"
+            class="w-40 rounded border border-border bg-muted px-1.5 py-[3px] font-[inherit] text-sm text-foreground"
+          />
+          {#if scheduleAt}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              class="flex-none text-muted-foreground"
+              title="予約を解除"
+              data-testid="compose-schedule-clear"
+              onclick={() => {
+                scheduleAt = "";
+                showSchedulePicker = false;
+              }}
+            ><X size={12} /></Button>
+          {/if}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="compose-scheduled-list"
+            onclick={() => (showScheduledModal = true)}
+          ><ListChecks size={16} class="size-4" />予約一覧</Button>
+        {/if}
+      {/if}
       <Button
         type="button"
         variant="outline"
@@ -1058,7 +1192,7 @@
         onclick={toggleDraftMenu}
         disabled={busy || !accountId}
       ><FileText size={16} class="size-4" /></Button>
-      <Button type="button" size="sm" disabled={busy} onclick={submit} data-testid="compose-submit">{busy ? "…" : "投稿"}</Button>
+      <Button type="button" size="sm" disabled={busy} onclick={submit} data-testid="compose-submit">{busy ? "…" : scheduleAvailable && scheduleAt ? "予約" : "投稿"}</Button>
     </div>
   </div>
   </div>
@@ -1163,6 +1297,13 @@
       <ReactionPicker accountId={accountId} onpick={insertEmoji} />
     </div>
   </div>
+{/if}
+
+{#if showScheduledModal && accountId}
+  <!-- アカウントが変わったら別のアカウントの一覧を操作しないよう、モーダルごと作り直す -->
+  {#key accountId}
+    <ScheduledModal {accountId} onrestore={restoreScheduled} onclose={() => (showScheduledModal = false)} />
+  {/key}
 {/if}
 
 {#if showDrivePicker && accountId}

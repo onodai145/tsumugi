@@ -1,8 +1,6 @@
 <script lang="ts">
-  import flatpickr from "flatpickr";
-  import "flatpickr/dist/flatpickr.min.css";
-  import { Japanese } from "flatpickr/dist/l10n/ja.js";
   import type { Instance as FlatpickrInstance } from "flatpickr/dist/types/instance";
+  import { datePicker } from "../lib/flatpickrDatePicker";
   import { app } from "../lib/store.svelte";
   import AccountSelect from "./AccountSelect.svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";
@@ -38,40 +36,6 @@
   // サーバー検索は簡単モード固定（notes/search はTQLを受け付けない）。
   const showGuided = $derived(scope === "server" || uiMode === "guided");
   const dateVisible = $derived(scope === "cache" || caps?.dateRange === true);
-
-  // flatpickrをSvelteのバインディングなしに素のinputへ被せるアクション。fpインスタンスは
-  // クリアボタン(fp.clear())から使えるよう呼び出し元に返す。defaultHour/defaultMinuteは
-  // 日付だけクリックして時刻を触らなかった場合の既定値（開始側は0時、終了側はその日の終わり）。
-  function datePicker(
-    node: HTMLInputElement,
-    opts: { defaultHour: number; onChange: (d: Date | null) => void; onCreate: (fp: FlatpickrInstance) => void },
-  ) {
-    const fp: FlatpickrInstance = flatpickr(node, {
-      enableTime: true,
-      time_24hr: true,
-      dateFormat: "Y-m-d H:i",
-      locale: Japanese,
-      defaultHour: opts.defaultHour,
-      defaultMinute: opts.defaultHour === 0 ? 0 : 59,
-      onChange: (dates) => opts.onChange(dates[0] ?? null),
-      // flatpickr本体はヘッダを常に「月セレクト→年input」の順でDOM生成し、これを入れ替える
-      // 設定は無い。buildMonths()自体は初期化時に1度しか呼ばれない(月送りは値の更新のみ)
-      // ので、onReadyで年側のwrapperを月セレクトの前に差し替えれば以後も維持される。
-      onReady: (_selectedDates, _dateStr, instance) => {
-        const yearWrapper = instance.currentYearElement.closest(".numInputWrapper");
-        const monthSelect = instance.monthsDropdownContainer;
-        if (yearWrapper && monthSelect?.parentElement) {
-          monthSelect.parentElement.insertBefore(yearWrapper, monthSelect);
-        }
-      },
-    });
-    opts.onCreate(fp);
-    return {
-      destroy() {
-        fp.destroy();
-      },
-    };
-  }
 
   let notes = $state<Note[]>([]);
   let busy = $state(false);
@@ -429,113 +393,3 @@
     {/if}
   </div>
 </Modal>
-
-<style>
-  /* flatpickrはカレンダーpopupをinputの外(通常body直下)に生成するため、Svelteのscoped CSSが
-     効かずすべて:globalが必要。app.cssのカラートークンに載せ替えてライト/ダーク両対応にする。 */
-  :global(.flatpickr-calendar) {
-    background: var(--color-popover);
-    color: var(--color-popover-foreground);
-    border: 1px solid var(--color-border);
-    border-radius: 0.5rem;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    font-family: inherit;
-  }
-  :global(.flatpickr-calendar.arrowTop:before),
-  :global(.flatpickr-calendar.arrowTop:after) {
-    display: none;
-  }
-  :global(.flatpickr-months .flatpickr-month),
-  :global(.flatpickr-current-month) {
-    color: var(--color-popover-foreground);
-    fill: var(--color-popover-foreground);
-  }
-  /* flatpickr本体が `span.flatpickr-weekday { color: rgba(0,0,0,0.54); }` を要素+クラスの
-     セレクタで持っており、こちらをクラス単体(.flatpickr-weekday)で上書きしても詳細度で
-     負けて常に元の色が勝つ（読み込み順に関係なく曜日だけ暗いまま沈んで見えた原因）。
-     詳細度を合わせるため要素セレクタを揃える。 */
-  :global(span.flatpickr-weekday) {
-    color: var(--color-popover-foreground);
-  }
-  /* 日本の慣習に合わせ土曜=青・日曜=赤にする。firstDayOfWeekが既定の0(日曜始まり)なので、
-     曜日ヘッダ・日付セルとも7列グリッドの1列目=日曜・7列目=土曜になる。 */
-  :global(.flatpickr-weekdaycontainer span.flatpickr-weekday:nth-child(1)) {
-    color: var(--danger);
-  }
-  :global(.flatpickr-weekdaycontainer span.flatpickr-weekday:nth-child(7)) {
-    color: var(--info);
-  }
-  :global(.flatpickr-weekdays) {
-    background: transparent;
-  }
-  :global(.flatpickr-day) {
-    color: var(--color-popover-foreground);
-  }
-  :global(.flatpickr-day.flatpickr-disabled),
-  :global(.flatpickr-day.prevMonthDay),
-  :global(.flatpickr-day.nextMonthDay) {
-    color: var(--color-muted-foreground);
-  }
-  /* :not()で選択中/前後月/無効セルを除外し、cascadeの並び順に依存せず正しく上書きされる
-     ようにする（土日色 vs 選択中の白文字 vs 前後月の淡色、が競合しないように）。 */
-  :global(
-    .flatpickr-day:nth-child(7n + 1):not(.selected):not(.prevMonthDay):not(.nextMonthDay):not(.flatpickr-disabled)
-  ) {
-    color: var(--danger);
-  }
-  :global(
-    .flatpickr-day:nth-child(7n):not(.selected):not(.prevMonthDay):not(.nextMonthDay):not(.flatpickr-disabled)
-  ) {
-    color: var(--info);
-  }
-  :global(.flatpickr-day:hover) {
-    background: var(--color-accent);
-    border-color: var(--color-accent);
-  }
-  :global(.flatpickr-day.selected) {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    color: var(--color-primary-foreground);
-  }
-  :global(.flatpickr-day.today) {
-    border-color: var(--color-primary);
-  }
-  /* 年/時/分の数値inputと月のselectは、WebKitGTKではネイティブ(GTKテーマ)の
-     枠+背景をOSが直接描画し、background-color等のCSSを与えても無視される
-     （computed styleの値自体はCSS通りになるが実際の描画には反映されない）。
-     -webkit-appearance/appearance を none にしてネイティブウィジェット描画を止めないと
-     常にGTKテーマの灰色のままになる。それを止めた上でbackground/borderを載せる。 */
-  :global(.numInputWrapper input),
-  :global(.flatpickr-time input),
-  :global(.flatpickr-current-month .flatpickr-monthDropdown-months) {
-    -webkit-appearance: none;
-    appearance: none;
-    background: var(--color-muted);
-    color: var(--color-popover-foreground);
-    border: 1px solid var(--color-border);
-    border-radius: 0.25rem;
-  }
-  :global(.flatpickr-current-month .flatpickr-monthDropdown-months .flatpickr-monthDropdown-month) {
-    background: var(--color-muted);
-    color: var(--color-popover-foreground);
-  }
-  :global(.flatpickr-time .flatpickr-time-separator),
-  :global(.flatpickr-time .flatpickr-am-pm) {
-    color: var(--color-popover-foreground);
-  }
-  /* flatpickr本体の `.flatpickr-time input:hover, .flatpickr-time input:focus { background: #eee; }`
-     は疑似クラスの分だけ上のbaseルールより詳細度が高く、フォーカス時(＝実際に時刻を
-     入力しようとした瞬間)だけ強制的に#eee(明るいグレー)に戻っていた。同じ詳細度で
-     上書きする。 */
-  :global(.flatpickr-time input:hover),
-  :global(.flatpickr-time input:focus) {
-    background: var(--color-accent);
-  }
-  :global(.flatpickr-time) {
-    border-top: 1px solid var(--color-border);
-  }
-  :global(.flatpickr-months .flatpickr-prev-month svg),
-  :global(.flatpickr-months .flatpickr-next-month svg) {
-    fill: var(--color-popover-foreground);
-  }
-</style>

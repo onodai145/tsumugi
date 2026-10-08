@@ -185,6 +185,14 @@ export const commands = {
 	 *  `acct` は `@user@host` 形式（userId へ解決する）、日時は秒（日時範囲はサーバーが対応する場合のみ）。
 	 */
 	searchServerNotes: (accountId: string, query: string, acct: string | null, host: string | null, sinceDate: number | null, untilDate: number | null, untilId: string | null, limit: number) => typedError<Note[], Error>(__TAURI_INVOKE("search_server_notes", { accountId, query, acct, host, sinceDate, untilDate, untilId, limit })),
+	/**  アカウントの接続先サーバーが予約投稿に対応するか。取得失敗は非対応扱い。 */
+	getScheduleCapabilities: (accountId: string) => typedError<ScheduleCapabilities, Error>(__TAURI_INVOKE("get_schedule_capabilities", { accountId })),
+	/**  予約投稿を作る。`scheduled_at` は epoch 秒。添付は呼び出し側でアップロード済みの `fileIds`。 */
+	scheduleNote: (accountId: string, draft: NoteDraft_Deserialize, scheduledAt: number) => typedError<ScheduledNote, Error>(__TAURI_INVOKE("schedule_note", { accountId, draft, scheduledAt })),
+	/**  予約中の投稿一覧。`until_id` は前のページの最後の ID。`limit` は 1〜100 に丸める。 */
+	listScheduledNotes: (accountId: string, untilId: string | null, limit: number) => typedError<ScheduledNote[], Error>(__TAURI_INVOKE("list_scheduled_notes", { accountId, untilId, limit })),
+	/**  予約の取り消し(サーバー側の下書きを削除する)。 */
+	cancelScheduledNote: (accountId: string, draftId: string) => typedError<null, Error>(__TAURI_INVOKE("cancel_scheduled_note", { accountId, draftId })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -886,6 +894,29 @@ export type ReactionUser = {
 	user: User,
 	/**  Misskey形式キー（Unicode生 or :name@host:） */
 	reaction: string,
+};
+
+/**  接続先サーバーが対応する予約投稿機能。フロントはこれを見て予約ボタンの出し分けをする。 */
+export type ScheduleCapabilities = {
+	/**  予約投稿が使えるか。 */
+	available: boolean,
+};
+
+export type ScheduledNote = {
+	/**  サーバー側の下書き ID(取り消しに使う)。 */
+	id: string,
+	/**  予約日時(epoch 秒)。現在より過去なら、投稿に失敗して残っているもの。 */
+	scheduledAt: number,
+	text: string,
+	cw: string | null,
+	visibility: VisibilityInput,
+	localOnly: boolean,
+	reactionAcceptance: ReactionAcceptanceInput,
+	channelId: string | null,
+	poll: PollDraftSnapshot | null,
+	fileIds: string[],
+	replyNote: DraftNoteSnapshot | null,
+	quoteNote: DraftNoteSnapshot | null,
 };
 
 /**
