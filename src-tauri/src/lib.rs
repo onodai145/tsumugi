@@ -80,6 +80,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::scheduled::schedule_note,
             commands::scheduled::list_scheduled_notes,
             commands::scheduled::cancel_scheduled_note,
+            commands::scheduled::schedule_note_local,
+            commands::scheduled::list_local_scheduled_notes,
+            commands::scheduled::cancel_local_scheduled_note,
+            commands::scheduled::post_local_scheduled_now,
             commands::note::post_note,
             commands::note::renote,
             commands::note::delete_note_cmd,
@@ -142,6 +146,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ColumnConnectionState,
             events::ColumnGapFill,
             events::ColumnNotificationGapFill,
+            events::ScheduledPostPosted,
+            events::ScheduledPostFailed,
         ])
 }
 
@@ -269,6 +275,15 @@ pub fn run() {
 
             let drafts_path = config_dir.join("drafts.json");
             let drafts = DraftStore::new(drafts_path).expect("failed to open drafts file");
+            // クライアント側の予約投稿(Issue #60 B)。起動時に、送信中のまま残っていた予約は結果が
+            // 分からないため、再送せず失敗にする。
+            let scheduled_posts = store::ScheduledPostStore::new(config_dir.join("scheduled_posts.json"))
+                .expect("failed to open scheduled posts file");
+            match scheduled_posts.recover_posting() {
+                Ok(0) => {}
+                Ok(n) => log::warn!("{n} scheduled post(s) were left in 'posting'; marked as failed"),
+                Err(e) => log::warn!("failed to recover scheduled posts: {e}"),
+            }
 
             // 設定(UiPrefs.enable_file_logging)でON/OFFする(Issue #12: 「謎のタイミングで
             // 通知が来る」の調査用に、リリースビルドでもWS再接続/pingタイムアウトのログを
@@ -365,7 +380,11 @@ pub fn run() {
                 }
             };
             let cache = NoteCacheStore::new_from_arc(cache_backend);
-            app.manage(AppState::new(Box::new(KeyringStore), settings, drafts, cache, cache_dir.clone()));
+            app.manage(
+                AppState::new(Box::new(KeyringStore), settings, drafts, cache, cache_dir.clone())
+                    .with_scheduled_posts(scheduled_posts),
+            );
+            scheduler::spawn(app.handle().clone());
 
             // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の
             // 未確定文字列インライン表示)を無効化しているため、明示的に再度有効化する。
@@ -424,6 +443,18 @@ mod specta_export {
         assert!(
             ts.contains("scheduledAt: number") || ts.contains("scheduledAt:number"),
             "ScheduledNote.scheduled_at should export as number (camelCase)"
+        );
+        // クライアント側予約(Issue #60 B)のコマンド・型・イベント
+        assert!(ts.contains("scheduleNoteLocal"), "missing scheduleNoteLocal command");
+        assert!(ts.contains("listLocalScheduledNotes"), "missing listLocalScheduledNotes command");
+        assert!(ts.contains("cancelLocalScheduledNote"), "missing cancelLocalScheduledNote command");
+        assert!(ts.contains("postLocalScheduledNow"), "missing postLocalScheduledNow command");
+        assert!(ts.contains("LocalScheduledNote"), "missing LocalScheduledNote type");
+        assert!(ts.contains("ScheduledPostPosted"), "missing ScheduledPostPosted event");
+        assert!(ts.contains("ScheduledPostFailed"), "missing ScheduledPostFailed event");
+        assert!(
+            ts.contains("\"pending\"") && ts.contains("\"expired\""),
+            "LocalScheduleStatus should export camelCase variants"
         );
         assert!(ts.contains("dateRange"), "SearchCapabilities.date_range should be camelCase");
         // serde(rename_all="camelCase") が specta 経由で TS に反映されていること

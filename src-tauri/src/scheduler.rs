@@ -11,6 +11,8 @@ use crate::domain::{LocalScheduleStatus, LocalScheduledNote};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use crate::store::draft::DraftInput;
+use tauri::Manager;
+use tauri_specta::Event as _;
 
 /// 予約時刻からこの秒数以内なら投稿する。超えていたら期限切れ(自動では投稿しない)。
 pub const MISSED_GRACE_SEC: i64 = 300;
@@ -170,6 +172,54 @@ pub async fn post_now(state: &AppState, account_id: &str, id: &str, now: i64) ->
     attempt(state, id, now, false)
         .await
         .ok_or_else(|| Error::Invalid("投稿処理中です".into()))
+}
+
+/// 結果をフロントへ通知する(トースト・一覧の読み直し用)。`Expired` も、ユーザーに知らせるため
+/// 失敗のイベントで通知する。
+pub fn emit_outcome(app: &tauri::AppHandle, outcome: &Outcome) {
+    use crate::events::{ScheduledPostFailed, ScheduledPostPosted};
+    let result = match outcome {
+        Outcome::Posted { account_id, id, note_id } => ScheduledPostPosted {
+            account_id: account_id.clone(),
+            id: id.clone(),
+            note_id: note_id.clone(),
+        }
+        .emit(app),
+        Outcome::Failed { account_id, id, message } => ScheduledPostFailed {
+            account_id: account_id.clone(),
+            id: id.clone(),
+            message: message.clone(),
+        }
+        .emit(app),
+        Outcome::Expired { account_id, id } => ScheduledPostFailed {
+            account_id: account_id.clone(),
+            id: id.clone(),
+            message: EXPIRED_MESSAGE.to_string(),
+        }
+        .emit(app),
+    };
+    if let Err(e) = result {
+        log::warn!("failed to emit scheduled post event: {e}");
+    }
+}
+
+/// 常駐タスクを起動する。次の期限まで(最大 `MAX_SLEEP_SEC` 秒)寝て、期限が来た予約を処理する。
+/// 予約の追加・取り消しなどで `scheduler_wakeup` が通知されたら、すぐ起き直す。
+pub fn spawn(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let state = app.state::<AppState>();
+            for outcome in process_due(&state, now_sec()).await {
+                emit_outcome(&app, &outcome);
+            }
+            let wait = next_sleep(now_sec(), state.scheduled_posts.next_wakeup());
+            let wakeup = state.scheduler_wakeup.clone();
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(wait)) => {}
+                _ = wakeup.notified() => {}
+            }
+        }
+    });
 }
 
 pub fn schedule_local(

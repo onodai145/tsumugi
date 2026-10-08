@@ -83,3 +83,23 @@ pub enum ConnectionState {
     Reconnecting,
     Error,
 }
+
+/// クライアント側の予約投稿が投稿された(Issue #60 B)。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledPostPosted {
+    pub account_id: String,
+    /// ローカル予約の ID(投稿後は一覧から消える)。
+    pub id: String,
+    /// 投稿されたノートの ID。
+    pub note_id: String,
+}
+
+/// クライアント側の予約投稿が失敗した、または期限切れになった(Issue #60 B)。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledPostFailed {
+    pub account_id: String,
+    pub id: String,
+    pub message: String,
+}
