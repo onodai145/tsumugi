@@ -132,6 +132,11 @@ pub struct AppState {
     test_api_base: Mutex<Option<String>>,
     pub settings: SettingsStore,
     pub drafts: DraftStore,
+    /// クライアント側の予約投稿(Issue #60 B)。`AppState::new*` のシグネチャを変えずに済むよう、
+    /// 既定はメモリ版で、起動時に `with_scheduled_posts` で永続版へ差し替える。
+    pub scheduled_posts: crate::store::ScheduledPostStore,
+    /// スケジューラを起こす通知。予約の追加・取り消し・「今すぐ投稿」の後に `notify_one` する。
+    pub scheduler_wakeup: std::sync::Arc<tokio::sync::Notify>,
     pub cache: NoteCacheStore,
     /// ノートキャッシュDB(`cache.db`)を置くディレクトリ。`set_cache_backend`がSqliteへ
     /// 切り替える際に`cache_dir.join("cache.db")`を再度開くために保持する(Issue #115 Phase 2)。
@@ -158,6 +163,12 @@ impl AppState {
         cache_dir: std::path::PathBuf,
     ) -> Self {
         Self::new_with_sound(secrets, settings, drafts, cache, cache_dir, SoundPlayer::spawn())
+    }
+
+    /// 予約投稿のストアを差し替える(起動時に永続版へ)。
+    pub fn with_scheduled_posts(mut self, store: crate::store::ScheduledPostStore) -> Self {
+        self.scheduled_posts = store;
+        self
     }
 
     /// `sound` フィールドの構築方法を差し替え可能にした内部コンストラクタ。
@@ -196,6 +207,8 @@ impl AppState {
             test_api_base: Mutex::new(None),
             settings,
             drafts,
+            scheduled_posts: crate::store::ScheduledPostStore::new_in_memory(),
+            scheduler_wakeup: std::sync::Arc::new(tokio::sync::Notify::new()),
             cache,
             cache_dir,
             gap_fill_in_flight: Mutex::new(HashSet::new()),

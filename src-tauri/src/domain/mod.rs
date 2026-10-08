@@ -36,7 +36,7 @@ pub use notify::NotifyConfig;
 pub use pane::{Edge, PaneChild, PaneNode, SplitDirection};
 pub use reaction::{EmojiDef, ReactionSummary, ReactionUser};
 pub use schedule::{schedule_capabilities, ScheduleCapabilities};
-pub use scheduled::ScheduledNote;
+pub use scheduled::{LocalScheduleStatus, LocalScheduledNote, ScheduledNote};
 pub use search::{parse_misskey_version, search_capabilities, SearchCapabilities};
 pub use share::ShareReceived;
 pub use ui::{BackgroundKind, UiPrefs};
