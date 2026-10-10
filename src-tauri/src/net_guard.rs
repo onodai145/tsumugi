@@ -44,16 +44,23 @@ fn is_blocked_v6(ip: Ipv6Addr) -> bool {
         || (first & 0xffc0) == 0xfe80 // link-local fe80::/10
 }
 
-/// 許可リストの照合キー: 小文字化し、ポートと末尾のドットを除いたホスト部。
+/// 許可リストの照合キー: 小文字化・punycode化し、ポートと末尾のドットを除いたホスト部。
+/// punycode化するのは、リゾルバに渡る名前(`url` クレートがUnicodeのホストを変換したもの)と
+/// Unicode表記のアカウントホストを一致させるため。
 pub(crate) fn host_key(host: &str) -> String {
-    let h = host.trim().to_ascii_lowercase();
+    let h = host.trim();
     // 角括弧付きIPv6はアカウントのホストとして来ない(`normalize_host` が `.` を要求する)ため、
     // `host:port` の最後の `:` 以降が数字だけならポートとして落とす。
     let h = match h.rsplit_once(':') {
-        Some((name, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => name.to_string(),
+        Some((name, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => name,
         _ => h,
     };
-    h.trim_end_matches('.').to_string()
+    // 変換できない文字列は、ASCIIの小文字化だけで従来どおりのキーにする(照合は一致しなくなるだけ)。
+    let normalized = match url::Host::parse(h) {
+        Ok(parsed) => parsed.to_string(),
+        Err(_) => h.to_ascii_lowercase(),
+    };
+    normalized.trim_end_matches('.').to_string()
 }
 
 /// 例外として取得を許可するホスト(登録アカウントのホスト)の集合。クローンは同じ集合を共有する。
@@ -245,6 +252,24 @@ mod tests {
         assert_eq!(host_key("LOCALHOST."), "localhost");
         assert_eq!(host_key("192.168.1.10"), "192.168.1.10");
         assert_eq!(host_key("192.168.1.10:3000"), "192.168.1.10");
+    }
+
+    #[test]
+    fn host_key_converts_unicode_host_to_punycode() {
+        let key = host_key("みすきー.example:3000");
+        assert!(key.starts_with("xn--"), "unexpected key: {key}");
+        // reqwest/url がリゾルバへ渡す名前と同じ表記になる
+        let ascii = url::Url::parse("http://みすきー.example:3000/").unwrap().host_str().unwrap().to_string();
+        assert_eq!(key, ascii);
+    }
+
+    #[test]
+    fn allowlisted_unicode_host_matches_the_name_the_resolver_receives() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["みすきー.example:3000"]);
+        let ascii = url::Url::parse("http://みすきー.example:3000/").unwrap().host_str().unwrap().to_string();
+        let out = filter_addrs(&ascii, vec![sa("192.168.1.10")], &allow).unwrap();
+        assert_eq!(out, vec![sa("192.168.1.10")]);
     }
 
     #[test]

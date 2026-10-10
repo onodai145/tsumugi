@@ -61,7 +61,7 @@ WebView から渡された任意URLを Rust (`reqwest`) で取得するコマン
 - 型は `Arc<RwLock<HashSet<String>>>`。登録済みアカウントのホスト名(小文字化、ポート無し)の集合。
 - `GuardedResolver` が共有して参照する。
 - `AppState` に `refresh_fetch_allowlist()` を設け、`accounts` が変わる箇所の直後で呼ぶ。対象は `AppState::new`(起動時のロード)、`commands/account.rs` のアカウント追加(`upsert`)・削除(`remove`)、`state.rs` の `upsert` 呼び出し。
-- 照合キーは、小文字化し、ポートと末尾のドットを除いたホスト部。アカウントのホストはポート付き (`mi.example.com:3000`) やIP直指定 (`192.168.1.10`) でも登録できる (`normalize_host` が `.` を含めば通すため) ので、キー化して格納する。
+- 照合キーは、小文字化・punycode化し、ポートと末尾のドットを除いたホスト部(Unicode表記のホストも、リゾルバに渡る `xn--...` と一致させるため)。アカウントのホストはポート付き (`mi.example.com:3000`) やIP直指定 (`192.168.1.10`) でも登録できる (`normalize_host` が `.` を含めば通すため) ので、キー化して格納する。
 - キーが一致するホストだけは private へ解決されても許可する。IP リテラルのURLは、キーと完全一致する場合に限り許可し、それ以外は拒否する。
 
 ### 3. 取得専用クライアント
