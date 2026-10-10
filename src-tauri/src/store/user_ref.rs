@@ -142,17 +142,20 @@ pub(crate) fn fill_user_from_snapshot(conn: &Connection, user: &User) -> Result<
     Ok(())
 }
 
-/// ノート本体+renote(入れ子)分の User をすべて集める(重複排除はしない)。
+/// ノート本体+renote+reply(入れ子)分の User をすべて集める(重複排除はしない)。
 /// upsert_note が「note.payload に埋め込まれる全ユーザー」をキャッシュへ反映するために使う。
 pub(crate) fn collect_users(note: &Note) -> Vec<&User> {
     let mut out = vec![&note.user];
     if let Some(renote) = &note.renote {
         out.extend(collect_users(renote));
     }
+    if let Some(reply) = &note.reply {
+        out.extend(collect_users(reply));
+    }
     out
 }
 
-/// note_value の `user`(本体+renote分)を `{"id": ...}` スタブへ差し替える。
+/// note_value の `user`(本体+renote+reply分)を `{"id": ...}` スタブへ差し替える。
 /// upsert_note の保存直前に呼び、payload に生ユーザー情報を持たせない。
 pub(crate) fn stub_user_refs(note_value: &mut serde_json::Value) {
     if let Some(id) = note_value.get("user").and_then(|u| u.get("id")).cloned() {
@@ -160,6 +163,9 @@ pub(crate) fn stub_user_refs(note_value: &mut serde_json::Value) {
     }
     if note_value.get("renote").map(|r| r.is_object()).unwrap_or(false) {
         stub_user_refs(&mut note_value["renote"]);
+    }
+    if note_value.get("reply").map(|r| r.is_object()).unwrap_or(false) {
+        stub_user_refs(&mut note_value["reply"]);
     }
 }
 
@@ -169,15 +175,16 @@ pub(crate) fn is_legacy_full_user(user_value: &serde_json::Value) -> bool {
     user_value.get("username").is_some()
 }
 
-/// note_value の `user`(本体+renote分)のいずれかが旧形式かどうかを再帰的に判定する。
+/// note_value の `user`(本体+renote+reply分)のいずれかが旧形式かどうかを再帰的に判定する。
 pub(crate) fn has_legacy_full_user(note_value: &serde_json::Value) -> bool {
     if note_value.get("user").map(is_legacy_full_user).unwrap_or(false) {
         return true;
     }
     note_value.get("renote").map(has_legacy_full_user).unwrap_or(false)
+        || note_value.get("reply").map(has_legacy_full_user).unwrap_or(false)
 }
 
-/// note_value の `user.id`(本体+renote分)を出現順にすべて集める(重複可、呼び出し元で
+/// note_value の `user.id`(本体+renote+reply分)を出現順にすべて集める(重複可、呼び出し元で
 /// dedupする想定)。stub_user_refs 済み・旧形式どちらの形にも対応する(常に `["user"]["id"]`
 /// を見るだけなので形式を問わない)。
 pub(crate) fn collect_user_id_refs(note_value: &serde_json::Value, out: &mut Vec<String>) {
@@ -189,10 +196,16 @@ pub(crate) fn collect_user_id_refs(note_value: &serde_json::Value, out: &mut Vec
             collect_user_id_refs(renote, out);
         }
     }
+    if let Some(reply) = note_value.get("reply") {
+        if reply.is_object() {
+            collect_user_id_refs(reply, out);
+        }
+    }
 }
 
-/// note_value の `user` スタブ(本体+renote分)を users から引いてフルオブジェクトへ埋め戻す。
-/// 参照先のいずれかが users に無ければ false を返す(このノートは復元不可、呼び出し元でスキップする)。
+/// note_value の `user` スタブ(本体+renote+reply分)を users から引いてフルオブジェクトへ埋め戻す。
+/// 本体・renote の参照先のいずれかが users に無ければ false を返す(このノートは復元不可、呼び出し元でスキップする)。
+/// reply は補助表示なので、reply 側の欠落は reply を null にして true を返す(本体は捨てない)。
 pub(crate) fn hydrate_user_refs(note_value: &mut serde_json::Value, users: &HashMap<String, User>) -> bool {
     let Some(id) = note_value
         .get("user")
@@ -207,8 +220,16 @@ pub(crate) fn hydrate_user_refs(note_value: &mut serde_json::Value, users: &Hash
     };
     note_value["user"] = serde_json::to_value(user).unwrap_or(serde_json::Value::Null);
 
-    if note_value.get("renote").map(|r| r.is_object()).unwrap_or(false) {
-        return hydrate_user_refs(&mut note_value["renote"], users);
+    if note_value.get("renote").map(|r| r.is_object()).unwrap_or(false)
+        && !hydrate_user_refs(&mut note_value["renote"], users)
+    {
+        return false;
+    }
+    // reply は補助表示。参照先ユーザーが欠けていても本体は捨てず、reply だけ落とす
+    if note_value.get("reply").map(|r| r.is_object()).unwrap_or(false)
+        && !hydrate_user_refs(&mut note_value["reply"], users)
+    {
+        note_value["reply"] = serde_json::Value::Null;
     }
     true
 }
@@ -632,6 +653,105 @@ mod tests {
         assert_eq!(got.name.as_deref(), Some("Renamed"));
         assert_eq!(got.icon_url.as_deref(), Some("https://remote.example/favicon.ico"));
         assert_eq!(got.theme_color.as_deref(), Some("#ff8800"));
+    }
+
+    #[test]
+    fn collect_users_includes_reply_author() {
+        let mut n = bare_note("n1", user_lite("u1", "Alice"));
+        n.reply = Some(Box::new(bare_note("n0", user_lite("u3", "Carol"))));
+        let users = collect_users(&n);
+        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["u1", "u3"]);
+    }
+
+    #[test]
+    fn stub_user_refs_recurses_into_reply() {
+        let mut v = json!({
+            "id": "n1",
+            "user": { "id": "u1", "username": "alice" },
+            "reply": {
+                "id": "n0",
+                "user": { "id": "u3", "username": "carol" },
+                "reply": null
+            }
+        });
+        stub_user_refs(&mut v);
+        assert_eq!(v["user"], json!({ "id": "u1" }));
+        assert_eq!(v["reply"]["user"], json!({ "id": "u3" }));
+    }
+
+    #[test]
+    fn collect_user_id_refs_collects_reply_author() {
+        let v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "renote": { "id": "n0", "user": { "id": "u2" }, "renote": null },
+            "reply": { "id": "r0", "user": { "id": "u3" }, "reply": null }
+        });
+        let mut ids = Vec::new();
+        collect_user_id_refs(&v, &mut ids);
+        assert_eq!(ids, vec!["u1".to_string(), "u2".to_string(), "u3".to_string()]);
+    }
+
+    #[test]
+    fn has_legacy_full_user_detects_legacy_shape_in_reply() {
+        let v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "reply": { "id": "r0", "user": { "id": "u3", "username": "carol" } }
+        });
+        assert!(has_legacy_full_user(&v));
+        let v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "reply": { "id": "r0", "user": { "id": "u3" } }
+        });
+        assert!(!has_legacy_full_user(&v));
+    }
+
+    #[test]
+    fn hydrate_user_refs_fills_in_reply_author() {
+        let mut v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "reply": { "id": "r0", "user": { "id": "u3" }, "reply": null }
+        });
+        let mut users = HashMap::new();
+        users.insert("u1".to_string(), user_lite("u1", "Alice"));
+        users.insert("u3".to_string(), user_lite("u3", "Carol"));
+
+        assert!(hydrate_user_refs(&mut v, &users));
+        assert_eq!(v["reply"]["user"]["username"], json!("alice"));
+    }
+
+    #[test]
+    fn hydrate_user_refs_drops_only_reply_when_reply_author_missing() {
+        let mut v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "reply": { "id": "r0", "user": { "id": "u3" }, "reply": null }
+        });
+        let mut users = HashMap::new();
+        users.insert("u1".to_string(), user_lite("u1", "Alice"));
+
+        // 返信先は補助表示なので、本体は復元可能(true)のまま reply だけ null に落とす
+        assert!(hydrate_user_refs(&mut v, &users));
+        assert_eq!(v["user"]["username"], json!("alice"));
+        assert_eq!(v["reply"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn hydrate_user_refs_still_fails_when_renote_author_missing_even_with_reply() {
+        let mut v = json!({
+            "id": "n1",
+            "user": { "id": "u1" },
+            "renote": { "id": "n0", "user": { "id": "u2" }, "renote": null },
+            "reply": { "id": "r0", "user": { "id": "u3" }, "reply": null }
+        });
+        let mut users = HashMap::new();
+        users.insert("u1".to_string(), user_lite("u1", "Alice"));
+        users.insert("u3".to_string(), user_lite("u3", "Carol"));
+
+        assert!(!hydrate_user_refs(&mut v, &users));
     }
 
     #[test]
