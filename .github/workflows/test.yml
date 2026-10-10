@@ -131,7 +131,7 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
         if: needs.changes.outputs.code == 'true'
         with:
           tool: cargo-llvm-cov
