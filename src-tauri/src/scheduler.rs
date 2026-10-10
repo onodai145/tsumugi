@@ -11,6 +11,7 @@ use crate::domain::{LocalScheduleStatus, LocalScheduledNote};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use crate::store::draft::DraftInput;
+use std::time::{Duration, Instant};
 use tauri::Manager;
 use tauri_specta::Event as _;
 
@@ -86,9 +87,20 @@ pub fn next_sleep(now: i64, next_wakeup: Option<i64>) -> u64 {
     }
 }
 
+/// 1 回の送信を待つ上限。応答が返らない送信でスケジューラ全体(全アカウントの予約)が止まらないようにする。
+pub const SEND_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// 1 件を送る。`Posting` への遷移に勝った場合だけ送る(None なら誰かが送信中、または存在しない)。
 /// `allow_retry` のとき、再試行できる失敗は `Pending` に戻して None を返す。
-async fn attempt(state: &AppState, id: &str, now: i64, allow_retry: bool) -> Option<Outcome> {
+/// 送信は `timeout` で打ち切る。時間切れは「届いたか分からない」ので再送せず、結果不明の `Failed` にする。
+/// 再試行の待ち時間は、送信が終わった後の時刻(`clock()`)を基準にする。
+async fn attempt(
+    state: &AppState,
+    id: &str,
+    clock: &(dyn Fn() -> i64 + Sync),
+    timeout: Duration,
+    allow_retry: bool,
+) -> Option<Outcome> {
     let entry = match state.scheduled_posts.begin_post(id) {
         Ok(Some(e)) => e,
         Ok(None) => return None,
@@ -99,7 +111,13 @@ async fn attempt(state: &AppState, id: &str, now: i64, allow_retry: bool) -> Opt
     };
     let account_id = entry.account_id.clone();
     let result = match state.client_for(&account_id) {
-        Ok(client) => create_note(&client, &to_note_draft(&entry.input)).await,
+        Ok(client) => {
+            match tokio::time::timeout(timeout, create_note(&client, &to_note_draft(&entry.input))).await {
+                Ok(r) => r,
+                // `error.rs` の `From<reqwest::Error>` と同じ接頭辞にして、`classify` の timeout 経路に乗せる
+                Err(_) => Err(Error::Network(format!("timeout: no response within {}s", timeout.as_secs()))),
+            }
+        }
         Err(e) => Err(e),
     };
     let fail = |message: String| {
@@ -118,7 +136,7 @@ async fn attempt(state: &AppState, id: &str, now: i64, allow_retry: bool) -> Opt
         Err(e) => match classify(&e) {
             Failure::Retry if allow_retry && (entry.attempts as usize) < RETRY_DELAYS_SEC.len() => {
                 let delay = RETRY_DELAYS_SEC[entry.attempts as usize];
-                if let Err(err) = state.scheduled_posts.finish_retry(id, entry.attempts + 1, now + delay) {
+                if let Err(err) = state.scheduled_posts.finish_retry(id, entry.attempts + 1, clock() + delay) {
                     log::warn!("scheduled post {id}: failed to schedule retry: {err}");
                 }
                 None
@@ -137,16 +155,25 @@ pub enum Outcome {
 }
 
 /// 期限が来た予約を処理する。猶予を超えていれば `Expired`、そうでなければ送信する。
+/// `now` は処理を始めた時刻。1 件ごとの送信に時間がかかるため、予約ごとの判定には
+/// 処理開始からの経過秒を足した時刻を使う(`process_due_with`)。
 pub async fn process_due(state: &AppState, now: i64) -> Vec<Outcome> {
+    let start = Instant::now();
+    process_due_with(state, &|| now + start.elapsed().as_secs() as i64, SEND_TIMEOUT).await
+}
+
+/// `process_due` の本体。時計(`clock`)と送信のタイムアウトを引数に取る(テストで差し替える)。
+/// 猶予の判定・再試行の基準は、予約 1 件ごとに時計を読み直した時刻を使う。
+async fn process_due_with(state: &AppState, clock: &(dyn Fn() -> i64 + Sync), timeout: Duration) -> Vec<Outcome> {
     let mut out = Vec::new();
-    for e in state.scheduled_posts.due(now) {
-        if now - e.scheduled_at > MISSED_GRACE_SEC {
+    for e in state.scheduled_posts.due(clock()) {
+        if clock() - e.scheduled_at > MISSED_GRACE_SEC {
             if state.scheduled_posts.mark_expired(&e.id).unwrap_or(false) {
                 out.push(Outcome::Expired { account_id: e.account_id.clone(), id: e.id.clone() });
             }
             continue;
         }
-        if let Some(o) = attempt(state, &e.id, now, true).await {
+        if let Some(o) = attempt(state, &e.id, clock, timeout, true).await {
             out.push(o);
         }
     }
@@ -169,7 +196,7 @@ pub async fn post_now(state: &AppState, account_id: &str, id: &str, now: i64) ->
             ))
         }
     }
-    attempt(state, id, now, false)
+    attempt(state, id, &|| now, SEND_TIMEOUT, false)
         .await
         .ok_or_else(|| Error::Invalid("投稿処理中です".into()))
 }
@@ -500,6 +527,70 @@ mod tests {
         s.scheduled_posts.begin_post(&e.id).unwrap();
         assert!(process_due(&s, NOW).await.is_empty());
         assert!(mock.received_requests().await.unwrap().is_empty());
+    }
+
+    // ---- 送信のタイムアウトと、予約 1 件ごとの時刻 ----
+
+    /// Review Important 1: 応答が返らない送信はタイムアウトで打ち切り、結果不明の Failed にする(再送しない)。
+    /// 打ち切った後の別の予約は処理が続き、その時点で猶予を過ぎていれば投稿せず Expired にする。
+    #[tokio::test]
+    async fn a_hanging_post_times_out_without_resending_and_later_entries_use_a_fresh_now() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/create"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(created_note()).set_delay(Duration::from_secs(3)))
+            .mount(&mock)
+            .await;
+        let s = state();
+        s.set_test_api_base(mock.uri());
+        let first = s.scheduled_posts.add("acc1", NOW - 10, test_input("first"), 0).unwrap();
+        let second = s.scheduled_posts.add("acc1", NOW - 5, test_input("second"), 0).unwrap();
+
+        // タイムアウト(200ms)が過ぎたら、時計が猶予より大きく進む
+        let timeout = Duration::from_millis(200);
+        let start = std::time::Instant::now();
+        let clock = move || if start.elapsed() >= timeout { NOW + 2 * MISSED_GRACE_SEC } else { NOW };
+        let out = process_due_with(&s, &clock, timeout).await;
+
+        assert_eq!(out.len(), 2, "{out:?}");
+        let Outcome::Failed { id, message, .. } = &out[0] else { panic!("{out:?}") };
+        assert_eq!(*id, first.id);
+        assert!(message.contains("タイムアウト") && message.contains("投稿されたか確認"), "{message}");
+        assert_eq!(out[1], Outcome::Expired { account_id: "acc1".into(), id: second.id.clone() });
+
+        let got = s.scheduled_posts.get(&first.id).unwrap();
+        assert_eq!((got.status, got.attempts), (LocalScheduleStatus::Failed, 0), "not scheduled for retry");
+        assert_eq!(s.scheduled_posts.get(&second.id).unwrap().status, LocalScheduleStatus::Expired);
+        // 再送もされず、2 件目も送られていない
+        assert_eq!(mock.received_requests().await.unwrap().len(), 1);
+        assert!(process_due_with(&s, &|| NOW + 4 * MISSED_GRACE_SEC, timeout).await.is_empty());
+        assert_eq!(mock.received_requests().await.unwrap().len(), 1);
+    }
+
+    /// 再試行の待ち時間(`next_attempt_at`)は、送信が終わった後の時刻を基準にする。
+    #[tokio::test]
+    async fn a_retry_is_scheduled_relative_to_the_time_after_the_attempt() {
+        let s = state();
+        s.set_test_api_base("http://127.0.0.1:1".into()); // 接続拒否
+        let e = s.scheduled_posts.add("acc1", NOW - 1, test_input("x"), 0).unwrap();
+        let calls = std::sync::atomic::AtomicI64::new(0);
+        let clock = || NOW + 10 * (calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1); // 呼ぶたびに進む
+        let n = || calls.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(process_due_with(&s, &clock, SEND_TIMEOUT).await.is_empty());
+        let got = s.scheduled_posts.get(&e.id).unwrap();
+        // due 判定・猶予判定・再試行の基準で、時計は少なくとも 2 回以上読まれ、後の読み取りが基準になる
+        assert!(n() >= 2);
+        assert_eq!(got.next_attempt_at, Some(NOW + 10 * n() + RETRY_DELAYS_SEC[0]));
+    }
+
+    /// `process_due(state, now)` の公開シグネチャは、処理開始からの経過秒で `now` を進める時計に委譲する。
+    #[tokio::test]
+    async fn process_due_keeps_its_public_signature() {
+        let mock = mock_create(200, created_note()).await;
+        let s = state();
+        s.set_test_api_base(mock.uri());
+        s.scheduled_posts.add("acc1", NOW - 10, test_input("hello"), 0).unwrap();
+        assert!(matches!(process_due(&s, NOW).await.as_slice(), [Outcome::Posted { .. }]));
     }
 
     // ---- post_now ----

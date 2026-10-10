@@ -343,6 +343,9 @@ class AppStore {
     } finally {
       this.booting = false;
     }
+    // スケジューラの最初の処理は webview ができる前に走り、そのときのイベントは受け取れない。
+    // 閉じている間に期限切れ・失敗になったローカル予約は、ここで一度読んで知らせる。
+    void this.#notifyUnfinishedLocalScheduled();
     await this.#pollStats();
     if (this.#statsTimer !== null) clearInterval(this.#statsTimer);
     this.#statsTimer = setInterval(() => void this.#pollStats(), 10_000);
@@ -360,6 +363,21 @@ class AppStore {
 
     if (this.#clockTimer !== null) clearInterval(this.#clockTimer);
     this.#clockTimer = setInterval(() => (this.now = Date.now()), 5_000);
+  }
+
+  /// 起動時に、アカウントごとのローカル予約を一度読み、期限切れ・失敗のものがあれば全アカウント分を
+  /// まとめて1回だけログ(Backstage)で知らせる(Issue #60 B)。ScheduledPostFailed イベントと同じ
+  /// error レベル。アカウント単位の取得失敗は黙って飛ばす(予約一覧を開けば分かる)。
+  async #notifyUnfinishedLocalScheduled() {
+    const lists = await Promise.all(
+      this.accounts.map((a) => unwrap(commands.listLocalScheduledNotes(a.id)).catch(() => [])),
+    );
+    const all = lists.flat();
+    const expired = all.filter((n) => n.status === "expired").length;
+    const failed = all.filter((n) => n.status === "failed").length;
+    if (expired + failed === 0) return;
+    const parts = [expired > 0 ? `期限切れ ${expired} 件` : "", failed > 0 ? `失敗 ${failed} 件` : ""].filter(Boolean);
+    this.#log("error", `予約投稿が投稿されないまま残っています(${parts.join("、")})。予約一覧で確認してください`);
   }
 
   /// 設定の上限に従ってノートキャッシュから古いノートを削除する（Issue #6）。失敗しても
