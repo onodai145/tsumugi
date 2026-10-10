@@ -25,6 +25,14 @@ describe("local scheduled posts (client-side fallback)", function () {
   let userId: string;
   let dueMs: number;
 
+  // 予約時刻までに最低限残っているべき時間。遅い環境で 3 件の予約や取り消し・戻す操作が時刻に間に合わないと、
+  // アプリが過去の日時を拒否したり P2 が先に投稿されたりして、分かりにくい失敗になる。原因をここで明示する。
+  const assertTimeLeft = (step: string) => {
+    if (dueMs - Date.now() < 15_000) {
+      throw new Error(`${step} took too long; the due time is too close (CI too slow?). remaining=${dueMs - Date.now()}ms`);
+    }
+  };
+
   const postedTexts = async () =>
     (await listUserNotes(token, userId, 50)).map((n) => n.text ?? "").filter((t) => t.includes(MARK));
 
@@ -51,11 +59,12 @@ describe("local scheduled posts (client-side fallback)", function () {
 
   it("schedules three posts for the same minute (P1: post, P2: cancel, P3: restore)", async function () {
     this.timeout(180000);
-    // 3 件の予約操作の間に時刻が過ぎても、すべて未来になるよう余裕を持たせる(次の分の 0 秒)
-    dueMs = nextMinuteAfter(45_000);
+    // 3 件の予約・取り消し・戻す操作が時刻に間に合うよう余裕を持たせる(次の分の 0 秒。75〜135 秒先になる)
+    dueMs = nextMinuteAfter(75_000);
     await scheduleAt(P1, dueMs);
     await scheduleAt(P2, dueMs);
     await scheduleAt(P3, dueMs);
+    assertTimeLeft("scheduling the three posts");
 
     // 予約しただけでは投稿されていない
     expect(await postedTexts()).toEqual([]);
@@ -70,6 +79,7 @@ describe("local scheduled posts (client-side fallback)", function () {
 
   it("cancels P2 and restores P3 into the compose box", async function () {
     this.timeout(60000);
+    assertTimeLeft("scheduling and listing the three posts");
     const p2 = await rowContaining(P2);
     expect(p2).toBeTruthy();
     await (await $(`[data-testid="scheduled-cancel-${rowId(p2!.testid)}"]`)).click();
@@ -84,6 +94,7 @@ describe("local scheduled posts (client-side fallback)", function () {
       timeoutMsg: "P3 was not restored to the compose box",
     });
     expect(await (await $('[data-testid="compose-submit"]')).getText()).toContain("予約");
+    assertTimeLeft("cancelling P2 and restoring P3");
     // 作成欄に戻したので、予約としては残らない(ここでは送信しない)
   });
 

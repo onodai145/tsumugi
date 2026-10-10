@@ -31,7 +31,7 @@ export async function scheduleAt(text: string, atMs: number): Promise<void> {
   await browser.waitUntil(async () => (await (await $('[data-testid="compose-textarea"]')).getValue()) === "", {
     timeout: 20000,
     interval: 300,
-    timeoutMsg: `compose box did not clear after scheduling "${text}"`,
+    timeoutMsg: `compose box did not clear after scheduling "${text}" (the app rejects a past date, so the due time may be too close — slow runner?)`,
   });
 }
 
