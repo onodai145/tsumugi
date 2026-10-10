@@ -73,7 +73,7 @@ docker compose down -v
   セッションの合間に、`helpers/sessionHooks.ts` の `runPreSession` が `scheduled_posts.json` を**直接書き換える**
   (A: 予約時刻を猶予より前の過去にする、B: `status` を `posting` にする)。再起動後、A は自動投稿されず
   「期限切れ」として残り、B は再送されず「投稿に失敗」(結果不明)になり、A は「今すぐ投稿」でちょうど 1 件投稿
-  されることを確認する。待ち時間は短い。ストアの JSON のキー名・状態の値を変えたら、このフックも直すこと
+  されることを確認する。待ち時間は 1.5〜2 分前後。ストアの JSON のキー名・状態の値を変えたら、このフックも直すこと
   (`src-tauri/src/store/scheduled_post.rs` と相互に参照している)。
 
 ## 再起動をまたぐ・キャッシュDBを検査するシナリオ
