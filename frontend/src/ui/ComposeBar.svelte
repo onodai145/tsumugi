@@ -22,7 +22,7 @@
   import { pickComposePlaceholder } from "../lib/composePlaceholder";
   import { shouldInterceptPaste } from "../lib/pasteIntent";
   import { epochSecToLocalInput, localInputToEpochSec, scheduleErrorMessage, validateSchedule } from "../lib/schedule";
-  import { LOCAL_SCHEDULE_NOTICE } from "../lib/scheduledList";
+  import { LOCAL_SCHEDULE_NOTICE, type ScheduledListItem } from "../lib/scheduledList";
   import ScheduledModal from "./ScheduledModal.svelte";
   import DateTimeInput from "./DateTimeInput.svelte";
   import type {
@@ -35,7 +35,6 @@
     Draft,
     DraftInput,
     DraftNoteSnapshot,
-    ScheduledNote,
   } from "../bindings/tauri.gen";
 
   // expanded: モバイルの投稿モーダルなど、常に複数行分の入力欄を確保したい文脈向け
@@ -721,11 +720,13 @@
     showDraftMenu = false;
   }
 
-  /// 予約一覧の「作成欄に戻す」。内容を作成欄に読み込んでから、サーバー側の予約を削除する。
-  /// 削除に失敗した場合、予約が残ったまま作成欄からも投稿できてしまう(重複)ため警告する。
-  async function restoreScheduled(s: ScheduledNote) {
+  /// 予約一覧の「作成欄に戻す」。内容を作成欄に読み込んでから、予約を削除する(サーバー予約は
+  /// notes/drafts/delete、ローカル予約はストアから)。削除に失敗した場合、予約が残ったまま作成欄からも
+  /// 投稿できてしまう(重複)ため警告する。
+  async function restoreScheduled(item: ScheduledListItem) {
     if (!accountId) return;
     const acc = accountId;
+    const s = item.note;
     await loadDraft({
       id: s.id,
       accountId: acc,
@@ -751,9 +752,10 @@
     }
     showScheduledModal = false;
     try {
-      await unwrapAcc(acc, commands.cancelScheduledNote(acc, s.id));
+      if (item.origin === "server") await unwrapAcc(acc, commands.cancelScheduledNote(acc, s.id));
+      else await unwrapAcc(acc, commands.cancelLocalScheduledNote(acc, s.id));
     } catch (e) {
-      err = `作成欄には戻しましたが、サーバー側の予約を取り消せませんでした。このまま投稿すると重複します。予約一覧から取り消してください。\n${String(e)}`;
+      err = `作成欄には戻しましたが、予約を取り消せませんでした。このまま投稿すると重複します。予約一覧から取り消してください。\n${String(e)}`;
     }
   }
 
@@ -1306,7 +1308,13 @@
 {#if showScheduledModal && accountId}
   <!-- アカウントが変わったら別のアカウントの一覧を操作しないよう、モーダルごと作り直す -->
   {#key accountId}
-    <ScheduledModal {accountId} onrestore={restoreScheduled} onclose={() => (showScheduledModal = false)} />
+    <ScheduledModal
+      {accountId}
+      serverSide={scheduleServerSide === true}
+      reloadToken={app.scheduledPostTick}
+      onrestore={restoreScheduled}
+      onclose={() => (showScheduledModal = false)}
+    />
   {/key}
 {/if}
 
