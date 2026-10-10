@@ -54,6 +54,7 @@ function makeNote(id: string, createdAt: number, text = "hello"): Note {
     user: makeUser(),
     replyId: null,
     replyUserId: null,
+    reply: null,
     renoteId: null,
     renote: null,
     files: [],
