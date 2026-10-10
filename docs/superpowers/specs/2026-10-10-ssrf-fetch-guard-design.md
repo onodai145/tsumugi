@@ -53,7 +53,7 @@ WebView から渡された任意URLを Rust (`reqwest`) で取得するコマン
 **(c) URL 検証 `validate_url(&Url) -> Result<()>` とリダイレクトポリシー**
 
 - スキームは `http` / `https` のみ許可する。
-- ホストが IP リテラルの場合は `is_blocked_ip` で判定する(IP リテラルは DNS リゾルバを通らないため、ここで止める)。許可リストはホスト名にのみ効き、IP リテラルには効かない。
+- ホストが IP リテラルの場合は、許可リストに同じ文字列(IPリテラルのアカウントホスト)があれば許可し、無ければ `is_blocked_ip` で判定する(IP リテラルは DNS リゾルバを通らないため、ここで止める)。
 - リダイレクトポリシー(`reqwest::redirect::Policy::custom`)は、各ホップで `validate_url` を呼び、ホップ数は10回までとする。ホスト名のホップは (b) のリゾルバが接続時に検証する。
 
 ### 2. 許可リスト
@@ -61,7 +61,8 @@ WebView から渡された任意URLを Rust (`reqwest`) で取得するコマン
 - 型は `Arc<RwLock<HashSet<String>>>`。登録済みアカウントのホスト名(小文字化、ポート無し)の集合。
 - `GuardedResolver` が共有して参照する。
 - `AppState` に `refresh_fetch_allowlist()` を設け、`accounts` が変わる箇所の直後で呼ぶ。対象は `AppState::new`(起動時のロード)、`commands/account.rs` のアカウント追加(`upsert`)・削除(`remove`)、`state.rs` の `upsert` 呼び出し。
-- ホスト名が一致する場合だけ private へ解決されても許可する。IP リテラルのURLは許可リストに関わらず拒否する。
+- 照合キーは、小文字化し、ポートと末尾のドットを除いたホスト部。アカウントのホストはポート付き (`mi.example.com:3000`) やIP直指定 (`192.168.1.10`) でも登録できる (`normalize_host` が `.` を含めば通すため) ので、キー化して格納する。
+- キーが一致するホストだけは private へ解決されても許可する。IP リテラルのURLは、キーと完全一致する場合に限り許可し、それ以外は拒否する。
 
 ### 3. 取得専用クライアント
 
