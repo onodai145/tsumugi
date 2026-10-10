@@ -128,9 +128,75 @@ pub(crate) fn filter_addrs(
     Ok(kept)
 }
 
+/// 検証付きDNSリゾルバ。システムの名前解決(`tokio::net::lookup_host`)の結果から
+/// 禁止IPを除く。reqwest はここで返したアドレスにだけ接続する。
+struct GuardedResolver {
+    allow: FetchAllowlist,
+}
+
+impl reqwest::dns::Resolve for GuardedResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let allow = self.allow.clone();
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
+            match filter_addrs(&host, addrs, &allow) {
+                Ok(kept) => Ok(Box::new(kept.into_iter()) as reqwest::dns::Addrs),
+                Err(blocked) => {
+                    log::warn!("fetch blocked at DNS resolution: {host}");
+                    Err(Box::new(blocked) as Box<dyn std::error::Error + Send + Sync>)
+                }
+            }
+        })
+    }
+}
+
+const MAX_REDIRECTS: usize = 10;
+
+/// 各ホップでスキームとIPリテラルを検証するリダイレクトポリシー。
+/// ホスト名のホップは、接続時に `GuardedResolver` が検証する。
+fn redirect_policy(allow: FetchAllowlist) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
+            return attempt.error("too many redirects");
+        }
+        match validate_url(attempt.url(), &allow) {
+            Ok(()) => attempt.follow(),
+            Err(blocked) => {
+                log::warn!("fetch blocked at redirect: {blocked}");
+                attempt.error(blocked)
+            }
+        }
+    })
+}
+
+/// 取得専用のHTTPクライアント。検証付きリゾルバとリダイレクトポリシーを備える。
+/// システムプロキシ設定は従来どおり尊重する(プロキシ使用時はホスト名経由のIP検証が効かない)。
+pub(crate) fn build_fetch_client(user_agent: &str, allow: FetchAllowlist) -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(user_agent)
+        .dns_resolver(Arc::new(GuardedResolver { allow: allow.clone() }))
+        .redirect(redirect_policy(allow))
+        .build()
+}
+
+/// `source` チェーンのどこかに `BlockedAddress` があるか(`reqwest::Error` を渡す)。
+pub(crate) fn is_blocked_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if e.downcast_ref::<BlockedAddress>().is_some() {
+            return true;
+        }
+        cur = e.source();
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn ip(s: &str) -> IpAddr {
         s.parse().unwrap()
@@ -264,5 +330,77 @@ mod tests {
         allow.replace(["Mi.Home.Lan:3000"]);
         let out = filter_addrs("MI.HOME.LAN.", vec![sa("192.168.1.10")], &allow).unwrap();
         assert_eq!(out, vec![sa("192.168.1.10")]);
+    }
+
+    fn client(allow: &FetchAllowlist) -> reqwest::Client {
+        build_fetch_client("tsumugi-test", allow.clone()).unwrap()
+    }
+
+    /// `MockServer` は 127.0.0.1 で待ち受ける。`localhost` 名でアクセスして、リゾルバ経由の経路を通す。
+    fn localhost_url(server: &MockServer, p: &str) -> String {
+        let port = server.address().port();
+        format!("http://localhost:{port}{p}")
+    }
+
+    #[tokio::test]
+    async fn resolver_rejects_localhost_when_not_allowlisted() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/a")).respond_with(ResponseTemplate::new(200).set_body_string("ok")).mount(&server).await;
+        let err = client(&FetchAllowlist::default()).get(localhost_url(&server, "/a")).send().await.unwrap_err();
+        assert!(is_blocked_error(&err), "unexpected error: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn resolver_allows_localhost_when_allowlisted() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/a")).respond_with(ResponseTemplate::new(200).set_body_string("ok")).mount(&server).await;
+        let allow = FetchAllowlist::default();
+        allow.replace(["localhost"]);
+        let body = client(&allow).get(localhost_url(&server, "/a")).send().await.unwrap().text().await.unwrap();
+        assert_eq!(body, "ok");
+    }
+
+    #[tokio::test]
+    async fn redirect_to_blocked_ip_literal_is_rejected() {
+        let server = MockServer::start().await;
+        let secret = format!("http://127.0.0.1:{}/secret", server.address().port());
+        Mock::given(method("GET")).and(path("/r")).respond_with(ResponseTemplate::new(302).insert_header("Location", secret.as_str())).mount(&server).await;
+        Mock::given(method("GET")).and(path("/secret")).respond_with(ResponseTemplate::new(200).set_body_string("internal")).mount(&server).await;
+        let allow = FetchAllowlist::default();
+        allow.replace(["localhost"]); // 最初のホップは許可し、リダイレクト先のIPリテラルだけを拒否させる
+        let err = client(&allow).get(localhost_url(&server, "/r")).send().await.unwrap_err();
+        assert!(is_blocked_error(&err), "unexpected error: {err:?}");
+        let received = server.received_requests().await.unwrap();
+        assert!(received.iter().all(|r| r.url.path() != "/secret"), "the redirect target must not be requested");
+    }
+
+    #[tokio::test]
+    async fn redirect_between_allowed_hosts_is_followed() {
+        let server = MockServer::start().await;
+        let target = localhost_url(&server, "/final");
+        Mock::given(method("GET")).and(path("/r")).respond_with(ResponseTemplate::new(302).insert_header("Location", target.as_str())).mount(&server).await;
+        Mock::given(method("GET")).and(path("/final")).respond_with(ResponseTemplate::new(200).set_body_string("done")).mount(&server).await;
+        let allow = FetchAllowlist::default();
+        allow.replace(["localhost"]);
+        let body = client(&allow).get(localhost_url(&server, "/r")).send().await.unwrap().text().await.unwrap();
+        assert_eq!(body, "done");
+    }
+
+    #[tokio::test]
+    async fn too_many_redirects_is_an_error() {
+        let server = MockServer::start().await;
+        let me = localhost_url(&server, "/loop");
+        Mock::given(method("GET")).and(path("/loop")).respond_with(ResponseTemplate::new(302).insert_header("Location", me.as_str())).mount(&server).await;
+        let allow = FetchAllowlist::default();
+        allow.replace(["localhost"]);
+        let err = client(&allow).get(me).send().await.unwrap_err();
+        assert!(err.is_redirect(), "unexpected error: {err:?}");
+        assert!(!is_blocked_error(&err));
+    }
+
+    #[test]
+    fn is_blocked_error_is_false_for_unrelated_errors() {
+        let e = std::io::Error::other("boom");
+        assert!(!is_blocked_error(&e));
     }
 }
