@@ -101,6 +101,12 @@ impl CacheMetrics {
 
 pub struct AppState {
     pub http: reqwest::Client,
+    /// WebViewから渡された任意URLを取得するコマンド専用のHTTPクライアント(Issue #377)。
+    /// 禁止IP(loopback/private/link-local等)への接続を `net_guard` が拒否する。API通信は `http` を使う。
+    pub fetch_http: reqwest::Client,
+    /// `fetch_http` が例外として許可するホスト(登録アカウントのホスト)。`accounts` が変わったら
+    /// `refresh_fetch_allowlist` で差し替える。
+    pub fetch_allowlist: crate::net_guard::FetchAllowlist,
     pub accounts: Mutex<AccountManager>,
     pub secrets: Box<dyn SecretStore>,
     pub pending: Mutex<HashMap<String, PendingMiAuth>>,
@@ -187,11 +193,16 @@ impl AppState {
             Vec::new()
         });
         let mute = settings.load_mute().unwrap_or_default();
+        let fetch_allowlist = crate::net_guard::FetchAllowlist::default();
+        fetch_allowlist.replace(accounts.iter().map(|a| a.host.as_str()));
         Self {
             http: reqwest::Client::builder()
                 .user_agent(USER_AGENT)
                 .build()
                 .expect("failed to build reqwest client"),
+            fetch_http: crate::net_guard::build_fetch_client(USER_AGENT, fetch_allowlist.clone())
+                .expect("failed to build fetch client"),
+            fetch_allowlist,
             accounts: Mutex::new(AccountManager::with_accounts(accounts)),
             secrets,
             pending: Mutex::new(HashMap::new()),
@@ -323,6 +334,12 @@ impl AppState {
         )
     }
 
+    /// `accounts` の全ホストで取得先の許可リストを差し替える。アカウントの追加・削除の直後に呼ぶ。
+    pub fn refresh_fetch_allowlist(&self) {
+        let hosts: Vec<String> = self.accounts.lock().unwrap().list().into_iter().map(|a| a.host).collect();
+        self.fetch_allowlist.replace(hosts);
+    }
+
     /// account_id から (host, token) を引く。未登録なら Invalid、token 欠落なら Unauthorized。
     pub fn host_token(&self, account_id: &str) -> crate::error::Result<(String, String)> {
         use crate::error::Error;
@@ -395,6 +412,7 @@ impl AppState {
             avatar_blurhash: None,
         });
         self.secrets.set(account_id, "token").unwrap();
+        self.refresh_fetch_allowlist();
     }
 }
 
@@ -453,6 +471,19 @@ mod tests {
         let mgr = state.accounts.lock().unwrap();
         assert_eq!(mgr.list().len(), 1);
         assert_eq!(mgr.active_id(), Some("acc1")); // 先頭が active
+    }
+
+    #[test]
+    fn refresh_fetch_allowlist_follows_registered_accounts() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        assert!(!state.fetch_allowlist.contains_key("misskey.test"));
+
+        state.register_test_account("acc1");
+        assert!(state.fetch_allowlist.contains_key("misskey.test"));
+
+        state.accounts.lock().unwrap().remove("acc1").unwrap();
+        state.refresh_fetch_allowlist();
+        assert!(!state.fetch_allowlist.contains_key("misskey.test"));
     }
 
     #[test]

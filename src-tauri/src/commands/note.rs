@@ -408,26 +408,52 @@ pub async fn read_clipboard_text(app: AppHandle) -> Result<String> {
 /// ドライブの添付URLは公開直リンクのため、認証トークンは不要。
 const MAX_SAVE_FILE_BYTES: u64 = 200 * 1024 * 1024;
 
-#[tauri::command]
-#[specta::specta]
-pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: String) -> Result<()> {
-    let resp = state.http.get(&url).send().await?;
+/// 添付ファイルのURLを `fetch_http` でダウンロードする(`save_url_to_file` / `fetch_url_bytes` 共通)。
+/// 取得先は `net_guard` が検証する: スキームとIPリテラルは送信前に、ホスト名は接続時(DNS解決後)と
+/// リダイレクトの各ホップで拒否する(Issue #377)。上限サイズを超えるファイルは拒否する。
+async fn fetch_guarded_bytes(
+    http: &reqwest::Client,
+    allow: &crate::net_guard::FetchAllowlist,
+    url: &str,
+) -> Result<Vec<u8>> {
+    let blocked = || {
+        Error::Invalid("取得先が許可されていません(ローカル/社内ネットワークのアドレス)".to_string())
+    };
+    let parsed = url::Url::parse(url).map_err(|e| Error::Invalid(format!("invalid url: {e}")))?;
+    if let Err(b) = crate::net_guard::validate_url(&parsed, allow) {
+        log::warn!("fetch blocked before request: {b}");
+        return Err(blocked());
+    }
+    let resp = http.get(parsed).send().await.map_err(|e| {
+        if crate::net_guard::is_blocked_error(&e) {
+            blocked()
+        } else {
+            Error::from(e)
+        }
+    })?;
     if !resp.status().is_success() {
         return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
     }
-    if resp.content_length().is_some_and(|len| len > MAX_SAVE_FILE_BYTES) {
-        return Err(Error::Invalid(format!(
+    let too_large = || {
+        Error::Invalid(format!(
             "ファイルが大きすぎます（{}MB超）",
             MAX_SAVE_FILE_BYTES / 1024 / 1024
-        )));
+        ))
+    };
+    if resp.content_length().is_some_and(|len| len > MAX_SAVE_FILE_BYTES) {
+        return Err(too_large());
     }
     let bytes = resp.bytes().await?;
     if bytes.len() as u64 > MAX_SAVE_FILE_BYTES {
-        return Err(Error::Invalid(format!(
-            "ファイルが大きすぎます（{}MB超）",
-            MAX_SAVE_FILE_BYTES / 1024 / 1024
-        )));
+        return Err(too_large());
     }
+    Ok(bytes.to_vec())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: String) -> Result<()> {
+    let bytes = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &url).await?;
     tokio::fs::write(&path, &bytes)
         .await
         .map_err(|e| Error::Invalid(format!("cannot write file {path}: {e}")))?;
@@ -442,24 +468,8 @@ pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: Str
 /// 別問題）。Rust側でCORSに縛られずダウンロードし、ArrayBufferとしてそのまま渡す。
 #[tauri::command]
 pub async fn fetch_url_bytes(state: State<'_, AppState>, url: String) -> Result<tauri::ipc::Response> {
-    let resp = state.http.get(&url).send().await?;
-    if !resp.status().is_success() {
-        return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
-    }
-    if resp.content_length().is_some_and(|len| len > MAX_SAVE_FILE_BYTES) {
-        return Err(Error::Invalid(format!(
-            "ファイルが大きすぎます（{}MB超）",
-            MAX_SAVE_FILE_BYTES / 1024 / 1024
-        )));
-    }
-    let bytes = resp.bytes().await?;
-    if bytes.len() as u64 > MAX_SAVE_FILE_BYTES {
-        return Err(Error::Invalid(format!(
-            "ファイルが大きすぎます（{}MB超）",
-            MAX_SAVE_FILE_BYTES / 1024 / 1024
-        )));
-    }
-    Ok(tauri::ipc::Response::new(bytes.to_vec()))
+    let bytes = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &url).await?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// プレビュー用途に許容する最大サイズ(base64化してフロントに保持するため、実アップロード上限より小さく抑える)。
@@ -628,6 +638,78 @@ pub async fn fetch_url_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn allow_localhost() -> crate::net_guard::FetchAllowlist {
+        let allow = crate::net_guard::FetchAllowlist::default();
+        allow.replace(["localhost"]);
+        allow
+    }
+
+    fn fetch_client(allow: &crate::net_guard::FetchAllowlist) -> reqwest::Client {
+        crate::net_guard::build_fetch_client("tsumugi-test", allow.clone()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn fetch_guarded_bytes_returns_body_for_allowed_host() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/f")).respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8, 2, 3])).mount(&server).await;
+        let allow = allow_localhost();
+        let url = format!("http://localhost:{}/f", server.address().port());
+        let bytes = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap();
+        assert_eq!(bytes, vec![1u8, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn fetch_guarded_bytes_rejects_ip_literal_without_connecting() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        let allow = crate::net_guard::FetchAllowlist::default();
+        let url = format!("http://127.0.0.1:{}/f", server.address().port());
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_guarded_bytes_rejects_hostname_resolving_to_loopback() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        let allow = crate::net_guard::FetchAllowlist::default();
+        let url = format!("http://localhost:{}/f", server.address().port());
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_guarded_bytes_rejects_unparsable_url() {
+        let allow = crate::net_guard::FetchAllowlist::default();
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, "not a url").await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "unexpected: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_guarded_bytes_maps_http_error_status() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(404)).mount(&server).await;
+        let allow = allow_localhost();
+        let url = format!("http://localhost:{}/missing", server.address().port());
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
+        assert!(matches!(err, Error::Api(_)), "unexpected: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_guarded_bytes_rejects_oversize_content_length() {
+        let server = MockServer::start().await;
+        let big = vec![0u8; (MAX_SAVE_FILE_BYTES as usize) + 1];
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(big)).mount(&server).await;
+        let allow = allow_localhost();
+        let url = format!("http://localhost:{}/big", server.address().port());
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")), "unexpected: {err:?}");
+    }
 
     #[test]
     fn effective_translate_lang_falls_back_to_ja_when_blank() {

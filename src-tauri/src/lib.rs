@@ -8,6 +8,7 @@ mod events;
 mod fence;
 mod filter;
 mod mobile_intent;
+mod net_guard;
 mod scheduler;
 mod session;
 mod sound;
