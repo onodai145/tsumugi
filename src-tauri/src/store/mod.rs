@@ -6,6 +6,7 @@
 
 pub mod db;
 pub mod draft;
+pub mod scheduled_post;
 pub mod note_cache;
 pub mod settings;
 mod sqlite_backend;
@@ -16,6 +17,7 @@ pub(crate) mod mysql_user_ref;
 pub mod user_ref;
 
 pub use draft::DraftStore;
+pub use scheduled_post::ScheduledPostStore;
 pub use note_cache::NoteCacheStore;
 pub use settings::SettingsStore;
 pub(crate) use sqlite_backend::SqliteBackend;

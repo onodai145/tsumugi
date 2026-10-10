@@ -12,7 +12,8 @@ const SCHEDULE_MIN_VERSION: (u32, u32, u32) = (2025, 10, 0);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleCapabilities {
-    /// 予約投稿が使えるか。
+    /// **サーバー側予約**(`notes/drafts` の `scheduledAt`)が使えるか。false のときは、
+    /// クライアント側予約(tsumugi が保持して投稿する、Issue #60 B)を使う。
     pub available: bool,
 }
 

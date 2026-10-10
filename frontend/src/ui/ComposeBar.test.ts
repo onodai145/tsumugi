@@ -510,16 +510,49 @@ describe("ComposeBar 予約投稿", () => {
       if (cmd === "get_auto_draft") return Promise.resolve(null);
       if (cmd === "get_schedule_capabilities") return Promise.resolve({ available });
       if (cmd === "schedule_note") return Promise.resolve({ id: "d1" });
+      if (cmd === "schedule_note_local") return Promise.resolve({ note: { id: "l1" }, status: "pending", error: null });
       return Promise.resolve(null);
     });
   }
   const futureInput = () => epochSecToLocalInput(Math.floor((Date.now() + 86_400_000) / 1000));
 
-  it("非対応サーバーでは予約ボタンを出さない", async () => {
+  it("非対応サーバーでも予約ボタンが出て、ローカル予約の注意書きが出る", async () => {
     mockCaps(false);
-    const { queryByTestId } = render(ComposeBar);
+    const { findByTestId } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
+    const hint = await findByTestId("compose-schedule-local-hint");
+    expect(hint.textContent).toContain("アプリを起動している間だけ");
+  });
+
+  it("対応サーバーでは注意書きを出さない", async () => {
+    mockCaps(true);
+    const { findByTestId, queryByTestId } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_schedule_capabilities", { accountId: "acc1" }));
-    expect(queryByTestId("compose-schedule-toggle")).toBeNull();
+    expect(queryByTestId("compose-schedule-local-hint")).toBeNull();
+  });
+
+  it("非対応サーバーでは schedule_note_local を呼ぶ(schedule_note・post_note は呼ばない)", async () => {
+    mockCaps(false);
+    const { findByTestId, getByTestId } = render(ComposeBar);
+    await fireEvent.click(await findByTestId("compose-schedule-toggle"));
+    const value = futureInput();
+    await setDateTime(getByTestId("compose-schedule-input"), value);
+    await fireEvent.input(getByTestId("compose-textarea"), { target: { value: "ローカルで予約" } });
+    await fireEvent.click(getByTestId("compose-submit"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("schedule_note_local", {
+        accountId: "acc1",
+        input: expect.objectContaining({ text: "ローカルで予約", visibility: "public", fileIds: [] }),
+        scheduledAt: localInputToEpochSec(value),
+      }),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("schedule_note", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("post_note", expect.anything());
+    // 成功したら作成欄が空になり、投稿ボタンも元に戻る
+    await waitFor(() => expect((getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe(""));
+    expect(getByTestId("compose-submit").textContent).toContain("投稿");
   });
 
   it("対応サーバーで日時を設定すると投稿ボタンが「予約」になり、schedule_note を呼ぶ(post_note は呼ばない)", async () => {
@@ -665,6 +698,47 @@ describe("ComposeBar 予約投稿", () => {
     expect((ui.getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe("戻したい本文");
   });
 
+  const localScheduled = (over: Record<string, unknown> = {}) => ({
+    note: scheduledNote(over),
+    status: "pending",
+    error: null,
+  });
+
+  it("ローカル予約の「作成欄に戻す」は、内容を読み込んで cancel_local_scheduled_note で削除する", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_schedule_capabilities") return Promise.resolve({ available: false });
+      if (cmd === "list_local_scheduled_notes") return Promise.resolve([localScheduled({ id: "l1" })]);
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    const ui = render(ComposeBar);
+    await openScheduledList(ui);
+    await fireEvent.click(await ui.findByTestId("scheduled-restore-l1"));
+
+    await waitFor(() =>
+      expect((ui.getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe("戻したい本文"),
+    );
+    expect(invokeMock).toHaveBeenCalledWith("cancel_local_scheduled_note", { accountId: "acc1", id: "l1" });
+    expect(invokeMock).not.toHaveBeenCalledWith("cancel_scheduled_note", expect.anything());
+    // 未来の予約なので、予約日時も復元される
+    expect(ui.getByTestId("compose-submit").textContent).toContain("予約");
+  });
+
+  it("ローカル予約を戻した後に削除が失敗したら、内容は残して重複の警告を出す", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_schedule_capabilities") return Promise.resolve({ available: false });
+      if (cmd === "list_local_scheduled_notes") return Promise.resolve([localScheduled({ id: "l1" })]);
+      if (cmd === "cancel_local_scheduled_note") return Promise.reject({ kind: "network", message: "offline" });
+      if (cmd === "list_drafts") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    const ui = render(ComposeBar);
+    await openScheduledList(ui);
+    await fireEvent.click(await ui.findByTestId("scheduled-restore-l1"));
+    expect(await ui.findByText(/重複/)).toBeTruthy();
+    expect((ui.getByTestId("compose-textarea") as HTMLTextAreaElement).value).toBe("戻したい本文");
+  });
+
   // Review Focus 4: 期間指定の投票は、投稿時刻ではなく予約日時を基準に締切を計算する
   async function setupPoll(ui: UiQueries, scheduleValue: string) {
     await fireEvent.click(await ui.findByTestId("compose-schedule-toggle"));
@@ -692,6 +766,30 @@ describe("ComposeBar 予約投稿", () => {
       expect(invokeMock).toHaveBeenCalledWith("schedule_note", {
         accountId: "acc1",
         draft: expect.objectContaining({
+          poll: expect.objectContaining({ expiresAt: scheduledAt * 1000 + 2 * 3_600_000 }),
+        }),
+        scheduledAt,
+      }),
+    );
+  });
+
+  // Review Focus 5: ローカル予約でも、期間指定の投票は予約日時を基準にする
+  it("ローカル予約でも、期間指定の投票は予約日時を基準に締切を計算する", async () => {
+    mockCaps(false);
+    const ui = render(ComposeBar);
+    const value = futureInput();
+    await setupPoll(ui, value);
+    await fireEvent.click(ui.getByText("期間を指定"));
+    await fireEvent.input(ui.container.querySelector("input[type=number]") as HTMLInputElement, {
+      target: { value: "2" },
+    });
+    await fireEvent.click(ui.getByTestId("compose-submit"));
+
+    const scheduledAt = localInputToEpochSec(value) as number;
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("schedule_note_local", {
+        accountId: "acc1",
+        input: expect.objectContaining({
           poll: expect.objectContaining({ expiresAt: scheduledAt * 1000 + 2 * 3_600_000 }),
         }),
         scheduledAt,
@@ -730,31 +828,35 @@ describe("ComposeBar 予約投稿", () => {
     await fireEvent.click(await ui.findByTestId(`account-select-option-${id}`));
   }
 
-  it("予約非対応のアカウントへ切り替えると予約日時が消え、通常の投稿になる", async () => {
+  it("予約日時はアカウントを切り替えても保たれ、経路は切り替え先の対応状況で決まる", async () => {
     app.accounts = [...app.accounts, acc2];
     invokeMock.mockImplementation((cmd: string, args?: { accountId?: string }) => {
       if (cmd === "get_schedule_capabilities") return Promise.resolve({ available: args?.accountId === "acc1" });
-      if (cmd === "post_note") return Promise.resolve({ id: "n1" });
+      if (cmd === "schedule_note_local") return Promise.resolve({ note: { id: "l1" }, status: "pending", error: null });
       return Promise.resolve(cmd === "list_drafts" ? [] : null);
     });
     const ui = render(ComposeBar);
     await fireEvent.click(await ui.findByTestId("compose-schedule-toggle"));
-    await setDateTime(ui.getByTestId("compose-schedule-input"), futureInput());
-    expect(ui.getByTestId("compose-submit").textContent).toContain("予約");
+    const value = futureInput();
+    await setDateTime(ui.getByTestId("compose-schedule-input"), value);
+    expect(ui.queryByTestId("compose-schedule-local-hint")).toBeNull(); // acc1 はサーバー予約
 
     await switchAccount(ui, "acc2");
-    await waitFor(() => expect(ui.queryByTestId("compose-schedule-toggle")).toBeNull());
-    expect(ui.getByTestId("compose-submit").textContent).toContain("投稿");
+    // 日時は消えず、acc2 は非対応なのでローカル予約の注意書きが出る
+    expect(await ui.findByTestId("compose-schedule-local-hint")).toBeTruthy();
+    expect(ui.getByTestId("compose-submit").textContent).toContain("予約");
 
-    await fireEvent.input(ui.getByTestId("compose-textarea"), { target: { value: "通常投稿" } });
+    await fireEvent.input(ui.getByTestId("compose-textarea"), { target: { value: "acc2 で予約" } });
     await fireEvent.click(ui.getByTestId("compose-submit"));
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("post_note", expect.objectContaining({ accountId: "acc2" })),
+      expect(invokeMock).toHaveBeenCalledWith("schedule_note_local", expect.objectContaining({ accountId: "acc2" })),
     );
     expect(invokeMock).not.toHaveBeenCalledWith("schedule_note", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("post_note", expect.anything());
   });
 
-  it("切り替え先の予約対応を確認している間は、予約日時つきの送信を止める", async () => {
+  // Review Focus 4: 方式が決まる前の予約日時つきの送信は、即時投稿にも予約にもしない
+  it("切り替え先の予約方式を確認している間は、予約日時つきの送信を止める", async () => {
     app.accounts = [...app.accounts, acc2];
     invokeMock.mockImplementation((cmd: string, args?: { accountId?: string }) => {
       if (cmd === "get_schedule_capabilities")
@@ -767,12 +869,31 @@ describe("ComposeBar 予約投稿", () => {
     await fireEvent.input(ui.getByTestId("compose-textarea"), { target: { value: "x" } });
 
     await switchAccount(ui, "acc2");
-    await waitFor(() => expect(ui.queryByTestId("compose-schedule-toggle")).toBeNull());
     await fireEvent.click(ui.getByTestId("compose-submit"));
 
-    expect(await ui.findByText(/予約投稿を確認中/)).toBeTruthy();
+    expect(await ui.findByText(/方式を確認中/)).toBeTruthy();
     expect(invokeMock).not.toHaveBeenCalledWith("post_note", expect.anything());
     expect(invokeMock).not.toHaveBeenCalledWith("schedule_note", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("schedule_note_local", expect.anything());
+  });
+
+  // 通常の投稿(予約日時なし)は、予約方式の確認が終わっていなくても止めない
+  it("予約方式を確認している間でも、予約日時が無い通常の投稿は止めない", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_schedule_capabilities") return new Promise(() => {});
+      if (cmd === "post_note") return Promise.resolve({ id: "n1" });
+      return Promise.resolve(cmd === "list_drafts" ? [] : null);
+    });
+    const ui = render(ComposeBar);
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_schedule_capabilities", { accountId: "acc1" }));
+    await fireEvent.input(ui.getByTestId("compose-textarea"), { target: { value: "ふつうの投稿" } });
+    await fireEvent.click(ui.getByTestId("compose-submit"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("post_note", expect.objectContaining({ accountId: "acc1" })),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("schedule_note", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("schedule_note_local", expect.anything());
   });
 
   it("未来の予約を作成欄に戻すと予約日時も復元され、投稿ボタンは「予約」のまま", async () => {

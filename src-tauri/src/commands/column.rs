@@ -1908,6 +1908,26 @@ fn apply_search_mutes(
         .collect()
 }
 
+/// 環境変数の値を、上書きするバージョン文字列として解釈する(空白は除き、空なら無し)。
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn parse_version_override(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim).filter(|v| !v.is_empty()).map(String::from)
+}
+
+/// **デバッグビルド限定**: `TSUMUGI_DEBUG_SERVER_VERSION` で、アプリが認識する接続先サーバーの
+/// バージョンを上書きする。E2E で、予約に対応した使い捨ての Misskey を「非対応サーバー」に見せて、
+/// クライアント側予約(Issue #60 B)の経路を通すために使う。実サーバーは変わらないので、投稿など
+/// 以降の API 呼び出しは本物のまま。リリースビルド(`debug_assertions` なし)には含めない。
+#[cfg(debug_assertions)]
+fn debug_server_version_override() -> Option<String> {
+    parse_version_override(std::env::var("TSUMUGI_DEBUG_SERVER_VERSION").ok().as_deref())
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_server_version_override() -> Option<String> {
+    None
+}
+
 /// アカウントの接続先サーバーの Misskey バージョン。`AppState` にキャッシュし、未取得なら
 /// `/api/meta` から取得する。取得失敗は None(呼び出し側で非対応扱い)で、失敗はキャッシュしない
 /// ため次回また取りに行く。未登録アカウントだけはエラーを返す。
@@ -1915,6 +1935,9 @@ pub(crate) async fn cached_server_version(
     state: &AppState,
     account_id: &str,
 ) -> Result<Option<String>> {
+    if let Some(v) = debug_server_version_override() {
+        return Ok(Some(v));
+    }
     if let Some(v) = state.server_version(account_id) {
         return Ok(Some(v));
     }
@@ -2131,6 +2154,18 @@ mod tests {
     use crate::domain::{User, Visibility};
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// 環境変数そのものをテストに使うと、並行して走る他のテストの判定に影響するため、
+    /// 値の解釈(空白・空文字の扱い)だけを純関数で固定する。環境変数が実際にアプリまで届くことは、
+    /// E2E(`e2e/specs-scheduled/`)で確認する。
+    #[test]
+    fn parse_version_override_trims_and_ignores_blank() {
+        assert_eq!(parse_version_override(None), None);
+        assert_eq!(parse_version_override(Some("")), None);
+        assert_eq!(parse_version_override(Some("   ")), None);
+        assert_eq!(parse_version_override(Some("2025.9.0")), Some("2025.9.0".to_string()));
+        assert_eq!(parse_version_override(Some(" 2025.9.0 \n")), Some("2025.9.0".to_string()));
+    }
 
     fn note(id: &str, created_at: i64) -> Note {
         Note {

@@ -23,6 +23,11 @@ function settingsPath(): string {
   return join(home, "config", "com.onodai.tsumugi", "settings.json");
 }
 
+function scheduledPostsPath(): string {
+  const home = readFileSync(process.env.E2E_REUSE_HOME_FILE as string, "utf-8").trim();
+  return join(home, "config", "com.onodai.tsumugi", "scheduled_posts.json");
+}
+
 const log = (m: string) => console.log(`[e2e:pre] ${m}`);
 
 export async function runPreSession(specs: string[]): Promise<void> {
@@ -45,5 +50,24 @@ export async function runPreSession(specs: string[]): Promise<void> {
   if (dir === "specs-server-mute-restart" && name.startsWith("3-")) {
     await unmuteUser(st.c.adminToken, st.c.mId);
     log(`admin UNMUTED user M (${st.c.mId})`);
+  }
+  if (dir === "specs-scheduled-restart" && name.startsWith("2-")) {
+    // 直前のセッションのアプリが完全に止まるのを待つ(アプリ停止中でないと、終了時の書き込みと競合する)
+    await new Promise((r) => setTimeout(r, 4000));
+    // アプリ停止中に、クライアント側予約のストア(scheduled_posts.json)を直接書き換える。
+    // キー名と状態の値は src-tauri/src/store/scheduled_post.rs(`ScheduledPostEntry`)と同じ。変えたら両方直すこと。
+    //  - A: 猶予(5 分)より十分前の過去にして、「アプリが起動していない間に予約時刻を過ぎた」状況にする
+    //  - B: status を posting にして、「送信中に終了した」状況にする
+    const p = scheduledPostsPath();
+    const json = JSON.parse(readFileSync(p, "utf-8")) as {
+      posts: { scheduledAt: number; status: string; input: { text: string } }[];
+    };
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const post of json.posts) {
+      if (post.input.text.includes(st.s.textA)) post.scheduledAt = nowSec - 3600;
+      if (post.input.text.includes(st.s.textB)) post.status = "posting";
+    }
+    writeFileSync(p, JSON.stringify(json));
+    log(`scheduled_posts.json: A → expired time, B → posting (${json.posts.length} posts): ${JSON.stringify(json.posts.map((x) => ({ t: x.input.text, at: x.scheduledAt, s: x.status })))}`);
   }
 }

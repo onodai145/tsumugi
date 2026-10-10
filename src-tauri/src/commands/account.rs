@@ -89,6 +89,8 @@ pub async fn remove_account(state: State<'_, AppState>, account_id: String) -> R
     for col in state.settings.load_columns()?.into_iter().filter(|c| c.account_id == account_id) {
         state.connections.close(&col.id);
     }
+    // そのアカウントのクライアント側予約(Issue #60 B)も消す。送信先が無くなるため。
+    state.scheduled_posts.remove_account(&account_id)?;
     state.accounts.lock().unwrap().remove(&account_id)?;
     state.secrets.delete(&account_id)?;
     state.forget_server_version(&account_id);

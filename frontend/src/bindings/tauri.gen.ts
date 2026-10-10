@@ -193,6 +193,17 @@ export const commands = {
 	listScheduledNotes: (accountId: string, untilId: string | null, limit: number) => typedError<ScheduledNote[], Error>(__TAURI_INVOKE("list_scheduled_notes", { accountId, untilId, limit })),
 	/**  予約の取り消し(サーバー側の下書きを削除する)。 */
 	cancelScheduledNote: (accountId: string, draftId: string) => typedError<null, Error>(__TAURI_INVOKE("cancel_scheduled_note", { accountId, draftId })),
+	/**
+	 *  クライアント側(ローカル)予約を作る(Issue #60 B)。`scheduled_at` は epoch 秒。
+	 *  添付は呼び出し側でアップロード済みの `fileIds`(`DraftInput.file_ids`)。
+	 */
+	scheduleNoteLocal: (accountId: string, input: DraftInput, scheduledAt: number) => typedError<LocalScheduledNote, Error>(__TAURI_INVOKE("schedule_note_local", { accountId, input, scheduledAt })),
+	/**  そのアカウントのローカル予約(予約日時の昇順)。 */
+	listLocalScheduledNotes: (accountId: string) => typedError<LocalScheduledNote[], Error>(__TAURI_INVOKE("list_local_scheduled_notes", { accountId })),
+	/**  ローカル予約の取り消し(削除)。送信中のものは取り消せない。 */
+	cancelLocalScheduledNote: (accountId: string, id: string) => typedError<null, Error>(__TAURI_INVOKE("cancel_local_scheduled_note", { accountId, id })),
+	/**  期限切れ・失敗したローカル予約を、今すぐ 1 回だけ送る。結果はイベントでも通知する。 */
+	postLocalScheduledNow: (accountId: string, id: string) => typedError<null, Error>(__TAURI_INVOKE("post_local_scheduled_now", { accountId, id })),
 	/**  投稿する（本文・CW・可視性・添付・投票・返信/引用/Renote）。作成された Note を返す。 */
 	postNote: (accountId: string, draft: NoteDraft_Deserialize) => typedError<Note, Error>(__TAURI_INVOKE("post_note", { accountId, draft })),
 	/**  純粋 Renote。 */
@@ -390,6 +401,8 @@ export const events = {
 	columnNoteUpdated: makeEvent<ColumnNoteUpdated>("column-note-updated"),
 	columnNotification: makeEvent<ColumnNotification>("column-notification"),
 	columnNotificationGapFill: makeEvent<ColumnNotificationGapFill>("column-notification-gap-fill"),
+	scheduledPostFailed: makeEvent<ScheduledPostFailed>("scheduled-post-failed"),
+	scheduledPostPosted: makeEvent<ScheduledPostPosted>("scheduled-post-posted"),
 };
 
 /* Types */
@@ -717,6 +730,27 @@ export type LatestRelease = {
 	url: string,
 };
 
+/**  クライアント側(ローカル)予約の状態(Issue #60 B)。 */
+export type LocalScheduleStatus = 
+/**  予約時刻(または再試行の予定時刻)を待っている。 */
+"pending" | 
+/**  送信中。結果が分かるまで、取り消しも再送もできない。 */
+"posting" | 
+/**  アプリが起動していない間に予約時刻を過ぎた(猶予超過)。自動では投稿しない。 */
+"expired" | 
+/**  投稿に失敗した。理由は `error`。 */
+"failed";
+
+/**
+ *  ローカル予約 1 件。中身は A の `ScheduledNote` を再利用する(`id` はローカル予約の ID)。
+ *  これにより、A の「作成欄に戻す」の処理をそのまま使える。
+ */
+export type LocalScheduledNote = {
+	note: ScheduledNote,
+	status: LocalScheduleStatus,
+	error: string | null,
+};
+
 /**  `start_miauth` の戻り値。フロントは `url` をブラウザで開く。 */
 export type MiAuthSession = {
 	url: string,
@@ -898,7 +932,10 @@ export type ReactionUser = {
 
 /**  接続先サーバーが対応する予約投稿機能。フロントはこれを見て予約ボタンの出し分けをする。 */
 export type ScheduleCapabilities = {
-	/**  予約投稿が使えるか。 */
+	/**
+	 *  **サーバー側予約**(`notes/drafts` の `scheduledAt`)が使えるか。false のときは、
+	 *  クライアント側予約(tsumugi が保持して投稿する、Issue #60 B)を使う。
+	 */
 	available: boolean,
 };
 
@@ -917,6 +954,22 @@ export type ScheduledNote = {
 	fileIds: string[],
 	replyNote: DraftNoteSnapshot | null,
 	quoteNote: DraftNoteSnapshot | null,
+};
+
+/**  クライアント側の予約投稿が失敗した、または期限切れになった(Issue #60 B)。 */
+export type ScheduledPostFailed = {
+	accountId: string,
+	id: string,
+	message: string,
+};
+
+/**  クライアント側の予約投稿が投稿された(Issue #60 B)。 */
+export type ScheduledPostPosted = {
+	accountId: string,
+	/**  ローカル予約の ID(投稿後は一覧から消える)。 */
+	id: string,
+	/**  投稿されたノートの ID。 */
+	noteId: string,
 };
 
 /**

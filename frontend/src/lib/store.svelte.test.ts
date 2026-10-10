@@ -1496,3 +1496,76 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
     expect(syncedAccounts()).toEqual([]);
   });
 });
+
+// 起動時に、閉じている間に期限切れ・失敗になったローカル予約を一度だけ通知する(Issue #60 B)。
+// スケジューラの最初の処理は webview ができる前に走るため、そのときのイベントは受け取れない。
+describe("AppStore.boot(): ローカル予約の期限切れ・失敗の通知 (Issue #60 B)", () => {
+  const acc = (id: string) => ({ id });
+  type Local = { note: { id: string }; status: string; error: string | null };
+  const local = (id: string, status: string): Local => ({ note: { id }, status, error: null });
+  let byAccount: Record<string, Local[] | Error>;
+  const scheduleLogs = () => app.logs.filter((l) => l.text.includes("予約投稿"));
+  const listCalls = () => invokeMock.mock.calls.filter(([cmd]) => cmd === "list_local_scheduled_notes");
+
+  async function boot() {
+    vi.useFakeTimers();
+    const bootPromise = app.boot();
+    await vi.advanceTimersByTimeAsync(0);
+    await bootPromise.catch(() => {});
+  }
+
+  beforeEach(() => {
+    byAccount = {};
+    invokeMock.mockClear();
+    invokeMock.mockImplementation(async (cmd: string, args?: { accountId?: string }) => {
+      if (cmd === "list_accounts") return [acc("acc1"), acc("acc2")];
+      if (cmd === "list_local_scheduled_notes") {
+        const r = byAccount[args?.accountId ?? ""] ?? [];
+        if (r instanceof Error) throw r;
+        return r;
+      }
+      return { status: "ok", data: null };
+    });
+    app.logs = [];
+    app.ui = { ...app.ui, theme: "auto" };
+  });
+
+  afterEach(() => {
+    app.teardown();
+    vi.useRealTimers();
+    app.accounts = [];
+    app.groups = [];
+  });
+
+  it("expired / failed があれば、全アカウント分をまとめて1回だけ通知する", async () => {
+    byAccount = {
+      acc1: [local("a", "expired"), local("b", "pending"), local("c", "failed")],
+      acc2: [local("d", "expired"), local("e", "posting")],
+    };
+    await boot();
+
+    expect(listCalls().map(([, a]) => (a as { accountId: string }).accountId).sort()).toEqual(["acc1", "acc2"]);
+    const logs = scheduleLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].level).toBe("error");
+    expect(logs[0].text).toContain("期限切れ 2 件");
+    expect(logs[0].text).toContain("失敗 1 件");
+  });
+
+  it("pending / posting だけなら通知しない", async () => {
+    byAccount = { acc1: [local("a", "pending"), local("b", "posting")], acc2: [] };
+    await boot();
+
+    expect(scheduleLogs()).toHaveLength(0);
+  });
+
+  it("一部のアカウントの取得に失敗しても、他のアカウント分は通知する", async () => {
+    byAccount = { acc1: new Error("boom"), acc2: [local("d", "failed")] };
+    await boot();
+
+    const logs = scheduleLogs();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].text).toContain("失敗 1 件");
+    expect(logs[0].text).not.toContain("期限切れ");
+  });
+});

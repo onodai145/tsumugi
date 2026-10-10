@@ -263,3 +263,23 @@ export async function signInAs(username: string, password: string): Promise<stri
   }
   throw new Error("signInAs: unreachable");
 }
+
+/**
+ * `users/notes` でユーザーの最新ノートを返す(予約投稿が実際に投稿されたかを、アプリの画面ではなく
+ * Misskey 側の事実として確認するために使う)。
+ */
+export async function listUserNotes(
+  token: string,
+  userId: string,
+  limit = 30,
+): Promise<{ id: string; text: string | null }[]> {
+  const res = await fetch(`${BASE_URL}/api/users/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ i: token, userId, limit }),
+  });
+  if (!res.ok) {
+    throw new Error(`listUserNotes: users/notes failed ${res.status}: ${await res.text()}`);
+  }
+  return (await res.json()) as { id: string; text: string | null }[];
+}
