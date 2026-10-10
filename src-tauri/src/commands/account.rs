@@ -63,6 +63,7 @@ pub async fn complete_miauth(state: State<'_, AppState>, session_id: String) -> 
     state.secrets.set(&account.id, &token)?;
     state.settings.upsert_account(&account)?; // 再起動で復元できるよう永続化
     state.accounts.lock().unwrap().upsert(account.clone());
+    state.refresh_fetch_allowlist();
     state.pending.lock().unwrap().remove(&session_id);
     Ok(account)
 }
@@ -92,6 +93,7 @@ pub async fn remove_account(state: State<'_, AppState>, account_id: String) -> R
     // そのアカウントのクライアント側予約(Issue #60 B)も消す。送信先が無くなるため。
     state.scheduled_posts.remove_account(&account_id)?;
     state.accounts.lock().unwrap().remove(&account_id)?;
+    state.refresh_fetch_allowlist();
     state.secrets.delete(&account_id)?;
     state.forget_server_version(&account_id);
     state.forget_translator_available(&account_id);
