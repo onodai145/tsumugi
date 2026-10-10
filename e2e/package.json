@@ -9,6 +9,7 @@
     "e2e": "NODE_EXTRA_CA_CERTS=./certs/ca.pem wdio run wdio.conf.ts",
     "e2e:mobile": "NODE_EXTRA_CA_CERTS=./certs/ca.pem wdio run wdio.mobile.conf.ts",
     "e2e:scheduled": "TSUMUGI_DEBUG_SERVER_VERSION=2025.9.0 NODE_EXTRA_CA_CERTS=./certs/ca.pem wdio run wdio.scheduled.conf.ts",
+    "e2e:scheduled-restart": "TSUMUGI_DEBUG_SERVER_VERSION=2025.9.0 scripts/run-reuse-home.sh scheduled-restart ./specs-scheduled-restart/1-setup.e2e.ts ./specs-scheduled-restart/2-restart.e2e.ts",
     "e2e:column-edit": "scripts/run-reuse-home.sh column-edit ./specs-column-edit/column-edit-during-backfill.e2e.ts",
     "e2e:server-mute-restart": "scripts/run-reuse-home.sh server-mute-restart ./specs-server-mute-restart/1-setup.e2e.ts ./specs-server-mute-restart/2-restart-added.e2e.ts ./specs-server-mute-restart/3-restart-removed.e2e.ts",
     "e2e:ng-restart": "scripts/run-reuse-home.sh ng-restart ./specs-ng-restart/1-setup.e2e.ts ./specs-ng-restart/2-unmute.e2e.ts",

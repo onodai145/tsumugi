@@ -57,6 +57,25 @@ docker compose down -v
   `wdio run` で連続実行し、設定・カラム構成がアプリ再起動後も復元されることを
   検証する専用コマンド。
 
+## クライアント側の予約投稿(Issue #60 B)
+
+予約に対応していないサーバーのアカウントでは、tsumugi が予約をローカル(`scheduled_posts.json`)に保持し、
+起動している間に自分で投稿する。E2E の Misskey(2026.7.0)は予約に**対応している**ため、
+**デバッグビルド限定**の環境変数 `TSUMUGI_DEBUG_SERVER_VERSION=2025.9.0` で、アプリが認識する
+サーバーバージョンだけを上書きし、ローカル予約の経路を通す(投稿は本物の `notes/create`)。
+リリースビルドにはこの環境変数の分岐は含まれない(`src-tauri/src/commands/column.rs` の
+`debug_server_version_override`)。`pnpm e2e` には含まれず、専用のスクリプトで実行する。
+
+- `pnpm e2e:scheduled` — `specs-scheduled/`。3 件(P1・P2・P3)を同じ分に予約し、P2 は取り消し、P3 は作成欄に戻す。
+  予約時刻に P1 だけが**ちょうど 1 件**投稿されること、取り消した/戻した予約は投稿されないことを、Misskey の API
+  (`users/notes`)で確認する。待ち時間は 2 分前後。
+- `pnpm e2e:scheduled-restart` — `specs-scheduled-restart/`(`scripts/run-reuse-home.sh` の再起動シナリオ)。
+  セッションの合間に、`helpers/sessionHooks.ts` の `runPreSession` が `scheduled_posts.json` を**直接書き換える**
+  (A: 予約時刻を猶予より前の過去にする、B: `status` を `posting` にする)。再起動後、A は自動投稿されず
+  「期限切れ」として残り、B は再送されず「投稿に失敗」(結果不明)になり、A は「今すぐ投稿」でちょうど 1 件投稿
+  されることを確認する。待ち時間は短い。ストアの JSON のキー名・状態の値を変えたら、このフックも直すこと
+  (`src-tauri/src/store/scheduled_post.rs` と相互に参照している)。
+
 ## 再起動をまたぐ・キャッシュDBを検査するシナリオ
 
 次の3つは、`wdio.restart.conf.ts` で実行する(`pnpm e2e` には含まれない)。一時HOMEを使い回し(`scripts/run-reuse-home.sh`が終了時に消す)、
