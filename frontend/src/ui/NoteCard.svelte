@@ -119,6 +119,13 @@
       : inner.emojis,
   );
 
+  // 返信先プレビュー本文用(Issue #287)。本文の emojiMap と同様、閲覧インスタンスのローカル絵文字をフォールバックにして重ねる。
+  const replyEmojiMap = $derived(
+    emojiAcct
+      ? { ...app.localEmojiUrls(emojiAcct), ...proxiedEmojiMap(replyTarget?.emojis, instanceHost) }
+      : (replyTarget?.emojis ?? {}),
+  );
+
   // MFM再パースは本文変更時のみ行いたいため、リアクション更新等の無関係な再レンダリングで
   // inner が変わるたびに走らないよう $derived に切り出す(urlPreviewEnabled判定も含める)。
   const previewUrls = $derived(
@@ -365,7 +372,7 @@
     {#if replyTarget}
       <button
         type="button"
-        class="mb-0.5 flex w-full min-w-0 cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-left text-xs text-[var(--info)]"
+        class="mb-0.5 flex w-full min-w-0 cursor-pointer items-center gap-1 rounded-sm border-0 bg-transparent p-0 text-left text-xs text-[var(--info)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         data-testid="reply-preview"
         aria-expanded={replyExpanded}
         onclick={() => (replyExpanded = !replyExpanded)}
@@ -380,7 +387,7 @@
             {#if replyPreview.kind === "label"}
               {replyPreview.label}
             {:else}
-              <Mfm text={replyPreview.text} emojis={proxiedEmojiMap(replyTarget.emojis, instanceHost)} simple />
+              <Mfm text={replyPreview.text} emojis={replyEmojiMap} simple />
             {/if}
           {/if}
         </span>

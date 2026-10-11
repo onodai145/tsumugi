@@ -208,6 +208,44 @@ describe("NoteCard action banner", () => {
       expect(preview.textContent).toContain("一行目 二行目");
     });
 
+    it("shows only the author name, without a colon, when the target has nothing to excerpt", () => {
+      const note = makeNote({
+        replyId: "parent1",
+        reply: makeNote({
+          id: "parent1",
+          text: null,
+          cw: null,
+          files: [],
+          renote: null,
+          user: makeUser({ id: "u2", name: "Bob", username: "bob" }),
+        }),
+      });
+      const { getByTestId } = render(NoteCard, { props: { note } });
+      const text = getByTestId("reply-preview").textContent ?? "";
+      expect(text).toContain("Bob");
+      expect(text).not.toContain(":");
+    });
+
+    it("resolves the viewing instance's local custom emojis in the preview body", () => {
+      app.emojis = {
+        acc1: [
+          { name: "localmoji", host: null, url: "https://local.example/localmoji.png", category: null, aliases: [] },
+        ],
+      };
+      try {
+        const note = makeNote({
+          replyId: "parent1",
+          reply: makeNote({ id: "parent1", text: "やあ :localmoji:" }),
+        });
+        const { getByTestId } = render(NoteCard, { props: { note, emojiAccountId: "acc1" } });
+        const img = getByTestId("reply-preview").querySelector("img.custom-emoji");
+        expect(img).not.toBeNull();
+        expect(img?.getAttribute("src")).toBe("https://local.example/localmoji.png");
+      } finally {
+        app.emojis = {};
+      }
+    });
+
     it("does not offer a nested preview inside the expanded target", async () => {
       const nested = makeNote({ id: "parent1", replyId: "grand", reply: makeNote({ id: "grand" }) });
       const note = makeNote({ replyId: "parent1", reply: nested });
