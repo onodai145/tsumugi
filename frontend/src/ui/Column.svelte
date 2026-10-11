@@ -561,6 +561,7 @@
       {#each notesForSlot(tab.notes, role) as note (note.id)}
         <NoteCard
           {note}
+          showReplyCard
           accountId={tab.accountId}
           tabId={tab.id}
           selected={role === "active" && note.id === tab.selectedNoteId}

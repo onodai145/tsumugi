@@ -108,6 +108,37 @@ describe("NotificationCard note actions", () => {
     expect(container.querySelector('[data-testid="notification-note-preview"]')).toBeNull();
   });
 
+  it("shows the reply target card when the notified note is a reply", () => {
+    const notification = makeNotification({
+      type: "mention",
+      note: makeNote({
+        id: "n2",
+        replyId: "parent1",
+        reply: makeNote({ id: "parent1", text: "元ノート", user: makeUser({ id: "u3", name: "Dave", username: "dave" }) }),
+      }),
+    });
+    const { container } = render(NotificationCard, {
+      props: { notification, accountId: "a1" },
+    });
+    const card = container.querySelector('[data-testid="reply-card"]');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("Dave");
+    expect(card?.textContent).toContain("元ノート");
+    expect(container.querySelector('[data-testid="reply-preview"]')).toBeNull();
+  });
+
+  it("shows no reply target card when the notified note has no reply target", () => {
+    const notification = makeNotification({
+      type: "mention",
+      note: makeNote({ id: "n2", replyId: "parent1", reply: null }),
+    });
+    const { container } = render(NotificationCard, {
+      props: { notification, accountId: "a1" },
+    });
+    expect(container.querySelector('[data-testid="reply-card"]')).toBeNull();
+    expect(container.textContent).not.toContain("返信先");
+  });
+
   it("通知元ユーザーのisCatがtrueのとき猫耳(.ears)を描画する", () => {
     const notification = makeNotification({
       type: "mention",

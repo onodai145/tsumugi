@@ -254,6 +254,95 @@ describe("NoteCard action banner", () => {
       expect(getAllByTestId("reply-preview").length).toBe(1);
     });
   });
+
+  describe("reply target card (showReplyCard)", () => {
+    const target = () =>
+      makeNote({
+        id: "parent1",
+        text: "元のノートの本文",
+        user: makeUser({ id: "u2", name: "Bob", username: "bob" }),
+      });
+
+    it("shows the card instead of the one-line preview", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId, queryByTestId } = render(NoteCard, { props: { note, showReplyCard: true } });
+      expect(queryByTestId("reply-preview")).toBeNull();
+      const card = getByTestId("reply-card");
+      expect(card.textContent).toContain("Bob");
+      expect(card.textContent).toContain("@bob");
+      expect(card.textContent).toContain("元のノートの本文");
+    });
+
+    it("shows the card even when hideActionBanner is set", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId, queryByTestId } = render(NoteCard, {
+        props: { note, showReplyCard: true, hideActionBanner: true },
+      });
+      expect(getByTestId("reply-card")).toBeTruthy();
+      expect(queryByTestId("reply-preview")).toBeNull();
+    });
+
+    it("shows nothing when the target is unavailable and hideActionBanner is set", () => {
+      const note = makeNote({ replyId: "parent1", reply: null });
+      const { queryByText, queryByTestId } = render(NoteCard, {
+        props: { note, showReplyCard: true, hideActionBanner: true },
+      });
+      expect(queryByTestId("reply-card")).toBeNull();
+      expect(queryByText("返信")).toBeNull();
+    });
+
+    it("shows the plain reply label when the target is unavailable", () => {
+      const note = makeNote({ replyId: "parent1", reply: null });
+      const { getByText, queryByTestId } = render(NoteCard, { props: { note, showReplyCard: true } });
+      expect(getByText("返信")).toBeTruthy();
+      expect(queryByTestId("reply-card")).toBeNull();
+    });
+
+    it("keeps the one-line preview when showReplyCard is not set", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId, queryByTestId } = render(NoteCard, { props: { note } });
+      expect(getByTestId("reply-preview")).toBeTruthy();
+      expect(queryByTestId("reply-card")).toBeNull();
+    });
+
+    it("still hides the Renote banner with hideActionBanner but shows the card for a renoted reply", () => {
+      const inner = makeNote({ id: "r1", replyId: "parent1", reply: target() });
+      const note = makeNote({ id: "rn", text: null, renote: inner, renoteId: "r1" });
+      const { getByTestId, container } = render(NoteCard, {
+        props: { note, showReplyCard: true, hideActionBanner: true },
+      });
+      expect(getByTestId("reply-card")).toBeTruthy();
+      expect(container.textContent).not.toContain("がRenote");
+    });
+
+    it("resolves the viewing instance's local custom emojis in the card body", () => {
+      app.emojis = {
+        acc1: [
+          { name: "localmoji", host: null, url: "https://local.example/localmoji.png", category: null, aliases: [] },
+        ],
+      };
+      try {
+        const note = makeNote({
+          replyId: "parent1",
+          reply: makeNote({ id: "parent1", text: "やあ :localmoji:" }),
+        });
+        const { getByTestId } = render(NoteCard, {
+          props: { note, showReplyCard: true, emojiAccountId: "acc1" },
+        });
+        const img = getByTestId("reply-card-body").querySelector("img.custom-emoji");
+        expect(img?.getAttribute("src")).toBe("https://local.example/localmoji.png");
+      } finally {
+        app.emojis = {};
+      }
+    });
+
+    it("opens the target's profile with the accountId when the card name is clicked", async () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId } = render(NoteCard, { props: { note, showReplyCard: true, accountId: "acc1" } });
+      await fireEvent.click(getByTestId("reply-card-name"));
+      expect(openProfile).toHaveBeenCalledWith({ userId: "u2" }, "acc1");
+    });
+  });
 });
 
 describe("NoteCard showActions", () => {

@@ -11,6 +11,7 @@
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
   import Avatar from "./Avatar.svelte";
+  import ReplyTargetCard from "./ReplyTargetCard.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { readableTextColor, isValidHexColor } from "../lib/color";
@@ -43,6 +44,7 @@
     showActions,
     hideReactions = false,
     hideActionBanner = false,
+    showReplyCard = false,
     accountId,
     emojiAccountId,
     tabId,
@@ -54,6 +56,7 @@
     showActions?: boolean;
     hideReactions?: boolean;
     hideActionBanner?: boolean;
+    showReplyCard?: boolean;
     accountId?: string;
     emojiAccountId?: string;
     tabId?: string;
@@ -65,7 +68,8 @@
   const isPureRenote = $derived(!note.text && !!note.renote);
   const inner = $derived(isPureRenote ? note.renote! : note);
 
-  // 返信先の1行プレビュー(Issue #287)。reply が無ければ従来の「↩ 返信」だけを出す。
+  // 返信先プレビュー(Issue #287)。reply が無ければ従来の「↩ 返信」だけを出す。
+  // showReplyCard が真ならカラム/通知用のアバター付きカード(ReplyTargetCard)、偽なら1行プレビュー+展開。
   const replyTarget = $derived(inner.reply ?? null);
   const replyPreview = $derived(replyTarget ? replyPreviewBody(replyTarget) : null);
   let replyExpanded = $state(false);
@@ -368,7 +372,9 @@
       /> がRenote
     </div>
   {/if}
-  {#if inner.replyId && !hideActionBanner}
+  {#if showReplyCard && inner.replyId && replyTarget}
+    <ReplyTargetCard note={replyTarget} {accountId} emojiMap={replyEmojiMap} {instanceHost} />
+  {:else if inner.replyId && !hideActionBanner}
     {#if replyTarget}
       <button
         type="button"
