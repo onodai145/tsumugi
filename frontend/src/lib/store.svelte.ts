@@ -5,6 +5,7 @@ import { invalidateReactionUsers } from "./reactionUsersCache";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { loadAssetBlobUrl } from "./assetBlob";
 import {
   isPermissionGranted,
   requestPermission,
@@ -221,6 +222,11 @@ class AppStore {
   #bgVideoSourcePath: string | null = null;
   // #bgVideoSourcePath に対応する blob: URL。切り替え時に確実に revoke してメモリリークを防ぐ。
   #bgVideoBlobUrl: string | null = null;
+  // 背景画像も同様に、asset:// を CSS の background-image から直接読めない環境があるため
+  // blob: URL 経由で --bg-image に渡す(#loadBackgroundImageBlob 参照)。
+  // #bgImageSourcePath は取得を開始した元パスで、重複取得の抑止と古いレスポンスの破棄に使う。
+  #bgImageSourcePath: string | null = null;
+  #bgImageBlobUrl: string | null = null;
 
   #unlisten: UnlistenFn[] = [];
   // columnId -> 直近の接続状態。resumeColumn/addColumn の await 解決前に届いた
@@ -274,6 +280,7 @@ class AppStore {
       this.#bgVideoEl = null;
     }
     this.#bgVideoSourcePath = null;
+    this.#releaseBackgroundImage();
   }
 
   async boot() {
@@ -1712,13 +1719,13 @@ class AppStore {
     const root = document.documentElement;
     const kind = prefs.backgroundKind ?? null;
     const path = prefs.backgroundPath ?? "";
-    const assetUrl = path ? convertFileSrc(path) : "";
     // Tileは動画では意味を持たないため、動画のときはcoverへフォールバックする。
     const rawFitMode = prefs.backgroundFitMode ?? "cover";
     const fitMode = kind === "video" && rawFitMode === "tile" ? "cover" : rawFitMode;
 
     if (kind === "video" && path) {
       root.style.removeProperty("--bg-image");
+      this.#releaseBackgroundImage();
       if (!this.#bgVideoEl) {
         const v = document.createElement("video");
         v.autoplay = true;
@@ -1741,10 +1748,11 @@ class AppStore {
         this.#bgVideoEl.style.display = "none";
         this.#bgVideoEl.pause();
       }
-      if (kind === "image" && assetUrl) {
-        root.style.setProperty("--bg-image", `url("${assetUrl}")`);
+      if (kind === "image" && path) {
+        if (this.#bgImageSourcePath !== path) void this.#loadBackgroundImageBlob(path);
       } else {
         root.style.removeProperty("--bg-image");
+        this.#releaseBackgroundImage();
       }
     }
 
@@ -1782,6 +1790,39 @@ class AppStore {
       this.#bgVideoEl.src = blobUrl;
     } catch (e) {
       this.#log("warn", `背景動画の読み込みに失敗しました: ${String(e)}`);
+    }
+  }
+
+  /// 背景画像のblob: URLと取得済みパスの記録を破棄する。
+  #releaseBackgroundImage() {
+    if (this.#bgImageBlobUrl) {
+      URL.revokeObjectURL(this.#bgImageBlobUrl);
+      this.#bgImageBlobUrl = null;
+    }
+    this.#bgImageSourcePath = null;
+  }
+
+  /// 背景画像をasset://ではなくblob: URLで --bg-image に設定する。
+  /// devビルド(httpオリジン)ではasset://をCSSのbackground-imageから直接読めず画像が表示されないため、
+  /// fetch()で取得したBlobのblob: URLを使う(loadAssetBlobUrl参照)。
+  /// #applyBackgroundは同期関数なので、この非同期処理はfire-and-forgetで呼ばれる。
+  async #loadBackgroundImageBlob(path: string) {
+    this.#bgImageSourcePath = path;
+    let blobUrl: string | null = null;
+    try {
+      blobUrl = await loadAssetBlobUrl(path);
+      // 取得中に別の背景へ切り替えられていたら、古いレスポンスの反映は捨てる。
+      if (this.#bgImageSourcePath !== path) {
+        URL.revokeObjectURL(blobUrl);
+        return;
+      }
+      if (this.#bgImageBlobUrl) URL.revokeObjectURL(this.#bgImageBlobUrl);
+      this.#bgImageBlobUrl = blobUrl;
+      document.documentElement.style.setProperty("--bg-image", `url("${blobUrl}")`);
+    } catch (e) {
+      // 失敗を記録に残すと再試行されなくなるため、まだ自分のパスなら記録を戻す。
+      if (this.#bgImageSourcePath === path) this.#bgImageSourcePath = null;
+      this.#log("warn", `背景画像の読み込みに失敗しました: ${String(e)}`);
     }
   }
 

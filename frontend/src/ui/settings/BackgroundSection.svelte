@@ -8,6 +8,7 @@
   import { BACKGROUND_POSITION_GRID, type BackgroundPosition } from "../../lib/backgroundPosition";
   import { Button } from "$lib/components/ui/button";
   import { convertFileSrc } from "@tauri-apps/api/core";
+  import { loadAssetBlobUrl } from "../../lib/assetBlob";
 
   let backgroundKind = $state<"image" | "video" | null>(app.ui.backgroundKind ?? null);
   let backgroundPath = $state<string | null>(app.ui.backgroundPath ?? null);
@@ -25,10 +26,37 @@
   let err = $state<string | null>(null);
   let saved = $state(false);
 
-  const previewUrl = $derived(backgroundPath ? convertFileSrc(backgroundPath) : "");
   const fitModeOptions = $derived(
     backgroundKind === "video" ? BACKGROUND_FIT_MODE_OPTIONS_FOR_VIDEO : BACKGROUND_FIT_MODE_OPTIONS,
   );
+
+  // 画像プレビュー用のblob: URL。devビルド(httpオリジン)では<img>からasset://を直接読めないため、
+  // store.svelte.tsの#loadBackgroundImageBlobと同じくfetch()経由のblob: URLを使う。
+  let imagePreviewUrl = $state("");
+  $effect(() => {
+    if (backgroundKind !== "image" || !backgroundPath) {
+      imagePreviewUrl = "";
+      return;
+    }
+    let blobUrl = "";
+    let cancelled = false;
+    loadAssetBlobUrl(backgroundPath)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        blobUrl = url;
+        imagePreviewUrl = url;
+      })
+      .catch(() => {
+        if (!cancelled) imagePreviewUrl = "";
+      });
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  });
 
   // 動画プレビュー用のblob: URL。WebKitGTK(GStreamerバックエンド)の<video>要素は
   // Tauriのasset://カスタムURIスキームを直接読めない(store.svelte.tsの#applyBackground /
@@ -125,8 +153,8 @@
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">背景メディア（画像/動画）</span>
   <div class="flex items-center gap-2.5">
-    {#if backgroundKind === "image" && previewUrl}
-      <img class="h-9 w-14 rounded-md border border-border object-cover" src={previewUrl} alt="背景プレビュー" />
+    {#if backgroundKind === "image" && imagePreviewUrl}
+      <img class="h-9 w-14 rounded-md border border-border object-cover" src={imagePreviewUrl} alt="背景プレビュー" />
     {:else if backgroundKind === "video" && videoPreviewUrl}
       <!-- svelte-ignore a11y_media_has_caption -->
       <video class="h-9 w-14 rounded-md border border-border object-cover" src={videoPreviewUrl} muted autoplay loop playsinline></video>
