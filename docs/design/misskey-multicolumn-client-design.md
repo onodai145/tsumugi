@@ -160,6 +160,8 @@ pub struct Note {
     pub local_only: bool,
     pub user: User,
     pub reply_id: Option<String>,
+    /// 返信先ノート(浅く1階層のみ。表示専用でフィルタ評価には使わない)
+    pub reply: Option<Box<Note>>,
     pub renote_id: Option<String>,
     pub renote: Option<Box<Note>>,
     pub files: Vec<DriveFile>,
