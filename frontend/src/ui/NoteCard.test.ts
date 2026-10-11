@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { cleanup, render, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
 import { app } from "../lib/store.svelte";
 
@@ -53,6 +53,7 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     user: makeUser(),
     replyId: null,
     replyUserId: null,
+    reply: null,
     renoteId: null,
     renote: null,
     files: [],
@@ -115,6 +116,143 @@ describe("NoteCard action banner", () => {
     });
     const { container } = render(NoteCard, { props: { note } });
     expect(container.querySelector('[data-testid="note-reaction-wrap"]')).toBeNull();
+  });
+
+  describe("reply target preview", () => {
+    const target = () =>
+      makeNote({
+        id: "parent1",
+        text: "元のノートの本文",
+        user: makeUser({ id: "u2", name: "Bob", username: "bob" }),
+      });
+
+    it("shows the target author and a body excerpt on one line", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId } = render(NoteCard, { props: { note } });
+      const preview = getByTestId("reply-preview");
+      expect(preview.textContent).toContain("Bob");
+      expect(preview.textContent).toContain("元のノートの本文");
+      expect(preview.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("shows the cw instead of the body when the target has a cw", () => {
+      const note = makeNote({
+        replyId: "parent1",
+        reply: makeNote({ id: "parent1", cw: "ネタバレ", text: "秘密の本文" }),
+      });
+      const { getByTestId } = render(NoteCard, { props: { note } });
+      const text = getByTestId("reply-preview").textContent ?? "";
+      expect(text).toContain("ネタバレ");
+      expect(text).not.toContain("秘密の本文");
+    });
+
+    it("shows (画像) when the target only has image files", () => {
+      const note = makeNote({
+        replyId: "parent1",
+        reply: makeNote({
+          id: "parent1",
+          text: null,
+          files: [
+            {
+              id: "f1",
+              mimeType: "image/png",
+              isSensitive: false,
+              url: "https://example.com/a.png",
+              thumbnailUrl: null,
+              name: "a.png",
+              size: 1,
+            },
+          ],
+        }),
+      });
+      const { getByTestId } = render(NoteCard, { props: { note } });
+      expect(getByTestId("reply-preview").textContent).toContain("(画像)");
+    });
+
+    it("falls back to the plain reply label when the target is unavailable", () => {
+      const note = makeNote({ replyId: "parent1", reply: null });
+      const { getByText, queryByTestId } = render(NoteCard, { props: { note } });
+      expect(getByText("返信")).toBeTruthy();
+      expect(queryByTestId("reply-preview")).toBeNull();
+    });
+
+    it("hides the preview when hideActionBanner is set", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { queryByTestId } = render(NoteCard, { props: { note, hideActionBanner: true } });
+      expect(queryByTestId("reply-preview")).toBeNull();
+    });
+
+    it("expands the target note on click and collapses on the second click", async () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId, container } = render(NoteCard, { props: { note } });
+      const preview = getByTestId("reply-preview");
+      expect(container.querySelectorAll("article").length).toBe(1);
+
+      await fireEvent.click(preview);
+      expect(preview.getAttribute("aria-expanded")).toBe("true");
+      expect(container.querySelectorAll("article").length).toBe(2);
+
+      await fireEvent.click(preview);
+      expect(preview.getAttribute("aria-expanded")).toBe("false");
+      expect(container.querySelectorAll("article").length).toBe(1);
+    });
+
+    it("renders no line break in the preview when the target text is multi-line", () => {
+      const note = makeNote({
+        replyId: "parent1",
+        reply: makeNote({ id: "parent1", text: "一行目\n二行目" }),
+      });
+      const { getByTestId } = render(NoteCard, { props: { note } });
+      const preview = getByTestId("reply-preview");
+      expect(preview.querySelector("br")).toBeNull();
+      expect(preview.textContent).toContain("一行目 二行目");
+    });
+
+    it("shows only the author name, without a colon, when the target has nothing to excerpt", () => {
+      const note = makeNote({
+        replyId: "parent1",
+        reply: makeNote({
+          id: "parent1",
+          text: null,
+          cw: null,
+          files: [],
+          renote: null,
+          user: makeUser({ id: "u2", name: "Bob", username: "bob" }),
+        }),
+      });
+      const { getByTestId } = render(NoteCard, { props: { note } });
+      const text = getByTestId("reply-preview").textContent ?? "";
+      expect(text).toContain("Bob");
+      expect(text).not.toContain(":");
+    });
+
+    it("resolves the viewing instance's local custom emojis in the preview body", () => {
+      app.emojis = {
+        acc1: [
+          { name: "localmoji", host: null, url: "https://local.example/localmoji.png", category: null, aliases: [] },
+        ],
+      };
+      try {
+        const note = makeNote({
+          replyId: "parent1",
+          reply: makeNote({ id: "parent1", text: "やあ :localmoji:" }),
+        });
+        const { getByTestId } = render(NoteCard, { props: { note, emojiAccountId: "acc1" } });
+        const img = getByTestId("reply-preview").querySelector("img.custom-emoji");
+        expect(img).not.toBeNull();
+        expect(img?.getAttribute("src")).toBe("https://local.example/localmoji.png");
+      } finally {
+        app.emojis = {};
+      }
+    });
+
+    it("does not offer a nested preview inside the expanded target", async () => {
+      const nested = makeNote({ id: "parent1", replyId: "grand", reply: makeNote({ id: "grand" }) });
+      const note = makeNote({ replyId: "parent1", reply: nested });
+      const { getByTestId, getAllByTestId } = render(NoteCard, { props: { note } });
+      await fireEvent.click(getByTestId("reply-preview"));
+      expect(getAllByTestId("reply-preview").length).toBe(1);
+    });
   });
 });
 

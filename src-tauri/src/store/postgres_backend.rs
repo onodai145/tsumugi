@@ -752,6 +752,9 @@ async fn self_heal_node(pool: &sqlx::PgPool, node: &mut serde_json::Value) -> Re
     if node.get("renote").map(|r| r.is_object()).unwrap_or(false) {
         changed |= Box::pin(self_heal_node(pool, &mut node["renote"])).await?;
     }
+    if node.get("reply").map(|r| r.is_object()).unwrap_or(false) {
+        changed |= Box::pin(self_heal_node(pool, &mut node["reply"])).await?;
+    }
     Ok(changed)
 }
 
@@ -1255,7 +1258,7 @@ mod tests {
                 followers_count: 5, following_count: 3, notes_count: 42,
                 emojis: std::collections::HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
             },
-            reply_id: None, reply_user_id: None, renote_id: None, renote: None,
+            reply_id: None, reply_user_id: None, reply: None, renote_id: None, renote: None,
             files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into(), size: None }],
             poll: None, tags: vec!["rust".into()], mentions: vec![],
             emojis: std::collections::HashMap::new(), channel_id: None, via: None, lang: None,
@@ -1312,6 +1315,30 @@ mod tests {
         let got = s.load_cached("col1", 10).await.unwrap();
         assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
         assert_eq!(got[0].reactions.get("👍"), Some(&3));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn cache_roundtrip_restores_reply_and_drops_it_when_author_missing() {
+        let s = backend().await;
+        let mut n = note("n_reply", 200);
+        let mut target = note("n_target", 100);
+        target.user.id = "u_bob".into();
+        target.user.username = "bob".into();
+        target.user.name = Some("Bob".into());
+        n.reply_id = Some("n_target".into());
+        n.reply = Some(Box::new(target));
+        s.cache_note("col1", &n).await.unwrap();
+
+        let got = s.load_cached("col1", 10).await.unwrap();
+        assert_eq!(got.len(), 1);
+        let reply = got[0].reply.as_ref().expect("reply should be restored");
+        assert_eq!(reply.user.name.as_deref(), Some("Bob"));
+
+        sqlx::query("DELETE FROM \"user\" WHERE id = 'u_bob'").execute(s.pool()).await.unwrap();
+        let got = s.load_cached("col1", 10).await.unwrap();
+        assert_eq!(got.len(), 1, "返信先ユーザーの欠落でノート行ごと捨ててはいけない");
+        assert!(got[0].reply.is_none());
     }
 
     #[tokio::test]

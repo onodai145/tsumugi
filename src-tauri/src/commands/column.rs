@@ -2195,6 +2195,7 @@ mod tests {
             reply_id: None,
             reply_user_id: None,
             renote_id: None,
+            reply: None,
             renote: None,
             files: vec![],
             poll: None,
