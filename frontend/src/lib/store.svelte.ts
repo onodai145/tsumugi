@@ -1803,7 +1803,7 @@ class AppStore {
   }
 
   /// 背景画像をasset://ではなくblob: URLで --bg-image に設定する。
-  /// WebKitGTK 2.54 ではasset://をCSSのbackground-imageから直接読めず画像が表示されないため、
+  /// devビルド(httpオリジン)ではasset://をCSSのbackground-imageから直接読めず画像が表示されないため、
   /// fetch()で取得したBlobのblob: URLを使う(loadAssetBlobUrl参照)。
   /// #applyBackgroundは同期関数なので、この非同期処理はfire-and-forgetで呼ばれる。
   async #loadBackgroundImageBlob(path: string) {

@@ -30,7 +30,7 @@
     backgroundKind === "video" ? BACKGROUND_FIT_MODE_OPTIONS_FOR_VIDEO : BACKGROUND_FIT_MODE_OPTIONS,
   );
 
-  // 画像プレビュー用のblob: URL。WebKitGTK 2.54 では<img>からasset://を直接読めないため、
+  // 画像プレビュー用のblob: URL。devビルド(httpオリジン)では<img>からasset://を直接読めないため、
   // store.svelte.tsの#loadBackgroundImageBlobと同じくfetch()経由のblob: URLを使う。
   let imagePreviewUrl = $state("");
   $effect(() => {
