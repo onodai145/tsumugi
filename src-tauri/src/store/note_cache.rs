@@ -255,7 +255,7 @@ fn self_heal_legacy_row(conn: &Connection, note_id: &str, value: &mut serde_json
     Ok(())
 }
 
-/// 1ノード分(本体 or renote)の user を自己修復する。renote へ再帰する。
+/// 1ノード分(本体 / renote / reply)の user を自己修復する。renote と reply へ再帰する。
 /// 戻り値: このノード以下で1箇所でも書き換えたら true。
 fn self_heal_node(conn: &Connection, node: &mut serde_json::Value) -> Result<bool> {
     let mut changed = false;
@@ -272,6 +272,9 @@ fn self_heal_node(conn: &Connection, node: &mut serde_json::Value) -> Result<boo
     }
     if node.get("renote").map(|r| r.is_object()).unwrap_or(false) {
         changed |= self_heal_node(conn, &mut node["renote"])?;
+    }
+    if node.get("reply").map(|r| r.is_object()).unwrap_or(false) {
+        changed |= self_heal_node(conn, &mut node["reply"])?;
     }
     Ok(changed)
 }
@@ -625,6 +628,7 @@ mod tests {
             reply_id: None,
             reply_user_id: None,
             renote_id: None,
+            reply: None,
             renote: None,
             files: vec![DriveFile {
                 id: "f1".into(),

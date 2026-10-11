@@ -21,6 +21,9 @@ pub struct Note {
     pub reply_id: Option<String>,
     /// 返信先ノートの投稿者 userId（`reply_to_me` 述語用）。返信でない場合は None
     pub reply_user_id: Option<String>,
+    /// 返信先ノート。renote と同様に浅く1階層のみ保持する(`reply.reply` は常に None)。
+    /// 表示専用でフィルタ評価には使わない。返信でない/返信先が取得できない場合は None
+    pub reply: Option<Box<Note>>,
     pub renote_id: Option<String>,
     /// 引用/Renote先（浅く保持）
     pub renote: Option<Box<Note>>,
@@ -199,6 +202,7 @@ mod tests {
             reply_id: None,
             reply_user_id: None,
             renote_id: None,
+            reply: None,
             renote: None,
             files: vec![],
             poll: None,
@@ -230,6 +234,26 @@ mod tests {
 
         let back: Note = serde_json::from_value(v).unwrap();
         assert_eq!(back.reply_user_id.as_deref(), Some("target-user"));
+    }
+
+    #[test]
+    fn reply_round_trips_and_missing_key_deserializes_as_none() {
+        let mut n = minimal_note();
+        let mut target = minimal_note();
+        target.id = "r1".into();
+        n.reply_id = Some("r1".into());
+        n.reply = Some(Box::new(target));
+
+        let v = serde_json::to_value(&n).unwrap();
+        assert_eq!(v["reply"]["id"], "r1");
+        let back: Note = serde_json::from_value(v).unwrap();
+        assert_eq!(back.reply.as_ref().map(|r| r.id.as_str()), Some("r1"));
+
+        // 旧キャッシュ行(reply キーを持たない payload)は None として読める
+        let mut legacy = serde_json::to_value(&minimal_note()).unwrap();
+        legacy.as_object_mut().unwrap().remove("reply");
+        let back: Note = serde_json::from_value(legacy).unwrap();
+        assert!(back.reply.is_none());
     }
 
     #[test]

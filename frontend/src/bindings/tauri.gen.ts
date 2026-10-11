@@ -782,6 +782,11 @@ export type Note = {
 	replyId: string | null,
 	/**  返信先ノートの投稿者 userId（`reply_to_me` 述語用）。返信でない場合は None */
 	replyUserId: string | null,
+	/**
+	 *  返信先ノート。renote と同様に浅く1階層のみ保持する(`reply.reply` は常に None)。
+	 *  表示専用でフィルタ評価には使わない。返信でない/返信先が取得できない場合は None
+	 */
+	reply: Note | null,
 	renoteId: string | null,
 	/**  引用/Renote先（浅く保持） */
 	renote: Note | null,

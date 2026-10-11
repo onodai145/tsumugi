@@ -11,6 +11,7 @@
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import ReactionUsersPopover from "./ReactionUsersPopover.svelte";
   import Avatar from "./Avatar.svelte";
+  import ReplyTargetCard from "./ReplyTargetCard.svelte";
   import Self from "./NoteCard.svelte";
   import { relativeTime } from "../lib/time";
   import { readableTextColor, isValidHexColor } from "../lib/color";
@@ -42,6 +43,7 @@
     showActions,
     hideReactions = false,
     hideActionBanner = false,
+    showReplyCard = false,
     accountId,
     emojiAccountId,
     tabId,
@@ -53,6 +55,7 @@
     showActions?: boolean;
     hideReactions?: boolean;
     hideActionBanner?: boolean;
+    showReplyCard?: boolean;
     accountId?: string;
     emojiAccountId?: string;
     tabId?: string;
@@ -63,6 +66,10 @@
   // 純粋Renote（本文なし＋renote先あり）は「誰が」を出して中身を委譲
   const isPureRenote = $derived(!note.text && !!note.renote);
   const inner = $derived(isPureRenote ? note.renote! : note);
+
+  // 返信先の表示(Issue #287)。showReplyCard が真で返信先(reply)があればカラム/通知用の
+  // アバター付きカード(ReplyTargetCard)、それ以外は従来の「↩ 返信」だけを出す。
+  const replyTarget = $derived(inner.reply ?? null);
 
   // app.now（Issue #256、5秒ごとに更新される共有tick）を依存として読むことで、
   // 時間経過に合わせて相対時刻表示を再計算させる。
@@ -111,6 +118,13 @@
     emojiAcct
       ? { ...app.localEmojiUrls(emojiAcct), ...proxiedEmojiMap(inner.emojis, instanceHost) }
       : inner.emojis,
+  );
+
+  // 返信先プレビュー本文用(Issue #287)。本文の emojiMap と同様、閲覧インスタンスのローカル絵文字をフォールバックにして重ねる。
+  const replyEmojiMap = $derived(
+    emojiAcct
+      ? { ...app.localEmojiUrls(emojiAcct), ...proxiedEmojiMap(replyTarget?.emojis, instanceHost) }
+      : (replyTarget?.emojis ?? {}),
   );
 
   // MFM再パースは本文変更時のみ行いたいため、リアクション更新等の無関係な再レンダリングで
@@ -355,7 +369,9 @@
       /> がRenote
     </div>
   {/if}
-  {#if inner.replyId && !hideActionBanner}
+  {#if showReplyCard && inner.replyId && replyTarget}
+    <ReplyTargetCard note={replyTarget} {accountId} emojiMap={replyEmojiMap} {instanceHost} />
+  {:else if inner.replyId && !hideActionBanner}
     <div class="mb-0.5 inline-flex items-center gap-1 text-xs text-[var(--info)]">
       <Reply size={12} /> 返信
     </div>

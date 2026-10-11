@@ -310,6 +310,12 @@ impl From<RawNote> for Note {
             user: r.user.into(),
             reply_id: r.reply_id,
             reply_user_id: r.reply.as_ref().map(|reply| reply.user.id.clone()),
+            reply: r.reply.map(|n| {
+                let mut reply: Note = (*n).into();
+                // 浅く1階層のみ保持する
+                reply.reply = None;
+                Box::new(reply)
+            }),
             renote_id: r.renote_id,
             renote: r.renote.map(|n| Box::new((*n).into())),
             files: r.files.into_iter().map(Into::into).collect(),
@@ -400,6 +406,50 @@ mod tests {
         .unwrap();
         let n: Note = raw.into();
         assert_eq!(n.reply_user_id, None);
+    }
+
+    #[test]
+    fn keeps_nested_reply_as_shallow_note() {
+        let raw: RawNote = serde_json::from_str(
+            r#"{
+              "id":"n2","createdAt":"2026-07-05T12:00:00.000Z","text":"@bob hi",
+              "user":{"id":"u1","username":"alice","host":null},
+              "visibility":"public","replyId":"r1",
+              "reply":{
+                "id":"r1","createdAt":"2026-07-05T11:00:00.000Z","text":"original",
+                "user":{"id":"bob-id","username":"bob","host":null,"name":"Bob"},
+                "visibility":"public","replyId":"r0",
+                "reply":{
+                  "id":"r0","createdAt":"2026-07-05T10:00:00.000Z","text":"grandparent",
+                  "user":{"id":"carol-id","username":"carol","host":null},
+                  "visibility":"public"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+        let n: Note = raw.into();
+        let reply = n.reply.expect("reply should be kept");
+        assert_eq!(reply.id, "r1");
+        assert_eq!(reply.text.as_deref(), Some("original"));
+        assert_eq!(reply.user.name.as_deref(), Some("Bob"));
+        // 浅く1階層のみ: 返信先の返信先は落とす(reply_id は残る)
+        assert!(reply.reply.is_none());
+        assert_eq!(reply.reply_id.as_deref(), Some("r0"));
+    }
+
+    #[test]
+    fn reply_is_none_when_not_a_reply() {
+        let raw: RawNote = serde_json::from_str(
+            r#"{
+              "id":"n3","createdAt":"2026-07-05T12:00:00.000Z","text":"hi",
+              "user":{"id":"u1","username":"alice","host":null},
+              "visibility":"public"
+            }"#,
+        )
+        .unwrap();
+        let n: Note = raw.into();
+        assert!(n.reply.is_none());
     }
 
     #[test]

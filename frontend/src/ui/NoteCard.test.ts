@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { cleanup, render, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
 import { app } from "../lib/store.svelte";
 
@@ -53,6 +53,7 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     user: makeUser(),
     replyId: null,
     replyUserId: null,
+    reply: null,
     renoteId: null,
     renote: null,
     files: [],
@@ -115,6 +116,121 @@ describe("NoteCard action banner", () => {
     });
     const { container } = render(NoteCard, { props: { note } });
     expect(container.querySelector('[data-testid="note-reaction-wrap"]')).toBeNull();
+  });
+
+  describe("reply banner without showReplyCard", () => {
+    const target = () =>
+      makeNote({
+        id: "parent1",
+        text: "元のノートの本文",
+        user: makeUser({ id: "u2", name: "Bob", username: "bob" }),
+      });
+
+    it("shows only the plain reply label even when the target is available", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByText, queryByTestId, container } = render(NoteCard, { props: { note } });
+      expect(getByText("返信")).toBeTruthy();
+      expect(queryByTestId("reply-preview")).toBeNull();
+      expect(queryByTestId("reply-card")).toBeNull();
+      expect(container.textContent).not.toContain("元のノートの本文");
+    });
+
+    it("shows nothing when hideActionBanner is set", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { queryByText, queryByTestId } = render(NoteCard, { props: { note, hideActionBanner: true } });
+      expect(queryByText("返信")).toBeNull();
+      expect(queryByTestId("reply-preview")).toBeNull();
+      expect(queryByTestId("reply-card")).toBeNull();
+    });
+
+    it("shows the plain reply label when the target is unavailable", () => {
+      const note = makeNote({ replyId: "parent1", reply: null });
+      const { getByText, queryByTestId } = render(NoteCard, { props: { note } });
+      expect(getByText("返信")).toBeTruthy();
+      expect(queryByTestId("reply-preview")).toBeNull();
+      expect(queryByTestId("reply-card")).toBeNull();
+    });
+  });
+
+  describe("reply target card (showReplyCard)", () => {
+    const target = () =>
+      makeNote({
+        id: "parent1",
+        text: "元のノートの本文",
+        user: makeUser({ id: "u2", name: "Bob", username: "bob" }),
+      });
+
+    it("shows the card instead of the plain reply label", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId, queryByText } = render(NoteCard, { props: { note, showReplyCard: true } });
+      expect(queryByText("返信")).toBeNull();
+      const card = getByTestId("reply-card");
+      expect(card.textContent).toContain("Bob");
+      expect(card.textContent).toContain("@bob");
+      expect(card.textContent).toContain("元のノートの本文");
+    });
+
+    it("shows the card even when hideActionBanner is set", () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId } = render(NoteCard, {
+        props: { note, showReplyCard: true, hideActionBanner: true },
+      });
+      expect(getByTestId("reply-card")).toBeTruthy();
+    });
+
+    it("shows nothing when the target is unavailable and hideActionBanner is set", () => {
+      const note = makeNote({ replyId: "parent1", reply: null });
+      const { queryByText, queryByTestId } = render(NoteCard, {
+        props: { note, showReplyCard: true, hideActionBanner: true },
+      });
+      expect(queryByTestId("reply-card")).toBeNull();
+      expect(queryByText("返信")).toBeNull();
+    });
+
+    it("shows the plain reply label when the target is unavailable", () => {
+      const note = makeNote({ replyId: "parent1", reply: null });
+      const { getByText, queryByTestId } = render(NoteCard, { props: { note, showReplyCard: true } });
+      expect(getByText("返信")).toBeTruthy();
+      expect(queryByTestId("reply-card")).toBeNull();
+    });
+
+    it("still hides the Renote banner with hideActionBanner but shows the card for a renoted reply", () => {
+      const inner = makeNote({ id: "r1", replyId: "parent1", reply: target() });
+      const note = makeNote({ id: "rn", text: null, renote: inner, renoteId: "r1" });
+      const { getByTestId, container } = render(NoteCard, {
+        props: { note, showReplyCard: true, hideActionBanner: true },
+      });
+      expect(getByTestId("reply-card")).toBeTruthy();
+      expect(container.textContent).not.toContain("がRenote");
+    });
+
+    it("resolves the viewing instance's local custom emojis in the card body", () => {
+      app.emojis = {
+        acc1: [
+          { name: "localmoji", host: null, url: "https://local.example/localmoji.png", category: null, aliases: [] },
+        ],
+      };
+      try {
+        const note = makeNote({
+          replyId: "parent1",
+          reply: makeNote({ id: "parent1", text: "やあ :localmoji:" }),
+        });
+        const { getByTestId } = render(NoteCard, {
+          props: { note, showReplyCard: true, emojiAccountId: "acc1" },
+        });
+        const img = getByTestId("reply-card-body").querySelector("img.custom-emoji");
+        expect(img?.getAttribute("src")).toBe("https://local.example/localmoji.png");
+      } finally {
+        app.emojis = {};
+      }
+    });
+
+    it("opens the target's profile with the accountId when the card name is clicked", async () => {
+      const note = makeNote({ replyId: "parent1", reply: target() });
+      const { getByTestId } = render(NoteCard, { props: { note, showReplyCard: true, accountId: "acc1" } });
+      await fireEvent.click(getByTestId("reply-card-name"));
+      expect(openProfile).toHaveBeenCalledWith({ userId: "u2" }, "acc1");
+    });
   });
 });
 

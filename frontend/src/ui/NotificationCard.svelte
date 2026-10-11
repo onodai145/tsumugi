@@ -127,6 +127,7 @@
         showActions={true}
         hideReactions
         hideActionBanner
+        showReplyCard
         accountId={accountId}
         emojiAccountId={accountId}
       />
