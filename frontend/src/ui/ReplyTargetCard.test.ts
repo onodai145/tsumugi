@@ -126,6 +126,13 @@ describe("ReplyTargetCard", () => {
     expect(queryByTestId("reply-card-body")).toBeNull();
   });
 
+  it("leaves a mb-2 gap below the card, before the reply note body", () => {
+    const { getByTestId } = render(ReplyTargetCard, { props: { note: makeNote() } });
+    const cls = getByTestId("reply-card").classList;
+    expect(cls.contains("mb-2")).toBe(true);
+    expect(cls.contains("mb-0.5")).toBe(false);
+  });
+
   it("has no expand toggle", () => {
     const { getByTestId, container } = render(ReplyTargetCard, { props: { note: makeNote() } });
     expect(getByTestId("reply-card").querySelector("[aria-expanded]")).toBeNull();

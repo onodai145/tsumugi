@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DriveFile, Note } from "../bindings/tauri.gen";
-import { replyCardBody, replyPreviewBody } from "./replyPreview";
+import { replyCardBody } from "./replyPreview";
 
 function file(mimeType: string): DriveFile {
   return {
@@ -23,59 +23,6 @@ function partial(overrides: Partial<Note>): Note {
     ...overrides,
   } as Note;
 }
-
-describe("replyPreviewBody", () => {
-  it("collapses newlines and runs of whitespace in the text for one-line display", () => {
-    expect(replyPreviewBody(partial({ text: "一行目\n\n二行目   三行目" }))).toEqual({
-      kind: "text",
-      text: "一行目 二行目 三行目",
-    });
-  });
-
-  it("collapses newlines in the cw for one-line display", () => {
-    expect(replyPreviewBody(partial({ cw: "注意\n  ネタバレ", text: "本文" }))).toEqual({
-      kind: "cw",
-      text: "注意 ネタバレ",
-    });
-  });
-
-  it("returns the text when there is no cw", () => {
-    expect(replyPreviewBody(partial({ text: "こんにちは" }))).toEqual({ kind: "text", text: "こんにちは" });
-  });
-
-  it("prefers the cw over the text", () => {
-    expect(replyPreviewBody(partial({ cw: "ネタバレ注意", text: "本文" }))).toEqual({
-      kind: "cw",
-      text: "ネタバレ注意",
-    });
-  });
-
-  it("labels image-only notes as (画像)", () => {
-    expect(replyPreviewBody(partial({ files: [file("image/png"), file("image/jpeg")] }))).toEqual({
-      kind: "label",
-      label: "(画像)",
-    });
-  });
-
-  it("labels notes with a non-image file as (ファイル)", () => {
-    expect(replyPreviewBody(partial({ files: [file("image/png"), file("video/mp4")] }))).toEqual({
-      kind: "label",
-      label: "(ファイル)",
-    });
-  });
-
-  it("labels a pure renote as (Renote)", () => {
-    expect(replyPreviewBody(partial({ renote: {} as Note }))).toEqual({ kind: "label", label: "(Renote)" });
-  });
-
-  it("treats whitespace-only text as empty", () => {
-    expect(replyPreviewBody(partial({ text: "  \n " }))).toBeNull();
-  });
-
-  it("returns null when there is nothing to show", () => {
-    expect(replyPreviewBody(partial({}))).toBeNull();
-  });
-});
 
 describe("replyCardBody", () => {
   it("keeps newlines in the text (only trims the ends)", () => {
@@ -134,10 +81,5 @@ describe("replyCardBody", () => {
 
   it("returns null when there is nothing to show", () => {
     expect(replyCardBody(partial({}))).toBeNull();
-  });
-
-  it("does not change replyPreviewBody's one-line collapsing", () => {
-    expect(replyPreviewBody(partial({ text: "一行目\n二行目" }))).toEqual({ kind: "text", text: "一行目 二行目" });
-    expect(replyPreviewBody(partial({ files: [file("image/png")] }))).toEqual({ kind: "label", label: "(画像)" });
   });
 });

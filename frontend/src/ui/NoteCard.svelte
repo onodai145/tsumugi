@@ -16,7 +16,6 @@
   import { relativeTime } from "../lib/time";
   import { readableTextColor, isValidHexColor } from "../lib/color";
   import { acct, displayName } from "../lib/userDisplay";
-  import { replyPreviewBody } from "../lib/replyPreview";
   import { app } from "../lib/store.svelte";
   import { extractPreviewUrls } from "../lib/extractPreviewUrls";
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
@@ -68,11 +67,9 @@
   const isPureRenote = $derived(!note.text && !!note.renote);
   const inner = $derived(isPureRenote ? note.renote! : note);
 
-  // 返信先プレビュー(Issue #287)。reply が無ければ従来の「↩ 返信」だけを出す。
-  // showReplyCard が真ならカラム/通知用のアバター付きカード(ReplyTargetCard)、偽なら1行プレビュー+展開。
+  // 返信先の表示(Issue #287)。showReplyCard が真で返信先(reply)があればカラム/通知用の
+  // アバター付きカード(ReplyTargetCard)、それ以外は従来の「↩ 返信」だけを出す。
   const replyTarget = $derived(inner.reply ?? null);
-  const replyPreview = $derived(replyTarget ? replyPreviewBody(replyTarget) : null);
-  let replyExpanded = $state(false);
 
   // app.now（Issue #256、5秒ごとに更新される共有tick）を依存として読むことで、
   // 時間経過に合わせて相対時刻表示を再計算させる。
@@ -375,37 +372,9 @@
   {#if showReplyCard && inner.replyId && replyTarget}
     <ReplyTargetCard note={replyTarget} {accountId} emojiMap={replyEmojiMap} {instanceHost} />
   {:else if inner.replyId && !hideActionBanner}
-    {#if replyTarget}
-      <button
-        type="button"
-        class="mb-0.5 flex w-full min-w-0 cursor-pointer items-center gap-1 rounded-sm border-0 bg-transparent p-0 text-left text-xs text-[var(--info)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        data-testid="reply-preview"
-        aria-expanded={replyExpanded}
-        onclick={() => (replyExpanded = !replyExpanded)}
-      >
-        <Reply size={12} class="flex-none" />
-        <span class="min-w-0 truncate">
-          <Mfm
-            text={displayName(replyTarget.user)}
-            emojis={proxiedEmojiMap(replyTarget.user.emojis, instanceHost)}
-            simple
-          />{#if replyPreview}:
-            {#if replyPreview.kind === "label"}
-              {replyPreview.label}
-            {:else}
-              <Mfm text={replyPreview.text} emojis={replyEmojiMap} simple />
-            {/if}
-          {/if}
-        </span>
-      </button>
-      {#if replyExpanded}
-        <Self note={replyTarget} quoted hideReactions hideActionBanner emojiAccountId={emojiAcct} />
-      {/if}
-    {:else}
-      <div class="mb-0.5 inline-flex items-center gap-1 text-xs text-[var(--info)]">
-        <Reply size={12} /> 返信
-      </div>
-    {/if}
+    <div class="mb-0.5 inline-flex items-center gap-1 text-xs text-[var(--info)]">
+      <Reply size={12} /> 返信
+    </div>
   {/if}
 
   <div class="flex gap-[7px]">
