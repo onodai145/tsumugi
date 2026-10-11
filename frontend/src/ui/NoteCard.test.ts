@@ -197,6 +197,17 @@ describe("NoteCard action banner", () => {
       expect(container.querySelectorAll("article").length).toBe(1);
     });
 
+    it("renders no line break in the preview when the target text is multi-line", () => {
+      const note = makeNote({
+        replyId: "parent1",
+        reply: makeNote({ id: "parent1", text: "一行目\n二行目" }),
+      });
+      const { getByTestId } = render(NoteCard, { props: { note } });
+      const preview = getByTestId("reply-preview");
+      expect(preview.querySelector("br")).toBeNull();
+      expect(preview.textContent).toContain("一行目 二行目");
+    });
+
     it("does not offer a nested preview inside the expanded target", async () => {
       const nested = makeNote({ id: "parent1", replyId: "grand", reply: makeNote({ id: "grand" }) });
       const note = makeNote({ replyId: "parent1", reply: nested });

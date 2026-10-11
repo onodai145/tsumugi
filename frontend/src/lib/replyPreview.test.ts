@@ -25,6 +25,20 @@ function partial(overrides: Partial<Note>): Note {
 }
 
 describe("replyPreviewBody", () => {
+  it("collapses newlines and runs of whitespace in the text for one-line display", () => {
+    expect(replyPreviewBody(partial({ text: "一行目\n\n二行目   三行目" }))).toEqual({
+      kind: "text",
+      text: "一行目 二行目 三行目",
+    });
+  });
+
+  it("collapses newlines in the cw for one-line display", () => {
+    expect(replyPreviewBody(partial({ cw: "注意\n  ネタバレ", text: "本文" }))).toEqual({
+      kind: "cw",
+      text: "注意 ネタバレ",
+    });
+  });
+
   it("returns the text when there is no cw", () => {
     expect(replyPreviewBody(partial({ text: "こんにちは" }))).toEqual({ kind: "text", text: "こんにちは" });
   });
