@@ -1013,6 +1013,144 @@ mod tests {
         assert_eq!(v["renote"]["user"], serde_json::json!({ "id": "u_renote_author" }));
     }
 
+    fn note_replying_to_bob(id: &str, created_at: i64) -> Note {
+        let mut n = note(id, created_at);
+        let mut target = note("n_target", created_at - 100);
+        target.user.id = "u_bob".into();
+        target.user.username = "bob".into();
+        target.user.name = Some("Bob".into());
+        target.text = Some("original".into());
+        n.reply_id = Some("n_target".into());
+        n.reply = Some(Box::new(target));
+        n
+    }
+
+    #[tokio::test]
+    async fn cache_roundtrip_restores_reply_and_its_author() {
+        let s = store();
+        s.cache_note("col1", &note_replying_to_bob("n_reply", 200)).await.unwrap();
+
+        let got = s.load_cached("col1", 10).await.unwrap();
+        assert_eq!(got.len(), 1);
+        let reply = got[0].reply.as_ref().expect("reply should be restored");
+        assert_eq!(reply.id, "n_target");
+        assert_eq!(reply.text.as_deref(), Some("original"));
+        assert_eq!(reply.user.name.as_deref(), Some("Bob"));
+
+        // payload 内では reply.user もスタブ化されていること
+        let conn = s.conn().lock().unwrap();
+        let raw: String = conn.query_row("SELECT payload FROM note WHERE id = 'n_reply'", [], |r| r.get(0)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["reply"]["user"], serde_json::json!({ "id": "u_bob" }));
+    }
+
+    #[tokio::test]
+    async fn load_cached_keeps_note_but_drops_reply_when_reply_author_row_missing() {
+        let s = store();
+        s.cache_note("col1", &note_replying_to_bob("n_reply", 200)).await.unwrap();
+        {
+            let conn = s.conn().lock().unwrap();
+            conn.execute("DELETE FROM user WHERE id = 'u_bob'", []).unwrap();
+        }
+
+        let got = s.load_cached("col1", 10).await.unwrap();
+        assert_eq!(got.len(), 1, "返信先ユーザーの欠落でノート行ごと捨ててはいけない");
+        assert_eq!(got[0].id, "n_reply");
+        assert!(got[0].reply.is_none());
+    }
+
+    #[tokio::test]
+    async fn load_cached_reads_legacy_payload_without_reply_key() {
+        let s = store();
+        {
+            let conn = s.conn().lock().unwrap();
+            let n = note("n_old", 100);
+            let mut v = serde_json::to_value(&n).unwrap();
+            v["user"] = serde_json::json!({ "id": "u1" });
+            v.as_object_mut().unwrap().remove("reply");
+            let payload = serde_json::to_string(&v).unwrap();
+            conn.execute(
+                "INSERT INTO user (id, username, host, name, is_bot, is_cat, followers_count, following_count, notes_count)
+                 VALUES ('u1', 'alice', NULL, 'Alice', 0, 0, 0, 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO note (
+                    id, created_at, text, text_length, cw, visibility, local_only, user_id,
+                    reply_id, reply_user_id, renote_id, channel_id, via, lang,
+                    files_count, has_poll, has_link, is_pinned,
+                    reaction_count, renote_count, reply_count, my_reaction,
+                    is_renoted_by_me, is_favorited_by_me, payload
+                ) VALUES ('n_old', 100, '', 0, NULL, 'home', 0, 'u1', NULL, NULL, NULL, NULL, NULL, NULL,
+                    0, 0, 0, 0, 0, 0, 0, NULL, 0, 0, ?1)",
+                params![payload],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', 'n_old', 0, 100)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let got = s.load_cached("col1", 10).await.unwrap();
+        assert_eq!(got.len(), 1);
+        assert!(got[0].reply.is_none());
+    }
+
+    #[tokio::test]
+    async fn load_cached_self_heals_legacy_reply_author() {
+        let s = store();
+        {
+            let conn = s.conn().lock().unwrap();
+            let n = note("n_with_reply", 200);
+            let mut v = serde_json::to_value(&n).unwrap();
+            v["user"] = serde_json::json!({
+                "id": "u_main", "username": "mainuser", "host": null, "name": "Main User",
+                "avatarUrl": null, "isBot": false, "isCat": false,
+                "followersCount": 0, "followingCount": 0, "notesCount": 0,
+                "emojis": {}, "bio": null, "bannerUrl": null, "instance": null
+            });
+            let mut reply = serde_json::to_value(&note("n_target", 100)).unwrap();
+            reply["user"] = serde_json::json!({
+                "id": "u_target", "username": "target", "host": null, "name": "Target",
+                "avatarUrl": null, "isBot": false, "isCat": false,
+                "followersCount": 0, "followingCount": 0, "notesCount": 0,
+                "emojis": {}, "bio": null, "bannerUrl": null, "instance": null
+            });
+            v["reply"] = reply;
+            let payload = serde_json::to_string(&v).unwrap();
+            conn.execute(
+                "INSERT INTO note (
+                    id, created_at, text, text_length, cw, visibility, local_only, user_id,
+                    reply_id, reply_user_id, renote_id, channel_id, via, lang,
+                    files_count, has_poll, has_link, is_pinned,
+                    reaction_count, renote_count, reply_count, my_reaction,
+                    is_renoted_by_me, is_favorited_by_me, payload
+                ) VALUES ('n_with_reply', 200, '', 0, NULL, 'home', 0, 'u_main', 'n_target', NULL, NULL, NULL, NULL, NULL,
+                    0, 0, 0, 0, 0, 0, 0, NULL, 0, 0, ?1)",
+                params![payload],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', 'n_with_reply', 0, 200)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let got = s.load_cached("col1", 10).await.unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].reply.as_ref().expect("reply should be present").user.name.as_deref(), Some("Target"));
+
+        let conn = s.conn().lock().unwrap();
+        let raw: String =
+            conn.query_row("SELECT payload FROM note WHERE id = 'n_with_reply'", [], |r| r.get(0)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["reply"]["user"], serde_json::json!({ "id": "u_target" }));
+    }
+
     #[tokio::test]
     async fn load_cached_skips_note_when_referenced_user_row_missing() {
         let s = store();
