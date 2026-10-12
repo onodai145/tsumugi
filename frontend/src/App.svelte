@@ -292,7 +292,7 @@
     />
   {/if}
   {#if app.errorModal}
-    <Modal title="エラー" onclose={() => (app.errorModal = null)}>
+    <Modal title="エラー" compact onclose={() => (app.errorModal = null)}>
       {#snippet children()}
         <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{app.errorModal}</p>
         <div class="flex justify-end">
