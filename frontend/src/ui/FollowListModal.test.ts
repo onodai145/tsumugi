@@ -14,10 +14,12 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 const { default: FollowListModal } = await import("./FollowListModal.svelte");
+const { app } = await import("../lib/store.svelte");
 
 afterEach(() => {
   cleanup();
   invokeMock.mockClear();
+  app.ui = { ...app.ui, uiMode: "auto" };
 });
 
 function makeUser(id: string, username: string, overrides: Partial<{ isCat: boolean }> = {}) {
@@ -176,5 +178,24 @@ describe("FollowListModal", () => {
     });
     await waitFor(() => expect(getByText("bob")).toBeTruthy());
     expect(document.querySelector(".ears")).not.toBeNull();
+  });
+});
+
+describe("FollowListModal モバイル(Issue #450)", () => {
+  it("PC版では高さ上限付きのスクロール領域のまま", async () => {
+    invokeMock.mockResolvedValue([]);
+    render(FollowListModal, { props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} } });
+    const list = document.querySelector('[data-testid="follow-list-scroll"]') as HTMLElement;
+    expect(list.className).toMatch(/max-h-\[55vh\]/);
+  });
+
+  it("モバイルでは高さ上限を外し、Modal本文いっぱいに広げる(二重スクロールにしない)", async () => {
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    invokeMock.mockResolvedValue([]);
+    render(FollowListModal, { props: { kind: "followers", userId: "u1", accountId: "acc1", onclose: () => {} } });
+    const list = document.querySelector('[data-testid="follow-list-scroll"]') as HTMLElement;
+    expect(list.className).not.toMatch(/max-h-/);
+    expect(list.className).toMatch(/flex-1/);
+    expect(list.className).toMatch(/min-h-0/);
   });
 });

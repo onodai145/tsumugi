@@ -127,6 +127,8 @@
   // Column.svelte のタイムライン無限スクロールと同じ閾値(残り300px)で追加取得する。
   // notesErr が立っている間はスクロールのたびに再試行してしまう(失敗した直後は既に閾値内に
   // いるため)のを防ぐため、エラー時は無視する。再試行は下の再試行ボタン経由のみとする。
+  const mobileUi = $derived(app.useMobileUi());
+
   function onNotesScroll(e: Event) {
     if (profileState.status !== "ready" || notesErr) return;
     const el = e.currentTarget as HTMLElement;
@@ -136,91 +138,103 @@
   }
 </script>
 
-<Modal title="プロフィール" {onclose}>
-  {#if profileState.status === "loading"}
-    <p class="text-sm text-muted-foreground">読み込み中…</p>
-  {:else if profileState.status === "error"}
-    <p class="my-2 text-sm text-destructive">{profileState.message}</p>
-    <Button variant="outline" size="sm" onclick={load}>再試行</Button>
-  {:else}
-    {@const profile = profileState.profile}
-    {#if profile.user.bannerUrl}
-      <img class="block aspect-[3/1] w-[calc(100%+32px)] -mx-4 rounded-md object-cover" src={profile.user.bannerUrl} alt="" />
-    {/if}
-    <div class={profile.user.bannerUrl ? "flex items-end gap-2.5 -mt-[22px] pl-1" : "mt-2 flex items-end gap-2.5"}>
-      <Avatar
-        isCat={profile.user.isCat}
-        avatarBlurhash={profile.user.avatarBlurhash}
-        class="h-14 w-14 flex-none"
-      >
-        {#if profile.user.avatarUrl}
-          <img class="h-full w-full rounded-[var(--avatar-radius,20%)] border-2 border-background object-cover" src={profile.user.avatarUrl} alt="" />
-        {:else}
-          <div class="avatar-ph h-full w-full rounded-[var(--avatar-radius,20%)] border-2 border-background"></div>
+<Modal title="プロフィール" {onclose} maxHeight={mobileUi ? "100%" : undefined}>
+  <!-- モバイルは全画面ページ。プロフィール全体を1つのスクロール領域にし(ノート一覧の自前スクロールは
+       やめる)、無限スクロールもこの領域のscrollで行う(Issue #450)。PCでは素通し(display: contents)で
+       従来どおりノート一覧が自前スクロールする。同じ要素のままクラスだけ切り替えるのは、{#if}で
+       分岐すると切替時に中身が作り直されるため。 -->
+  <div
+    class={mobileUi ? "-mx-4 min-h-0 flex-1 overflow-y-auto px-4" : "contents"}
+    data-testid="profile-scroll"
+    onscroll={mobileUi ? onNotesScroll : undefined}
+  >
+    {#if profileState.status === "loading"}
+      <p class="text-sm text-muted-foreground">読み込み中…</p>
+    {:else if profileState.status === "error"}
+      <p class="my-2 text-sm text-destructive">{profileState.message}</p>
+      <Button variant="outline" size="sm" onclick={load}>再試行</Button>
+    {:else}
+      {@const profile = profileState.profile}
+      {#if profile.user.bannerUrl}
+        <img class="block aspect-[3/1] w-[calc(100%+32px)] -mx-4 rounded-md object-cover" src={profile.user.bannerUrl} alt="" />
+      {/if}
+      <div class={profile.user.bannerUrl ? "flex items-end gap-2.5 -mt-[22px] pl-1" : "mt-2 flex items-end gap-2.5"}>
+        <Avatar
+          isCat={profile.user.isCat}
+          avatarBlurhash={profile.user.avatarBlurhash}
+          class="h-14 w-14 flex-none"
+        >
+          {#if profile.user.avatarUrl}
+            <img class="h-full w-full rounded-[var(--avatar-radius,20%)] border-2 border-background object-cover" src={profile.user.avatarUrl} alt="" />
+          {:else}
+            <div class="avatar-ph h-full w-full rounded-[var(--avatar-radius,20%)] border-2 border-background"></div>
+          {/if}
+        </Avatar>
+        <div class="flex min-w-0 flex-1 flex-col gap-px">
+          <span class="text-sm font-semibold"
+            ><Mfm text={displayName(profile.user)} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} simple
+            /></span
+          >
+          <span class="text-sm text-muted-foreground">{acct(profile.user)}</span>
+        </div>
+        {#if !profile.isSelf}
+          <Button
+            size="sm"
+            variant={profile.isFollowing ? "outline" : "default"}
+            class="flex-none rounded-full {profile.isFollowing ? 'hover:border-destructive hover:text-destructive' : ''}"
+            disabled={followBusy}
+            onclick={toggleFollow}
+          >
+            {profile.isFollowing ? "フォロー解除" : "フォロー"}
+          </Button>
         {/if}
-      </Avatar>
-      <div class="flex min-w-0 flex-1 flex-col gap-px">
-        <span class="text-sm font-semibold"
-          ><Mfm text={displayName(profile.user)} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} simple
-          /></span
-        >
-        <span class="text-sm text-muted-foreground">{acct(profile.user)}</span>
       </div>
-      {#if !profile.isSelf}
-        <Button
-          size="sm"
-          variant={profile.isFollowing ? "outline" : "default"}
-          class="flex-none rounded-full {profile.isFollowing ? 'hover:border-destructive hover:text-destructive' : ''}"
-          disabled={followBusy}
-          onclick={toggleFollow}
+      {#if followErr}<p class="my-2 text-sm text-destructive">{followErr}</p>{/if}
+      {#if profile.user.bio}
+        <p class="mt-2.5 mb-0 whitespace-pre-wrap break-words text-sm leading-normal"
+          ><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p
         >
-          {profile.isFollowing ? "フォロー解除" : "フォロー"}
+      {/if}
+      <div class="mt-2.5 flex gap-1">
+        <!-- aria-label で明示: "フォロー中" の文字列を含む accessible name にすると
+             フォロー/フォロー解除トグルボタンを name=/フォロー/ で探すクエリと衝突するため -->
+        <Button variant="ghost" size="xs" aria-label="following-count" onclick={() => (followListKind = "following")}>
+          <strong class="font-semibold text-foreground">{profile.user.followingCount}</strong> フォロー中
         </Button>
-      {/if}
-    </div>
-    {#if followErr}<p class="my-2 text-sm text-destructive">{followErr}</p>{/if}
-    {#if profile.user.bio}
-      <p class="mt-2.5 mb-0 whitespace-pre-wrap break-words text-sm leading-normal"
-        ><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p
+        <Button variant="ghost" size="xs" aria-label="followers-count" onclick={() => (followListKind = "followers")}>
+          <strong class="font-semibold text-foreground">{profile.user.followersCount}</strong> フォロワー
+        </Button>
+        <span class="px-1.5 py-[3px] text-sm text-muted-foreground"
+          ><strong class="font-semibold text-foreground">{profile.user.notesCount}</strong> ノート</span
+        >
+      </div>
+      <Button variant="outline" size="sm" class="mt-2.5" onclick={addAsColumn}>カラムとして追加</Button>
+      <div
+        class={mobileUi
+        ? "mt-3 flex flex-col gap-2 border-t border-border pt-2.5"
+        : "mt-3 flex max-h-[40vh] flex-col gap-2 overflow-y-auto border-t border-border pt-2.5"}
+        data-testid="profile-notes-scroll"
+        onscroll={onNotesScroll}
       >
-    {/if}
-    <div class="mt-2.5 flex gap-1">
-      <!-- aria-label で明示: "フォロー中" の文字列を含む accessible name にすると
-           フォロー/フォロー解除トグルボタンを name=/フォロー/ で探すクエリと衝突するため -->
-      <Button variant="ghost" size="xs" aria-label="following-count" onclick={() => (followListKind = "following")}>
-        <strong class="font-semibold text-foreground">{profile.user.followingCount}</strong> フォロー中
-      </Button>
-      <Button variant="ghost" size="xs" aria-label="followers-count" onclick={() => (followListKind = "followers")}>
-        <strong class="font-semibold text-foreground">{profile.user.followersCount}</strong> フォロワー
-      </Button>
-      <span class="px-1.5 py-[3px] text-sm text-muted-foreground"
-        ><strong class="font-semibold text-foreground">{profile.user.notesCount}</strong> ノート</span
-      >
-    </div>
-    <Button variant="outline" size="sm" class="mt-2.5" onclick={addAsColumn}>カラムとして追加</Button>
-    <div
-      class="mt-3 flex max-h-[40vh] flex-col gap-2 overflow-y-auto border-t border-border pt-2.5"
-      data-testid="profile-notes-scroll"
-      onscroll={onNotesScroll}
-    >
-      {#each notes as note (note.id)}
-        <NoteCard {note} {accountId} />
-      {/each}
-      {#if notesBusy}<p class="m-0 text-center text-sm text-muted-foreground">読み込み中…</p>{/if}
-      {#if notesErr}
-        <p class="my-2 text-sm text-destructive">{notesErr}</p>
-        <Button variant="outline" size="sm" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</Button>
+        {#each notes as note (note.id)}
+          <NoteCard {note} {accountId} />
+        {/each}
+        {#if notesBusy}<p class="m-0 text-center text-sm text-muted-foreground">読み込み中…</p>{/if}
+        {#if notesErr}
+          <p class="my-2 text-sm text-destructive">{notesErr}</p>
+          <Button variant="outline" size="sm" onclick={() => loadMoreNotes(profile.user.id)} disabled={notesBusy}>再試行</Button>
+        {/if}
+      </div>
+      {#if followListKind}
+        <FollowListModal
+          kind={followListKind}
+          userId={profile.user.id}
+          {accountId}
+          onclose={() => (followListKind = null)}
+        />
       {/if}
-    </div>
-    {#if followListKind}
-      <FollowListModal
-        kind={followListKind}
-        userId={profile.user.id}
-        {accountId}
-        onclose={() => (followListKind = null)}
-      />
     {/if}
-  {/if}
+  </div>
 </Modal>
 
 <style>

@@ -192,6 +192,10 @@
   // サーバー検索は問い合わせ先がアカウントのサーバーなので、アカウントを変えたら結果を作り直す。
   // キャッシュ検索の結果はアカウントに依存しないため従来どおり保持する。
   let prevAccountId: string | undefined;
+  // モバイルは全画面ページ(Modal.svelte)。PC用の高さ上限・角丸はやめ、Modal本文いっぱいに広げる
+  // (Issue #450)。
+  const mobileUi = $derived(app.useMobileUi());
+
   $effect(() => {
     const id = accountId;
     if (scope === "server" && prevAccountId !== undefined && id !== prevAccountId) resetResults();
@@ -199,12 +203,17 @@
   });
 </script>
 
-<Modal title="検索" {onclose} width="620px">
+<Modal title="検索" {onclose} width="620px" maxHeight={mobileUi ? "100%" : undefined}>
   <!-- Modal.svelte のp-4を打ち消してフォーム+結果を1つの高さ制限付きフレックス列にする
        (Settings.svelte と同じ「-mx-4 -mb-4 + max-h + overflow-hidden」パターン)。
        ウィンドウが低くてもモーダル全体が画面外にはみ出さず、結果欄は残り空間いっぱいに
        広がる（固定max-hだったこれまでは常に狭かった）。 -->
-  <div class="-mx-4 -mb-4 flex max-h-[calc(84vh-3rem)] flex-col overflow-hidden rounded-b-[11px]">
+  <div
+    class={mobileUi
+      ? "-mx-4 flex min-h-0 flex-1 flex-col"
+      : "-mx-4 -mb-4 flex max-h-[calc(84vh-3rem)] flex-col overflow-hidden rounded-b-[11px]"}
+    data-testid="search-body"
+  >
     <form onsubmit={runSearch} class="flex flex-none flex-col gap-2.5 px-4">
       <div class="flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground"

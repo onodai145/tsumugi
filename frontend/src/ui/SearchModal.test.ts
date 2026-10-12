@@ -411,3 +411,27 @@ describe("SearchModal サーバー検索", () => {
     expect(row.contains(getByText("エキスパート(TQL)"))).toBe(true);
   });
 });
+
+describe("SearchModal モバイル(Issue #450)", () => {
+  afterEach(() => {
+    app.ui = { ...app.ui, uiMode: "auto" };
+  });
+
+  it("PC版では高さ上限・角丸付きのフレーム", () => {
+    app.accounts = [makeAccount()];
+    render(SearchModal, { props: { onclose: () => {} } });
+    const body = document.querySelector('[data-testid="search-body"]') as HTMLElement;
+    expect(body.className).toMatch(/max-h-\[calc\(84vh-3rem\)\]/);
+  });
+
+  it("モバイルでは高さ上限と下の角丸を外し、Modal本文いっぱいに広げる", () => {
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    app.accounts = [makeAccount()];
+    render(SearchModal, { props: { onclose: () => {} } });
+    const body = document.querySelector('[data-testid="search-body"]') as HTMLElement;
+    expect(body.className).not.toMatch(/max-h-/);
+    expect(body.className).not.toMatch(/rounded-b/);
+    expect(body.className).toMatch(/flex-1/);
+    expect(body.className).toMatch(/min-h-0/);
+  });
+});

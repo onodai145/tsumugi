@@ -21,6 +21,10 @@
   // 接続先インスタンス経由のプロキシURLで解決する必要がある。
   const instanceHost = $derived(app.accounts.find((a) => a.id === accountId)?.host);
 
+  // モバイルは全画面ページ(Modal.svelte)。PC用の高さ上限(max-h)はやめ、Modal本文いっぱいに
+  // 広げて一覧自身が唯一のスクロール領域になるようにする(二重スクロール回避, Issue #450)。
+  const mobileUi = $derived(app.useMobileUi());
+
   let users = $state<FollowListEntry[]>([]);
   let busy = $state(false);
   let done = $state(false);
@@ -90,9 +94,11 @@
   }
 </script>
 
-<Modal title={kind === "followers" ? "フォロワー" : "フォロー中"} {onclose}>
+<Modal title={kind === "followers" ? "フォロワー" : "フォロー中"} {onclose} maxHeight={mobileUi ? "100%" : undefined}>
   <ul
-    class="-mx-4 mt-1 mb-0 max-h-[55vh] list-none overflow-y-auto p-0"
+    class={mobileUi
+      ? "-mx-4 mt-1 mb-0 min-h-0 flex-1 list-none overflow-y-auto p-0"
+      : "-mx-4 mt-1 mb-0 max-h-[55vh] list-none overflow-y-auto p-0"}
     data-testid="follow-list-scroll"
     onscroll={onScroll}
   >

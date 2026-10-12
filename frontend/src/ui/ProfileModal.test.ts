@@ -15,10 +15,12 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 const { default: ProfileModal } = await import("./ProfileModal.svelte");
+const { app } = await import("../lib/store.svelte");
 
 afterEach(() => {
   cleanup();
   invokeMock.mockClear();
+  app.ui = { ...app.ui, uiMode: "auto" };
 });
 
 // ブリーフ原文は `[{ id: "n1" } as Note]` という不完全なオブジェクトをキャストのみで
@@ -215,5 +217,62 @@ describe("ProfileModal", () => {
       props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
     });
     await waitFor(() => expect(document.querySelector(".ears")).not.toBeNull());
+  });
+});
+
+describe("ProfileModal モバイル(Issue #450)", () => {
+  function mockProfileWithNote() {
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "get_user_profile") return Promise.resolve(profileResponse());
+      if (cmd === "get_user_notes" && args?.untilId == null) return Promise.resolve([makeNote({ id: "n1" })]);
+      if (cmd === "get_user_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+  }
+
+  it("PC版ではノート一覧が高さ上限付きの自前スクロール領域", async () => {
+    mockProfileWithNote();
+    const { getByText } = render(ProfileModal, {
+      props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("hello")).toBeTruthy());
+    const notes = document.querySelector('[data-testid="profile-notes-scroll"]') as HTMLElement;
+    expect(notes.className).toMatch(/max-h-\[40vh\]/);
+    expect(notes.className).toMatch(/overflow-y-auto/);
+  });
+
+  it("モバイルではプロフィール全体を1つのスクロール領域にし、ノート一覧の高さ上限を外す", async () => {
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    mockProfileWithNote();
+    const { getByText } = render(ProfileModal, {
+      props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("hello")).toBeTruthy());
+    const notes = document.querySelector('[data-testid="profile-notes-scroll"]') as HTMLElement;
+    expect(notes.className).not.toMatch(/max-h-/);
+    expect(notes.className).not.toMatch(/overflow-y-auto/);
+    const scroller = document.querySelector('[data-testid="profile-scroll"]') as HTMLElement;
+    expect(scroller.className).toMatch(/overflow-y-auto/);
+    expect(scroller.contains(notes)).toBe(true);
+  });
+
+  it("モバイルでは全体スクロール領域の末尾付近で次のノートを取得する", async () => {
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    mockProfileWithNote();
+    const { getByText, queryByText } = render(ProfileModal, {
+      props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
+    });
+    await waitFor(() => expect(getByText("hello")).toBeTruthy());
+    // 初回のノート取得が完全に終わる(notesBusyが戻る)まで待つ。busy中のスクロールは無視される。
+    await waitFor(() => expect(queryByText("読み込み中…")).toBeNull());
+    invokeMock.mockClear();
+    const scroller = document.querySelector('[data-testid="profile-scroll"]') as HTMLElement;
+    Object.defineProperty(scroller, "scrollTop", { value: 500, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true });
+    await fireEvent.scroll(scroller);
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("get_user_notes", expect.objectContaining({ untilId: "n1" })),
+    );
   });
 });
