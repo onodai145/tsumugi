@@ -287,6 +287,58 @@ describe("Modal モバイル全画面(Issue #450)", () => {
     expect(document.activeElement).toBe(getByTestId("child-input"));
   });
 
+  it("全画面本文はscroll-paddingでキーボードの高さを避ける(フォーカス欄がキーボードの上に出る)", async () => {
+    mobile();
+    const { getByText, unmount } = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi") },
+    });
+    await tick();
+    expect((getByText("hi").closest("div") as HTMLElement).className).toContain("scroll-pb-[var(--keyboard-inset)]");
+    unmount();
+    const withMax = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi2"), maxHeight: "100%" },
+    });
+    await tick();
+    expect((withMax.getByText("hi2").closest("div") as HTMLElement).className).toContain("scroll-pb-[var(--keyboard-inset)]");
+  });
+
+  it("キーボードが出て--keyboard-insetが増えたら、フォーカス中の入力欄をキーボードの上へスクロールする", async () => {
+    mobile();
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(ModalFocusHost);
+    await tick();
+    spy.mockClear();
+    document.documentElement.style.setProperty("--keyboard-inset", "300px");
+    await new Promise((r) => setTimeout(r, 0)); // MutationObserverのコールバック
+    expect(spy).toHaveBeenCalledWith({ block: "nearest" });
+    expect(spy.mock.contexts.at(-1)).toBe(document.activeElement);
+    document.documentElement.style.removeProperty("--keyboard-inset");
+  });
+
+  it("キーボードが閉じた(0になった)ときはスクロールしない", async () => {
+    mobile();
+    document.documentElement.style.setProperty("--keyboard-inset", "300px");
+    render(ModalFocusHost);
+    await tick();
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    spy.mockClear();
+    document.documentElement.style.setProperty("--keyboard-inset", "0px");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(spy).not.toHaveBeenCalled();
+    document.documentElement.style.removeProperty("--keyboard-inset");
+  });
+
+  it("PC版(箱型)ではキーボード高さの変化でスクロールしない", async () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(ModalFocusHost);
+    await tick();
+    spy.mockClear();
+    document.documentElement.style.setProperty("--keyboard-inset", "300px");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(spy).not.toHaveBeenCalled();
+    document.documentElement.style.removeProperty("--keyboard-inset");
+  });
+
   it("PC版・compactでも子のフォーカスを奪わない", async () => {
     const { getByTestId } = render(ModalFocusHost, { props: { compact: true } });
     await tick();
