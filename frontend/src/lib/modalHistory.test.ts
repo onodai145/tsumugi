@@ -21,6 +21,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   releases.splice(0).forEach((r) => r());
   await settle();
   vi.restoreAllMocks();
@@ -107,5 +108,34 @@ describe("modalHistory", () => {
     await flushMicrotasks();
     expect(go).toHaveBeenCalledTimes(1);
     expect(go).toHaveBeenCalledWith(-1);
+  });
+
+  it("自分の履歴に着地したpopstate(遅れて届いたもの等)ではoncloseしない", () => {
+    const push = vi.spyOn(history, "pushState");
+    const a = open();
+    const id = push.mock.calls[0][0].tsumugiModal;
+    window.dispatchEvent(new PopStateEvent("popstate", { state: { tsumugiModal: id } }));
+    expect(a.onclose).not.toHaveBeenCalled();
+  });
+
+  it("より下の履歴に着地したpopstateは、積んである複数枚をまとめて閉じる", () => {
+    const a = open();
+    const b = open();
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    expect(b.onclose).toHaveBeenCalledTimes(1);
+    expect(a.onclose).toHaveBeenCalledTimes(1);
+  });
+
+  it("history.goがpopstateを起こさなくても、一定時間後に遅延pushが再開する", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(history, "go").mockImplementation(() => {});
+    const a = open();
+    a.release();
+    await flushMicrotasks();
+    const push = vi.spyOn(history, "pushState");
+    open();
+    expect(push).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1500);
+    expect(push).toHaveBeenCalledTimes(1);
   });
 });
