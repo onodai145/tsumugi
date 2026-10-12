@@ -980,3 +980,30 @@ describe("ComposeBar expanded のレイアウト(モバイル投稿画面で入�
     expect(textarea.className).not.toMatch(/(^|\s)flex-1(\s|$)/);
   });
 });
+
+describe("ComposeBar のメニューは下に空きが無ければ上に出る(モバイル投稿画面でボタン群が下端にあるため)", () => {
+  function bottomRect(): DOMRect {
+    return { top: 730, bottom: 760, left: 20, right: 120, width: 100, height: 30, x: 20, y: 730, toJSON: () => ({}) } as DOMRect;
+  }
+
+  it("画像を添付メニューは画面下端のボタンでは上に出る", async () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(bottomRect());
+    const { getByTitle } = render(ComposeBar, { props: { expanded: true } });
+    await fireEvent.click(getByTitle("画像を添付"));
+    const menu = document.querySelector('[role="menu"]') as HTMLElement;
+    expect(menu.getAttribute("style")).toMatch(/bottom:/);
+    expect(menu.getAttribute("style")).not.toMatch(/top:/);
+    vi.restoreAllMocks();
+  });
+
+  it("下書きメニューは画面下端のボタンでは上に出る", async () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(bottomRect());
+    const { getByTitle } = render(ComposeBar, { props: { expanded: true } });
+    await fireEvent.click(getByTitle("下書き"));
+    const menu = document.querySelector('[role="menu"]') as HTMLElement;
+    expect(menu.getAttribute("style")).toMatch(/bottom:/);
+    expect(menu.getAttribute("style")).not.toMatch(/top:/);
+    vi.restoreAllMocks();
+  });
+});
+

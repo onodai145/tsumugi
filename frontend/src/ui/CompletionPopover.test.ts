@@ -99,3 +99,33 @@ describe("CompletionPopover", () => {
     expect(el.style.top).toBe("99px");
   });
 });
+
+describe("CompletionPopover の上下反転(キーボードの裏に隠れない)", () => {
+  const items = [emojiItem, unicodeItem, textItem];
+
+  it("anchorTopが無ければ従来どおりtop指定", () => {
+    const { getByTestId } = render(CompletionPopover, {
+      props: { items, selectedIndex: 0, left: 10, top: 730, onpick: () => {} },
+    });
+    expect(getByTestId("completion-popover").getAttribute("style")).toMatch(/top:\s*730px/);
+  });
+
+  it("下に空きが無いとき、キャレット行(anchorTop)の上に出る", () => {
+    const { getByTestId } = render(CompletionPopover, {
+      props: { items, selectedIndex: 0, left: 10, top: 730, anchorTop: 710, onpick: () => {} },
+    });
+    const style = getByTestId("completion-popover").getAttribute("style") ?? "";
+    expect(style).toMatch(/bottom:/);
+    expect(style).not.toMatch(/top:/);
+  });
+
+  it("上部のキャレットでは下に出る", () => {
+    const { getByTestId } = render(CompletionPopover, {
+      props: { items, selectedIndex: 0, left: 10, top: 60, anchorTop: 40, onpick: () => {} },
+    });
+    const style = getByTestId("completion-popover").getAttribute("style") ?? "";
+    expect(style).toMatch(/top:/);
+    expect(style).not.toMatch(/bottom:/);
+  });
+});
+

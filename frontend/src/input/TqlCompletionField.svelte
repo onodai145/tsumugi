@@ -103,7 +103,7 @@
     selectionMoved = false;
   });
 
-  let popoverPos = $state<{ left: number; top: number } | null>(null);
+  let popoverPos = $state<{ left: number; top: number; anchorTop: number } | null>(null);
   $effect(() => {
     if (!popoverOpen || !trigger || !el) {
       popoverPos = null;
@@ -112,9 +112,9 @@
     const rect = el.getBoundingClientRect();
     if (el instanceof HTMLTextAreaElement) {
       const caret = getCaretCoordinates(el, trigger.start);
-      popoverPos = { left: rect.left + caret.left, top: rect.top + caret.top + caret.height };
+      popoverPos = { left: rect.left + caret.left, top: rect.top + caret.top + caret.height, anchorTop: rect.top + caret.top };
     } else {
-      popoverPos = { left: rect.left, top: rect.bottom + 4 };
+      popoverPos = { left: rect.left, top: rect.bottom + 4, anchorTop: rect.top };
     }
   });
 
@@ -237,6 +237,7 @@
     selectedIndex={selectionMoved ? selectedIndex : -1}
     left={popoverPos.left}
     top={popoverPos.top}
+    anchorTop={popoverPos.anchorTop}
     onpick={confirmCompletion}
   />
 {/if}

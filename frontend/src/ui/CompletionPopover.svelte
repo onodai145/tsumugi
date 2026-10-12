@@ -1,22 +1,33 @@
 <script lang="ts">
   import type { CompletionItem } from "../lib/mfmCompletion";
   import { portal } from "../lib/portal";
+  import { placeVertically, placementStyle } from "../lib/popoverPosition";
 
   let {
     items,
     selectedIndex,
     left,
     top,
+    anchorTop,
     onpick,
   }: {
     items: CompletionItem[];
     selectedIndex: number;
     left: number;
+    // 候補をキャレットの下端(top)に出す。anchorTop(キャレット行の上端)を渡すと、下に空きが
+    // 無いとき(モバイルのキーボード直上など)はキャレット行の上に反転する。
     top: number;
+    anchorTop?: number;
     onpick: (index: number) => void;
   } = $props();
 
   let itemEls: (HTMLButtonElement | undefined)[] = $state([]);
+
+  const placement = $derived(
+    anchorTop === undefined
+      ? { top }
+      : placeVertically({ top: anchorTop, bottom: top }, Math.min(260, items.length * 30 + 8), 0),
+  );
 
   $effect(() => {
     itemEls[selectedIndex]?.scrollIntoView({ block: "nearest" });
@@ -29,7 +40,7 @@
   class="fixed z-[1010] flex max-h-[260px] min-w-[160px] max-w-[min(320px,90vw)] flex-col overflow-y-auto rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
   data-testid="completion-popover"
   use:portal
-  style={`left:${left}px;top:${top}px`}
+  style={placementStyle(left, placement)}
   role="listbox"
 >
   {#each items as item, i (item.key)}

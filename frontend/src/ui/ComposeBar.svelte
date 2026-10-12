@@ -16,6 +16,7 @@
   import ReactionPicker from "../input/ReactionPicker.svelte";
   import { emojiKeyToInsertText } from "../lib/emojiKey";
   import CompletionPopover from "./CompletionPopover.svelte";
+  import { placeVertically, placementStyle, type VerticalPlacement } from "../lib/popoverPosition";
   import { applyCompletion, buildCompletionItems, detectTrigger, type CompletionItem, type Trigger } from "../lib/mfmCompletion";
   import { getCaretCoordinates } from "../lib/caretPosition";
   import { searchHashtagItems, searchMentionItems } from "../lib/mfmSearch";
@@ -118,14 +119,14 @@
   // a fallback value" で例外を投げ、ComposeBar 全体がマウントに失敗する)。
   let attachTrigger = $state<HTMLElement | null>(null);
   let showAttachMenu = $state(false);
-  let attachMenuPos = $state<{ left: number; top: number } | null>(null);
+  let attachMenuPos = $state<({ left: number } & VerticalPlacement) | null>(null);
   let showDrivePicker = $state(false);
   let showEmojiPicker = $state(false);
   let emojiPickerTrigger = $state<HTMLElement | null>(null);
   let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
   let showDraftMenu = $state(false);
   let draftMenuTrigger = $state<HTMLElement | null>(null);
-  let draftMenuPos = $state<{ left: number; top: number } | null>(null);
+  let draftMenuPos = $state<({ left: number } & VerticalPlacement) | null>(null);
   let manualDrafts = $state<Draft[]>([]);
   // 予約投稿(Issue #60)。scheduleAt は datetime-local 文字列(空なら通常の投稿)。
   // scheduleServerSide: そのアカウントのサーバーがサーバー側予約に対応しているか。
@@ -183,7 +184,8 @@
       return;
     }
     const r = attachTrigger?.getBoundingClientRect();
-    if (r) attachMenuPos = { left: r.left, top: r.bottom + 4 };
+    // モバイルの投稿画面ではボタン群が画面下端(キーボード直上)にあるため、下に空きが無ければ上に出す。
+    if (r) attachMenuPos = { left: r.left, ...placeVertically(r, ATTACH_MENU_H) };
     showAttachMenu = true;
   }
 
@@ -214,6 +216,8 @@
   // ポップオーバー(幅280px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
   // ビューポート内に収まるようクランプする(絵文字ピッカーと同様)。
   const DRAFT_MENU_W = 280;
+  const DRAFT_MENU_H = 280;
+  const ATTACH_MENU_H = 90;
   function toggleDraftMenu() {
     if (showDraftMenu) {
       showDraftMenu = false;
@@ -222,7 +226,7 @@
     const r = draftMenuTrigger?.getBoundingClientRect();
     if (r) {
       const left = Math.min(Math.max(8, r.right - DRAFT_MENU_W), window.innerWidth - DRAFT_MENU_W - 8);
-      draftMenuPos = { left, top: r.bottom + 4 };
+      draftMenuPos = { left, ...placeVertically(r, DRAFT_MENU_H) };
     }
     showDraftMenu = true;
     void loadManualDrafts();
@@ -317,7 +321,7 @@
     selectionMoved = false;
   });
 
-  let popoverPos = $state<{ left: number; top: number } | null>(null);
+  let popoverPos = $state<{ left: number; top: number; anchorTop: number } | null>(null);
   $effect(() => {
     if (!popoverOpen || !trigger || !textarea) {
       popoverPos = null;
@@ -325,7 +329,7 @@
     }
     const rect = textarea.getBoundingClientRect();
     const caret = getCaretCoordinates(textarea, trigger.start);
-    popoverPos = { left: rect.left + caret.left, top: rect.top + caret.top + caret.height };
+    popoverPos = { left: rect.left + caret.left, top: rect.top + caret.top + caret.height, anchorTop: rect.top + caret.top };
   });
 
   // アカウントが後から読まれた場合／既定アカウントが変更された場合の追従（手動選択後は止める）
@@ -1009,6 +1013,7 @@
       selectedIndex={selectionMoved ? selectedIndex : -1}
       left={popoverPos.left}
       top={popoverPos.top}
+      anchorTop={popoverPos.anchorTop}
       onpick={confirmCompletion}
     />
   {/if}
@@ -1223,7 +1228,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="fixed min-w-[160px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
-      style={`left:${attachMenuPos.left}px;top:${attachMenuPos.top}px`}
+      style={placementStyle(attachMenuPos.left, attachMenuPos)}
       onclick={(e) => e.stopPropagation()}
       role="menu"
       tabindex="-1"
@@ -1254,7 +1259,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="fixed w-[280px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
-      style={`left:${draftMenuPos.left}px;top:${draftMenuPos.top}px`}
+      style={placementStyle(draftMenuPos.left, draftMenuPos)}
       onclick={(e) => e.stopPropagation()}
       role="menu"
       tabindex="-1"
