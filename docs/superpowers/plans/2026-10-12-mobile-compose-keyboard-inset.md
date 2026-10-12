@@ -166,7 +166,9 @@ A() { adb -s emulator-5570 "$@"; }
 PID=$(A shell pidof com.onodai.tsumugi.debug | tr -d '\r')
 A forward tcp:9333 localabstract:webview_devtools_remote_$PID
 KB='getComputedStyle(document.documentElement).getPropertyValue("--keyboard-inset").trim() + " innerH=" + innerHeight'
-python3 "$SCRATCH/cdp.py" 'document.querySelector("button[title=\"投稿\"]").click(), "opened"'; sleep 3
+# FABは必ず本物のタップで押す(CDPの .click() はユーザー操作として扱われず、キーボードが出ない/積んだ履歴が
+# ブラウザに飛ばされて最初の戻るでアプリが終了する)。1080x2400 の AVD では FAB は右下 (955,2213)。
+A shell input tap 955 2213; sleep 3
 echo "keyboard shown:"; A shell dumpsys input_method | grep -m1 mInputShown; python3 "$SCRATCH/cdp.py" "$KB"
 A shell input keyevent KEYCODE_BACK; sleep 2
 echo "keyboard hidden:"; A shell dumpsys input_method | grep -m1 mInputShown; python3 "$SCRATCH/cdp.py" "$KB"
@@ -550,7 +552,7 @@ Task 1 の Step 3・4 と同じ手順(ビルド → `tsumugi-verify` を `-read-
 
 - [ ] **Step 2: 投稿画面でキーボード上端との一致を測る**
 
-投稿画面を開き、入力欄をタップしてキーボードを出してから測定する:
+投稿画面を開き(FAB は本物の `adb shell input tap` で押す。API 36 の AVD では FAB は (955,2275))、入力欄をタップしてキーボードを出してから測定する:
 
 ```bash
 python3 "$SCRATCH/cdp.py" 'JSON.stringify((()=>{
