@@ -178,6 +178,10 @@
     showEmojiPicker = true;
   }
 
+  function keepTextareaFocus(e: MouseEvent) {
+    if ((e.target as HTMLElement | null)?.closest("button")) e.preventDefault();
+  }
+
   function toggleAttachMenu() {
     if (showAttachMenu) {
       showAttachMenu = false;
@@ -1111,7 +1115,11 @@
     </div>
   {/if}
 
-  <div class="flex items-center justify-between gap-2">
+  <!-- モバイルの投稿画面(expanded)では、ボタンのmousedown(タッチ後に合成される)の既定動作を止め、
+       テキストエリアのフォーカス(=ソフトキーボード)を保つ。フォーカスが移るとキーボードが閉じ、
+       ボタン群が下端へ動いて、開いたメニューが取り残される。入力欄自体のmousedownは止めない。 -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="flex items-center justify-between gap-2" onmousedown={expanded ? keepTextareaFocus : undefined}>
     <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
       <VisibilitySelect bind:value={visibility} disabled={useChannel} />
       <Button

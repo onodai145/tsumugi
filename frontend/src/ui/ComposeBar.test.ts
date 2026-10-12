@@ -1007,3 +1007,23 @@ describe("ComposeBar のメニューは下に空きが無ければ上に出る(�
   });
 });
 
+describe("ComposeBar expanded: ツールバーのボタンでテキストエリアのフォーカスを奪わない(キーボードを閉じない)", () => {
+  it("expandedでは、ツールバーのボタンのmousedownの既定動作を止める(フォーカス移動=キーボードが閉じるのを防ぐ)", async () => {
+    const { getByTitle } = render(ComposeBar, { props: { expanded: true } });
+    const attach = getByTitle("画像を添付");
+    // fireEvent は defaultPrevented になった(= preventDefault された)とき false を返す。
+    expect(await fireEvent.mouseDown(attach)).toBe(false);
+    expect(await fireEvent.mouseDown(getByTitle("下書き"))).toBe(false);
+  });
+
+  it("expandedでは、入力欄のmousedownは止めない(キャレット移動・選択が効く)", async () => {
+    const { getByTestId } = render(ComposeBar, { props: { expanded: true } });
+    expect(await fireEvent.mouseDown(getByTestId("compose-textarea"))).toBe(true);
+  });
+
+  it("expandedでない投稿バー(PC)では従来どおりフォーカスが移る", async () => {
+    const { getByTitle } = render(ComposeBar);
+    expect(await fireEvent.mouseDown(getByTitle("画像を添付"))).toBe(true);
+  });
+});
+
