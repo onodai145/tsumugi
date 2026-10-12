@@ -28,8 +28,8 @@
   const bodyClass = $derived(
     fullscreen
       ? maxHeight
-        ? "flex min-h-0 flex-1 flex-col overflow-hidden p-4 pb-[max(1rem,var(--safe-bottom))]"
-        : "min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,var(--safe-bottom))]"
+        ? "flex min-h-0 flex-1 flex-col overflow-y-auto p-4 pb-[max(1rem,var(--safe-bottom),calc(var(--keyboard-inset)_+_0.5rem))]"
+        : "min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,var(--safe-bottom),calc(var(--keyboard-inset)_+_0.5rem))]"
       : maxHeight
         ? "flex flex-1 flex-col min-h-0"
         : "contents",
