@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 const { default: Modal } = await import("./Modal.svelte");
+const { default: ModalFocusHost } = await import("./ModalFocusHost.test.host.svelte");
 const { app } = await import("../lib/store.svelte");
 
 const settle = () => new Promise<void>((r) => setTimeout(r, 20));
@@ -229,5 +230,18 @@ describe("Modal モバイル全画面(Issue #450)", () => {
     base.unmount();
     await Promise.resolve();
     expect(go).toHaveBeenCalledTimes(1);
+  });
+
+  it("子がマウント時にフォーカスした入力欄を、Modalのフォーカス処理が奪わない(返信・共有の事前入力)", async () => {
+    mobile();
+    const { getByTestId } = render(ModalFocusHost);
+    await tick();
+    expect(document.activeElement).toBe(getByTestId("child-input"));
+  });
+
+  it("PC版・compactでも子のフォーカスを奪わない", async () => {
+    const { getByTestId } = render(ModalFocusHost, { props: { compact: true } });
+    await tick();
+    expect(document.activeElement).toBe(getByTestId("child-input"));
   });
 });

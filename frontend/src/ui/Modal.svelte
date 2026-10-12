@@ -37,15 +37,22 @@
 
   // 深くネストされたコンポーネントから呼ばれても
   // content-visibility/containの包含ブロックを脱出できるよう portal で body 直下に置く。
+  // appendChild による移動は、フォーカス中の要素が子孫にあるとフォーカスを外してしまう。
+  // 子がマウント時に当てたフォーカス(ComposeBarの返信・共有の事前入力)を保つため、移動後に戻す。
   function portal(node: HTMLElement) {
+    const active = document.activeElement;
     document.body.appendChild(node);
+    if (active instanceof HTMLElement && node.contains(active)) active.focus();
     return { destroy: () => node.remove() };
   }
 
   let modalEl: HTMLDivElement | undefined;
 
+  // 子が既にモーダル内の要素へフォーカスしていれば奪わない(ComposeBarの返信・共有の事前入力は
+  // マウント時に入力欄へフォーカスする。子のeffectの方が先に走るため、無条件にfocus()すると
+  // モバイルのソフトキーボードが開かなくなる)。
   $effect(() => {
-    modalEl?.focus();
+    if (modalEl && !modalEl.contains(document.activeElement)) modalEl.focus();
   });
 
   // 全画面表示中だけ履歴を1つ積み、戻るジェスチャ/ボタンで閉じられるようにする。
