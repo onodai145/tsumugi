@@ -127,6 +127,8 @@ E2E（`e2e/specs-mobile/`）がこれらの変数を上書きしてセーフエ�
 - 新しい大きめの画面(設定・検索・フォーム等)は`Modal`をそのまま使う。モバイルでは`width`/`maxHeight`は無視される。
 - エラー表示など短い通知は`<Modal compact ...>`にして、モバイルでも従来の箱型ダイアログのままにする(履歴にも参加しない)。確認ダイアログは`ConfirmDialog`を使う。
 - 本文の左右余白は`Modal`の`p-4`。全幅で見せたい要素(`Settings`のタブ帯)は`-mx-4`で打ち消す。
+- 呼び出し側が持つ高さ上限(`max-h-*`)や内側の`overflow-y-auto`はPC(箱型)専用。モバイルでは二重スクロールになるため、`app.useMobileUi()`で外し、`Modal`の`maxHeight`を渡して本文を縦並びの枠にした上で、自前のスクロール領域を`min-h-0 flex-1`にする(`SearchModal`/`FollowListModal`/`ProfileModal`参照)。
+- `sticky`を本文内に置く場合、基準はスクロール領域のパディング内側になる。本文の`p-4`ぶん`-top-4`で打ち消す(`Settings`のタブ帯参照)。
 
 ## 14. 今後
 
