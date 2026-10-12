@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
+import { tick } from "svelte";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -83,5 +84,16 @@ describe("Settings モバイルのタブ帯(Issue #450)", () => {
     app.ui = { ...app.ui, developerOptionsEnabled: true };
     const dev = await findByTestId("settings-tab-developer");
     expect(getByTestId("settings-tab-strip").contains(dev)).toBe(true);
+  });
+
+  it("UIモードを切り替えても本文セクションのDOMは作り直されない(保存直後の表示が消えない)", async () => {
+    const { getByTestId } = renderSettings();
+    const section = getByTestId("settings-section");
+    const child = section.firstElementChild;
+    expect(child).not.toBeNull();
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    await tick();
+    expect(getByTestId("settings-section")).toBe(section);
+    expect(getByTestId("settings-section").firstElementChild).toBe(child);
   });
 });

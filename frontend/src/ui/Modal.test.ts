@@ -172,6 +172,28 @@ describe("Modal モバイル全画面(Issue #450)", () => {
     expect(getByRole("dialog").className).toMatch(/rounded-xl/);
   });
 
+  it("PC⇄モバイルを切り替えてもchildrenのDOMは作り直されない(設定の保存表示などが消えない)", async () => {
+    const { getByText } = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi") },
+    });
+    await tick();
+    const before = getByText("hi");
+    mobile();
+    await tick();
+    expect(getByText("hi")).toBe(before);
+  });
+
+  it("maxHeight指定でも切り替えでchildrenのDOMは作り直されない", async () => {
+    const { getByText } = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi"), maxHeight: "78vh" },
+    });
+    await tick();
+    const before = getByText("hi");
+    mobile();
+    await tick();
+    expect(getByText("hi")).toBe(before);
+  });
+
   it("compactはモバイルでも箱型で、履歴に触れない", async () => {
     mobile();
     const push = vi.spyOn(history, "pushState");

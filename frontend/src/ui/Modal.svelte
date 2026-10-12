@@ -25,6 +25,16 @@
   // モバイルUIでは全画面ページとして表示する(Issue #450)。
   const fullscreen = $derived(!compact && app.useMobileUi());
 
+  const bodyClass = $derived(
+    fullscreen
+      ? maxHeight
+        ? "flex min-h-0 flex-1 flex-col overflow-hidden p-4 pb-[max(1rem,var(--safe-bottom))]"
+        : "min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,var(--safe-bottom))]"
+      : maxHeight
+        ? "flex flex-1 flex-col min-h-0"
+        : "contents",
+  );
+
   // 深くネストされたコンポーネントから呼ばれても
   // content-visibility/containの包含ブロックを脱出できるよう portal で body 直下に置く。
   function portal(node: HTMLElement) {
@@ -76,29 +86,16 @@
         >
         <span class="min-w-0 truncate">{title}</span>
       </header>
-      {#if maxHeight}
-        <div class="flex min-h-0 flex-1 flex-col overflow-hidden p-4 pb-[max(1rem,var(--safe-bottom))]">
-          <div class="flex min-h-0 flex-1 flex-col">
-            {@render children()}
-          </div>
-        </div>
-      {:else}
-        <div class="min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,var(--safe-bottom))]">
-          {@render children()}
-        </div>
-      {/if}
     {:else}
       <header class="mb-3 flex flex-none items-center justify-between font-semibold">
         <span>{title}</span>
         <Button variant="ghost" size="icon-xs" onclick={onclose} data-testid="modal-close"><X size={16} /></Button>
       </header>
-      {#if maxHeight}
-        <div class="flex flex-1 flex-col min-h-0">
-          {@render children()}
-        </div>
-      {:else}
-        {@render children()}
-      {/if}
     {/if}
+    <!-- 本文ラッパーはPC/モバイルで同じ要素のままクラスだけ切り替える。{#if}で分岐すると
+         UIモード切替(設定の保存直後など)でchildrenが作り直され、内部の状態や表示が消える。 -->
+    <div class={bodyClass}>
+      {@render children()}
+    </div>
   </div>
 </div>
