@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render } from "@testing-library/svelte";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -26,7 +26,7 @@ function renderSettings() {
 afterEach(() => {
   cleanup();
   invokeMock.mockClear();
-  app.ui = { ...app.ui, developerOptionsEnabled: false };
+  app.ui = { ...app.ui, developerOptionsEnabled: false, uiMode: "auto" };
 });
 
 describe("Settings タブ構成(Issue #326)", () => {
@@ -55,5 +55,33 @@ describe("Settings タブ構成(Issue #326)", () => {
     app.ui = { ...app.ui, developerOptionsEnabled: true };
 
     expect(await findByTestId("settings-tab-developer")).not.toBeNull();
+  });
+});
+
+describe("Settings モバイルのタブ帯(Issue #450)", () => {
+  it("PC版ではタブ帯(settings-tab-strip)を出さない", () => {
+    const { queryByTestId } = renderSettings();
+    expect(queryByTestId("settings-tab-strip")).toBeNull();
+  });
+
+  it("モバイル版では横スクロールのタブ帯を出し、タブ切り替えができる", async () => {
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    const { getByTestId } = renderSettings();
+    const strip = getByTestId("settings-tab-strip");
+    expect(strip.className).toMatch(/overflow-x-auto/);
+    const layout = getByTestId("settings-tab-layout");
+    expect(strip.contains(layout)).toBe(true);
+    expect(layout.getAttribute("aria-selected")).toBe("false");
+    await fireEvent.click(layout);
+    expect(layout.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("モバイル版でも開発者オプション解除でタブ帯にタブが動的に現れる", async () => {
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    const { getByTestId, queryByTestId, findByTestId } = renderSettings();
+    expect(queryByTestId("settings-tab-developer")).toBeNull();
+    app.ui = { ...app.ui, developerOptionsEnabled: true };
+    const dev = await findByTestId("settings-tab-developer");
+    expect(getByTestId("settings-tab-strip").contains(dev)).toBe(true);
   });
 });
