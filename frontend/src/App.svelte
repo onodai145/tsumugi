@@ -238,7 +238,7 @@
   {/if}
 
   {#if app.showComposeModal}
-    <Modal title="投稿" onclose={() => (app.showComposeModal = false)}>
+    <Modal title="投稿" onclose={() => (app.showComposeModal = false)} maxHeight="100%">
       {#snippet children()}
         <ComposeBar onPosted={() => (app.showComposeModal = false)} expanded />
       {/snippet}

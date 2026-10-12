@@ -948,3 +948,35 @@ describe("ComposeBar 予約投稿", () => {
     );
   });
 });
+
+describe("ComposeBar expanded のレイアウト(モバイル投稿画面で入力欄をキーボード上端まで広げる)", () => {
+  function parts(textarea: HTMLElement) {
+    const wrapper = textarea.parentElement as HTMLElement;
+    const column = wrapper.parentElement as HTMLElement;
+    return { wrapper, column };
+  }
+
+  it("expandedのとき、入力欄ラッパーが余り高さを取り(flex-1)、入力欄は伸びてサイズ変更できない", () => {
+    const { getByTestId } = render(ComposeBar, { props: { expanded: true } });
+    const textarea = getByTestId("compose-textarea");
+    const { wrapper, column } = parts(textarea);
+    expect(wrapper.className).toMatch(/(^|\s)flex-1(\s|$)/);
+    expect(wrapper.className).toMatch(/(^|\s)flex(\s|$)/);
+    expect(wrapper.className).toMatch(/min-h-24/);
+    expect(column.className).toMatch(/self-stretch/);
+    expect(textarea.className).toMatch(/resize-none/);
+    expect(textarea.className).not.toMatch(/resize-y/);
+    expect(textarea.className).toMatch(/min-h-24/);
+  });
+
+  it("expandedでないとき(PCの投稿バー)は従来のレイアウトのまま", () => {
+    const { getByTestId } = render(ComposeBar);
+    const textarea = getByTestId("compose-textarea");
+    const { wrapper, column } = parts(textarea);
+    expect(wrapper.className).toBe("relative");
+    expect(column.className).not.toMatch(/self-stretch/);
+    // 非expandedの入力欄は、未フォーカス時のコンパクト表示で resize-none になる(従来どおり)ため、
+    // クラス全体ではなく「伸びる指定(flex-1)が無い」ことだけを確認する。
+    expect(textarea.className).not.toMatch(/(^|\s)flex-1(\s|$)/);
+  });
+});

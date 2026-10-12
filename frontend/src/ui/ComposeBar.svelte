@@ -944,7 +944,7 @@
     large={!expanded}
   />
 
-  <div class="flex flex-1 min-w-0 flex-col gap-1">
+  <div class={expanded ? "flex flex-1 min-w-0 flex-col gap-1 self-stretch" : "flex flex-1 min-w-0 flex-col gap-1"}>
   {#if replyTo || quoteOf}
     <div class="flex items-center gap-1.5 rounded-md border border-border bg-muted px-1.5 py-[3px] text-sm text-muted-foreground">
       <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -958,10 +958,10 @@
     <input class="w-full box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-sm text-foreground" placeholder="内容警告 (CW)" bind:value={cw} />
   {/if}
 
-  <div class="relative">
+  <div class={expanded ? "relative flex flex-1 min-h-24" : "relative"}>
     <textarea
       class={expanded
-        ? "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-24 [transition:min-height_0.12s_ease]"
+        ? "w-full min-w-0 box-border resize-none rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-24 [transition:min-height_0.12s_ease]"
         : compact
           ? "w-full box-border resize-none rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-[34px] [transition:min-height_0.12s_ease]"
           : "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-20 [transition:min-height_0.12s_ease]"}
