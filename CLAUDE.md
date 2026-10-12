@@ -44,6 +44,8 @@ Requires NDK r27c. The symlinks inside the NDK toolchain that `setup-ndk` extrac
 
 If the build fails during Gradle configuration with `A problem occurred configuring project ':buildSrc'` and a cause like `IllegalArgumentException: 26.0.2` (or any JDK version string), it's not an NDK issue — Gradle 8.14.3's bundled Kotlin DSL compiler can't parse newer JDK version strings when evaluating `buildSrc`'s `build.gradle.kts`. Build with an older JDK, e.g. `JAVA_HOME=/usr/lib/jvm/java-21-openjdk cargo tauri android build --debug --target aarch64`.
 
+`MainActivity.kt` が IME(ソフトキーボード)のインセットから、キーボードが WebView 下端を覆う高さを CSS 変数 `--keyboard-inset` として WebView に設定する(マニフェストは `adjustNothing` で WebView は縮まない)。フロントはこの変数だけを参照する。`gen/android/.../generated/` は Tauri が再生成するため編集せず、`MainActivity.kt` とマニフェストだけを編集する。エミュレーターで確認するときは、FAB 等は `adb shell input tap` の本物のタップで押す(CDP の `.click()` はユーザー操作扱いにならず、キーボードが出ない/積んだ履歴が飛ばされて最初の戻るでアプリが終了する)。
+
 ## Architecture
 
 ### Rust ↔ TS boundary

@@ -129,6 +129,8 @@ E2E（`e2e/specs-mobile/`）がこれらの変数を上書きしてセーフエ�
 - 本文の左右余白は`Modal`の`p-4`。全幅で見せたい要素(`Settings`のタブ帯)は`-mx-4`で打ち消す。
 - 呼び出し側が持つ高さ上限(`max-h-*`)や内側の`overflow-y-auto`はPC(箱型)専用。モバイルでは二重スクロールになるため、`app.useMobileUi()`で外し、`Modal`の`maxHeight`を渡して本文を縦並びの枠にした上で、自前のスクロール領域を`min-h-0 flex-1`にする(`SearchModal`/`FollowListModal`/`ProfileModal`参照)。
 - `sticky`を本文内に置く場合、基準はスクロール領域のパディング内側になる。本文の`p-4`ぶん`-top-4`で打ち消す(`Settings`のタブ帯参照)。
+- 全画面本文の下余白は `max(1rem, var(--safe-bottom), calc(var(--keyboard-inset) + 0.5rem))`。`--keyboard-inset` はソフトキーボードが WebView 下端を覆う高さ(CSS px)で、Android のネイティブ(`MainActivity.kt`)が実行時に設定する。WebView はキーボードで縮まない(`adjustNothing`)ため、`100dvh` では合わせられない。キーボードが無い/PC では `app.css` の既定 `0px`。
+- 本文いっぱいに伸ばしたい要素(モバイルの投稿画面の入力欄)は、`Modal` に `maxHeight` を渡して本文を縦並びの枠にし、要素を `flex-1`(最小高さ付き)にする。内容が収まらないときは本文がスクロールする。
 
 ## 14. 今後
 
