@@ -130,7 +130,7 @@
         this={mobileUi ? "div" : "nav"}
         bind:this={stripEl}
         class={mobileUi
-          ? "sticky top-0 z-10 flex gap-1 overflow-x-auto border-b border-border bg-background px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          ? "sticky -top-4 z-10 flex gap-1 overflow-x-auto border-b border-border bg-background px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           : "flex w-40 flex-none flex-col gap-0.5 overflow-y-auto border-r border-border bg-muted px-2 py-2.5"}
         role={mobileUi ? "tablist" : undefined}
         data-testid={mobileUi ? "settings-tab-strip" : undefined}

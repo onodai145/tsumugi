@@ -70,6 +70,11 @@ describe("Settings モバイルのタブ帯(Issue #450)", () => {
     const { getByTestId } = renderSettings();
     const strip = getByTestId("settings-tab-strip");
     expect(strip.className).toMatch(/overflow-x-auto/);
+    // stickyはスクロール領域のパディング(Modal本文のp-4)の内側を基準に止まるため、
+    // -top-4でパディング分を打ち消さないと、ヘッダーとの間に16pxの隙間ができて本文が透ける。
+    expect(strip.className).toMatch(/(^|\s)sticky(\s|$)/);
+    expect(strip.className).toMatch(/(^|\s)-top-4(\s|$)/);
+    expect(strip.className).not.toMatch(/(^|\s)top-0(\s|$)/);
     const layout = getByTestId("settings-tab-layout");
     expect(strip.contains(layout)).toBe(true);
     expect(layout.getAttribute("aria-selected")).toBe("false");
