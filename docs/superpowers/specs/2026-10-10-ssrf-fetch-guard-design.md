@@ -39,9 +39,10 @@ WebView から渡された任意URLを Rust (`reqwest`) で取得するコマン
 
 **(a) IP の判定 `is_blocked_ip(IpAddr) -> bool`**
 
-- IPv4: loopback、private (10/8, 172.16/12, 192.168/16)、link-local (169.254/16)、unspecified、broadcast、CGNAT (100.64/10)、multicast。
-- IPv6: `::1`、unique-local (fc00::/7)、link-local (fe80::/10)、unspecified、multicast。
+- IPv4: loopback、private (10/8, 172.16/12, 192.168/16)、link-local (169.254/16)、unspecified、broadcast、CGNAT (100.64/10)、multicast、0.0.0.0/8、IETFプロトコル割り当て (192.0.0.0/24)、ベンチマーク用 (198.18.0.0/15)、予約済み (240.0.0.0/4)(Issue #481)。
+- IPv6: `::1`、unique-local (fc00::/7)、link-local (fe80::/10)、unspecified、multicast、site-local (fec0::/10)、IPv4互換 (::/96)、discard (100::/64)、ローカル用NAT64 (64:ff9b:1::/48)(Issue #481)。
 - IPv4-mapped IPv6 (`::ffff:a.b.c.d`) は中身のIPv4で判定する。
+- NAT64 (`64:ff9b::/96`) と 6to4 (`2002::/16`) は、埋め込まれたIPv4(NAT64は下位32ビット、6to4は第2・第3セグメント)を取り出して、IPv4側の判定にかける。範囲ごと拒否すると公開IPv4宛ての正規の通信まで止めてしまうため。ローカル用NAT64 (`64:ff9b:1::/48`) と IPv4互換 (`::/96`) は、IPv4の埋め込み位置が可変、または廃止済みで正規の用途が無いため、範囲ごと拒否する。
 
 **(b) 検証付き DNS リゾルバ `GuardedResolver`**(`reqwest::dns::Resolve` 実装)
 
@@ -78,8 +79,8 @@ WebView から渡された任意URLを Rust (`reqwest`) で取得するコマン
 
 ### 5. テスト
 
-- `is_blocked_ip` の表形式テスト(上記の全範囲と、境界値: 172.15.x / 172.32.x、100.63.x / 100.128.x、IPv4-mapped)。
-- `validate_url`: スキーム (`file:`, `ftp:`)、IPリテラル(`127.0.0.1`, `[::1]`, `169.254.169.254`, `192.168.1.1`)、公開ホスト名が通ること。
+- `is_blocked_ip` の表形式テスト(上記の全範囲と、境界値: 172.15.x / 172.32.x、100.63.x / 100.128.x、198.17.x / 198.20.x、IPv4-mapped、NAT64・6to4 の埋め込みIPv4が禁止か公開か)。
+- `validate_url`: スキーム (`file:`, `ftp:`)、IPリテラル(`127.0.0.1`, `[::1]`, `169.254.169.254`, `192.168.1.1`, `[64:ff9b::7f00:1]`, `[2002:c0a8:101::1]`)、公開ホスト名が通ること。
 - `GuardedResolver`: 禁止IPのみに解決されるホスト(`localhost`)で `BlockedAddress`、許可リストにあると通る。
 - `wiremock` のローカルサーバーを使った統合テスト: 許可リストにある `localhost` ホストなら取得できる。公開ホストから `127.0.0.1` へのリダイレクトは拒否される。
 
