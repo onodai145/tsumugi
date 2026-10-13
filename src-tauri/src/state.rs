@@ -1,6 +1,6 @@
 //! Tauri が管理するアプリ状態（command から `State<AppState>` で参照）。
 
-use crate::domain::{EmojiDef, MuteConfig, Note};
+use crate::domain::{EmojiDef, MuteConfig, Note, Notification};
 use crate::fence::ColumnFence;
 use crate::filter::mute::WordMuteRule;
 use crate::session::{AccountManager, SecretStore};
@@ -261,6 +261,48 @@ impl AppState {
             .lock()
             .unwrap()
             .insert(account_id.to_string(), rules);
+    }
+
+    /// 返信先ノートがミュート対象か(ローカルNG・サーバーミュート・サーバーワードミュート)。
+    fn is_reply_muted(&self, account_id: &str, mute: &MuteConfig, reply: &Note) -> bool {
+        let server_muted = self.is_server_muted(account_id, &reply.user.id);
+        let word_rules = self.server_word_mutes.lock().unwrap();
+        let rules = word_rules.get(account_id).map(Vec::as_slice).unwrap_or(&[]);
+        crate::filter::mute::is_reply_target_muted(reply, mute, server_muted, rules)
+    }
+
+    /// 返信先(`reply`)がミュート対象なら表示用に `None` にする(Issue #486)。Renote 先の `reply` も同様。
+    /// `reply_id` / `reply_user_id` は残すので、UI は従来の「↩ 返信」だけを出す。
+    /// キャッシュへ書いた後、画面・イベントへ出す直前のコピーに対して呼ぶこと。
+    pub fn strip_muted_reply(&self, account_id: &str, note: &mut Note) {
+        let mute = self.mute.lock().unwrap().clone();
+        self.strip_muted_reply_with(account_id, &mute, note);
+    }
+
+    /// `strip_muted_reply` を複数ノートに適用する(NG 設定のコピーは1回だけ)。
+    pub fn strip_muted_replies(&self, account_id: &str, notes: &mut [Note]) {
+        let mute = self.mute.lock().unwrap().clone();
+        for note in notes {
+            self.strip_muted_reply_with(account_id, &mute, note);
+        }
+    }
+
+    /// 通知の対象ノートの返信先を `strip_muted_reply` と同様に外す。`note` が無い通知は何もしない。
+    pub fn strip_muted_reply_in_notification(&self, account_id: &str, n: &mut Notification) {
+        if let Some(note) = n.note.as_mut() {
+            self.strip_muted_reply(account_id, note);
+        }
+    }
+
+    fn strip_muted_reply_with(&self, account_id: &str, mute: &MuteConfig, note: &mut Note) {
+        if note.reply.as_deref().is_some_and(|r| self.is_reply_muted(account_id, mute, r)) {
+            note.reply = None;
+        }
+        if let Some(inner) = note.renote.as_deref_mut() {
+            if inner.reply.as_deref().is_some_and(|r| self.is_reply_muted(account_id, mute, r)) {
+                inner.reply = None;
+            }
+        }
     }
 
     /// account のサーバー側ミュート同期の排他ロック。同じアカウントには同じ `Arc` を返す。
@@ -589,5 +631,199 @@ mod tests {
         state.forget_server_mute_sync_lock("a1");
 
         assert!(!std::sync::Arc::ptr_eq(&before, &state.server_mute_sync_lock("a1")));
+    }
+
+    fn reply_test_note(id: &str, user_id: &str, username: &str, text: &str) -> crate::domain::Note {
+        use crate::domain::{User, Visibility};
+        crate::domain::Note {
+            id: id.into(),
+            created_at: 0,
+            text: Some(text.into()),
+            cw: None,
+            visibility: Visibility::Public,
+            local_only: false,
+            user: User {
+                id: user_id.into(),
+                username: username.into(),
+                host: None,
+                name: None,
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 0,
+                following_count: 0,
+                notes_count: 0,
+                emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
+                avatar_blurhash: None,
+                instance: None,
+            },
+            reply_id: None,
+            reply_user_id: None,
+            renote_id: None,
+            reply: None,
+            renote: None,
+            files: vec![],
+            poll: None,
+            tags: vec![],
+            mentions: vec![],
+            emojis: std::collections::HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
+            reactions: std::collections::HashMap::new(),
+            reaction_count: 0,
+            renote_count: 0,
+            reply_count: 0,
+            my_reaction: None,
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
+        }
+    }
+
+    /// 返信先 r1 つきの返信ノート n1 を作る。
+    fn reply_with_target(target_user_id: &str, target_username: &str, target_text: &str) -> crate::domain::Note {
+        let mut n = reply_test_note("n1", "u1", "alice", "my reply");
+        n.reply_id = Some("r1".into());
+        n.reply_user_id = Some(target_user_id.into());
+        n.reply = Some(Box::new(reply_test_note("r1", target_user_id, target_username, target_text)));
+        n
+    }
+
+    #[test]
+    fn strip_muted_reply_removes_target_muted_by_local_ng_user() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        *state.mute.lock().unwrap() = crate::domain::MuteConfig {
+            ng_users: vec!["@bob".into()],
+            ..Default::default()
+        };
+        let mut n = reply_with_target("u2", "bob", "hi");
+
+        state.strip_muted_reply("acc1", &mut n);
+
+        assert!(n.reply.is_none());
+        assert_eq!(n.reply_id.as_deref(), Some("r1"), "reply_id は残す");
+        assert_eq!(n.reply_user_id.as_deref(), Some("u2"), "reply_user_id は残す");
+        assert_eq!(n.text.as_deref(), Some("my reply"), "本体は変えない");
+    }
+
+    #[test]
+    fn strip_muted_reply_removes_target_muted_by_local_ng_word() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        *state.mute.lock().unwrap() = crate::domain::MuteConfig {
+            ng_words: vec!["spoiler".into()],
+            ..Default::default()
+        };
+        let mut n = reply_with_target("u2", "bob", "big SPOILER here");
+
+        state.strip_muted_reply("acc1", &mut n);
+
+        assert!(n.reply.is_none());
+    }
+
+    #[test]
+    fn strip_muted_reply_removes_target_muted_by_server_mute() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.set_server_mutes("acc1", HashSet::from(["u2".to_string()]));
+        let mut n = reply_with_target("u2", "bob", "hi");
+
+        state.strip_muted_reply("acc1", &mut n);
+
+        assert!(n.reply.is_none());
+    }
+
+    #[test]
+    fn strip_muted_reply_removes_target_muted_by_server_word_mute() {
+        use crate::filter::mute::WordMuteRule;
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.set_server_word_mutes("acc1", vec![WordMuteRule::Words(vec!["secret".into()])]);
+        let mut n = reply_with_target("u2", "bob", "a secret b");
+
+        state.strip_muted_reply("acc1", &mut n);
+
+        assert!(n.reply.is_none());
+    }
+
+    #[test]
+    fn strip_muted_reply_keeps_target_when_nothing_matches() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.set_server_mutes("acc1", HashSet::from(["someone-else".to_string()]));
+        let mut n = reply_with_target("u2", "bob", "hi");
+        let before = n.clone();
+
+        state.strip_muted_reply("acc1", &mut n);
+
+        assert_eq!(n, before);
+    }
+
+    #[test]
+    fn strip_muted_reply_uses_the_given_accounts_server_mutes_only() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.set_server_mutes("acc2", HashSet::from(["u2".to_string()]));
+        let mut n = reply_with_target("u2", "bob", "hi");
+
+        state.strip_muted_reply("acc1", &mut n);
+
+        assert!(n.reply.is_some(), "別アカウントのサーバーミュートは効かない");
+    }
+
+    #[test]
+    fn strip_muted_reply_also_strips_the_reply_of_a_renote_target() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.set_server_mutes("acc1", HashSet::from(["u2".to_string()]));
+        let inner = reply_with_target("u2", "bob", "hi");
+        let mut wrapper = reply_test_note("rn", "u3", "carol", "");
+        wrapper.text = None;
+        wrapper.renote_id = Some("n1".into());
+        wrapper.renote = Some(Box::new(inner));
+
+        state.strip_muted_reply("acc1", &mut wrapper);
+
+        let inner = wrapper.renote.as_ref().expect("Renote 先は残る");
+        assert!(inner.reply.is_none());
+        assert_eq!(inner.reply_id.as_deref(), Some("r1"));
+    }
+
+    #[test]
+    fn strip_muted_replies_handles_a_batch_and_leaves_notes_without_reply_alone() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.set_server_mutes("acc1", HashSet::from(["u2".to_string()]));
+        let plain = reply_test_note("p", "u1", "alice", "no reply");
+        let mut notes = vec![reply_with_target("u2", "bob", "hi"), plain.clone()];
+
+        state.strip_muted_replies("acc1", &mut notes);
+
+        assert!(notes[0].reply.is_none());
+        assert_eq!(notes[1], plain);
+    }
+
+    #[test]
+    fn strip_muted_reply_in_notification_strips_the_note_and_tolerates_no_note() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.set_server_mutes("acc1", HashSet::from(["u2".to_string()]));
+        let mut with_note = crate::domain::Notification {
+            id: "x1".into(),
+            created_at: 0,
+            kind: "reply".into(),
+            user: None,
+            note: Some(reply_with_target("u2", "bob", "hi")),
+            reaction: None,
+        };
+        let mut without_note = crate::domain::Notification {
+            id: "x2".into(),
+            created_at: 0,
+            kind: "follow".into(),
+            user: None,
+            note: None,
+            reaction: None,
+        };
+
+        state.strip_muted_reply_in_notification("acc1", &mut with_note);
+        state.strip_muted_reply_in_notification("acc1", &mut without_note);
+
+        assert!(with_note.note.as_ref().unwrap().reply.is_none());
+        assert!(without_note.note.is_none());
     }
 }
