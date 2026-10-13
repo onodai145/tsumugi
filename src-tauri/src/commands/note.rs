@@ -641,9 +641,10 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn allow_localhost() -> crate::net_guard::FetchAllowlist {
+    /// `localhost:{サーバーのポート}` だけを許可するリスト(`MockServer` はランダムポートで待ち受ける)。
+    fn allow_localhost(server: &MockServer) -> crate::net_guard::FetchAllowlist {
         let allow = crate::net_guard::FetchAllowlist::default();
-        allow.replace(["localhost"]);
+        allow.replace([format!("localhost:{}", server.address().port())]);
         allow
     }
 
@@ -655,7 +656,7 @@ mod tests {
     async fn fetch_guarded_bytes_returns_body_for_allowed_host() {
         let server = MockServer::start().await;
         Mock::given(method("GET")).and(path("/f")).respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8, 2, 3])).mount(&server).await;
-        let allow = allow_localhost();
+        let allow = allow_localhost(&server);
         let url = format!("http://localhost:{}/f", server.address().port());
         let bytes = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap();
         assert_eq!(bytes, vec![1u8, 2, 3]);
@@ -684,6 +685,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fetch_guarded_bytes_rejects_other_port_of_allowlisted_host() {
+        let allowed = MockServer::start().await;
+        let other = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&other).await;
+        let allow = allow_localhost(&allowed);
+        let url = format!("http://localhost:{}/f", other.address().port());
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(other.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn fetch_guarded_bytes_rejects_unparsable_url() {
         let allow = crate::net_guard::FetchAllowlist::default();
         let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, "not a url").await.unwrap_err();
@@ -694,7 +707,7 @@ mod tests {
     async fn fetch_guarded_bytes_maps_http_error_status() {
         let server = MockServer::start().await;
         Mock::given(method("GET")).respond_with(ResponseTemplate::new(404)).mount(&server).await;
-        let allow = allow_localhost();
+        let allow = allow_localhost(&server);
         let url = format!("http://localhost:{}/missing", server.address().port());
         let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
         assert!(matches!(err, Error::Api(_)), "unexpected: {err:?}");
@@ -705,7 +718,7 @@ mod tests {
         let server = MockServer::start().await;
         let big = vec![0u8; (MAX_SAVE_FILE_BYTES as usize) + 1];
         Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(big)).mount(&server).await;
-        let allow = allow_localhost();
+        let allow = allow_localhost(&server);
         let url = format!("http://localhost:{}/big", server.address().port());
         let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
         assert!(matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")), "unexpected: {err:?}");

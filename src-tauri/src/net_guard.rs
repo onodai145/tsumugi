@@ -126,23 +126,39 @@ impl std::fmt::Display for BlockedAddress {
 
 impl std::error::Error for BlockedAddress {}
 
-/// スキームとIPリテラルを検証する。ホスト名は接続時にリゾルバが検証するので、ここでは通す。
+/// スキーム、IPリテラル、許可ホストのポートを検証する。許可リストに無いホスト名は、
+/// 接続時にリゾルバが検証するので、ここでは通す。
+///
+/// 許可リストにあるホストは、DNSリゾルバにポートが渡らず全アドレスが通ってしまうため、
+/// URLのポートが許可ポートに含まれるかをここで確認する(Issue #482)。
 pub(crate) fn validate_url(url: &url::Url, allow: &FetchAllowlist) -> std::result::Result<(), BlockedAddress> {
     let blocked = |host: String| BlockedAddress { host };
     if !matches!(url.scheme(), "http" | "https") {
         return Err(blocked(format!("scheme {}", url.scheme())));
     }
-    let literal = match url.host() {
-        Some(url::Host::Ipv4(v4)) => Some(IpAddr::V4(v4)),
-        Some(url::Host::Ipv6(v6)) => Some(IpAddr::V6(v6)),
-        Some(url::Host::Domain(_)) => None,
-        None => return Err(blocked("no host".to_string())),
+    let Some(port) = url.port_or_known_default() else {
+        return Err(blocked("no port".to_string()));
     };
-    let Some(ip) = literal else { return Ok(()) };
-    // 許可リストのキーはポートを除いたホスト部。`ip.to_string()` は既にポートを含まない正規形なので、
-    // `host_key` を通さずそのまま照合する(IPv6の `:` をポート区切りと誤認しないため)。
-    if is_blocked_ip(ip) && !allow.contains_host(&ip.to_string()) {
-        return Err(blocked(ip.to_string()));
+    match url.host() {
+        Some(url::Host::Domain(domain)) => {
+            let key = host_key(domain);
+            if allow.contains_host(&key) && !allow.allows(&key, port) {
+                return Err(blocked(format!("{key}:{port}")));
+            }
+            Ok(())
+        }
+        Some(url::Host::Ipv4(v4)) => validate_ip_literal(IpAddr::V4(v4), port, allow),
+        Some(url::Host::Ipv6(v6)) => validate_ip_literal(IpAddr::V6(v6), port, allow),
+        None => Err(blocked("no host".to_string())),
+    }
+}
+
+/// IPリテラルのURLを検証する。禁止IPは、許可リストにそのIPがあり、かつポートが許可ポートに含まれる場合だけ通す。
+/// 許可リストのキーはポートを除いたホスト部。`ip.to_string()` は既にポートを含まない正規形なので、
+/// `host_key` を通さずそのまま照合する(IPv6の `:` をポート区切りと誤認しないため)。
+fn validate_ip_literal(ip: IpAddr, port: u16, allow: &FetchAllowlist) -> std::result::Result<(), BlockedAddress> {
+    if is_blocked_ip(ip) && !allow.allows(&ip.to_string(), port) {
+        return Err(BlockedAddress { host: format!("{ip}:{port}") });
     }
     Ok(())
 }
@@ -425,6 +441,59 @@ mod tests {
         assert!(validate_url(&url("http://localhost:3000/"), &FetchAllowlist::default()).is_ok());
     }
 
+    #[test]
+    fn validate_url_rejects_other_port_on_allowlisted_hostname() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["mi.home.lan:3000"]);
+        assert!(validate_url(&url("http://mi.home.lan:3000/files/a.png"), &allow).is_ok());
+        assert!(validate_url(&url("http://mi.home.lan:22/"), &allow).is_err());
+        assert!(validate_url(&url("http://mi.home.lan:8080/"), &allow).is_err());
+        // 登録ポートが既定ポートでないとき、既定ポートも例外ではない
+        assert!(validate_url(&url("https://mi.home.lan/"), &allow).is_err());
+        assert!(validate_url(&url("http://mi.home.lan/"), &allow).is_err());
+    }
+
+    #[test]
+    fn validate_url_allows_default_ports_for_portless_hostname() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["mi.home.lan"]);
+        for s in ["http://mi.home.lan/", "https://mi.home.lan/", "http://mi.home.lan:80/", "https://mi.home.lan:443/"] {
+            assert!(validate_url(&url(s), &allow).is_ok(), "{s} should be allowed");
+        }
+        for s in ["http://mi.home.lan:3000/", "https://mi.home.lan:8080/"] {
+            assert!(validate_url(&url(s), &allow).is_err(), "{s} should be rejected");
+        }
+    }
+
+    #[test]
+    fn validate_url_applies_port_rule_to_case_trailing_dot_and_unicode_hosts() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["MI.Home.Lan:3000", "みすきー.example:4000"]);
+        assert!(validate_url(&url("https://MI.HOME.LAN.:3000/"), &allow).is_ok());
+        assert!(validate_url(&url("https://MI.HOME.LAN.:8080/"), &allow).is_err());
+        assert!(validate_url(&url("http://みすきー.example:4000/"), &allow).is_ok());
+        assert!(validate_url(&url("http://みすきー.example:22/"), &allow).is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_other_port_on_allowlisted_ip_literal() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["192.168.1.10:3000", "192.168.1.20"]);
+        assert!(validate_url(&url("http://192.168.1.10:3000/"), &allow).is_ok());
+        assert!(validate_url(&url("http://192.168.1.10:22/"), &allow).is_err());
+        assert!(validate_url(&url("http://192.168.1.20/"), &allow).is_ok());
+        assert!(validate_url(&url("http://192.168.1.20:8080/"), &allow).is_err());
+    }
+
+    #[test]
+    fn validate_url_does_not_apply_port_rule_to_unlisted_hosts() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["mi.home.lan:3000"]);
+        assert!(validate_url(&url("http://cdn.other.example:8443/x"), &allow).is_ok());
+        assert!(validate_url(&url("https://cdn.other.example/x"), &allow).is_ok());
+        assert!(validate_url(&url("http://8.8.8.8:8080/"), &allow).is_ok());
+    }
+
     fn sa(s: &str) -> SocketAddr {
         format!("{s}:0").parse().unwrap()
     }
@@ -452,6 +521,26 @@ mod tests {
 
     fn client(allow: &FetchAllowlist) -> reqwest::Client {
         build_fetch_client("tsumugi-test", allow.clone()).unwrap()
+    }
+
+    /// `localhost:{サーバーのポート}` だけを許可するリスト(`MockServer` はランダムポートで待ち受ける)。
+    fn allow_localhost_port(server: &MockServer) -> FetchAllowlist {
+        let allow = FetchAllowlist::default();
+        allow.replace([format!("localhost:{}", server.address().port())]);
+        allow
+    }
+
+    #[tokio::test]
+    async fn redirect_to_other_port_of_allowlisted_host_is_rejected() {
+        let first = MockServer::start().await;
+        let other = MockServer::start().await;
+        let target = localhost_url(&other, "/secret");
+        Mock::given(method("GET")).and(path("/r")).respond_with(ResponseTemplate::new(302).insert_header("Location", target.as_str())).mount(&first).await;
+        Mock::given(method("GET")).and(path("/secret")).respond_with(ResponseTemplate::new(200).set_body_string("other service")).mount(&other).await;
+        let allow = allow_localhost_port(&first);
+        let err = client(&allow).get(localhost_url(&first, "/r")).send().await.unwrap_err();
+        assert!(is_blocked_error(&err), "unexpected error: {err:?}");
+        assert!(other.received_requests().await.unwrap().is_empty(), "the other port must not be requested");
     }
 
     /// `MockServer` は 127.0.0.1 で待ち受ける。`localhost` 名でアクセスして、リゾルバ経由の経路を通す。
@@ -498,8 +587,7 @@ mod tests {
         let target = localhost_url(&server, "/final");
         Mock::given(method("GET")).and(path("/r")).respond_with(ResponseTemplate::new(302).insert_header("Location", target.as_str())).mount(&server).await;
         Mock::given(method("GET")).and(path("/final")).respond_with(ResponseTemplate::new(200).set_body_string("done")).mount(&server).await;
-        let allow = FetchAllowlist::default();
-        allow.replace(["localhost"]);
+        let allow = allow_localhost_port(&server);
         let body = client(&allow).get(localhost_url(&server, "/r")).send().await.unwrap().text().await.unwrap();
         assert_eq!(body, "done");
     }
@@ -509,8 +597,7 @@ mod tests {
         let server = MockServer::start().await;
         let me = localhost_url(&server, "/loop");
         Mock::given(method("GET")).and(path("/loop")).respond_with(ResponseTemplate::new(302).insert_header("Location", me.as_str())).mount(&server).await;
-        let allow = FetchAllowlist::default();
-        allow.replace(["localhost"]);
+        let allow = allow_localhost_port(&server);
         let err = client(&allow).get(me).send().await.unwrap_err();
         assert!(err.is_redirect(), "unexpected error: {err:?}");
         assert!(!is_blocked_error(&err));
