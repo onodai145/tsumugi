@@ -355,8 +355,9 @@ pub async fn resume_column(
             Some(r) => restore_boundary(&state, &column.id, r).await,
             None => None,
         };
-        let notes = restrict_to_boundary(cached, restore_e.as_deref());
+        let mut notes = restrict_to_boundary(cached, restore_e.as_deref());
         state.cache_metrics.record_resume(!notes.is_empty());
+        state.strip_muted_replies(&column.account_id, &mut notes);
         notes
     };
 
@@ -400,9 +401,12 @@ pub async fn resume_column(
                 if gap_result.notes.is_empty() {
                     return;
                 }
+                // キャッシュへは書き終えている。UI へ出すコピーだけ除去する(Issue #486)。
+                let mut gap_notes = gap_result.notes;
+                state.strip_muted_replies(&account_id, &mut gap_notes);
                 let _ = crate::events::ColumnGapFill {
                     column_id,
-                    notes: gap_result.notes,
+                    notes: gap_notes,
                     truncated: gap_result.truncated,
                     boundary_id: gap_result.boundary_id,
                     target_id: if gap_result.truncated {
@@ -887,7 +891,10 @@ async fn open_stream_and_fetch<R: Runtime>(
         || open_streams_only(app, state, column, &resolved, host, token),
     )
     .await?;
-    Ok((fetch.notes, vec![]))
+    // キャッシュには元の返信先を残し(上で書き終えている)、UI に返すコピーだけ除去する(Issue #486)。
+    let mut notes = fetch.notes;
+    state.strip_muted_replies(&column.account_id, &mut notes);
+    Ok((notes, vec![]))
 }
 
 /// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
@@ -1208,9 +1215,12 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
     if gap_result.notes.is_empty() {
         return;
     }
+    // キャッシュへは書き終えている。UI へ出すコピーだけ除去する(Issue #486)。
+    let mut gap_notes = gap_result.notes;
+    state.strip_muted_replies(&column.account_id, &mut gap_notes);
     let _ = crate::events::ColumnGapFill {
         column_id: column.id.clone(),
-        notes: gap_result.notes,
+        notes: gap_notes,
         truncated: gap_result.truncated,
         boundary_id: gap_result.boundary_id,
         target_id: if gap_result.truncated {
@@ -3610,6 +3620,73 @@ mod tests {
             "visibility": "home"
         }]);
         Mock::given(method("POST")).respond_with(ResponseTemplate::new(200).set_body_json(page)).mount(mock).await;
+    }
+
+    /// ノート n9(u1)が、返信先 r1(u_muted)への返信になっているページ。
+    async fn mount_reply_page(mock: &MockServer) {
+        let page = serde_json::json!([{
+            "id": "n9",
+            "createdAt": "2026-07-05T12:00:00.000Z",
+            "text": "hello",
+            "user": { "id": "u1", "username": "alice", "host": null },
+            "visibility": "home",
+            "replyId": "r1",
+            "reply": {
+                "id": "r1",
+                "createdAt": "2026-07-05T11:00:00.000Z",
+                "text": "secret",
+                "user": { "id": "u_muted", "username": "bob", "host": null },
+                "visibility": "home"
+            }
+        }]);
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200).set_body_json(page)).mount(mock).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn open_stream_and_fetch_hides_a_muted_reply_target_but_caches_the_original() {
+        let mock = MockServer::start().await;
+        mount_reply_page(&mock).await;
+        let state = command_state(&mock);
+        state.set_server_mutes("acc1", std::collections::HashSet::from(["u_muted".to_string()]));
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        let app = tauri::test::mock_app();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let (host, token) = state.host_token("acc1").unwrap();
+        let epoch = state.column_fence.begin("c1");
+
+        let (notes, _) = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &epoch)
+            .await
+            .unwrap();
+
+        assert_eq!(notes.len(), 1, "返信ノート本体は残る");
+        assert!(notes[0].reply.is_none(), "ミュート対象の返信先は外す");
+        assert_eq!(notes[0].reply_id.as_deref(), Some("r1"), "reply_id は残す");
+        let cached = state.cache.load_cached("c1", 10).await.unwrap();
+        assert_eq!(
+            cached[0].reply.as_ref().map(|r| r.id.as_str()),
+            Some("r1"),
+            "キャッシュには元の返信先を残す"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn open_stream_and_fetch_keeps_a_reply_target_that_is_not_muted() {
+        let mock = MockServer::start().await;
+        mount_reply_page(&mock).await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        let app = tauri::test::mock_app();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let (host, token) = state.host_token("acc1").unwrap();
+        let epoch = state.column_fence.begin("c1");
+
+        let (notes, _) = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &epoch)
+            .await
+            .unwrap();
+
+        assert_eq!(notes[0].reply.as_ref().map(|r| r.id.as_str()), Some("r1"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
