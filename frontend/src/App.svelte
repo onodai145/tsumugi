@@ -238,23 +238,11 @@
   {/if}
 
   {#if app.showComposeModal}
-    <div
-      class="fixed inset-0 z-50 grid content-start justify-items-stretch bg-black/45 pt-[max(6vh,var(--safe-top))]"
-      onclick={() => (app.showComposeModal = false)}
-      onkeydown={(e) => e.key === "Escape" && (app.showComposeModal = false)}
-      role="presentation"
-    >
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <div
-        class="box-border max-h-[80vh] w-full overflow-y-auto rounded-xl border border-border bg-background p-3"
-        onclick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        tabindex="-1"
-      >
+    <Modal title="投稿" onclose={() => (app.showComposeModal = false)}>
+      {#snippet children()}
         <ComposeBar onPosted={() => (app.showComposeModal = false)} expanded />
-      </div>
-    </div>
+      {/snippet}
+    </Modal>
   {/if}
 
   {#if showAddColumn}
@@ -292,7 +280,7 @@
     />
   {/if}
   {#if app.errorModal}
-    <Modal title="エラー" onclose={() => (app.errorModal = null)}>
+    <Modal title="エラー" compact onclose={() => (app.errorModal = null)}>
       {#snippet children()}
         <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{app.errorModal}</p>
         <div class="flex justify-end">

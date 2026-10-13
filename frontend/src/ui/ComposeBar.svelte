@@ -1205,7 +1205,7 @@
 </div>
 
 {#if err}
-  <Modal title="エラー" onclose={() => (err = null)}>
+  <Modal title="エラー" compact onclose={() => (err = null)}>
     {#snippet children()}
       <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{err}</p>
       <div class="flex justify-end">
