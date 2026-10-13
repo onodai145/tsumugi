@@ -1638,6 +1638,20 @@ describe("app.setMute strips muted reply targets (Issue #486)", () => {
     expect(live.notifications[0].note?.reply).toBeNull();
   });
 
+  it("返信先が変わらない通知はオブジェクトを再生成しない", async () => {
+    const unrelated = makeNotification({
+      id: "x1",
+      type: "reply",
+      note: makeNote({ id: "n2", replyId: "r1", reply: makeNote({ id: "r1", user: makeUser({ id: "u3", username: "carol" }) }) }),
+    });
+    app.groups = [makeGroup([makeNoteTab([], { notifications: [unrelated] })])];
+    const before = app.groups[0].tabs[0].notifications[0];
+
+    await app.setMute({ ngWords: [], ngUsers: ["@bob"], ngInstances: [] });
+
+    expect(app.groups[0].tabs[0].notifications[0]).toBe(before);
+  });
+
   it("note を持たない通知はそのまま残る", async () => {
     const tab = makeNoteTab([], { notifications: [makeNotification({ id: "x1", type: "follow", note: null })] });
     app.groups = [makeGroup([tab])];

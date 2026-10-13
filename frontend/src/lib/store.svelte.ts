@@ -1911,9 +1911,11 @@ class AppStore {
       t.notes = t.notes
         .filter((n) => !isMuted(n, config))
         .map((n) => stripMutedReply(n, config));
-      t.notifications = t.notifications.map((x) =>
-        x.note ? { ...x, note: stripMutedReply(x.note, config) } : x,
-      );
+      t.notifications = t.notifications.map((x) => {
+        if (!x.note) return x;
+        const stripped = stripMutedReply(x.note, config);
+        return stripped === x.note ? x : { ...x, note: stripped };
+      });
     }
     this.#log("info", "NG（ミュート）設定を保存しました");
   }
