@@ -25,7 +25,7 @@ pub(crate) fn is_blocked_ip(ip: IpAddr) -> bool {
 }
 
 fn is_blocked_v4(ip: Ipv4Addr) -> bool {
-    let [a, b, _, _] = ip.octets();
+    let [a, b, c, _] = ip.octets();
     ip.is_loopback()
         || ip.is_private()
         || ip.is_link_local()
@@ -33,15 +33,45 @@ fn is_blocked_v4(ip: Ipv4Addr) -> bool {
         || ip.is_broadcast()
         || ip.is_multicast()
         || (a == 100 && (64..=127).contains(&b)) // CGNAT 100.64.0.0/10
+        || a == 0 // "このネットワーク" 0.0.0.0/8
+        || (a == 192 && b == 0 && c == 0) // IETFプロトコル割り当て 192.0.0.0/24
+        || (a == 198 && (b & 0xfe) == 18) // ベンチマーク用 198.18.0.0/15
+        || a >= 240 // 予約済み 240.0.0.0/4
+        || (a == 192 && b == 0 && c == 2) // ドキュメント用 TEST-NET-1 192.0.2.0/24
+        || (a == 198 && b == 51 && c == 100) // ドキュメント用 TEST-NET-2 198.51.100.0/24
+        || (a == 203 && b == 0 && c == 113) // ドキュメント用 TEST-NET-3 203.0.113.0/24
+        || (a == 192 && b == 88 && c == 99) // 廃止済みの6to4リレー 192.88.99.0/24
 }
 
 fn is_blocked_v6(ip: Ipv6Addr) -> bool {
-    let first = ip.segments()[0];
+    let seg = ip.segments();
+    let first = seg[0];
+    // 下位32ビットにIPv4を埋め込む NAT64 64:ff9b::/96。埋め込みのIPv4で判定する。
+    if seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        let [_, _, _, _, _, _, hi, lo] = seg;
+        return is_blocked_v4(Ipv4Addr::from(((hi as u32) << 16) | lo as u32));
+    }
+    // 上位16ビット目から32ビットにIPv4を埋め込む 6to4 2002::/16。埋め込みのIPv4で判定する。
+    if first == 0x2002 {
+        return is_blocked_v4(Ipv4Addr::from(((seg[1] as u32) << 16) | seg[2] as u32));
+    }
     ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
         || (first & 0xfe00) == 0xfc00 // unique-local fc00::/7
         || (first & 0xffc0) == 0xfe80 // link-local fe80::/10
+        || (first & 0xffc0) == 0xfec0 // site-local fec0::/10(廃止済み)
+        || seg[..6] == [0; 6] // IPv4互換 ::/96(廃止済み)
+        || seg[..4] == [0x100, 0, 0, 0] // discard 100::/64
+        || seg[..3] == [0x64, 0xff9b, 1] // ローカル用NAT64 64:ff9b:1::/48(埋め込み位置が可変なので範囲ごと拒否)
+        || seg[..4] == [0x100, 0, 0, 1] // ダミー 100:0:0:1::/64
+        || (first == 0x2001 && seg[1] == 0) // Teredo 2001::/32(IPv4を埋め込むので範囲ごと拒否)
+        || (first == 0x2001 && seg[1] == 0xdb8) // ドキュメント用 2001:db8::/32
+        || (first == 0x3fff && (seg[1] & 0xf000) == 0) // ドキュメント用 3fff::/20
+        || seg[..3] == [0x2001, 2, 0] // ベンチマーク用 2001:2::/48
+        || (first == 0x2001 && (seg[1] & 0xfff0) == 0x10) // 廃止済みORCHID 2001:10::/28
+        || first == 0x5f00 // SRv6 SID 5f00::/16
+        || seg[..6] == [0, 0, 0, 0, 0xffff, 0] // 旧SIIT形式のIPv4-translated ::ffff:0:0:0/96(登録簿に無い廃止済み形式)
 }
 
 /// `host:port` を (ホスト部, ポート文字列) に分ける。最後の `:` 以降が数字だけならポートとみなす。
@@ -149,6 +179,8 @@ pub(crate) fn validate_url(url: &url::Url, allow: &FetchAllowlist) -> std::resul
         }
         Some(url::Host::Ipv4(v4)) => validate_ip_literal(IpAddr::V4(v4), port, allow),
         Some(url::Host::Ipv6(v6)) => validate_ip_literal(IpAddr::V6(v6), port, allow),
+        // http/https でホストの無いURLは `url` クレートがパースしないため実際には到達しない。
+        // `Option` を網羅するための分岐で、万一来ても通さない側に倒す。
         None => Err(blocked("no host".to_string())),
     }
 }
@@ -258,6 +290,11 @@ mod tests {
         for s in [
             "127.0.0.1", "127.255.255.254", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.0.1",
             "169.254.169.254", "0.0.0.0", "255.255.255.255", "100.64.0.1", "100.127.255.255", "224.0.0.1",
+            "0.0.0.1", "0.255.255.255", "192.0.0.0", "192.0.0.255", "198.18.0.0", "198.19.255.255",
+            "240.0.0.0", "254.255.255.255",
+            // ドキュメント用 TEST-NET-1/2/3 と、廃止済みの 6to4 リレー 192.88.99.0/24
+            "192.0.2.0", "192.0.2.255", "198.51.100.0", "198.51.100.255", "203.0.113.0", "203.0.113.255",
+            "192.88.99.0", "192.88.99.255",
         ] {
             assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
         }
@@ -265,21 +302,79 @@ mod tests {
 
     #[test]
     fn allows_ipv4_just_outside_special_ranges() {
-        for s in ["8.8.8.8", "1.1.1.1", "172.15.255.255", "172.32.0.1", "100.63.255.255", "100.128.0.1", "192.167.1.1", "11.0.0.1"] {
+        for s in ["8.8.8.8", "1.1.1.1", "172.15.255.255", "172.32.0.1", "100.63.255.255", "100.128.0.1", "192.167.1.1", "11.0.0.1",
+            "1.0.0.0", "192.0.1.0", "198.17.255.255", "198.20.0.0", "223.255.255.255",
+            "192.0.3.0", "198.51.99.255", "198.51.101.0", "203.0.112.255", "203.0.114.0", "192.88.98.255", "192.88.100.0",
+        ] {
             assert!(!is_blocked_ip(ip(s)), "{s} should be allowed");
         }
     }
 
     #[test]
     fn blocks_ipv6_special_ranges() {
-        for s in ["::1", "::", "fc00::1", "fd12:3456::1", "fe80::1", "ff02::1"] {
+        for s in [
+            "::1", "::", "fc00::1", "fd12:3456::1", "fe80::1", "ff02::1",
+            // site-local fec0::/10(廃止済み)
+            "fec0::1", "feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            // IPv4互換 ::/96(廃止済み)。埋め込みが公開IPでも範囲ごと拒否する
+            "::2", "::7f00:1", "::8.8.8.8", "::ffff:ffff",
+            // discard 100::/64
+            "100::", "100::ffff:ffff:ffff:ffff",
+            // ローカル用NAT64 64:ff9b:1::/48。埋め込みが公開IPでも範囲ごと拒否する
+            "64:ff9b:1::", "64:ff9b:1:ffff:ffff:ffff:ffff:ffff", "64:ff9b:1::808:808",
+            // ダミー 100:0:0:1::/64
+            "100:0:0:1::", "100:0:0:1:ffff:ffff:ffff:ffff",
+            // Teredo 2001::/32(IPv4を埋め込む。範囲ごと拒否)
+            "2001::", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "2001:0:ffff:ffff:ffff:ffff:ffff:ffff",
+            // ドキュメント用 2001:db8::/32 と 3fff::/20
+            "2001:db8::", "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", "3fff::", "3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff",
+            // ベンチマーク用 2001:2::/48、廃止済みORCHID 2001:10::/28、SRv6 SID 5f00::/16
+            "2001:2::", "2001:2:0:ffff:ffff:ffff:ffff:ffff", "2001:10::", "2001:1f:ffff:ffff:ffff:ffff:ffff:ffff",
+            "5f00::", "5f00:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            // 旧SIIT形式のIPv4-translated ::ffff:0:0:0/96(登録簿に無い廃止済み形式。範囲ごと拒否)
+            "::ffff:0:7f00:1", "::ffff:0:8.8.8.8", "::ffff:0:ffff:ffff",
+        ] {
             assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
         }
     }
 
     #[test]
-    fn allows_public_ipv6() {
-        assert!(!is_blocked_ip(ip("2606:4700:4700::1111")));
+    fn allows_ipv6_just_outside_special_ranges() {
+        for s in [
+            "2606:4700:4700::1111", "fe7f::1", "::1:0:0", "101::1", "64:ff9b:2::1",
+            "64:ff9c::1", "64:ff9a::1", "64:ff9b:0:1::1",
+            "100:0:0:2::", "100:1::",
+            // 登録簿で全世界から到達可能とされる 2001::/23 内の細分は拒否しない
+            "2001:1::1", "2001:1::2", "2001:1::3", "2001:3::1", "2001:4:112::1", "2001:20::1", "2001:30::1", "2620:4f:8000::1",
+            // 禁止範囲の境界の外側
+            "2001:1::", "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", "2001:db9::", "2001:2:1::", "2001:f:ffff:ffff:ffff:ffff:ffff:ffff",
+            "3ffe:ffff::1", "3fff:1000::", "5eff:ffff::1", "5f01::", "::ffff:1:0:0",
+        ] {
+            assert!(!is_blocked_ip(ip(s)), "{s} should be allowed");
+        }
+    }
+
+    #[test]
+    fn nat64_is_judged_by_embedded_ipv4() {
+        for s in [
+            "64:ff9b::7f00:1", "64:ff9b::c0a8:101", "64:ff9b::a9fe:a9fe", "64:ff9b::a00:1",
+            "64:ff9b::c000:1", "64:ff9b::f000:1", "64:ff9b::127.0.0.1",
+        ] {
+            assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
+        }
+        for s in ["64:ff9b::808:808", "64:ff9b::101:101", "64:ff9b::8.8.8.8"] {
+            assert!(!is_blocked_ip(ip(s)), "{s} should be allowed");
+        }
+    }
+
+    #[test]
+    fn sixto4_is_judged_by_embedded_ipv4() {
+        for s in ["2002:7f00:1::", "2002:7f00:1::1", "2002:c0a8:101::1", "2002:a9fe:a9fe::1", "2002:0a00:0001:1:2:3:4:5"] {
+            assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
+        }
+        for s in ["2002:808:808::", "2002:808:808:1::1", "2001:7f00:1::1", "2003:7f00:1::1"] {
+            assert!(!is_blocked_ip(ip(s)), "{s} should be allowed");
+        }
     }
 
     #[test]
@@ -415,6 +510,10 @@ mod tests {
             "http://169.254.169.254/latest/meta-data/",
             "http://192.168.1.1/",
             "http://[::ffff:127.0.0.1]/",
+            "http://[64:ff9b::7f00:1]/",
+            "http://[64:ff9b::c0a8:101]/",
+            "http://[2002:c0a8:101::1]/",
+            "http://240.0.0.1/",
             "http://0x7f.1/",
             "http://2130706433/",
         ] {
