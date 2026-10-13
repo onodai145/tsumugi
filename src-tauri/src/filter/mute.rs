@@ -97,6 +97,20 @@ pub fn is_word_note_muted(note: &Note, rules: &[WordMuteRule]) -> bool {
     )
 }
 
+/// 返信先ノートがミュート対象か(Issue #486)。表示用に返信先カードを外す判定で、
+/// 返信ノート本体の表示・非表示には使わない。
+/// `server_muted` は呼び出し側が `reply.user.id` で調べたサーバー側ミュート/ブロックの結果。
+pub fn is_reply_target_muted(
+    reply: &Note,
+    cfg: &MuteConfig,
+    server_muted: bool,
+    word_rules: &[WordMuteRule],
+) -> bool {
+    server_muted
+        || is_muted_one(reply, cfg)
+        || is_word_muted(reply.text.as_deref(), reply.cw.as_deref(), word_rules)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +282,44 @@ mod tests {
     fn word_note_mute_false_when_neither_matches() {
         let rules = vec![WordMuteRule::Words(vec!["bad".into()])];
         assert!(!is_word_note_muted(&note("clean text", "a", None), &rules));
+    }
+
+    #[test]
+    fn reply_target_muted_by_ng_user() {
+        let cfg = MuteConfig { ng_users: vec!["@bad".into()], ..Default::default() };
+        assert!(is_reply_target_muted(&note("hi", "bad", None), &cfg, false, &[]));
+        assert!(!is_reply_target_muted(&note("hi", "good", None), &cfg, false, &[]));
+    }
+
+    #[test]
+    fn reply_target_muted_by_ng_instance() {
+        let cfg = MuteConfig { ng_instances: vec!["bad.example".into()], ..Default::default() };
+        assert!(is_reply_target_muted(&note("hi", "a", Some("bad.example")), &cfg, false, &[]));
+        assert!(!is_reply_target_muted(&note("hi", "a", Some("ok.example")), &cfg, false, &[]));
+    }
+
+    #[test]
+    fn reply_target_muted_by_ng_word_in_text_or_cw() {
+        let cfg = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+        assert!(is_reply_target_muted(&note("a SPOILER b", "a", None), &cfg, false, &[]));
+        let mut with_cw = note("body", "a", None);
+        with_cw.cw = Some("spoiler".into());
+        assert!(is_reply_target_muted(&with_cw, &cfg, false, &[]));
+        assert!(!is_reply_target_muted(&note("clean", "a", None), &cfg, false, &[]));
+    }
+
+    #[test]
+    fn reply_target_muted_by_server_mute_flag() {
+        let cfg = MuteConfig::default();
+        assert!(is_reply_target_muted(&note("hi", "a", None), &cfg, true, &[]));
+        assert!(!is_reply_target_muted(&note("hi", "a", None), &cfg, false, &[]));
+    }
+
+    #[test]
+    fn reply_target_muted_by_server_word_rule() {
+        let cfg = MuteConfig::default();
+        let rules = vec![WordMuteRule::Words(vec!["secret".into()])];
+        assert!(is_reply_target_muted(&note("a secret b", "a", None), &cfg, false, &rules));
+        assert!(!is_reply_target_muted(&note("public", "a", None), &cfg, false, &rules));
     }
 }
