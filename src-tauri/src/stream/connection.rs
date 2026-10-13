@@ -787,7 +787,7 @@ async fn handle_text<R: Runtime>(
                 return HandleResult::None;
             }
             let id = note.id.clone();
-            let normalized: Note = (*note).into();
+            let mut normalized: Note = (*note).into();
             // フィルタを通過しないノートは出さない（キャッシュ・キャプチャもしない）
             if !filter.matches(&normalized, ctx) {
                 log::debug!(target: "filter", "[{column_id}] note {id} dropped: TQL filter not matched");
@@ -807,6 +807,8 @@ async fn handle_text<R: Runtime>(
                     return HandleResult::None;
                 }
                 let _ = state.cache.cache_note(&column_id, &normalized).await;
+                // キャッシュには元の返信先を残し、画面へ出す分だけ外す(Issue #486)。cache_note の後に呼ぶこと。
+                state.strip_muted_reply(account_id, &mut normalized);
             }
             let _ = ColumnNote {
                 column_id: column_id.clone(),
@@ -831,7 +833,7 @@ async fn handle_text<R: Runtime>(
             }
             update_last_seen_notification_id(&mut sub.last_seen_notification_id, &notification.id);
             let account_id = sub.mode.account_id().to_string();
-            let n: Notification = (*notification).into();
+            let mut n: Notification = (*notification).into();
             if let Some(state) = app.try_state::<AppState>() {
                 if notification_muted(&state, &account_id, &n) {
                     return HandleResult::None;
@@ -871,6 +873,10 @@ async fn handle_text<R: Runtime>(
                         }
                     }
                 }
+            }
+            // 通知はキャッシュしないので、画面へ出す分の返信先だけ外す(Issue #486)。
+            if let Some(state) = app.try_state::<AppState>() {
+                state.strip_muted_reply_in_notification(&account_id, &mut n);
             }
             let _ = ColumnNotification {
                 column_id: column_id.clone(),
