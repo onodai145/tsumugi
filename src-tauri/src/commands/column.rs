@@ -2167,7 +2167,9 @@ fn filter_notifications(
             None => true,
         })
         .map(|mut n| {
-            state.strip_muted_reply_in_notification(account_id, &mut n);
+            if let Some(note) = n.note.as_mut() {
+                state.strip_muted_reply_with(account_id, &mute, note);
+            }
             n
         })
         .collect()

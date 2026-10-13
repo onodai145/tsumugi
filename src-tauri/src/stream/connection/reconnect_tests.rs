@@ -450,3 +450,86 @@ async fn recv_json_gives_up_even_while_pings_keep_arriving() {
     let mut conn = server.accept().await;
     conn.recv_json_within(Duration::from_millis(300)).await;
 }
+
+/// Issue #486: 返信先がミュート対象のとき、emit されるノートでは返信先を外し、
+/// キャッシュへ渡すノートには元の返信先を残す(NG 設定を後で外したときに復元できるように)。
+#[tokio::test]
+async fn channel_note_strips_muted_reply_from_emit_but_keeps_it_in_cache() {
+    let app = mock_app();
+    Builder::<MockRuntime>::new()
+        .events(collect_events![ColumnNote])
+        .mount_events(&app);
+    let handle = app.handle().clone();
+    // AppState を管理しないと mute/cache/strip の分岐ごと飛ばされ、テストが空振りになる。
+    app.manage(AppState::new_for_test(crate::store::SettingsStore::new_in_memory()));
+    let state = handle.state::<AppState>();
+    state.set_server_mutes("acc1", HashSet::from(["u_muted".to_string()]));
+
+    let (note_tx, mut notes) = unbounded_channel();
+    ColumnNote::listen_any(&handle, move |ev| {
+        let _ = note_tx.send(ev.payload);
+    });
+
+    let mut subs = HashMap::from([(
+        "col1".to_string(),
+        ChannelSub {
+            sub_id: "sub1".into(),
+            column_id: "col1".into(),
+            channel: "homeTimeline".into(),
+            params: json!({}),
+            mode: StreamMode::Notes {
+                account_id: "acc1".into(),
+                filter: Arc::new(CompiledFilter::PassAll),
+                ctx: Arc::new(EvalContext::default()),
+            },
+            dedup: Dedup::new(DEDUP_CAPACITY),
+            last_seen_notification_id: None,
+        },
+    )]);
+    let sub_index = HashMap::from([("sub1".to_string(), "col1".to_string())]);
+    let captures = CaptureSet::new(8);
+    let mut reaction_event_dedup = Dedup::new(DEDUP_CAPACITY);
+
+    let frame = json!({
+        "type": "channel",
+        "body": {
+            "id": "sub1",
+            "type": "note",
+            "body": {
+                "id": "n9",
+                "createdAt": "2026-07-05T00:00:00Z",
+                "user": { "id": "u1", "username": "alice" },
+                "text": "my reply",
+                "replyId": "r1",
+                "reply": {
+                    "id": "r1",
+                    "createdAt": "2026-07-05T00:00:00Z",
+                    "text": "muted target",
+                    "user": { "id": "u_muted", "username": "bob" }
+                }
+            }
+        }
+    });
+    let result = handle_text(
+        &handle,
+        "acc1",
+        &frame.to_string(),
+        &mut subs,
+        &sub_index,
+        &captures,
+        &mut reaction_event_dedup,
+    )
+    .await;
+    assert!(matches!(result, HandleResult::CaptureNote { .. }));
+
+    // emit されたノートは返信先が外れ、「↩ 返信」用の reply_id は残る。
+    let emitted = within(notes.recv()).await.expect("note channel closed").note;
+    assert_eq!(emitted.id, "n9");
+    assert!(emitted.reply.is_none(), "emit では返信先を外す");
+    assert_eq!(emitted.reply_id.as_deref(), Some("r1"));
+
+    // キャッシュには元の返信先が残る。
+    let cached = state.cache.get_note("n9").await.unwrap().expect("n9 is cached");
+    let cached_reply = cached.reply.expect("キャッシュには元の返信先を残す");
+    assert_eq!(cached_reply.id, "r1");
+}

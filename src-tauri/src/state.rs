@@ -294,7 +294,7 @@ impl AppState {
         }
     }
 
-    fn strip_muted_reply_with(&self, account_id: &str, mute: &MuteConfig, note: &mut Note) {
+    pub(crate) fn strip_muted_reply_with(&self, account_id: &str, mute: &MuteConfig, note: &mut Note) {
         if note.reply.as_deref().is_some_and(|r| self.is_reply_muted(account_id, mute, r)) {
             note.reply = None;
         }
