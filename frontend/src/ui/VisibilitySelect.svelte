@@ -3,6 +3,7 @@
   import type { Component } from "svelte";
   import { Globe, House, Lock, Mail } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
+  import { placeVertically, placementStyle, type VerticalPlacement } from "../lib/popoverPosition";
 
   let {
     value = $bindable(),
@@ -22,7 +23,7 @@
 
   let open = $state(false);
   let trigger = $state<HTMLElement | null>(null);
-  let pos = $state<{ left: number; top: number } | null>(null);
+  let pos = $state<({ left: number } & VerticalPlacement) | null>(null);
 
   const MENU_H = 200;
 
@@ -33,11 +34,8 @@
       return;
     }
     const r = trigger?.getBoundingClientRect();
-    if (r) {
-      const spaceBelow = window.innerHeight - r.bottom;
-      const top = spaceBelow >= MENU_H + 8 || spaceBelow > r.top ? r.bottom + 4 : r.top - 4;
-      pos = { left: r.left, top };
-    }
+    // モバイルの投稿画面ではボタン群が画面下端(キーボード直上)にあるため、下に空きが無ければ上に出す。
+    if (r) pos = { left: r.left, ...placeVertically(r, MENU_H) };
     open = true;
   }
 
@@ -70,7 +68,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="fixed min-w-[200px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
-      style={`left:${pos.left}px;top:${pos.top}px`}
+      style={placementStyle(pos.left, pos)}
       onclick={(e) => e.stopPropagation()}
       role="listbox"
       tabindex="-1"

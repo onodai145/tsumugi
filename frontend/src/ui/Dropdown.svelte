@@ -1,6 +1,7 @@
 <script lang="ts" generics="T extends string">
   // 汎用の値+ラベル ドロップダウン（テーマ適用・portal で overflow 脱出）。
   import { Button } from "$lib/components/ui/button";
+  import { placeVertically, placementStyle, type VerticalPlacement } from "../lib/popoverPosition";
 
   let {
     value = $bindable(),
@@ -18,7 +19,7 @@
 
   let open = $state(false);
   let trigger = $state<HTMLElement | null>(null);
-  let pos = $state<{ left: number; top: number; width: number } | null>(null);
+  let pos = $state<({ left: number; width: number } & VerticalPlacement) | null>(null);
 
   const MENU_H = 280;
 
@@ -28,11 +29,7 @@
       return;
     }
     const r = trigger?.getBoundingClientRect();
-    if (r) {
-      const spaceBelow = window.innerHeight - r.bottom;
-      const top = spaceBelow >= MENU_H + 8 || spaceBelow > r.top ? r.bottom + 4 : r.top - 4;
-      pos = { left: r.left, top, width: r.width };
-    }
+    if (r) pos = { left: r.left, width: r.width, ...placeVertically(r, MENU_H) };
     open = true;
   }
 
@@ -61,7 +58,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="fixed max-h-[280px] overflow-y-auto rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
-      style={`left:${pos.left}px;top:${pos.top}px;min-width:${pos.width}px`}
+      style={`${placementStyle(pos.left, pos)};min-width:${pos.width}px`}
       onclick={(e) => e.stopPropagation()}
       role="listbox"
       tabindex="-1"

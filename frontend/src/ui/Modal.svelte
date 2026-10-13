@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { app } from "../lib/store.svelte";
   import { pushModalHistory } from "../lib/modalHistory";
+  import { keyboardInset } from "../lib/popoverPosition";
 
   let {
     title,
@@ -28,8 +29,8 @@
   const bodyClass = $derived(
     fullscreen
       ? maxHeight
-        ? "flex min-h-0 flex-1 flex-col overflow-hidden p-4 pb-[max(1rem,var(--safe-bottom))]"
-        : "min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,var(--safe-bottom))]"
+        ? "flex min-h-0 flex-1 flex-col overflow-y-auto scroll-pb-[var(--keyboard-inset)] p-4 pb-[max(1rem,var(--safe-bottom),calc(var(--keyboard-inset)_+_0.5rem))]"
+        : "min-h-0 flex-1 overflow-y-auto scroll-pb-[var(--keyboard-inset)] p-4 pb-[max(1rem,var(--safe-bottom),calc(var(--keyboard-inset)_+_0.5rem))]"
       : maxHeight
         ? "flex flex-1 flex-col min-h-0"
         : "contents",
@@ -53,6 +54,21 @@
   // モバイルのソフトキーボードが開かなくなる)。
   $effect(() => {
     if (modalEl && !modalEl.contains(document.activeElement)) modalEl.focus();
+  });
+
+  // adjustNothing のため WebView はキーボードで縮まず、ブラウザはフォーカス欄をスクロールして
+  // 見せてくれない。--keyboard-inset が増えたとき(キーボードが出たとき)、フォーカス中の欄が
+  // この画面の中にあれば、キーボードの上(scroll-padding-bottom ぶん手前)へスクロールする。
+  $effect(() => {
+    if (!fullscreen) return;
+    const observer = new MutationObserver(() => {
+      const active = document.activeElement;
+      if (keyboardInset() > 0 && active instanceof HTMLElement && modalEl?.contains(active)) {
+        active.scrollIntoView({ block: "nearest" });
+      }
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] });
+    return () => observer.disconnect();
   });
 
   // 全画面表示中だけ履歴を1つ積み、戻るジェスチャ/ボタンで閉じられるようにする。

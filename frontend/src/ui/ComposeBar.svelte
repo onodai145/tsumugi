@@ -16,6 +16,7 @@
   import ReactionPicker from "../input/ReactionPicker.svelte";
   import { emojiKeyToInsertText } from "../lib/emojiKey";
   import CompletionPopover from "./CompletionPopover.svelte";
+  import { placeVertically, placementStyle, type VerticalPlacement } from "../lib/popoverPosition";
   import { applyCompletion, buildCompletionItems, detectTrigger, type CompletionItem, type Trigger } from "../lib/mfmCompletion";
   import { getCaretCoordinates } from "../lib/caretPosition";
   import { searchHashtagItems, searchMentionItems } from "../lib/mfmSearch";
@@ -118,14 +119,14 @@
   // a fallback value" で例外を投げ、ComposeBar 全体がマウントに失敗する)。
   let attachTrigger = $state<HTMLElement | null>(null);
   let showAttachMenu = $state(false);
-  let attachMenuPos = $state<{ left: number; top: number } | null>(null);
+  let attachMenuPos = $state<({ left: number } & VerticalPlacement) | null>(null);
   let showDrivePicker = $state(false);
   let showEmojiPicker = $state(false);
   let emojiPickerTrigger = $state<HTMLElement | null>(null);
   let emojiPickerPos = $state<{ left: number; top: number } | null>(null);
   let showDraftMenu = $state(false);
   let draftMenuTrigger = $state<HTMLElement | null>(null);
-  let draftMenuPos = $state<{ left: number; top: number } | null>(null);
+  let draftMenuPos = $state<({ left: number } & VerticalPlacement) | null>(null);
   let manualDrafts = $state<Draft[]>([]);
   // 予約投稿(Issue #60)。scheduleAt は datetime-local 文字列(空なら通常の投稿)。
   // scheduleServerSide: そのアカウントのサーバーがサーバー側予約に対応しているか。
@@ -177,13 +178,18 @@
     showEmojiPicker = true;
   }
 
+  function keepTextareaFocus(e: MouseEvent) {
+    if ((e.target as HTMLElement | null)?.closest("button")) e.preventDefault();
+  }
+
   function toggleAttachMenu() {
     if (showAttachMenu) {
       showAttachMenu = false;
       return;
     }
     const r = attachTrigger?.getBoundingClientRect();
-    if (r) attachMenuPos = { left: r.left, top: r.bottom + 4 };
+    // モバイルの投稿画面ではボタン群が画面下端(キーボード直上)にあるため、下に空きが無ければ上に出す。
+    if (r) attachMenuPos = { left: r.left, ...placeVertically(r, ATTACH_MENU_H) };
     showAttachMenu = true;
   }
 
@@ -214,6 +220,8 @@
   // ポップオーバー(幅280px)の大半がウィンドウ外にはみ出す。ボタンの右端に揃えつつ
   // ビューポート内に収まるようクランプする(絵文字ピッカーと同様)。
   const DRAFT_MENU_W = 280;
+  const DRAFT_MENU_H = 280;
+  const ATTACH_MENU_H = 90;
   function toggleDraftMenu() {
     if (showDraftMenu) {
       showDraftMenu = false;
@@ -222,7 +230,7 @@
     const r = draftMenuTrigger?.getBoundingClientRect();
     if (r) {
       const left = Math.min(Math.max(8, r.right - DRAFT_MENU_W), window.innerWidth - DRAFT_MENU_W - 8);
-      draftMenuPos = { left, top: r.bottom + 4 };
+      draftMenuPos = { left, ...placeVertically(r, DRAFT_MENU_H) };
     }
     showDraftMenu = true;
     void loadManualDrafts();
@@ -317,7 +325,7 @@
     selectionMoved = false;
   });
 
-  let popoverPos = $state<{ left: number; top: number } | null>(null);
+  let popoverPos = $state<{ left: number; top: number; anchorTop: number } | null>(null);
   $effect(() => {
     if (!popoverOpen || !trigger || !textarea) {
       popoverPos = null;
@@ -325,7 +333,7 @@
     }
     const rect = textarea.getBoundingClientRect();
     const caret = getCaretCoordinates(textarea, trigger.start);
-    popoverPos = { left: rect.left + caret.left, top: rect.top + caret.top + caret.height };
+    popoverPos = { left: rect.left + caret.left, top: rect.top + caret.top + caret.height, anchorTop: rect.top + caret.top };
   });
 
   // アカウントが後から読まれた場合／既定アカウントが変更された場合の追従（手動選択後は止める）
@@ -944,7 +952,7 @@
     large={!expanded}
   />
 
-  <div class="flex flex-1 min-w-0 flex-col gap-1">
+  <div class={expanded ? "flex flex-1 min-w-0 flex-col gap-1 self-stretch" : "flex flex-1 min-w-0 flex-col gap-1"}>
   {#if replyTo || quoteOf}
     <div class="flex items-center gap-1.5 rounded-md border border-border bg-muted px-1.5 py-[3px] text-sm text-muted-foreground">
       <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -958,10 +966,10 @@
     <input class="w-full box-border rounded border border-border bg-muted px-[9px] py-1.5 font-[inherit] text-sm text-foreground" placeholder="内容警告 (CW)" bind:value={cw} />
   {/if}
 
-  <div class="relative">
+  <div class={expanded ? "relative flex flex-1 min-h-24" : "relative"}>
     <textarea
       class={expanded
-        ? "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-24 [transition:min-height_0.12s_ease]"
+        ? "w-full min-w-0 box-border resize-none rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-24 [transition:min-height_0.12s_ease]"
         : compact
           ? "w-full box-border resize-none rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-[34px] [transition:min-height_0.12s_ease]"
           : "w-full box-border resize-y rounded-md border border-border bg-muted py-1.5 pr-[34px] pl-2 font-[inherit] text-sm leading-[1.4] text-foreground min-h-20 [transition:min-height_0.12s_ease]"}
@@ -1009,6 +1017,7 @@
       selectedIndex={selectionMoved ? selectedIndex : -1}
       left={popoverPos.left}
       top={popoverPos.top}
+      anchorTop={popoverPos.anchorTop}
       onpick={confirmCompletion}
     />
   {/if}
@@ -1106,7 +1115,11 @@
     </div>
   {/if}
 
-  <div class="flex items-center justify-between gap-2">
+  <!-- モバイルの投稿画面(expanded)では、ボタンのmousedown(タッチ後に合成される)の既定動作を止め、
+       テキストエリアのフォーカス(=ソフトキーボード)を保つ。フォーカスが移るとキーボードが閉じ、
+       ボタン群が下端へ動いて、開いたメニューが取り残される。入力欄自体のmousedownは止めない。 -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="flex items-center justify-between gap-2" onmousedown={expanded ? keepTextareaFocus : undefined}>
     <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
       <VisibilitySelect bind:value={visibility} disabled={useChannel} />
       <Button
@@ -1223,7 +1236,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="fixed min-w-[160px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
-      style={`left:${attachMenuPos.left}px;top:${attachMenuPos.top}px`}
+      style={placementStyle(attachMenuPos.left, attachMenuPos)}
       onclick={(e) => e.stopPropagation()}
       role="menu"
       tabindex="-1"
@@ -1254,7 +1267,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="fixed w-[280px] rounded-lg border border-border bg-background p-1 shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
-      style={`left:${draftMenuPos.left}px;top:${draftMenuPos.top}px`}
+      style={placementStyle(draftMenuPos.left, draftMenuPos)}
       onclick={(e) => e.stopPropagation()}
       role="menu"
       tabindex="-1"

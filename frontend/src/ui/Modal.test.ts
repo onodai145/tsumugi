@@ -232,11 +232,111 @@ describe("Modal モバイル全画面(Issue #450)", () => {
     expect(go).toHaveBeenCalledTimes(1);
   });
 
+  it("全画面本文の下余白にセーフエリアとキーボード高さ(--keyboard-inset)を含める", async () => {
+    mobile();
+    const { getByText } = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi") },
+    });
+    await tick();
+    const body = getByText("hi").closest("div") as HTMLElement;
+    expect(body.className).toContain("var(--safe-bottom)");
+    expect(body.className).toContain("var(--keyboard-inset)");
+  });
+
+  it("maxHeight指定の全画面本文もキーボード高さを含み、内容が収まらないときはスクロールする", async () => {
+    mobile();
+    const { getByText } = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi"), maxHeight: "100%" },
+    });
+    await tick();
+    const body = getByText("hi").closest("div") as HTMLElement;
+    expect(body.className).toContain("var(--keyboard-inset)");
+    expect(body.className).toMatch(/overflow-y-auto/);
+    expect(body.className).not.toMatch(/overflow-hidden/);
+  });
+
+  it("PC版(箱型)の本文はキーボード高さに影響されない", async () => {
+    const { getByText } = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi") },
+    });
+    await tick();
+    const body = getByText("hi").closest("div") as HTMLElement;
+    expect(body.className).not.toContain("--keyboard-inset");
+  });
+
+  it("全画面モーダルの上でcompactを開いても全画面側の余白式は変わらない", async () => {
+    mobile();
+    const base = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("base") },
+    });
+    await tick();
+    const before = (base.getByText("base").closest("div") as HTMLElement).className;
+    const err = render(Modal, {
+      props: { title: "エラー", onclose: () => {}, children: textSnippet("err"), compact: true },
+    });
+    await tick();
+    expect((base.getByText("base").closest("div") as HTMLElement).className).toBe(before);
+    expect(before).toContain("var(--keyboard-inset)");
+    err.unmount();
+  });
+
   it("子がマウント時にフォーカスした入力欄を、Modalのフォーカス処理が奪わない(返信・共有の事前入力)", async () => {
     mobile();
     const { getByTestId } = render(ModalFocusHost);
     await tick();
     expect(document.activeElement).toBe(getByTestId("child-input"));
+  });
+
+  it("全画面本文はscroll-paddingでキーボードの高さを避ける(フォーカス欄がキーボードの上に出る)", async () => {
+    mobile();
+    const { getByText, unmount } = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi") },
+    });
+    await tick();
+    expect((getByText("hi").closest("div") as HTMLElement).className).toContain("scroll-pb-[var(--keyboard-inset)]");
+    unmount();
+    const withMax = render(Modal, {
+      props: { title: "設定", onclose: () => {}, children: textSnippet("hi2"), maxHeight: "100%" },
+    });
+    await tick();
+    expect((withMax.getByText("hi2").closest("div") as HTMLElement).className).toContain("scroll-pb-[var(--keyboard-inset)]");
+  });
+
+  it("キーボードが出て--keyboard-insetが増えたら、フォーカス中の入力欄をキーボードの上へスクロールする", async () => {
+    mobile();
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(ModalFocusHost);
+    await tick();
+    spy.mockClear();
+    document.documentElement.style.setProperty("--keyboard-inset", "300px");
+    await new Promise((r) => setTimeout(r, 0)); // MutationObserverのコールバック
+    expect(spy).toHaveBeenCalledWith({ block: "nearest" });
+    expect(spy.mock.contexts.at(-1)).toBe(document.activeElement);
+    document.documentElement.style.removeProperty("--keyboard-inset");
+  });
+
+  it("キーボードが閉じた(0になった)ときはスクロールしない", async () => {
+    mobile();
+    document.documentElement.style.setProperty("--keyboard-inset", "300px");
+    render(ModalFocusHost);
+    await tick();
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    spy.mockClear();
+    document.documentElement.style.setProperty("--keyboard-inset", "0px");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(spy).not.toHaveBeenCalled();
+    document.documentElement.style.removeProperty("--keyboard-inset");
+  });
+
+  it("PC版(箱型)ではキーボード高さの変化でスクロールしない", async () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(ModalFocusHost);
+    await tick();
+    spy.mockClear();
+    document.documentElement.style.setProperty("--keyboard-inset", "300px");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(spy).not.toHaveBeenCalled();
+    document.documentElement.style.removeProperty("--keyboard-inset");
   });
 
   it("PC版・compactでも子のフォーカスを奪わない", async () => {

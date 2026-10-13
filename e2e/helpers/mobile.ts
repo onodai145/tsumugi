@@ -19,6 +19,13 @@ export async function setSafeArea(insets: Insets): Promise<void> {
   }, insets);
 }
 
+// ソフトキーボードがWebView下端を覆う高さ(Androidではネイティブが設定する)をCSS変数で上書きする。
+export async function setKeyboardInset(px: number): Promise<void> {
+  await browser.execute((v) => {
+    document.documentElement.style.setProperty("--keyboard-inset", `${v}px`);
+  }, px);
+}
+
 export async function rect(selector: string): Promise<Rect | null> {
   return browser.execute((sel) => {
     const el = document.querySelector(sel);

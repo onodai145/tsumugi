@@ -7,9 +7,14 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
+import android.webkit.WebView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import io.crates.keyring.Keyring
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.max
 
 class MainActivity : TauriActivity() {
     /// Rust側(mobile_intent.rs)へ共有インテントの内容を渡す(Issue #116)。
@@ -20,6 +25,45 @@ class MainActivity : TauriActivity() {
     /// 跨いだファイル名衝突対策)。System.currentTimeMillis() だけだと同一ミリ秒内の連続呼び出しで
     /// 衝突しうるため、単調増加カウンタを併用する。
     private val shareInvocationCounter = AtomicLong(0)
+
+    /// 直前に WebView へ渡した --keyboard-inset(px)。同じ値を何度も evaluateJavascript しないための記録。
+    private var lastKeyboardInsetCssPx = -1f
+
+    /// ソフトキーボード(IME)が WebView の下端を覆う高さを CSS 変数 --keyboard-inset としてフロントへ渡す。
+    /// WebView はキーボードで縮まず(adjustNothing)キーボードが重なるため、フロントは CSS だけでは
+    /// キーボード上端を知れない。ルートビューのインセットリスナーで IME の高さを受け取り、WebView 下端と
+    /// の重なりを CSS px にして設定する。
+    override fun onWebViewCreate(webView: WebView) {
+        super.onWebViewCreate(webView)
+        val root = window.decorView
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            publishKeyboardInset(webView, insets)
+            // 既定のインセット処理(システムバーの確保等)は変えない。リスナーを付けると既定処理が
+            // 置き換わるため、ここで明示的に既定処理へ委ねて、その結果を返す。
+            ViewCompat.onApplyWindowInsets(view, insets)
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    private fun publishKeyboardInset(webView: WebView, insets: WindowInsetsCompat) {
+        val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+        val imeBottomPx = if (imeVisible) insets.getInsets(WindowInsetsCompat.Type.ime()).bottom else 0
+        // 重なり = max(0, WebView下端 − IME上端)。座標はどちらもウィンドウ内の座標。
+        val windowHeight = webView.rootView.height
+        val location = IntArray(2)
+        webView.getLocationInWindow(location)
+        val webViewBottomPx = location[1] + webView.height
+        val imeTopPx = windowHeight - imeBottomPx
+        val overlapPx = if (imeVisible) max(0, webViewBottomPx - imeTopPx) else 0
+        val cssPx = overlapPx / resources.displayMetrics.density
+        if (cssPx == lastKeyboardInsetCssPx) return
+        lastKeyboardInsetCssPx = cssPx
+        val value = String.format(Locale.US, "%.1fpx", cssPx)
+        webView.evaluateJavascript(
+            "document.documentElement.style.setProperty('--keyboard-inset','$value')",
+            null,
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

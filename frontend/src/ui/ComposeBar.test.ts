@@ -948,3 +948,82 @@ describe("ComposeBar 予約投稿", () => {
     );
   });
 });
+
+describe("ComposeBar expanded のレイアウト(モバイル投稿画面で入力欄をキーボード上端まで広げる)", () => {
+  function parts(textarea: HTMLElement) {
+    const wrapper = textarea.parentElement as HTMLElement;
+    const column = wrapper.parentElement as HTMLElement;
+    return { wrapper, column };
+  }
+
+  it("expandedのとき、入力欄ラッパーが余り高さを取り(flex-1)、入力欄は伸びてサイズ変更できない", () => {
+    const { getByTestId } = render(ComposeBar, { props: { expanded: true } });
+    const textarea = getByTestId("compose-textarea");
+    const { wrapper, column } = parts(textarea);
+    expect(wrapper.className).toMatch(/(^|\s)flex-1(\s|$)/);
+    expect(wrapper.className).toMatch(/(^|\s)flex(\s|$)/);
+    expect(wrapper.className).toMatch(/min-h-24/);
+    expect(column.className).toMatch(/self-stretch/);
+    expect(textarea.className).toMatch(/resize-none/);
+    expect(textarea.className).not.toMatch(/resize-y/);
+    expect(textarea.className).toMatch(/min-h-24/);
+  });
+
+  it("expandedでないとき(PCの投稿バー)は従来のレイアウトのまま", () => {
+    const { getByTestId } = render(ComposeBar);
+    const textarea = getByTestId("compose-textarea");
+    const { wrapper, column } = parts(textarea);
+    expect(wrapper.className).toBe("relative");
+    expect(column.className).not.toMatch(/self-stretch/);
+    // 非expandedの入力欄は、未フォーカス時のコンパクト表示で resize-none になる(従来どおり)ため、
+    // クラス全体ではなく「伸びる指定(flex-1)が無い」ことだけを確認する。
+    expect(textarea.className).not.toMatch(/(^|\s)flex-1(\s|$)/);
+  });
+});
+
+describe("ComposeBar のメニューは下に空きが無ければ上に出る(モバイル投稿画面でボタン群が下端にあるため)", () => {
+  function bottomRect(): DOMRect {
+    return { top: 730, bottom: 760, left: 20, right: 120, width: 100, height: 30, x: 20, y: 730, toJSON: () => ({}) } as DOMRect;
+  }
+
+  it("画像を添付メニューは画面下端のボタンでは上に出る", async () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(bottomRect());
+    const { getByTitle } = render(ComposeBar, { props: { expanded: true } });
+    await fireEvent.click(getByTitle("画像を添付"));
+    const menu = document.querySelector('[role="menu"]') as HTMLElement;
+    expect(menu.getAttribute("style")).toMatch(/bottom:/);
+    expect(menu.getAttribute("style")).not.toMatch(/top:/);
+    vi.restoreAllMocks();
+  });
+
+  it("下書きメニューは画面下端のボタンでは上に出る", async () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(bottomRect());
+    const { getByTitle } = render(ComposeBar, { props: { expanded: true } });
+    await fireEvent.click(getByTitle("下書き"));
+    const menu = document.querySelector('[role="menu"]') as HTMLElement;
+    expect(menu.getAttribute("style")).toMatch(/bottom:/);
+    expect(menu.getAttribute("style")).not.toMatch(/top:/);
+    vi.restoreAllMocks();
+  });
+});
+
+describe("ComposeBar expanded: ツールバーのボタンでテキストエリアのフォーカスを奪わない(キーボードを閉じない)", () => {
+  it("expandedでは、ツールバーのボタンのmousedownの既定動作を止める(フォーカス移動=キーボードが閉じるのを防ぐ)", async () => {
+    const { getByTitle } = render(ComposeBar, { props: { expanded: true } });
+    const attach = getByTitle("画像を添付");
+    // fireEvent は defaultPrevented になった(= preventDefault された)とき false を返す。
+    expect(await fireEvent.mouseDown(attach)).toBe(false);
+    expect(await fireEvent.mouseDown(getByTitle("下書き"))).toBe(false);
+  });
+
+  it("expandedでは、入力欄のmousedownは止めない(キャレット移動・選択が効く)", async () => {
+    const { getByTestId } = render(ComposeBar, { props: { expanded: true } });
+    expect(await fireEvent.mouseDown(getByTestId("compose-textarea"))).toBe(true);
+  });
+
+  it("expandedでない投稿バー(PC)では従来どおりフォーカスが移る", async () => {
+    const { getByTitle } = render(ComposeBar);
+    expect(await fireEvent.mouseDown(getByTitle("画像を添付"))).toBe(true);
+  });
+});
+
