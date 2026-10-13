@@ -476,14 +476,14 @@ mod tests {
     #[test]
     fn refresh_fetch_allowlist_follows_registered_accounts() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        assert!(!state.fetch_allowlist.contains_key("misskey.test"));
+        assert!(!state.fetch_allowlist.contains_host("misskey.test"));
 
         state.register_test_account("acc1");
-        assert!(state.fetch_allowlist.contains_key("misskey.test"));
+        assert!(state.fetch_allowlist.contains_host("misskey.test"));
 
         state.accounts.lock().unwrap().remove("acc1").unwrap();
         state.refresh_fetch_allowlist();
-        assert!(!state.fetch_allowlist.contains_key("misskey.test"));
+        assert!(!state.fetch_allowlist.contains_host("misskey.test"));
     }
 
     #[test]
