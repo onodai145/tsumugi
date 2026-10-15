@@ -88,7 +88,7 @@ v1 に入れないもの: 音色切り替え(`@`)、エンベロープやビブ�
   - 音色は `PolySynth(FMSynth)`(spike と同じパラメータから開始)。サンプルレートは 22.05kHz、モノラル、16bit。長さは `total_sec` に余韻を足したもの。
   - WAV エンコーダは純粋関数として切り出す。
 - `lib/soundChoice.ts`(新規): `resolveSoundChoice(choice): Promise<string>`。`mml:` 以外はそのまま返す。`mml:` なら `parse_mml` → `renderScore` の順に処理し、結果を `choice` 全体をキーにメモ化する(最大 16 件、古い順に破棄)。どの段階で失敗しても `"beep"` を返し、デバッグログに理由を残す。`prewarmSoundChoice(choice)` は、結果を捨てて同じ処理を先に走らせる。
-- `ipc.ts` の `playNotifySound(choice): void` は、署名を変えず、内部で `resolveSoundChoice` を待ってから `commands.playNotifySound` を呼ぶ。呼び出し側(`store.svelte.ts`、試聴ボタン)は無変更。
+- `ipc.ts` の `playNotifySound(choice, onError?): void` は、内部で `resolveSoundChoice` を待ってから `commands.playNotifySound` を呼ぶ。解決に失敗したら `onError` に理由を渡して `beep` を鳴らす。`onError` は省略可能なので、既存の呼び出しは互換。`store.svelte.ts` の通知時の呼び出しは、`onError` でデバッグログに理由を残す。
 - 先読み: グローバル設定の読み込み時と `setNotify` の保存後に、`prewarmSoundChoice` を呼ぶ。カラム側の上書きは、初回の再生時に遅延レンダリングする。
 - UI: 3 か所に重複している選択 UI を、`ui/settings/SoundChoicePicker.svelte` に切り出す(`NotifySection.svelte` と `AddColumnModal.svelte` の両方で使う。カラム側は「グローバルを継承」を選べるオプションを持つ)。ここに「MML」モードを足す。
   - 内容: テキストエリア(等幅)、構文エラーの表示(位置と理由)、試聴ボタン、再生時間の表示、記法の折りたたみヘルプ。
