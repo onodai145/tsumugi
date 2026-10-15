@@ -138,3 +138,27 @@ WebKitGTK 2.54.1 を Xvfb で動かし、`Tone.Offline`(FMSynth と PolySynth)�
 - 音色の切り替え、ピアノロール、ステップシーケンサー。
 - MML の共有・インポート・エクスポート。
 - 通知音以外の用途。
+
+## 実装後の確認
+
+2026-10-16、`feat/issue-75-mml-ringtone` の HEAD 273d832 で確認した。実アプリは Xvfb(:87)・`dbus-run-session`・隔離した XDG_*(/tmp 直下)で起動し、`WAYLAND_DISPLAY` は unset した(実画面には出していない)。
+
+確認できたこと:
+- 自動テスト: `cargo test` は 721 passed / 0 failed / 61 ignored、`pnpm check` は 0 errors(既存の `UrlPreviewCard.svelte` の警告 1 件のみ)、`pnpm test` は 83 files / 882 tests passed。
+- `cargo fmt --check`: 差分は既存ファイルに広く既にあり(main でも同様)、今回追加・変更した `mml.rs` / `domain/mml.rs` / `commands/sound.rs` には出ない。
+- 設定→通知で「通知音を鳴らす」ON、種類「MML（打ち込み）」、`t120 o5 l8 cdefgab>c` を入力すると「再生時間 2.0 秒」が出た。
+- 試聴: IPC(`ipc://localhost/…` への fetch)を記録した。`play_notify_sound` の `choice` は `data:audio/wav;base64,UklGR…` で、長さは 152,975 文字(WAV 約 112KB、RIFF/22050Hz/mono/16bit を先頭バイトで確認)。`beep` には落ちず、「試聴に失敗しました」は出なかった。別の MML(`… r8 g`)では `parse_mml` 2 回(ピッカーの検証と再生前の解決)の後に `play_notify_sound`(182,375 文字)が続いた。stderr とログファイルに WARN/ERROR はなかった。
+- 不正な `c4 x`: 「4 文字目: 不明な文字 `x` です」(赤字)、保存ボタンと試聴ボタンの `disabled` 属性が付いた。
+- 保存: `settings.json` の `notify.soundChoice` が `"mml:t120 o5 l8 cdefgab>c"` になった。アプリを再起動して設定→通知を開くと、入力欄・モード(MML)・「通知音を鳴らす」ONが復元された。
+- カラム追加モーダル(通知音 ON → 継承の選択肢つき → MML): `c4 x` で追加ボタンと試聴が無効、`t120 o5 l8 efg` で「再生時間 0.8 秒」・追加ボタンが有効。
+
+確認できなかったこと:
+- 実際に音が鳴ること(Xvfb には音声デバイスがない)。Rust 側の再生は、`data:` URL を受け取り警告が出ていないことまでを見た。
+- カラム追加モーダルでの保存と再編集: 確認用のアカウントにトークンがなく、`unauthorized: no token for account` でカラムが作れなかった。
+- 実サーバーの通知カラムに新着を出して鳴らす経路。
+- Android の実機・エミュレーターの WebView、macOS / Windows。
+
+気づいたこと:
+- 隔離起動のデバッグビルドは `frontend/dist` を埋め込むため、古い dist(MML 以前)のままだった。`pnpm build` で dist を作り直してから `cargo build` した(dist は gitignore 対象)。
+- `window.__TAURI_INTERNALS__.invoke` は書き換え不可で、差し替えは無言で失敗する。呼び出しの記録は `window.fetch` の `ipc://` を包んで行った。
+- 同じ MML の 2 回目の試聴は `resolveSoundChoice` のメモ化により `parse_mml` を呼ばない(仕様どおり)。
