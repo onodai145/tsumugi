@@ -1,10 +1,10 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { app, NOTIFY_SOUND_PRESETS } from "../lib/store.svelte";
+  import { app } from "../lib/store.svelte";
   import type { TabView } from "../lib/store.svelte";
-  import { playNotifySound } from "../lib/ipc";
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
+  import SoundChoicePicker from "./settings/SoundChoicePicker.svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
   import Modal from "./Modal.svelte";
@@ -81,41 +81,7 @@
   let notifySound = $state(edit?.notifySound ?? untrack(() => sourceType === "notifications"));
   // 空文字＝設定→通知のグローバル選択を継承
   let notifySoundChoice = $state(edit?.notifySoundChoice ?? "");
-  let pickingSound = $state(false);
-
-  type SoundMode = "inherit" | "custom" | (string & {});
-  function modeFromChoice(choice: string): SoundMode {
-    if (!choice) return "inherit";
-    if (choice.startsWith("data:")) return "custom";
-    return choice;
-  }
-  let soundMode = $state<SoundMode>(untrack(() => modeFromChoice(notifySoundChoice)));
-  const soundModeOptions = [
-    { value: "inherit", label: "継承（グローバル設定）" },
-    ...NOTIFY_SOUND_PRESETS.map((p) => ({ value: p.id, label: p.label })),
-    { value: "custom", label: "カスタム（音声ファイル）" },
-  ];
-  $effect(() => {
-    if (soundMode === "inherit") notifySoundChoice = "";
-    else if (soundMode === "custom") {
-      if (!notifySoundChoice.startsWith("data:")) notifySoundChoice = "";
-    } else {
-      notifySoundChoice = soundMode;
-    }
-  });
-
-  async function pickSound() {
-    submitErr = null;
-    pickingSound = true;
-    try {
-      const url = await app.pickNotifySoundFile();
-      if (url) notifySoundChoice = url;
-    } catch (e) {
-      submitErr = String(e);
-    } finally {
-      pickingSound = false;
-    }
-  }
+  let soundInvalid = $state(false);
   let filterText = $state(edit?.filter.kind === "tql" ? edit.filter.value : "");
   let filterErr = $state<string | null>(null);
   let busy = $state(false);
@@ -505,19 +471,7 @@
     {#if notifySound}
       <div class="mb-2.5 flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">通知音の種類</span>
-        <Dropdown bind:value={soundMode} options={soundModeOptions} />
-        {#if soundMode === "custom"}
-          <div class="flex items-center gap-2.5">
-            <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
-              {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-            </Button>
-            {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
-            {/if}
-          </div>
-        {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
-        {/if}
+        <SoundChoicePicker bind:value={notifySoundChoice} allowInherit onvalidity={(v) => (soundInvalid = v)} />
       </div>
     {/if}
     <p class="mb-2 mt-0 text-xs text-muted-foreground">
@@ -556,26 +510,14 @@
     {#if notifySound}
       <div class="mb-2.5 flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">通知音の種類</span>
-        <Dropdown bind:value={soundMode} options={soundModeOptions} />
-        {#if soundMode === "custom"}
-          <div class="flex items-center gap-2.5">
-            <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
-              {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-            </Button>
-            {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
-            {/if}
-          </div>
-        {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
-        {/if}
+        <SoundChoicePicker bind:value={notifySoundChoice} allowInherit onvalidity={(v) => (soundInvalid = v)} />
       </div>
     {/if}
     <p class="mb-2 mt-0 text-xs text-muted-foreground">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
   {/if}
 
   <div class="mt-1.5 flex justify-end">
-    <Button disabled={busy || !!filterErr || !!tqlErr} onclick={submit} data-testid="add-column-submit">
+    <Button disabled={busy || !!filterErr || !!tqlErr || soundInvalid} onclick={submit} data-testid="add-column-submit">
       {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
     </Button>
   </div>
