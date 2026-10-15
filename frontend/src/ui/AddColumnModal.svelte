@@ -82,6 +82,11 @@
   // 空文字＝設定→通知のグローバル選択を継承
   let notifySoundChoice = $state(edit?.notifySoundChoice ?? "");
   let soundInvalid = $state(false);
+  // 簡単モードで通知設定ブロックを出すソース(検索・ユーザ・タグはライブ更新が無い)。
+  const guidedNotifyShown = $derived(sourceType !== "search" && sourceType !== "user" && sourceType !== "tag");
+  // 通知音ピッカーが描画される条件。非表示の間は入力途中(未検証)の MML 下書きを保存しないため、元の値に戻す。
+  const soundPickerShown = $derived(notifySound && (uiMode === "expert" || guidedNotifyShown));
+  const effectiveSoundChoice = $derived(soundPickerShown ? notifySoundChoice : (edit?.notifySoundChoice ?? ""));
   let filterText = $state(edit?.filter.kind === "tql" ? edit.filter.value : "");
   let filterErr = $state<string | null>(null);
   let busy = $state(false);
@@ -267,15 +272,15 @@
         const filter: FilterQuery = { kind: "tql", value: tqlText.trim() };
         if (isEdit && edit) {
           await app.updateColumn(edit.id, kind, filter, name);
-          await app.setColumnNotify(edit.id, notifyDesktop, notifySound, notifySoundChoice);
+          await app.setColumnNotify(edit.id, notifyDesktop, notifySound, effectiveSoundChoice);
         } else {
           const tab = await app.addColumn(accountId, kind, filter, groupId ?? undefined, name);
           if (
             notifyDesktop !== tab.notifyDesktop ||
             notifySound !== tab.notifySound ||
-            notifySoundChoice !== tab.notifySoundChoice
+            effectiveSoundChoice !== tab.notifySoundChoice
           ) {
-            await app.setColumnNotify(tab.id, notifyDesktop, notifySound, notifySoundChoice);
+            await app.setColumnNotify(tab.id, notifyDesktop, notifySound, effectiveSoundChoice);
           }
         }
         onclose();
@@ -308,16 +313,16 @@
       }
       if (isEdit && edit) {
         await app.updateColumn(edit.id, kind, buildFilter(), name);
-        await app.setColumnNotify(edit.id, notifyDesktop, notifySound, notifySoundChoice);
+        await app.setColumnNotify(edit.id, notifyDesktop, notifySound, effectiveSoundChoice);
       } else {
         const tab = await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined, name);
         // 既定値と異なる場合のみ追加で呼ぶ（既定は backend 側の add_column が設定済み）
         if (
           notifyDesktop !== tab.notifyDesktop ||
           notifySound !== tab.notifySound ||
-          notifySoundChoice !== tab.notifySoundChoice
+          effectiveSoundChoice !== tab.notifySoundChoice
         ) {
-          await app.setColumnNotify(tab.id, notifyDesktop, notifySound, notifySoundChoice);
+          await app.setColumnNotify(tab.id, notifyDesktop, notifySound, effectiveSoundChoice);
         }
       }
       onclose();
@@ -462,7 +467,7 @@
     </label>
   {/if}
 
-  {#if sourceType !== "search" && sourceType !== "user" && sourceType !== "tag"}
+  {#if guidedNotifyShown}
     <div class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">このタブの通知</span>
       <label class="flex items-center gap-1.5 text-sm"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
