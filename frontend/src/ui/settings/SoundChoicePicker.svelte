@@ -50,7 +50,9 @@
     | { kind: "idle" }
     | { kind: "pending" }
     | { kind: "ok"; totalSec: number }
-    | { kind: "error"; position: number; message: string };
+    | { kind: "error"; position: number; message: string }
+    // IPC 失敗など、構文の判定そのものができなかった場合(位置は無い)
+    | { kind: "failed"; message: string };
   let status = $state<MmlStatus>({ kind: "idle" });
 
   // 入力が止まって 300ms 後にパースする(初回だけ即時)。古い結果は捨てる。
@@ -65,12 +67,17 @@
     status = { kind: "pending" };
     const timer = setTimeout(
       async () => {
-        const r = await commands.parseMml(text);
-        if (text !== mmlText) return;
-        status =
-          r.status === "parsed"
-            ? { kind: "ok", totalSec: r.score.totalSec ?? 0 }
-            : { kind: "error", position: r.error.position, message: r.error.message };
+        try {
+          const r = await commands.parseMml(text);
+          if (text !== mmlText) return;
+          status =
+            r.status === "parsed"
+              ? { kind: "ok", totalSec: r.score.totalSec ?? 0 }
+              : { kind: "error", position: r.error.position, message: r.error.message };
+        } catch (e) {
+          if (text !== mmlText) return;
+          status = { kind: "failed", message: String(e) };
+        }
       },
       first ? 0 : 300,
     );
@@ -120,9 +127,10 @@
     bind:value={mmlText}
     data-testid="mml-input"
   ></textarea>
-  <p class="m-0 text-xs {status.kind === 'error' ? 'text-destructive' : 'text-muted-foreground'}" data-testid="mml-status">
+  <p class="m-0 text-xs {status.kind === 'error' || status.kind === 'failed' ? 'text-destructive' : 'text-muted-foreground'}" data-testid="mml-status">
     {#if status.kind === "ok"}再生時間 {status.totalSec.toFixed(1)} 秒
     {:else if status.kind === "error"}{status.position + 1} 文字目: {status.message}
+    {:else if status.kind === "failed"}構文を確認できませんでした: {status.message}
     {:else}確認中…{/if}
   </p>
   <div class="flex items-center gap-2.5">

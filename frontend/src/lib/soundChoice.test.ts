@@ -57,7 +57,7 @@ describe("resolveSoundChoice", () => {
 
   it("構文エラーは位置と理由を含む Error で reject し、失敗はキャッシュしない", async () => {
     parseMml.mockResolvedValueOnce({ status: "invalid", error: { position: 3, message: "不明な文字 `x` です" } });
-    await expect(resolveSoundChoice("mml:c4 x")).rejects.toThrow(/位置 3.*不明な文字/);
+    await expect(resolveSoundChoice("mml:c4 x")).rejects.toThrow(/4 文字目.*不明な文字/);
     expect(render).not.toHaveBeenCalled();
     parseMml.mockResolvedValueOnce(parsed);
     await expect(resolveSoundChoice("mml:c4 x")).resolves.toBe("data:audio/wav;base64,AAAA");

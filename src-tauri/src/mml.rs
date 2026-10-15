@@ -120,6 +120,8 @@ impl Cursor<'_> {
 }
 
 /// 1 トラック分の文字列を命令列にする。繰り返し `[ ... ]n` はここで展開する。
+/// 繰り返しは入れ子にできないので、展開後の命令数は入力サイズ(1000 文字 × 最大 99 回)で抑えられる。
+/// 時間の上限はここでは見ず、`run_track` が実行しながら判定する。
 fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError> {
     let mut c = Cursor { syms, i: 0, end };
     let mut out: Vec<Item> = Vec::new();
@@ -259,7 +261,8 @@ fn check_limit(t: f64, pos: usize) -> Result<(), MmlError> {
 }
 
 /// 命令列を実行して音を `notes` に積み、トラックの終了時刻(秒)を返す。
-/// 時間の積算は音符・休符ごとに行い、上限を超えた時点で打ち切る(展開後の長さに比例して固まらない)。
+/// 時間の積算は音符・休符ごとに行い、上限を超えた最初の音符・休符でエラーにして打ち切る。
+/// (繰り返しは `parse_track` で先に展開済み。その大きさは入力サイズで抑えられている。)
 fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f64, MmlError> {
     let mut st = TrackState {
         octave: DEFAULT_OCTAVE,
@@ -398,8 +401,9 @@ pub fn validate_sound_choice(choice: &str) -> crate::error::Result<()> {
     if let Some(text) = choice.strip_prefix(SOUND_CHOICE_PREFIX) {
         parse(text).map_err(|e| {
             Error::Invalid(format!(
-                "MML が不正です (位置 {}): {}",
-                e.position, e.message
+                "MML が不正です ({} 文字目): {}",
+                e.position + 1,
+                e.message
             ))
         })?;
     }
@@ -608,7 +612,9 @@ mod tests {
     }
 
     #[test]
-    fn loop_expansion_is_bounded_by_the_duration_limit() {
+    fn loop_expansion_stops_at_the_duration_limit() {
+        // `c1` は 2 秒。`[c1]99` は先に展開され、6 個目の `c1` で 10 秒を超えたところで止まる。
+        // 展開された命令は元の位置を引き継ぐので、エラー位置は繰り返し本体の `c1`(位置 1)を指す。
         assert_eq!(must_fail("[c1]99").position, 1);
     }
 
@@ -645,6 +651,6 @@ mod tests {
             Err(crate::error::Error::Invalid(_))
         ));
         let err = validate_sound_choice("mml:x").unwrap_err();
-        assert!(err.to_string().contains("位置 0"), "{err}");
+        assert!(err.to_string().contains("1 文字目"), "{err}");
     }
 }

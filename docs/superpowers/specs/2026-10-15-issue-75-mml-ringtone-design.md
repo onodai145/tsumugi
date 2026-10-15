@@ -64,7 +64,7 @@ Tone.js を使わず Rust で矩形波などを直接合成する案(C案)は、
 
 - 各トラックは独立した状態(テンポ・オクターブ・長さ・音量)を持ち、時刻 0 から始まる。テンポは `t` をトラックごとに書く必要がある(v1 の制約)。
 - `>` で上げる、`<` で下げる、という向きは実装によって逆のものがあり、確証のないまま多数派の向きを採った。
-- 上限: MML は 1000 文字以下、全トラックの再生時間は 10 秒以下。繰り返しは展開しながら時間を積算し、10 秒を超えた時点でエラーにする(展開しきってから判定しない)。
+- 上限: MML は 1000 文字以下、全トラックの再生時間は 10 秒以下。繰り返しはネストできないので、展開後の命令数は入力サイズ(1000 文字 × 最大 99 回)で抑えられる。時間の積算は音符・休符ごとに行い、10 秒を超えた最初の音でエラーにする。
 
 v1 に入れないもの: 音色切り替え(`@`)、エンベロープやビブラートなどの装飾、`n<番号>` 形式の音符指定、ループのネスト、トラックごとのテンポ共有、向きの反転設定。
 
@@ -74,8 +74,8 @@ v1 に入れないもの: 音色切り替え(`@`)、エンベロープやビブ�
 - `src-tauri/src/domain/mml.rs`(新規、`specta::Type`):
   - `NoteEvent { track: u8, start_sec: f64, duration_sec: f64, midi: u8, velocity: f64 }`
   - `MmlScore { notes: Vec<NoteEvent>, total_sec: f64, track_count: u8 }`
-  - `MmlError { position: u32, message: String }`。`position` は入力テキストの文字インデックス(0 始まり)。
-  - `MmlParseResult`: `{ status: "ok", score }` か `{ status: "error", error }` の列挙型(`#[serde(tag = "status")]`)。UI が位置を使うので、構文エラーはコマンドの `Err` ではなくデータとして返す。
+  - `MmlError { position: u32, message: String }`。`position` は入力テキストの文字インデックス(0 始まり)。UI とエラーメッセージ(`validate_sound_choice` を含む)では 1 始まりの「N 文字目」として表示する。
+  - `MmlParseResult`: `{ status: "parsed", score }` か `{ status: "invalid", error }` の列挙型(`#[serde(tag = "status")]`)。UI が位置を使うので、構文エラーはコマンドの `Err` ではなくデータとして返す。
 - `commands/sound.rs` に `parse_mml(text: String) -> MmlParseResult` を追加し、`specta_builder()` に登録する。
 - 保存時の検証: `set_notify` と `set_column_notify` は、`mml:` で始まる `sound_choice` をパースし、失敗なら `Error::Invalid` で保存を拒否する(UI の表示とは別に、保存の権威的な検証をここで持つ)。それ以外の形式は従来どおり検証しない。
 - `resolve_audio_bytes`: `mml:` が届いた場合は、`beep` を返して `warn` ログを残す(フロントのレンダリング失敗時の最後の砦)。既存のシグネチャは変えない。
@@ -93,6 +93,7 @@ v1 に入れないもの: 音色切り替え(`@`)、エンベロープやビブ�
 - UI: 3 か所に重複している選択 UI を、`ui/settings/SoundChoicePicker.svelte` に切り出す(`NotifySection.svelte` と `AddColumnModal.svelte` の両方で使う。カラム側は「グローバルを継承」を選べるオプションを持つ)。ここに「MML」モードを足す。
   - 内容: テキストエリア(等幅)、構文エラーの表示(位置と理由)、試聴ボタン、再生時間の表示、記法の折りたたみヘルプ。
   - 入力中の検証は `parse_mml` を 300ms のデバウンスで呼ぶ。
+  - ピッカーは、構文が通っていない間 `onvalidity` で親に通知して保存ボタンを止める。ピッカーが非表示のとき(通知音をオフにしたときなど)は、入力途中の未検証な下書きではなく、直前に保存済みの値を送る(`AddColumnModal` の `effectiveSoundChoice`、`NotifySection` も同様)。
   - モバイルでは、ソフトキーボードの `--keyboard-inset` の扱いを、既存のモーダルに合わせる。
   - 見た目は `docs/design/style-guide.md` に従い、一回限りの値は作らない。
 
@@ -104,7 +105,7 @@ v1 に入れないもの: 音色切り替え(`@`)、エンベロープやビブ�
 
 ## テスト
 
-- Rust(単体): パーサーを網羅する。音符・長さ・付点・タイ・オクターブ・テンポ・音量・繰り返し・マルチトラック・上限(文字数、時間、繰り返しの展開途中での打ち切り)・エラー位置。`resolve_audio_bytes("mml:...")` が `beep` を返すこと。`set_notify` と `set_column_notify` が不正な MML を拒否すること。`generates_frontend_bindings` で新しい型の出力を確認する。
+- Rust(単体): パーサーを網羅する。音符・長さ・付点・タイ・オクターブ・テンポ・音量・繰り返し・マルチトラック・上限(文字数、時間、繰り返しを含む場合の時間上限での打ち切り)・エラー位置。`resolve_audio_bytes("mml:...")` が `beep` を返すこと。保存時の検証は `validate_sound_choice` の単体テストで確認する。`set_notify` / `set_column_notify` そのもののコマンドレベルのテストは書かない(`State<AppState>` を取るため構築が重い)。この逸脱は記録済みで、コントローラが承認した。コマンド経由の拒否は手動確認で補う。`generates_frontend_bindings` で新しい型の出力を確認する。
 - フロント(Vitest): jsdom に Web Audio はないので、`tone` はモックする。`resolveSoundChoice` の分岐(通常の値の素通し、メモ化、各段階の失敗時のフォールバック、件数上限)と、WAV エンコーダ(ヘッダ・長さ・クリップ)を確認する。
 - 実機(手動):
   - Xvfb と隔離したインスタンスで、MML の入力・試聴・保存・通知時の再生を確認する(WAYLAND_DISPLAY を unset し、`dbus-run-session` で隔離する)。

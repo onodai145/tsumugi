@@ -51,6 +51,18 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(onvalidity).toHaveBeenLastCalledWith(true);
   });
 
+  it("parse_mml の IPC が失敗したら、位置なしのメッセージを出し invalid=true のままにする(未処理の reject はテスト失敗になる)", async () => {
+    vi.spyOn(commands, "parseMml").mockRejectedValue(new Error("ipc down"));
+    const onvalidity = vi.fn();
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4", onvalidity });
+    await vi.waitFor(() => expect(getByTestId("mml-status").textContent).toContain("ipc down"));
+    const text = getByTestId("mml-status").textContent ?? "";
+    expect(text).toContain("構文を確認できませんでした");
+    expect(text).not.toContain("文字目");
+    expect(text).not.toContain("確認中");
+    expect(onvalidity).toHaveBeenLastCalledWith(true);
+  });
+
   it("本文が空なら parse_mml を呼ばずに invalid=true にする", async () => {
     const onvalidity = vi.fn();
     render(SoundChoicePicker, { value: "mml:", onvalidity });

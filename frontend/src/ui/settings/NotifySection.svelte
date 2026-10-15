@@ -11,6 +11,9 @@
   let err = $state<string | null>(null);
   let saved = $state(false);
 
+  // ピッカーが非表示(通知音オフ)の間は、入力途中の未検証な下書きではなく保存済みの値を送る。
+  const effectiveSoundChoice = $derived(sound ? soundChoice : (app.notify.soundChoice ?? ""));
+
   const hasNotifyEnabledTab = $derived(
     app.groups.some((g) => g.tabs.some((t) => t.notifyDesktop || t.notifySound)),
   );
@@ -20,7 +23,7 @@
     saved = false;
     busy = true;
     try {
-      await app.setNotify({ desktop, sound, soundChoice });
+      await app.setNotify({ desktop, sound, soundChoice: effectiveSoundChoice });
       desktop = app.notify.desktop; // 権限拒否で false に戻る場合を反映
       saved = true;
     } catch (e) {

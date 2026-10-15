@@ -11,7 +11,7 @@ const cache = new Map<string, Promise<string>>();
 async function renderMml(text: string): Promise<string> {
   const r = await commands.parseMml(text);
   if (r.status !== "parsed") {
-    throw new Error(`MML 構文エラー (位置 ${r.error.position}): ${r.error.message}`);
+    throw new Error(`MML 構文エラー (${r.error.position + 1} 文字目): ${r.error.message}`);
   }
   return renderScore(r.score);
 }

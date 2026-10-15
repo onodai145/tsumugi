@@ -12,13 +12,17 @@ export async function renderScore(score: MmlScore): Promise<string> {
   const Tone = await import("tone");
   const buffer = await Tone.Offline(
     () => {
-      const synths = Array.from({ length: score.trackCount }, () =>
-        new Tone.PolySynth(Tone.FMSynth, {
+      const synths = Array.from({ length: score.trackCount }, () => {
+        const synth = new Tone.PolySynth(Tone.FMSynth, {
           harmonicity: 3,
           modulationIndex: 8,
           envelope: { attack: 0.005, decay: 0.1, sustain: 0.4, release: 0.1 },
-        }).toDestination(),
-      );
+        }).toDestination();
+        // 1 音源のピークは約 0.316。複数トラックを足すと 1.0 を超えて WAV 化で頭打ちになるので、
+        // トラック数で割って揃える(単一トラックは従来どおり)。
+        if (score.trackCount > 1) synth.volume.value = Tone.gainToDb(1 / score.trackCount);
+        return synth;
+      });
       for (const n of score.notes) {
         const hz = Tone.Frequency(n.midi, "midi").toFrequency();
         synths[n.track].triggerAttackRelease(hz, n.durationSec ?? 0, n.startSec ?? 0, n.velocity ?? 0);
