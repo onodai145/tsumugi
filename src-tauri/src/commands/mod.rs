@@ -40,4 +40,4 @@ pub use user::{
     unfollow_user, UserProfile,
 };
 #[allow(unused_imports)]
-pub use sound::play_notify_sound;
+pub use sound::{parse_mml, play_notify_sound};

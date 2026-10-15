@@ -1,7 +1,9 @@
 //! 通知音を鳴らす Tauri コマンド(Issue #12: webview の AudioContext 自動再生ポリシーに
 //! 左右されないよう、実際の再生は Rust 側(rodio)で行う)。
 
+use crate::domain::MmlParseResult;
 use crate::error::{Error, Result};
+use crate::mml;
 use crate::state::AppState;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::borrow::Cow;
@@ -37,6 +39,10 @@ pub(crate) fn resolve_audio_bytes(choice: &str) -> Result<Cow<'static, [u8]>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn play_notify_sound(state: State<'_, AppState>, choice: String) -> Result<()> {
+    if choice.starts_with(mml::SOUND_CHOICE_PREFIX) {
+        // フロント(ipc.ts)が mml: を data: に解決してから呼ぶ設計。ここに届くのは解決失敗の取りこぼし。
+        log::warn!("通知音: MML がレンダリングされずに届いたため beep で代替します");
+    }
     match resolve_audio_bytes(&choice) {
         Ok(bytes) => state.sound.play(bytes.into_owned()),
         // 注: この warn は `enable_file_logging` 設定(既定オフ)が有効な場合のみ
@@ -44,6 +50,16 @@ pub async fn play_notify_sound(state: State<'_, AppState>, choice: String) -> Re
         Err(e) => log::warn!("通知音: 再生対象の解決に失敗: {e}"),
     }
     Ok(())
+}
+
+/// MML を解釈して、時刻解決済みのノート列を返す(Issue #75)。構文エラーは Err ではなくデータで返す。
+#[tauri::command]
+#[specta::specta]
+pub async fn parse_mml(text: String) -> MmlParseResult {
+    match mml::parse(&text) {
+        Ok(score) => MmlParseResult::Parsed { score },
+        Err(error) => MmlParseResult::Invalid { error },
+    }
 }
 
 #[cfg(test)]
@@ -96,5 +112,27 @@ mod tests {
     #[test]
     fn rejects_invalid_base64() {
         assert!(resolve_audio_bytes("data:audio/wav;base64,not base64!!").is_err());
+    }
+
+    #[test]
+    fn mml_choice_that_reaches_rust_falls_back_to_beep() {
+        // フロントがレンダリングに失敗したときの最後の砦(通知を止めない)
+        assert_eq!(
+            resolve_audio_bytes("mml:c4d4").unwrap().as_ref(),
+            resolve_audio_bytes("beep").unwrap().as_ref()
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_mml_returns_data_for_both_outcomes() {
+        use crate::domain::MmlParseResult;
+        match super::parse_mml("c4".to_string()).await {
+            MmlParseResult::Parsed { score } => assert_eq!(score.notes.len(), 1),
+            other => panic!("expected Parsed, got {other:?}"),
+        }
+        match super::parse_mml("c4 x".to_string()).await {
+            MmlParseResult::Invalid { error } => assert_eq!(error.position, 3),
+            other => panic!("expected Invalid, got {other:?}"),
+        }
     }
 }

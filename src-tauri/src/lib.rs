@@ -128,6 +128,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::read_audio_data_url,
             commands::mute::import_background_media,
             commands::sound::play_notify_sound,
+            commands::sound::parse_mml,
             commands::mute::sync_server_mutes,
             commands::clip::list_clips,
             commands::clip::create_clip,
@@ -476,5 +477,10 @@ mod specta_export {
             ts.contains("createdAt: number") || ts.contains("createdAt:number"),
             "created_at should export as number:\n{ts}"
         );
+        // MML 着メロ(Issue #75)のコマンドと型
+        assert!(ts.contains("parseMml"), "missing parseMml command");
+        assert!(ts.contains("MmlParseResult"), "missing MmlParseResult type");
+        assert!(ts.contains("startSec"), "NoteEvent.start_sec should be camelCase");
+        assert!(ts.contains("\"parsed\"") && ts.contains("\"invalid\""), "MmlParseResult status tags");
     }
 }

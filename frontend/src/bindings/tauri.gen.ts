@@ -363,6 +363,8 @@ export const commands = {
 	 *  失敗しても通知フロー全体を止めないため、常に Ok を返す(失敗はログのみ)。
 	 */
 	playNotifySound: (choice: string) => typedError<null, Error>(__TAURI_INVOKE("play_notify_sound", { choice })),
+	/**  MML を解釈して、時刻解決済みのノート列を返す(Issue #75)。構文エラーは Err ではなくデータで返す。 */
+	parseMml: (text: string) => __TAURI_INVOKE<MmlParseResult>("parse_mml", { text }),
 	/**
 	 *  サーバ側のミュート/ブロック・ワードミュート(mutedWords)を取得して AppState に反映する。
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当。Issue #11）。
@@ -757,6 +759,22 @@ export type MiAuthSession = {
 	sessionId: string,
 };
 
+/**  MML の構文エラー。`position` は入力テキストの文字位置(0 始まり、空白を含む)。 */
+export type MmlError = {
+	position: number,
+	message: string,
+};
+
+/**  `parse_mml` コマンドの結果。UI が位置を使うので、構文エラーも `Err` ではなくデータで返す。 */
+export type MmlParseResult = { status: "parsed"; score: MmlScore } | { status: "invalid"; error: MmlError };
+
+export type MmlScore = {
+	notes: NoteEvent[],
+	/**  全トラックのうち最も長い再生時間(秒) */
+	totalSec: number | null,
+	trackCount: number,
+};
+
 /**  ローカル NG（ミュート）設定。サーバの mute/block とは別の、クライアント側フィルタ。 */
 export type MuteConfig = {
 	/**  本文/CW に含まれると非表示にする語（部分一致・大文字小文字無視） */
@@ -842,6 +860,18 @@ export type NoteDraft_Serialize = {
 	localOnly: boolean,
 	/**  `All`（既定）はフィールドごと省略し、Misskey 側のデフォルト（`null`＝全員）に委ねる。 */
 	reactionAcceptance?: ReactionAcceptanceInput | null,
+};
+
+/**  MML から展開した 1 音(Issue #75)。時刻は秒で、テンポ変化・繰り返し・タイは解決済み。 */
+export type NoteEvent = {
+	/**  トラック番号(0 始まり) */
+	track: number,
+	startSec: number | null,
+	durationSec: number | null,
+	/**  MIDI ノート番号(o4 の c が 60) */
+	midi: number,
+	/**  0.0〜1.0 */
+	velocity: number | null,
 };
 
 export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };
