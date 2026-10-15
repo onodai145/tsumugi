@@ -115,6 +115,8 @@ v1 に入れないもの: 音色切り替え(`@`)、エンベロープやビブ�
 
 `Tone.Offline` が Android WebView で動くかは未検証。実装計画の最初のタスクとして、Android(エミュレーター)で最小の `Tone.Offline` が動き、WAV が得られることを確認する。動かない場合は、この設計を C案(Rust で直接合成)に切り替える。その場合、パーサーと `MmlScore` はそのまま使える。
 
+検証結果(2026-10-15): 合格。Android 14 エミュレーター(sdk_gphone64_x86_64)の Chrome 113 で、Tone.js 15.1.22 の `Tone.Offline`(FMSynth、0.5 秒、22.05kHz)が `renderMs` 168、`peak` 0.316 で完了し、エラーは出なかった。`Tone.getContext().state` は `suspended`。UA は `Mozilla/5.0 (Linux; Android 14; sdk_gphone64_x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36`。実 WebView での最終確認は Task 8。
+
 ## spike の結果(参考)
 
 WebKitGTK 2.54.1 を Xvfb で動かし、`Tone.Offline`(FMSynth と PolySynth)を検証した。
