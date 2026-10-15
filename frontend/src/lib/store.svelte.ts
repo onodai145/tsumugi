@@ -1908,7 +1908,14 @@ class AppStore {
     await unwrap(commands.setMute(config));
     this.mute = config;
     for (const t of this.#allTabs()) {
-      t.notes = t.notes.filter((n) => !isMuted(n, config));
+      t.notes = t.notes
+        .filter((n) => !isMuted(n, config))
+        .map((n) => stripMutedReply(n, config));
+      t.notifications = t.notifications.map((x) => {
+        if (!x.note) return x;
+        const stripped = stripMutedReply(x.note, config);
+        return stripped === x.note ? x : { ...x, note: stripped };
+      });
     }
     this.#log("info", "NG（ミュート）設定を保存しました");
   }
@@ -2365,6 +2372,15 @@ function noteMutedOne(n: Note, cfg: MuteConfig): boolean {
 }
 export function isMuted(n: Note, cfg: MuteConfig): boolean {
   return noteMutedOne(n, cfg) || (n.renote ? noteMutedOne(n.renote, cfg) : false);
+}
+/// 返信先(`reply` / Renote先の `reply`)が NG 設定に該当するとき、`reply` を null にしたノートを返す(Issue #486)。
+/// 該当しなければ同じオブジェクトを返す。`replyId` は残すので、表示は従来の「↩ 返信」になる。
+/// サーバーミュート/ワードミュートはフロントから見えないため扱わない(Rust 側が配信時に外す)。
+export function stripMutedReply(n: Note, cfg: MuteConfig): Note {
+  const reply = n.reply && noteMutedOne(n.reply, cfg) ? null : n.reply;
+  const renote = n.renote ? stripMutedReply(n.renote, cfg) : n.renote;
+  if (reply === n.reply && renote === n.renote) return n;
+  return { ...n, reply, renote };
 }
 
 // ---- 通知の見出し / 音 ----

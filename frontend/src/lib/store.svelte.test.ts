@@ -23,7 +23,7 @@ vi.mock("./uiScale", async (importOriginal) => ({
   applyUiScale: applyUiScaleMock,
 }));
 
-const { app, applyOwnReactionEvent } = await import("./store.svelte");
+const { app, applyOwnReactionEvent, stripMutedReply } = await import("./store.svelte");
 
 const ACCOUNT_ID = "acc1";
 
@@ -1568,5 +1568,97 @@ describe("AppStore.boot(): ローカル予約の期限切れ・失敗の通知 (
     expect(logs).toHaveLength(1);
     expect(logs[0].text).toContain("失敗 1 件");
     expect(logs[0].text).not.toContain("期限切れ");
+  });
+});
+
+describe("stripMutedReply (Issue #486)", () => {
+  const cfg = (over: Partial<{ ngWords: string[]; ngUsers: string[]; ngInstances: string[] }> = {}) => ({
+    ngWords: [],
+    ngUsers: [],
+    ngInstances: [],
+    ...over,
+  });
+  const bob = () => makeUser({ id: "u2", username: "bob", name: "Bob" });
+  const replyNote = (target: Note) => makeNote({ id: "n1", replyId: "r1", replyUserId: "u2", reply: target });
+
+  it("NGユーザーの返信先は reply を null にし、replyId は残す", () => {
+    const n = replyNote(makeNote({ id: "r1", user: bob() }));
+    const got = stripMutedReply(n, cfg({ ngUsers: ["@bob"] }));
+    expect(got.reply).toBeNull();
+    expect(got.replyId).toBe("r1");
+    expect(got.text).toBe("hello");
+  });
+
+  it("NGインスタンスの返信先を外す", () => {
+    const n = replyNote(makeNote({ id: "r1", user: makeUser({ id: "u2", username: "bob", host: "bad.example" }) }));
+    expect(stripMutedReply(n, cfg({ ngInstances: ["bad.example"] })).reply).toBeNull();
+  });
+
+  it("NGワードを含む返信先を外す(本文とCW)", () => {
+    const byText = replyNote(makeNote({ id: "r1", user: bob(), text: "big SPOILER" }));
+    expect(stripMutedReply(byText, cfg({ ngWords: ["spoiler"] })).reply).toBeNull();
+    const byCw = replyNote(makeNote({ id: "r1", user: bob(), text: "body", cw: "spoiler" }));
+    expect(stripMutedReply(byCw, cfg({ ngWords: ["spoiler"] })).reply).toBeNull();
+  });
+
+  it("Renote先の返信先も外し、Renote先は残す", () => {
+    const inner = replyNote(makeNote({ id: "r1", user: bob() }));
+    const wrapper = makeNote({ id: "rn", text: null, renoteId: "n1", renote: inner });
+    const got = stripMutedReply(wrapper, cfg({ ngUsers: ["@bob"] }));
+    expect(got.renote).not.toBeNull();
+    expect(got.renote!.reply).toBeNull();
+    expect(got.renote!.replyId).toBe("r1");
+  });
+
+  it("該当しなければ同じオブジェクトを返す", () => {
+    const n = replyNote(makeNote({ id: "r1", user: bob() }));
+    expect(stripMutedReply(n, cfg({ ngUsers: ["@someone"] }))).toBe(n);
+    const plain = makeNote({ id: "p" });
+    expect(stripMutedReply(plain, cfg({ ngUsers: ["@bob"] }))).toBe(plain);
+  });
+});
+
+describe("app.setMute strips muted reply targets (Issue #486)", () => {
+  it("表示中のノートと通知の返信先を外し、本体は残す", async () => {
+    const target = () => makeNote({ id: "r1", user: makeUser({ id: "u2", username: "bob" }) });
+    const inTimeline = makeNote({ id: "n1", replyId: "r1", reply: target() });
+    const inNotification = makeNote({ id: "n2", replyId: "r1", reply: target() });
+    const tab = makeNoteTab([inTimeline], {
+      notifications: [makeNotification({ id: "x1", type: "reply", note: inNotification })],
+    });
+    app.groups = [makeGroup([tab])];
+
+    await app.setMute({ ngWords: [], ngUsers: ["@bob"], ngInstances: [] });
+
+    const live = app.groups[0].tabs[0];
+    expect(live.notes).toHaveLength(1);
+    expect(live.notes[0].reply).toBeNull();
+    expect(live.notes[0].replyId).toBe("r1");
+    expect(live.notifications).toHaveLength(1);
+    expect(live.notifications[0].note?.reply).toBeNull();
+  });
+
+  it("返信先が変わらない通知はオブジェクトを再生成しない", async () => {
+    const unrelated = makeNotification({
+      id: "x1",
+      type: "reply",
+      note: makeNote({ id: "n2", replyId: "r1", reply: makeNote({ id: "r1", user: makeUser({ id: "u3", username: "carol" }) }) }),
+    });
+    app.groups = [makeGroup([makeNoteTab([], { notifications: [unrelated] })])];
+    const before = app.groups[0].tabs[0].notifications[0];
+
+    await app.setMute({ ngWords: [], ngUsers: ["@bob"], ngInstances: [] });
+
+    expect(app.groups[0].tabs[0].notifications[0]).toBe(before);
+  });
+
+  it("note を持たない通知はそのまま残る", async () => {
+    const tab = makeNoteTab([], { notifications: [makeNotification({ id: "x1", type: "follow", note: null })] });
+    app.groups = [makeGroup([tab])];
+
+    await app.setMute({ ngWords: [], ngUsers: ["@bob"], ngInstances: [] });
+
+    expect(app.groups[0].tabs[0].notifications).toHaveLength(1);
+    expect(app.groups[0].tabs[0].notifications[0].note).toBeNull();
   });
 });
