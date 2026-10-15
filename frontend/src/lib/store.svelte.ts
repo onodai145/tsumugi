@@ -6,6 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { loadAssetBlobUrl } from "./assetBlob";
+import { prewarmSoundChoice } from "./soundChoice";
 import {
   isPermissionGranted,
   requestPermission,
@@ -292,6 +293,7 @@ class AppStore {
       this.mute = await unwrap(commands.getMute());
       const notify = await unwrap(commands.getNotify());
       this.notify = { ...notify, soundChoice: notify.soundChoice ?? "" };
+      prewarmSoundChoice(this.notify.soundChoice ?? "");
       const ui = await unwrap(commands.getUiPrefs());
       // セーフモードは復旧手段なので、取得に失敗したら fail-closed（CSSを適用しない側）に倒す。
       this.safeMode = await commands.isSafeMode().catch(() => true);
@@ -995,7 +997,7 @@ class AppStore {
         if ((wantsDesktop || wantsSound) && this.#markNotified(`note:${e.payload.note.id}`)) {
           this.#logDebug(`新着ノート通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
-          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
+          if (wantsSound) this.#playTabSound(tab);
         }
       }),
     );
@@ -1083,7 +1085,7 @@ class AppStore {
         if ((wantsDesktop || wantsSound) && this.#markNotified(n.id)) {
           this.#logDebug(`通知を発火: desktop=${wantsDesktop} sound=${wantsSound} (${tabName(tab)})`);
           if (wantsDesktop) void this.#osNotify(n);
-          if (wantsSound) playNotifySound(this.#resolveSoundChoice(tab));
+          if (wantsSound) this.#playTabSound(tab);
         }
         if (tab.notifications.some((x) => x.id === n.id)) return;
         tab.notifications = [n, ...tab.notifications].slice(0, MAX_NOTES);
@@ -1528,6 +1530,7 @@ class AppStore {
     }
     await unwrap(commands.setNotify(config));
     this.notify = config;
+    prewarmSoundChoice(config.soundChoice ?? "");
     this.#log("info", "通知設定を保存しました");
   }
 
@@ -1877,6 +1880,13 @@ class AppStore {
   /// 無ければ設定→通知のグローバル選択を継承する（どちらも空なら既定=beep）。
   #resolveSoundChoice(tab: TabView): string {
     return tab.notifySoundChoice || this.notify.soundChoice || "";
+  }
+
+  /// 通知音を鳴らす。MML の生成に失敗して beep で代替した場合は、理由をデバッグログに残す。
+  #playTabSound(tab: TabView) {
+    playNotifySound(this.#resolveSoundChoice(tab), (e) =>
+      this.#logDebug(`通知音の生成に失敗したため beep で代替します: ${String(e)}`),
+    );
   }
 
   async #osNotify(n: Notification) {

@@ -1,6 +1,7 @@
 // Tauri command のラッパ。生成された bindings の Result を unwrap し、
 // 失敗時は型付き Error を Error オブジェクトに変換して throw する。
 import { commands, type Error as ApiError, type HapticPattern } from "../bindings/tauri.gen";
+import { resolveSoundChoice } from "./soundChoice";
 
 export { commands };
 export * from "../bindings/tauri.gen";
@@ -39,8 +40,18 @@ export function formatError(e: ApiError): string {
 /// 呼び出し側は結果を待つ必要がないため fire-and-forget。IPC 層自体の失敗(コマンド未登録等の
 /// 開発時ミスなど)で unhandled promise rejection にならないよう、ここで一括して握りつぶす
 /// (play_notify_sound コマンド自体は常に Ok を返す設計で、失敗は Rust 側で warn ログのみ)。
-export function playNotifySound(choice: string): void {
-  void unwrap(commands.playNotifySound(choice)).catch(() => {});
+/// mml: は再生前に data: URL へ解決し、失敗したら beep で代替する(理由は onError に渡す)。
+export function playNotifySound(choice: string, onError?: (e: unknown) => void): void {
+  void (async () => {
+    let resolved = choice;
+    try {
+      resolved = await resolveSoundChoice(choice);
+    } catch (e) {
+      onError?.(e);
+      resolved = "beep"; // 解決できなくても通知は止めない
+    }
+    await unwrap(commands.playNotifySound(resolved));
+  })().catch(() => {});
 }
 
 /// ハプティクス(振動)を発火する(Issue #26)。isMobilePlatform && 設定ONの場合のみ呼ぶこと
