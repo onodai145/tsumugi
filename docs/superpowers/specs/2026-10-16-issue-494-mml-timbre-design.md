@@ -159,3 +159,40 @@ WebKitGTK 2.54.1 を Xvfb で動かし、`http://127.0.0.1` 起点のページ�
 - `pluck` / `metal`、サンプル音源。
 - 音色ごとの試聴ボタン、ピアノロール。
 - 通知の種類ごとに別の音を割り当てる機能、MML の共有・インポート・エクスポート。
+
+## 実装後の確認
+
+2026-10-16、`feat/issue-494-mml-timbre` の HEAD 647784d で確認した。実アプリは Xvfb(:87)・`dbus-run-session`・隔離した XDG_*(/tmp 直下)で起動し、`WAYLAND_DISPLAY` は unset した(実画面には出していない)。このセッションではコードを変更していない。
+
+確認できたこと:
+- 自動テスト: `cargo test` は 731 passed / 0 failed / 61 ignored、`pnpm test` は 86 files / 898 tests passed、`pnpm check` は 0 errors(既存の `UrlPreviewCard.svelte` の警告 1 件のみ)。
+- 設定→通知(実アプリ、確認用アカウントを 1 つ入れた隔離インスタンス。種類は「MML(打ち込み)」):
+  - `@bell o5 l8 cdefgab>c` で「再生時間 2.0 秒」(保存・試聴は有効)。`@3 t120 o5 c d e` は「再生時間 1.5 秒」。
+  - `@14 c` は赤字で「2 文字目: 音色は 0〜13 です」、保存と試聴の `disabled` が真。`@xyz c` は「2 文字目: 不明な音色です」、同じく保存と試聴が無効。
+  - 「記法」を開くと、「@3 または @bell 音色(下の一覧。何も書かなければ @0 fm)」の行と、`data-testid="mml-timbres"` の一覧「音色: @0 fm / @1 square / @2 pulse / @3 triangle / @4 saw / @5 sine / @6 organ / @7 epiano / @8 bell / @9 am / @10 lead / @11 bass / @12 drum / @13 noise」が出た(スクリーンショットで目視)。
+- 試聴: `window.fetch` の `ipc://` を包み、`play_notify_sound` の `choice` を記録した。いずれも `data:audio/wav;base64,UklGR…` で(RIFF/WAVE、22050Hz、モノラル、16bit を先頭バイトで確認)、`beep` には落ちず、「試聴に失敗しました」も出なかった。
+  - `@lead t120 o5 c d e`(1.5 秒): choice 123,562 文字(IPC 本文は 123,575 文字)
+  - `@drum o3 c4 c4`(1.0 秒): choice 94,162 文字(IPC 本文 94,175)
+  - `@noise c8 c8 c8`(0.8 秒): choice 79,462 文字(IPC 本文 79,475)
+  - 実アプリのログファイル(`tsumugi.log`)に WARN / ERROR は 0 件。stderr(`app.log`)の WARNING は、隔離環境に AT-SPI のバスがないことによる GTK の警告と、Xvfb に DRI3 がないことによる MESA の警告だけだった(アプリ由来ではない)。
+- 互換: `@` を含まない `t120 o5 l8 cdefgab>c` の試聴は、IPC 本文が 152,975 文字で #75 の確認時の値と同じ(choice 単体は 152,962 文字。#75 の記録の「152,975」は IPC 本文の長さだった)。`@0 t120 o5 l8 cdefgab>c` は `@` なしと同じ data: URL(簡易ハッシュまで一致)で、`@bell o5 l8 cdefgab>c` は長さが同じで内容(ハッシュ)が違った。つまり既存の MML は同じ音のまま、`@` を付けると別の波形が出る。
+- 保存と復元: `@3 t120 o5 c d e` を保存すると、`settings.json` の `notify` が `{"desktop": false, "sound": true, "soundChoice": "mml:@3 t120 o5 c d e"}` になった。アプリを再起動して設定→通知を開くと、入力欄に `@3 t120 o5 c d e`、種類は「MML(打ち込み)」、「通知音を鳴らす」ON、「再生時間 1.5 秒」が復元された。
+- Android エミュレーター(AVD `tsumugi-verify`、Android 14 x86_64、Chrome 113.0.5672.136 をヘッドレスで起動し、`http://10.0.2.2:<port>/calib.html` で Task 4 の校正ハーネス(実物の `renderScore` と `TIMBRE_LIST`)を 1 回実行した。UA 文字列は Chrome の UA 削減で `Android 10; K` と出るが、`getprop` は 14):
+  - 14 種すべてで `error` なし・NaN なし(`bad` は全て 0)。`lead`(`DuoSynth`)、`bass`(`MonoSynth`)、`drum`(`MembraneSynth`)、`noise`(`NoiseSynth`)も描画できた。
+  - C4 の単音のピーク: fm 0.2031 / square 0.1418 / pulse 0.1238 / triangle 0.2021 / saw 0.2387 / sine 0.1689 / organ 0.1300 / epiano 0.1958 / bell 0.2098 / am 0.1932 / lead 0.2274 / bass 0.2744 / drum 0.3259 / noise 0.3153。全て 0 でなく、0.36 以下。midi 36〜96 の単音のピークは全て 0.001 以上(最小は `bass` の midi 96 の 0.0577)。
+  - C4 の RMS は noise 以外が −25.6 dB で fm と一致(校正値どおり)、noise は −31.8 dB(fm より 6.2 dB 小さい。設計どおり)。WebKitGTK での校正と数値がほぼ一致した。
+  - 4 トラック同時(lead / square / saw / noise、C4)のピーク 0.1561。200 音(4 トラック × 50 音)の描画時間は noise 1,705 ms、lead 4,222 ms、fm 1,096 ms(エミュレーター上で、基準の 10 秒未満)。描画時間を音色ごとには測っていない。
+
+確認できなかったこと:
+- 実際に音が鳴ること、聞こえ方。作業者は音を聞けず、Xvfb にも音声デバイスがない。Rust 側の再生は、`data:` URL を受け取って警告が出ていないことまでを見た。初期案のパラメータ(特に `bell` / `epiano` / `lead` / `organ`)は、ユーザーの耳での調整が要る。
+- 複数トラックで音色が違うときの音量バランスの聞き比べ(ピークと RMS の数字だけ)。
+- 実際の Android WebView(エミュレーターの Chrome 113 で代用した)、Android 実機、macOS、Windows。
+- カラム追加モーダルでの保存と再編集(確認用アカウントにトークンがなく、カラムが作れない)。確認は設定→通知の既定の通知音だけ。
+- 実サーバーの通知カラムに新着を出して鳴らす経路。
+
+気づいたこと:
+- 隔離起動のデバッグビルドは `frontend/dist` を埋め込むので、`pnpm build` で dist を作り直してから `cargo build` した(dist は gitignore 対象)。
+- トークンのない隔離インスタンスは「アカウントを追加」の画面から先へ進めず、設定を開けない。設定ファイルにダミーのアカウント(`misskey.invalid`)を書いて起動すると、設定→通知を開ける。
+- #75 の記録の「152,975 文字」は `data:` URL ではなく IPC 本文(`{"choice":"…"}`)の長さだった。choice 単体の長さは 152,962 文字。
+- 同じ MML の 2 回目の試聴は `resolveSoundChoice` のメモ化により `parse_mml` を呼ばない(仕様どおり)。
+- Android エミュレーターの 200 音の描画は、`lead` が約 4.2 秒かかった(WebKitGTK では約 1.6 秒)。エミュレーターは CPU 描画で、実機とは比べられない。
