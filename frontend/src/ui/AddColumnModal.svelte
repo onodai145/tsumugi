@@ -1,10 +1,10 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { app, NOTIFY_SOUND_PRESETS } from "../lib/store.svelte";
+  import { app } from "../lib/store.svelte";
   import type { TabView } from "../lib/store.svelte";
-  import { playNotifySound } from "../lib/ipc";
   import AccountSelect from "./AccountSelect.svelte";
   import Dropdown from "./Dropdown.svelte";
+  import SoundChoicePicker from "./settings/SoundChoicePicker.svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
   import Modal from "./Modal.svelte";
@@ -81,41 +81,12 @@
   let notifySound = $state(edit?.notifySound ?? untrack(() => sourceType === "notifications"));
   // 空文字＝設定→通知のグローバル選択を継承
   let notifySoundChoice = $state(edit?.notifySoundChoice ?? "");
-  let pickingSound = $state(false);
-
-  type SoundMode = "inherit" | "custom" | (string & {});
-  function modeFromChoice(choice: string): SoundMode {
-    if (!choice) return "inherit";
-    if (choice.startsWith("data:")) return "custom";
-    return choice;
-  }
-  let soundMode = $state<SoundMode>(untrack(() => modeFromChoice(notifySoundChoice)));
-  const soundModeOptions = [
-    { value: "inherit", label: "継承（グローバル設定）" },
-    ...NOTIFY_SOUND_PRESETS.map((p) => ({ value: p.id, label: p.label })),
-    { value: "custom", label: "カスタム（音声ファイル）" },
-  ];
-  $effect(() => {
-    if (soundMode === "inherit") notifySoundChoice = "";
-    else if (soundMode === "custom") {
-      if (!notifySoundChoice.startsWith("data:")) notifySoundChoice = "";
-    } else {
-      notifySoundChoice = soundMode;
-    }
-  });
-
-  async function pickSound() {
-    submitErr = null;
-    pickingSound = true;
-    try {
-      const url = await app.pickNotifySoundFile();
-      if (url) notifySoundChoice = url;
-    } catch (e) {
-      submitErr = String(e);
-    } finally {
-      pickingSound = false;
-    }
-  }
+  let soundInvalid = $state(false);
+  // 簡単モードで通知設定ブロックを出すソース(検索・ユーザ・タグはライブ更新が無い)。
+  const guidedNotifyShown = $derived(sourceType !== "search" && sourceType !== "user" && sourceType !== "tag");
+  // 通知音ピッカーが描画される条件。非表示の間は入力途中(未検証)の MML 下書きを保存しないため、元の値に戻す。
+  const soundPickerShown = $derived(notifySound && (uiMode === "expert" || guidedNotifyShown));
+  const effectiveSoundChoice = $derived(soundPickerShown ? notifySoundChoice : (edit?.notifySoundChoice ?? ""));
   let filterText = $state(edit?.filter.kind === "tql" ? edit.filter.value : "");
   let filterErr = $state<string | null>(null);
   let busy = $state(false);
@@ -301,15 +272,15 @@
         const filter: FilterQuery = { kind: "tql", value: tqlText.trim() };
         if (isEdit && edit) {
           await app.updateColumn(edit.id, kind, filter, name);
-          await app.setColumnNotify(edit.id, notifyDesktop, notifySound, notifySoundChoice);
+          await app.setColumnNotify(edit.id, notifyDesktop, notifySound, effectiveSoundChoice);
         } else {
           const tab = await app.addColumn(accountId, kind, filter, groupId ?? undefined, name);
           if (
             notifyDesktop !== tab.notifyDesktop ||
             notifySound !== tab.notifySound ||
-            notifySoundChoice !== tab.notifySoundChoice
+            effectiveSoundChoice !== tab.notifySoundChoice
           ) {
-            await app.setColumnNotify(tab.id, notifyDesktop, notifySound, notifySoundChoice);
+            await app.setColumnNotify(tab.id, notifyDesktop, notifySound, effectiveSoundChoice);
           }
         }
         onclose();
@@ -342,16 +313,16 @@
       }
       if (isEdit && edit) {
         await app.updateColumn(edit.id, kind, buildFilter(), name);
-        await app.setColumnNotify(edit.id, notifyDesktop, notifySound, notifySoundChoice);
+        await app.setColumnNotify(edit.id, notifyDesktop, notifySound, effectiveSoundChoice);
       } else {
         const tab = await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined, name);
         // 既定値と異なる場合のみ追加で呼ぶ（既定は backend 側の add_column が設定済み）
         if (
           notifyDesktop !== tab.notifyDesktop ||
           notifySound !== tab.notifySound ||
-          notifySoundChoice !== tab.notifySoundChoice
+          effectiveSoundChoice !== tab.notifySoundChoice
         ) {
-          await app.setColumnNotify(tab.id, notifyDesktop, notifySound, notifySoundChoice);
+          await app.setColumnNotify(tab.id, notifyDesktop, notifySound, effectiveSoundChoice);
         }
       }
       onclose();
@@ -496,7 +467,7 @@
     </label>
   {/if}
 
-  {#if sourceType !== "search" && sourceType !== "user" && sourceType !== "tag"}
+  {#if guidedNotifyShown}
     <div class="mb-2.5 flex flex-col gap-1 text-sm">
       <span class="text-muted-foreground">このタブの通知</span>
       <label class="flex items-center gap-1.5 text-sm"><input type="checkbox" bind:checked={notifyDesktop} /> デスクトップ通知</label>
@@ -505,19 +476,7 @@
     {#if notifySound}
       <div class="mb-2.5 flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">通知音の種類</span>
-        <Dropdown bind:value={soundMode} options={soundModeOptions} />
-        {#if soundMode === "custom"}
-          <div class="flex items-center gap-2.5">
-            <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
-              {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-            </Button>
-            {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
-            {/if}
-          </div>
-        {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
-        {/if}
+        <SoundChoicePicker bind:value={notifySoundChoice} allowInherit onvalidity={(v) => (soundInvalid = v)} />
       </div>
     {/if}
     <p class="mb-2 mt-0 text-xs text-muted-foreground">
@@ -556,26 +515,14 @@
     {#if notifySound}
       <div class="mb-2.5 flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">通知音の種類</span>
-        <Dropdown bind:value={soundMode} options={soundModeOptions} />
-        {#if soundMode === "custom"}
-          <div class="flex items-center gap-2.5">
-            <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
-              {pickingSound ? "読み込み中…" : notifySoundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-            </Button>
-            {#if notifySoundChoice.startsWith("data:")}
-              <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(notifySoundChoice)}>試聴</Button>
-            {/if}
-          </div>
-        {:else if soundMode !== "inherit"}
-          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
-        {/if}
+        <SoundChoicePicker bind:value={notifySoundChoice} allowInherit onvalidity={(v) => (soundInvalid = v)} />
       </div>
     {/if}
     <p class="mb-2 mt-0 text-xs text-muted-foreground">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
   {/if}
 
   <div class="mt-1.5 flex justify-end">
-    <Button disabled={busy || !!filterErr || !!tqlErr} onclick={submit} data-testid="add-column-submit">
+    <Button disabled={busy || !!filterErr || !!tqlErr || soundInvalid} onclick={submit} data-testid="add-column-submit">
       {busy ? (isEdit ? "保存中…" : "作成中…") : isEdit ? "保存" : "追加"}
     </Button>
   </div>

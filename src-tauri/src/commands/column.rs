@@ -716,6 +716,7 @@ pub async fn set_column_notify(
     notify_sound: bool,
     notify_sound_choice: String,
 ) -> Result<()> {
+    crate::mml::validate_sound_choice(&notify_sound_choice)?;
     state
         .settings
         .set_column_notify(&column_id, notify_desktop, notify_sound, &notify_sound_choice)

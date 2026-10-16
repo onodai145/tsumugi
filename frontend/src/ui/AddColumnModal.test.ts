@@ -100,3 +100,43 @@ describe("AddColumnModal 編集モードで名前だけ変更した場合(Issue 
     expect(app.groups[0].tabs[0].customTitle).toBe("新しい名前");
   });
 });
+
+// Issue #75: 通知音ピッカーが非表示の間は、入力途中の(未検証の) MML 下書きを保存しない。
+describe("AddColumnModal の通知音の種類(Issue #75)", () => {
+  function setupEdit(notifySoundChoice: string) {
+    const tab = makeTab({ type: "home" }, { kind: "keywords", value: [] });
+    tab.notifySound = true;
+    tab.notifySoundChoice = notifySoundChoice;
+    app.groups = [{ id: "group1", width: 400, auto: false, tabs: [tab], activeTabId: tab.id }];
+    return tab;
+  }
+  const notifyCall = () => invokeMock.mock.calls.find((c) => c[0] === "set_column_notify");
+
+  it("通知音を外してピッカーが消えたら、MML の下書きではなく元の値で保存する", async () => {
+    const tab = setupEdit("chime");
+    const onclose = vi.fn();
+    const { getByText, getByTestId, getByLabelText } = render(AddColumnModal, { onclose, groupId: null, editTab: tab });
+
+    await fireEvent.click(getByText("チャイム"));
+    await fireEvent.click(getByText("MML（打ち込み）"));
+    await fireEvent.input(getByTestId("mml-input"), { target: { value: "c4 x" } });
+    await fireEvent.click(getByLabelText("通知音"));
+    await fireEvent.click(getByTestId("add-column-submit"));
+    await waitFor(() => expect(onclose).toHaveBeenCalled());
+
+    expect(notifyCall()?.[1]).toMatchObject({ notifySound: false, notifySoundChoice: "chime" });
+  });
+
+  it("ピッカーが見えているときは選んだプリセットをそのまま保存する", async () => {
+    const tab = setupEdit("");
+    const onclose = vi.fn();
+    const { getByText, getByTestId } = render(AddColumnModal, { onclose, groupId: null, editTab: tab });
+
+    await fireEvent.click(getByText("継承（グローバル設定）"));
+    await fireEvent.click(getByText("ピン"));
+    await fireEvent.click(getByTestId("add-column-submit"));
+    await waitFor(() => expect(onclose).toHaveBeenCalled());
+
+    expect(notifyCall()?.[1]).toMatchObject({ notifySound: true, notifySoundChoice: "ping" });
+  });
+});

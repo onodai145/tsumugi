@@ -253,6 +253,7 @@ pub async fn get_notify(state: State<'_, AppState>) -> Result<NotifyConfig> {
 #[tauri::command]
 #[specta::specta]
 pub async fn set_notify(state: State<'_, AppState>, config: NotifyConfig) -> Result<()> {
+    crate::mml::validate_sound_choice(&config.sound_choice)?;
     state.settings.save_notify(&config)
 }
 

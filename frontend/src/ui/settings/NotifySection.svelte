@@ -1,47 +1,18 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { app, NOTIFY_SOUND_PRESETS } from "../../lib/store.svelte";
-  import { playNotifySound } from "../../lib/ipc";
-  import Dropdown from "../Dropdown.svelte";
+  import { app } from "../../lib/store.svelte";
+  import SoundChoicePicker from "./SoundChoicePicker.svelte";
   import { Button } from "$lib/components/ui/button";
 
   let desktop = $state(app.notify.desktop);
   let sound = $state(app.notify.sound);
   let soundChoice = $state(app.notify.soundChoice ?? "");
-  let pickingSound = $state(false);
+  let soundInvalid = $state(false);
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
 
-  type SoundMode = "custom" | (string & {});
-  function modeFromChoice(choice: string): SoundMode {
-    return choice.startsWith("data:") ? "custom" : choice || "beep";
-  }
-  let soundMode = $state<SoundMode>(untrack(() => modeFromChoice(soundChoice)));
-  const soundModeOptions = [
-    ...NOTIFY_SOUND_PRESETS.map((p) => ({ value: p.id, label: p.label })),
-    { value: "custom", label: "カスタム（音声ファイル）" },
-  ];
-  $effect(() => {
-    if (soundMode === "custom") {
-      if (!soundChoice.startsWith("data:")) soundChoice = "";
-    } else {
-      soundChoice = soundMode;
-    }
-  });
-
-  async function pickSound() {
-    err = null;
-    pickingSound = true;
-    try {
-      const url = await app.pickNotifySoundFile();
-      if (url) soundChoice = url;
-    } catch (e) {
-      err = String(e);
-    } finally {
-      pickingSound = false;
-    }
-  }
+  // ピッカーが非表示(通知音オフ)の間は、入力途中の未検証な下書きではなく保存済みの値を送る。
+  const effectiveSoundChoice = $derived(sound ? soundChoice : (app.notify.soundChoice ?? ""));
 
   const hasNotifyEnabledTab = $derived(
     app.groups.some((g) => g.tabs.some((t) => t.notifyDesktop || t.notifySound)),
@@ -52,7 +23,7 @@
     saved = false;
     busy = true;
     try {
-      await app.setNotify({ desktop, sound, soundChoice });
+      await app.setNotify({ desktop, sound, soundChoice: effectiveSoundChoice });
       desktop = app.notify.desktop; // 権限拒否で false に戻る場合を反映
       saved = true;
     } catch (e) {
@@ -71,19 +42,7 @@
 {#if sound}
   <div class="my-1 mb-3 flex flex-col gap-1.5 text-sm">
     <span class="text-muted-foreground">通知音の種類(既定。タブごとに上書き可)</span>
-    <Dropdown bind:value={soundMode} options={soundModeOptions} />
-    {#if soundMode === "custom"}
-      <div class="mb-2 flex items-center gap-2 text-sm">
-        <Button type="button" variant="outline" size="sm" disabled={pickingSound} onclick={pickSound}>
-          {pickingSound ? "読み込み中…" : soundChoice.startsWith("data:") ? "音声を変更" : "音声ファイルを選択"}
-        </Button>
-        {#if soundChoice.startsWith("data:")}
-          <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundChoice)}>試聴</Button>
-        {/if}
-      </div>
-    {:else}
-      <Button type="button" variant="outline" size="sm" onclick={() => playNotifySound(soundMode)}>試聴</Button>
-    {/if}
+    <SoundChoicePicker bind:value={soundChoice} onvalidity={(v) => (soundInvalid = v)} />
   </div>
 {/if}
 
@@ -96,6 +55,6 @@
 
 <div class="flex items-center justify-end gap-3">
   {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}
-  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
+  <Button type="button" disabled={busy || soundInvalid} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
 </div>
 {#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
