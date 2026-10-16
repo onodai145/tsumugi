@@ -1,6 +1,6 @@
 // MML の音色(@番号 / @名前)ごとの音源の作り方(Issue #494)。
 // 音色の番号と名前は Rust の Timbre::ALL(src-tauri/src/domain/mml.rs)と同じにする。
-// gainDb は、C4 の単音の聞こえる大きさを fm(現行の音)にそろえる補正。実描画で測って決めている(docs/superpowers/specs/2026-10-16-issue-494-mml-timbre-design.md)。
+// gainDb は、C4 の単音の聞こえる大きさ(RMS)を fm(現行の音)にそろえる補正。実際の renderScore を WebKitGTK 2.54.1(Xvfb)で測って校正した値で、noise だけはピーク上限(0.36)を優先して小さめにしている(docs/superpowers/specs/2026-10-16-issue-494-mml-timbre-design.md の「校正結果」)。
 import type { Timbre } from "../bindings/tauri.gen";
 
 export type ToneModule = typeof import("tone");
@@ -60,15 +60,15 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
         db,
       ),
   },
-  square: { number: 1, name: "square", gainDb: -10.2, releaseSec: 0.1, create: basic({ type: "square" }) },
-  pulse: { number: 2, name: "pulse", gainDb: -11.6, releaseSec: 0.1, create: basic({ type: "pulse", width: 0.25 }) },
-  triangle: { number: 3, name: "triangle", gainDb: -6.9, releaseSec: 0.1, create: basic({ type: "triangle" }) },
-  saw: { number: 4, name: "saw", gainDb: -5.3, releaseSec: 0.1, create: basic({ type: "sawtooth" }) },
-  sine: { number: 5, name: "sine", gainDb: -8.7, releaseSec: 0.1, create: basic({ type: "sine" }) },
+  square: { number: 1, name: "square", gainDb: -13.1, releaseSec: 0.1, create: basic({ type: "square" }) },
+  pulse: { number: 2, name: "pulse", gainDb: -14.6, releaseSec: 0.1, create: basic({ type: "pulse", width: 0.25 }) },
+  triangle: { number: 3, name: "triangle", gainDb: -9.8, releaseSec: 0.1, create: basic({ type: "triangle" }) },
+  saw: { number: 4, name: "saw", gainDb: -8.3, releaseSec: 0.1, create: basic({ type: "sawtooth" }) },
+  sine: { number: 5, name: "sine", gainDb: -11.6, releaseSec: 0.1, create: basic({ type: "sine" }) },
   organ: {
     number: 6,
     name: "organ",
-    gainDb: -14.3,
+    gainDb: -14.2,
     releaseSec: 0.05,
     create: (Tone, db) =>
       poly(
@@ -82,7 +82,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
   epiano: {
     number: 7,
     name: "epiano",
-    gainDb: 0,
+    gainDb: -0.5,
     releaseSec: 0.3,
     create: (Tone, db) =>
       poly(
@@ -98,7 +98,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
   bell: {
     number: 8,
     name: "bell",
-    gainDb: 0,
+    gainDb: 0.1,
     releaseSec: 0.5,
     create: (Tone, db) =>
       poly(
@@ -114,7 +114,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
   am: {
     number: 9,
     name: "am",
-    gainDb: -1.4,
+    gainDb: 4.3,
     releaseSec: 0.2,
     create: (Tone, db) =>
       poly(
@@ -128,7 +128,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
   lead: {
     number: 10,
     name: "lead",
-    gainDb: -20.3,
+    gainDb: -15.9,
     releaseSec: 0.15,
     create: (Tone, db) => {
       const voice = { envelope: { attack: 0.01, decay: 0.1, sustain: 0.6, release: 0.15 } };
@@ -147,7 +147,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
   bass: {
     number: 11,
     name: "bass",
-    gainDb: -14.5,
+    gainDb: -10.0,
     releaseSec: 0.2,
     create: (Tone, db) =>
       poly(
@@ -163,7 +163,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
   drum: {
     number: 12,
     name: "drum",
-    gainDb: -6.8,
+    gainDb: -6.1,
     releaseSec: 0.3,
     create: (Tone, db) =>
       poly(
@@ -176,7 +176,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
   noise: {
     number: 13,
     name: "noise",
-    gainDb: -4.5,
+    gainDb: -5.0,
     releaseSec: 0.05,
     perNote: true,
     create: (Tone, db) => {
