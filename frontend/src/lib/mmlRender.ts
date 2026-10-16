@@ -6,7 +6,7 @@ import { encodeWavMono16, wavToDataUrl } from "./wav";
 
 const SAMPLE_RATE = 22050;
 /** FM 音源の余韻(リリース)が切れないように足す秒数 */
-const TAIL_SEC = 0.6;
+export const TAIL_SEC = 0.6;
 
 export async function renderScore(score: MmlScore): Promise<string> {
   const Tone = await import("tone");
