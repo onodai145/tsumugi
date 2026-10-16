@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() =
 
 const { commands } = await import("../../lib/ipc");
 const { default: SoundChoicePicker } = await import("./SoundChoicePicker.svelte");
+const { TIMBRE_LIST } = await import("../../lib/mmlTimbres");
 
 const okScore = { notes: [], totalSec: 2.5, trackCount: 1 };
 
@@ -91,5 +92,12 @@ describe("SoundChoicePicker の MML モード", () => {
     await vi.waitFor(() => expect(onvalidity).toHaveBeenLastCalledWith(true));
     unmount();
     expect(onvalidity).toHaveBeenLastCalledWith(false);
+  });
+
+  it("記法ヘルプに音色の一覧(番号と名前)が出る", async () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-timbres").textContent ?? "";
+    expect(TIMBRE_LIST).toHaveLength(14);
+    for (const p of TIMBRE_LIST) expect(text).toContain(`@${p.number} ${p.name}`);
   });
 });

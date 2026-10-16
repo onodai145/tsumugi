@@ -62,6 +62,7 @@ Issue #494(関連: #75 / `2026-10-15-issue-75-mml-ringtone-design.md`、PR #493)
 - `@<数字>` : 番号で指定する。範囲は 0〜13。数字は `o` や `t` と同じく連続する数字を 1 つの数として読む(`@10` は 10 番)。`@3c` のように、数字の直後に音符を続けてもよい。
 - `@<名前>` : 上の表の名前で指定する。**表の名前に最長一致**して読み、残りは次の命令として読む。空白は先に除かれているので、`@bell c` と `@bellc` は同じ意味になる(`bell` + `c`)。どの名前も他の名前の接頭辞ではないので、一意に決まる。
 - 状態: トラックごとに独立で、各トラックの先頭は `@0`。`;` でトラックを分けても引き継がれない。`[...]n` の中に書いてもよく、その場合は展開後の各回で再度適用される(`o` / `v` と同じ)。
+  - タイ(`&`)でつないだ音は、先頭の音の音色のまま(間に `@` があっても連結でき、先頭の音のベロシティを保つ既存の扱いと同じ)。
 - エラー(位置は 0 始まりの文字位置。UI は 1 始まりの「N 文字目」で表示する):
   - `@` の直後が数字でも既知の名前でもない: 「不明な音色です」。位置は `@` の次の文字。
   - 番号が 14 以上: 「音色は 0〜13 です」。位置は数字の先頭(`o9` の扱いと同じ)。
@@ -71,8 +72,8 @@ Issue #494(関連: #75 / `2026-10-15-issue-75-mml-ringtone-design.md`、PR #493)
 ### 3. Rust
 
 - `domain/mml.rs`: `Timbre` 列挙型(14 値、`specta::Type`、`serde(rename_all = "camelCase")`)を追加し、`NoteEvent` に `timbre: Timbre` を足す。`MmlScore` / `MmlError` / `MmlParseResult` は変えない。
-- `mml.rs`: `Timbre` に、番号からの変換(`from_number`)、名前からの変換(`match_name`、最長一致で名前と読み進めた長さを返す)、名前の一覧を持たせる。`Op::Timbre(Timbre)` を足し、`run_track` が現在の音色を持って各 `NoteEvent` に入れる。
-- 互換: `@` を含まない MML は、全ノートの `timbre` が `fm` になる以外、出力が変わらない。既存のテストは、期待値に `timbre: Timbre::Fm` を足す。
+- `Timbre`(`domain/mml.rs`)に、全値の一覧(`Timbre::ALL`)、番号からの変換(`from_number`)、名前(`name`)を持たせる。`mml.rs` の `Cursor::timbre_name` が、表の名前に最長一致して読み進める。`Op::Timbre(Timbre)` を足し、`run_track` が現在の音色を持って各 `NoteEvent` に入れる。
+- 互換: `@` を含まない MML は、全ノートの `timbre` が `fm` になる以外、出力が変わらない。既存のテストは `NoteEvent` を直接組み立てていないので、期待値の変更は要らない。
 - `commands/sound.rs`、`set_notify`、`set_column_notify` は変えない(検証は `parse` を通すので、`@` の誤りも自動で拒否される)。
 - 生成バインディング(`tauri.gen.ts`)に `Timbre` の文字列ユニオンが出る。`generates_frontend_bindings` で確認する。
 
