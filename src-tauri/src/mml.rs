@@ -4,7 +4,7 @@
 //! 各音を「開始秒・長さ秒・MIDI ノート番号・ベロシティ」で返す。音の生成はフロント(Tone.js)の責務。
 //! 方言と上限は docs/superpowers/specs/2026-10-15-issue-75-mml-ringtone-design.md を参照。
 
-use crate::domain::{MmlError, MmlScore, NoteEvent};
+use crate::domain::{MmlError, MmlScore, NoteEvent, Timbre};
 use crate::error::Error;
 
 pub const MAX_TEXT_CHARS: usize = 1000;
@@ -49,6 +49,7 @@ enum Op {
     DefaultLen(u32),
     Tempo(u32),
     Volume(u8),
+    Timbre(Timbre),
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +89,18 @@ impl Cursor<'_> {
             self.bump();
         }
         n.map(|n| (n, start))
+    }
+
+    /// 先頭が音色名と一致するなら、その名前の分だけ読み進めて返す。
+    /// どの名前も他の名前の接頭辞ではない(テストで確認)ので、一致は 1 つに決まる。
+    fn timbre_name(&mut self) -> Option<Timbre> {
+        let rest = &self.syms[self.i..];
+        let t = Timbre::ALL.into_iter().find(|t| {
+            let name = t.name();
+            rest.len() >= name.len() && name.chars().zip(rest).all(|(a, (b, _))| a == *b)
+        })?;
+        self.i += t.name().len();
+        Some(t)
     }
 
     fn require_number(&mut self, cmd_pos: usize, cmd: char) -> Result<(u32, usize), MmlError> {
@@ -195,6 +208,24 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 }
                 Op::Volume(n as u8)
             }
+            '@' => {
+                if c.peek().is_none() {
+                    return Err(mml_err(pos, "`@` の後に音色の番号か名前が必要です"));
+                }
+                if let Some((n, p)) = c.number() {
+                    let Some(t) = Timbre::from_number(n) else {
+                        return Err(mml_err(
+                            p,
+                            format!("音色は 0〜{} です", Timbre::ALL.len() - 1),
+                        ));
+                    };
+                    Op::Timbre(t)
+                } else if let Some(t) = c.timbre_name() {
+                    Op::Timbre(t)
+                } else {
+                    return Err(mml_err(c.pos(), "不明な音色です"));
+                }
+            }
             '[' => {
                 if open_loop.is_some() {
                     return Err(mml_err(pos, "繰り返しはネストできません"));
@@ -237,6 +268,7 @@ struct TrackState {
     len: u32,
     tempo: u32,
     volume: u32,
+    timbre: Timbre,
     t: f64,
     /// 直前の命令が音符だったとき、その音符の `notes` 内の index(タイの連結先)
     last_note: Option<usize>,
@@ -269,6 +301,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
         len: DEFAULT_LEN,
         tempo: DEFAULT_TEMPO,
         volume: DEFAULT_VOLUME,
+        timbre: Timbre::Fm,
         t: 0.0,
         last_note: None,
         tie_pos: None,
@@ -293,6 +326,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
             Op::DefaultLen(n) => st.len = *n,
             Op::Tempo(n) => st.tempo = *n,
             Op::Volume(n) => st.volume = u32::from(*n),
+            Op::Timbre(t) => st.timbre = *t,
             Op::Tie => {
                 if st.last_note.is_none() || st.tie_pos.is_some() {
                     return Err(mml_err(pos, "`&` の前に音符が必要です"));
@@ -327,6 +361,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                         duration_sec: d,
                         midi: midi as u8,
                         velocity: f64::from(st.volume) / 15.0,
+                        timbre: st.timbre,
                     });
                     st.last_note = Some(notes.len() - 1);
                 }
@@ -413,7 +448,7 @@ pub fn validate_sound_choice(choice: &str) -> crate::error::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{MmlError, MmlScore};
+    use crate::domain::{MmlError, MmlScore, Timbre};
 
     fn approx(a: f64, b: f64) {
         assert!((a - b).abs() < 1e-9, "{a} != {b}");
@@ -652,5 +687,124 @@ mod tests {
         ));
         let err = validate_sound_choice("mml:x").unwrap_err();
         assert!(err.to_string().contains("1 文字目"), "{err}");
+    }
+
+    fn timbres(text: &str) -> Vec<Timbre> {
+        must_parse(text).notes.iter().map(|n| n.timbre).collect()
+    }
+
+    /// Rust 側の番号・名前の表。フロントの `lib/mmlTimbres.test.ts` の `EXPECTED` と同じ並びにすること。
+    const TIMBRE_TABLE: [(u32, &str, Timbre); 14] = [
+        (0, "fm", Timbre::Fm),
+        (1, "square", Timbre::Square),
+        (2, "pulse", Timbre::Pulse),
+        (3, "triangle", Timbre::Triangle),
+        (4, "saw", Timbre::Saw),
+        (5, "sine", Timbre::Sine),
+        (6, "organ", Timbre::Organ),
+        (7, "epiano", Timbre::Epiano),
+        (8, "bell", Timbre::Bell),
+        (9, "am", Timbre::Am),
+        (10, "lead", Timbre::Lead),
+        (11, "bass", Timbre::Bass),
+        (12, "drum", Timbre::Drum),
+        (13, "noise", Timbre::Noise),
+    ];
+
+    #[test]
+    fn timbre_defaults_to_fm() {
+        assert_eq!(timbres("c d e"), vec![Timbre::Fm; 3]);
+    }
+
+    #[test]
+    fn every_timbre_is_reachable_by_number_and_by_name() {
+        for (n, name, t) in TIMBRE_TABLE {
+            assert_eq!(Timbre::ALL[n as usize], t);
+            assert_eq!(t.name(), name);
+            assert_eq!(timbres(&format!("@{n} c")), vec![t], "@{n}");
+            assert_eq!(timbres(&format!("@{name} c")), vec![t], "@{name}");
+        }
+        assert_eq!(Timbre::ALL.len(), TIMBRE_TABLE.len());
+    }
+
+    #[test]
+    fn timbre_names_are_not_prefixes_of_each_other() {
+        for a in Timbre::ALL {
+            for b in Timbre::ALL {
+                if a != b {
+                    assert!(!b.name().starts_with(a.name()), "{} は {} の接頭辞", a.name(), b.name());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn timbre_serializes_as_its_mml_name() {
+        for t in Timbre::ALL {
+            assert_eq!(serde_json::to_value(t).unwrap(), serde_json::json!(t.name()));
+        }
+        let note = &must_parse("c").notes[0];
+        assert_eq!(serde_json::to_value(note).unwrap()["timbre"], "fm");
+    }
+
+    #[test]
+    fn timbre_name_may_be_followed_directly_by_a_command() {
+        assert_eq!(timbres("@bellc"), vec![Timbre::Bell]);
+        assert_eq!(timbres("@amc4"), vec![Timbre::Am]);
+        assert_eq!(timbres("@sawt60c"), vec![Timbre::Saw]);
+        assert_eq!(timbres("@3c"), vec![Timbre::Triangle]);
+        assert_eq!(timbres("@Bell C"), vec![Timbre::Bell]);
+        assert_eq!(timbres("@ bell c"), vec![Timbre::Bell]); // 空白は先に除かれる
+    }
+
+    #[test]
+    fn timbre_can_change_mid_track() {
+        assert_eq!(
+            timbres("@1 c @bell d @0 e f"),
+            vec![Timbre::Square, Timbre::Bell, Timbre::Fm, Timbre::Fm]
+        );
+    }
+
+    #[test]
+    fn timbre_state_is_per_track() {
+        let s = must_parse("@1 c; c; @drum c");
+        let by_track: Vec<(u8, Timbre)> = s.notes.iter().map(|n| (n.track, n.timbre)).collect();
+        assert_eq!(
+            by_track,
+            vec![(0, Timbre::Square), (1, Timbre::Fm), (2, Timbre::Drum)]
+        );
+    }
+
+    #[test]
+    fn timbre_inside_a_loop_is_reapplied_each_round() {
+        assert_eq!(
+            timbres("[@1c @2c]2"),
+            vec![Timbre::Square, Timbre::Pulse, Timbre::Square, Timbre::Pulse]
+        );
+        // 繰り返しの外には 1 周目の最後の状態が残る
+        assert_eq!(timbres("[@1c]2 d"), vec![Timbre::Square, Timbre::Square, Timbre::Square]);
+    }
+
+    #[test]
+    fn tied_notes_keep_the_first_notes_timbre() {
+        let s = must_parse("@1 c4&@2 c4");
+        assert_eq!(s.notes.len(), 1);
+        assert_eq!(s.notes[0].timbre, Timbre::Square);
+        approx(s.notes[0].duration_sec, 1.0);
+    }
+
+    #[test]
+    fn timbre_errors_report_where_to_look() {
+        assert_eq!(must_fail("@14 c").position, 1); // 範囲外は数字の先頭
+        assert!(must_fail("@14 c").message.contains("0〜13"));
+        assert_eq!(must_fail("@xyz c").position, 1); // 不明な名前は `@` の次
+        assert!(must_fail("@xyz c").message.contains("不明な音色"));
+        assert_eq!(must_fail("@bel c").position, 1); // 名前の途中までは一致しない
+        assert_eq!(must_fail("@c").position, 1); // 音符名は音色名ではない
+        assert_eq!(must_fail("c @").position, 2); // 末尾の `@`
+        assert_eq!(must_fail("@").position, 0);
+        assert_eq!(must_fail("c; @").position, 3); // トラック末尾の `@`
+        assert_eq!(must_fail("＠bell c").position, 0); // 全角の `＠` は不明な文字
+        assert_eq!(must_fail("@3").position, 0); // 音符が無い(既存の規則)
     }
 }

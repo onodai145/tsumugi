@@ -482,5 +482,7 @@ mod specta_export {
         assert!(ts.contains("MmlParseResult"), "missing MmlParseResult type");
         assert!(ts.contains("startSec"), "NoteEvent.start_sec should be camelCase");
         assert!(ts.contains("\"parsed\"") && ts.contains("\"invalid\""), "MmlParseResult status tags");
+        assert!(ts.contains("export type Timbre"), "missing Timbre type");
+        assert!(ts.contains("\"epiano\""), "Timbre variants must be camelCase strings");
     }
 }
