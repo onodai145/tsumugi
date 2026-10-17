@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
+import { EditorView } from "@codemirror/view";
 import type { Account, ColumnKind, FilterQuery } from "../bindings/tauri.gen";
 import type { TabView } from "../lib/store.svelte";
 
@@ -115,11 +116,13 @@ describe("AddColumnModal の通知音の種類(Issue #75)", () => {
   it("通知音を外してピッカーが消えたら、MML の下書きではなく元の値で保存する", async () => {
     const tab = setupEdit("chime");
     const onclose = vi.fn();
-    const { getByText, getByTestId, getByLabelText } = render(AddColumnModal, { onclose, groupId: null, editTab: tab });
+    const { getByText, getByTestId, findByTestId, getByLabelText } = render(AddColumnModal, { onclose, groupId: null, editTab: tab });
 
     await fireEvent.click(getByText("チャイム"));
     await fireEvent.click(getByText("MML（打ち込み）"));
-    await fireEvent.input(getByTestId("mml-input"), { target: { value: "c4 x" } });
+    // MML の入力欄は動的 import なので、現れるまで待ってから CodeMirror に入力する
+    const view = EditorView.findFromDOM(await findByTestId("mml-input"))!;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "c4 x" } });
     await fireEvent.click(getByLabelText("通知音"));
     await fireEvent.click(getByTestId("add-column-submit"));
     await waitFor(() => expect(onclose).toHaveBeenCalled());

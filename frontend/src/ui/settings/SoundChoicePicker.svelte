@@ -4,6 +4,7 @@
   import { commands, playNotifySound } from "../../lib/ipc";
   import { MML_PREFIX } from "../../lib/soundChoice";
   import { TIMBRE_LIST } from "../../lib/mmlTimbres";
+  import { computeUsage, formatUsage, type ParsedUsage } from "../../lib/mmlUsage";
   import Dropdown from "../Dropdown.svelte";
   import { Button } from "$lib/components/ui/button";
 
@@ -51,17 +52,24 @@
     | { kind: "idle" }
     | { kind: "pending" }
     | { kind: "ok"; totalSec: number }
-    | { kind: "error"; position: number; message: string }
+    // text は、そのエラーを返した解析の入力。編集後の古い位置に下線を引かないために持つ
+    | { kind: "error"; position: number; message: string; text: string }
     // IPC 失敗など、構文の判定そのものができなかった場合(位置は無い)
     | { kind: "failed"; message: string };
   let status = $state<MmlStatus>({ kind: "idle" });
+  // 直近に構文が通ったときの音数と再生時間。解析中は点滅を避けて、これを出し続ける
+  let lastOk = $state<ParsedUsage | null>(null);
+  let editor = $state<{ focusAt(pos: number): void }>();
+  // 同じ画面に複数あっても id が衝突しないように
+  const uid = $props.id();
 
   // 入力が止まって 300ms 後にパースする(初回だけ即時)。古い結果は捨てる。
   $effect(() => {
     if (mode !== "mml") return;
     const text = mmlText;
     if (!text.trim()) {
-      status = { kind: "error", position: 0, message: "MML を入力してください" };
+      lastOk = null;
+      status = { kind: "error", position: 0, message: "MML を入力してください", text };
       return;
     }
     const first = untrack(() => status.kind === "idle");
@@ -71,12 +79,17 @@
         try {
           const r = await commands.parseMml(text);
           if (text !== mmlText) return;
-          status =
-            r.status === "parsed"
-              ? { kind: "ok", totalSec: r.score.totalSec ?? 0 }
-              : { kind: "error", position: r.error.position, message: r.error.message };
+          if (r.status === "parsed") {
+            const totalSec = r.score.totalSec ?? 0;
+            lastOk = { noteCount: r.score.notes.length, totalSec };
+            status = { kind: "ok", totalSec };
+          } else {
+            lastOk = null;
+            status = { kind: "error", position: r.error.position, message: r.error.message, text };
+          }
         } catch (e) {
           if (text !== mmlText) return;
+          lastOk = null;
           status = { kind: "failed", message: String(e) };
         }
       },
@@ -89,6 +102,14 @@
     onvalidity?.(mode === "mml" && status.kind !== "ok");
   });
   onMount(() => () => onvalidity?.(false));
+
+  // 編集したら status は pending に変わるので、位置のずれた古い下線は残らない。text の一致は念のため
+  const errorPosition = $derived(status.kind === "error" && status.text === mmlText ? status.position : null);
+  const usage = $derived(computeUsage(mmlText, status.kind === "ok" || status.kind === "pending" ? lastOk : null));
+
+  function jumpToError() {
+    if (errorPosition !== null) editor?.focusAt(errorPosition);
+  }
 
   async function pickSound() {
     pickErr = null;
@@ -120,19 +141,35 @@
     {/if}
   </div>
 {:else if mode === "mml"}
-  <textarea
-    class="resize-y rounded-lg border border-border bg-muted px-2.5 py-2 font-mono text-xs text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-    rows="3"
-    spellcheck="false"
-    placeholder="t120 o5 l8 cdefgab>c"
-    bind:value={mmlText}
-    data-testid="mml-input"
-  ></textarea>
-  <p class="m-0 text-xs {status.kind === 'error' || status.kind === 'failed' ? 'text-destructive' : 'text-muted-foreground'}" data-testid="mml-status">
+  {#await import("./MmlEditor.svelte")}
+    <div class="h-20 rounded-lg border border-border bg-muted"></div>
+  {:then { default: MmlEditor }}
+    <MmlEditor
+      bind:this={editor}
+      bind:value={mmlText}
+      {errorPosition}
+      describedBy="{uid}-status {uid}-usage"
+      invalid={status.kind === "error" || status.kind === "failed"}
+    />
+  {/await}
+  <p id="{uid}-status" class="m-0 text-xs {status.kind === 'error' || status.kind === 'failed' ? 'text-destructive' : 'text-muted-foreground'}" data-testid="mml-status">
     {#if status.kind === "ok"}再生時間 {status.totalSec.toFixed(1)} 秒
-    {:else if status.kind === "error"}{status.position + 1} 文字目: {status.message}
+    {:else if status.kind === "error"}<button
+        type="button"
+        class="cursor-pointer rounded-md border-0 bg-transparent p-0 text-xs text-destructive underline focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        onclick={jumpToError}
+        data-testid="mml-error-jump">{status.position + 1} 文字目</button>: {status.message}
     {:else if status.kind === "failed"}構文を確認できませんでした: {status.message}
     {:else}確認中…{/if}
+  </p>
+  <p id="{uid}-usage" class="m-0 flex flex-wrap gap-x-3 text-xs text-muted-foreground" data-testid="mml-usage">
+    {#each usage as u (u.key)}
+      <span
+        data-testid="mml-usage-{u.key}"
+        data-level={u.level}
+        class={{ "font-bold": u.level !== "normal", "text-[var(--warning)]": u.level === "near", "text-destructive": u.level === "over" }}
+      >{formatUsage(u)}</span>
+    {/each}
   </p>
   <div class="flex items-center gap-2.5">
     <Button type="button" variant="outline" size="sm" disabled={status.kind !== "ok"} onclick={() => preview(value)}>試聴</Button>
