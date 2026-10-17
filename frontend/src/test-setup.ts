@@ -86,3 +86,14 @@ if (!window.VTTCue) {
 
   window.VTTCue = VTTCueStub as unknown as typeof VTTCue;
 }
+
+// CodeMirror が測定に使う Range の矩形 API。jsdom には無いので、何も返さない実装で補う。
+// (他にも足りない API がテストで出たら、ここに必要なものだけ足す。)
+if (!Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () =>
+    ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as unknown as DOMRectList;
+}
+if (!Range.prototype.getBoundingClientRect) {
+  Range.prototype.getBoundingClientRect = () =>
+    ({ x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => ({}) }) as DOMRect;
+}
