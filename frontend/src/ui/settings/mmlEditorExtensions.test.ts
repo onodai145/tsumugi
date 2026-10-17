@@ -60,10 +60,16 @@ describe("errorField", () => {
     expect(texts("mml-error")).toEqual([]);
   });
 
-  it("手前を編集すると、下線は同じ文字に付いたままずれる", () => {
+  it("文書を編集すると、位置がずれるので下線は自分で消える(親からの消去の dispatch を待たない)", () => {
     const { view, texts } = mount("c4 x");
     view.dispatch({ effects: setErrorRange.of({ from: 3, to: 4 }) });
     view.dispatch({ changes: { from: 0, insert: "d" } });
+    expect(texts("mml-error")).toEqual([]);
+  });
+
+  it("編集と同じ transaction で範囲を設定したら、設定が勝つ", () => {
+    const { view, texts } = mount("c4 x");
+    view.dispatch({ changes: { from: 0, insert: "d" }, effects: setErrorRange.of({ from: 4, to: 5 }) });
     expect(texts("mml-error")).toEqual(["x"]);
   });
 

@@ -79,6 +79,8 @@
     const pos = errorPosition;
     if (!view) return;
     const range = pos === null ? null : errorRange(view.state.doc.toString(), pos);
+    // 編集で下線が自分で消えているなら、消すためだけの dispatch はしない(IME 変換中の更新を増やさない)
+    if (range === null && view.state.field(errorField).size === 0) return;
     view.dispatch({ effects: setErrorRange.of(range) });
   });
 

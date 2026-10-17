@@ -46,7 +46,9 @@ export const setErrorRange = StateEffect.define<{ from: number; to: number } | n
 export const errorField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(decorations, tr) {
-    let next = decorations.map(tr.changes);
+    // 編集すると位置がずれて、古い下線はもう正しくない。親からの消去を待たず、ここで消す
+    // (IME 変換中に、変換とは別の transaction を増やさないため)。同じ transaction の設定は下で勝つ
+    let next = tr.docChanged ? Decoration.none : decorations;
     for (const effect of tr.effects) {
       if (!effect.is(setErrorRange)) continue;
       const range = effect.value;

@@ -151,6 +151,18 @@
       describedBy="{uid}-status {uid}-usage"
       invalid={status.kind === "error" || status.kind === "failed"}
     />
+  {:catch}
+    <!-- エディタの chunk を読み込めなかったとき。MML の入力手段が黙って消えないように、素の入力欄に戻す -->
+    <textarea
+      class="resize-y rounded-lg border border-border bg-muted px-2.5 py-2 font-mono text-xs text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      rows="3"
+      spellcheck="false"
+      aria-label="MML"
+      aria-describedby="{uid}-status {uid}-usage"
+      bind:value={mmlText}
+      data-testid="mml-input-fallback"
+    ></textarea>
+    <p class="m-0 text-xs text-destructive" data-testid="mml-editor-load-error">エディタを読み込めなかったため、簡易な入力欄を表示しています。</p>
   {/await}
   <p id="{uid}-status" class="m-0 text-xs {status.kind === 'error' || status.kind === 'failed' ? 'text-destructive' : 'text-muted-foreground'}" data-testid="mml-status">
     {#if status.kind === "ok"}再生時間 {status.totalSec.toFixed(1)} 秒

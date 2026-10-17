@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import { EditorView } from "@codemirror/view";
 import MmlEditor from "./MmlEditor.svelte";
@@ -86,5 +86,17 @@ describe("MmlEditor", () => {
   it("空のとき、プレースホルダーを出す", () => {
     const { container } = render(MmlEditor, { value: "" });
     expect(container.querySelector(".cm-placeholder")?.textContent).toBe("t120 o5 l8 cdefgab>c");
+  });
+
+  it("編集で下線が自分で消えているときは、errorPosition が null になっても余計な dispatch をしない(IME 変換中の更新を増やさない)", async () => {
+    const { container, getByTestId, rerender } = render(MmlEditor, { value: "c4 x", errorPosition: 3 });
+    expect(container.querySelector(".mml-error")).not.toBeNull();
+    const view = viewOf(getByTestId("mml-input"));
+    view.dispatch({ changes: { from: 4, insert: "y" } }); // 編集 → 下線は消える
+    expect(container.querySelector(".mml-error")).toBeNull();
+    const dispatch = vi.spyOn(EditorView.prototype, "dispatch");
+    await rerender({ value: "c4 xy", errorPosition: null });
+    expect(dispatch).not.toHaveBeenCalled();
+    dispatch.mockRestore();
   });
 });
