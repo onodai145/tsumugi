@@ -7,14 +7,15 @@
 use crate::domain::{MmlError, MmlScore, NoteEvent, Timbre};
 use crate::error::Error;
 
-pub const MAX_TEXT_CHARS: usize = 1000;
+pub const MAX_TEXT_CHARS: usize = 5000;
 pub const MAX_TRACKS: usize = 4;
-pub const MAX_TOTAL_SEC: f64 = 10.0;
+pub const MAX_TOTAL_SEC: f64 = 90.0;
+pub const MAX_NOTES: usize = 3000;
 
 /// `sound_choice` に MML を入れるときの接頭辞。
 pub const SOUND_CHOICE_PREFIX: &str = "mml:";
 
-/// 浮動小数点の積算誤差で、ちょうど 10 秒の MML を弾かないための許容幅。
+/// 浮動小数点の積算誤差で、ちょうど上限(90 秒)の MML を弾かないための許容幅。
 const TIME_EPS: f64 = 1e-6;
 const VALID_LENGTHS: [u32; 7] = [1, 2, 4, 8, 16, 32, 64];
 const MAX_DOTS: u8 = 2;
@@ -133,7 +134,7 @@ impl Cursor<'_> {
 }
 
 /// 1 トラック分の文字列を命令列にする。繰り返し `[ ... ]n` はここで展開する。
-/// 繰り返しは入れ子にできないので、展開後の命令数は入力サイズ(1000 文字 × 最大 99 回)で抑えられる。
+/// 繰り返しは入れ子にできないので、展開後の命令数は入力サイズ(5000 文字 × 最大 99 回)で抑えられる。
 /// 時間の上限はここでは見ず、`run_track` が実行しながら判定する。
 fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError> {
     let mut c = Cursor { syms, i: 0, end };
@@ -287,7 +288,10 @@ fn duration_sec(len: u32, dots: u8, tempo: u32) -> f64 {
 
 fn check_limit(t: f64, pos: usize) -> Result<(), MmlError> {
     if t > MAX_TOTAL_SEC + TIME_EPS {
-        return Err(mml_err(pos, "再生時間は 10 秒以下にしてください"));
+        return Err(mml_err(
+            pos,
+            format!("再生時間は {} 秒以下にしてください", MAX_TOTAL_SEC as u32),
+        ));
     }
     Ok(())
 }
@@ -355,6 +359,9 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                     }
                     notes[idx].duration_sec += d;
                 } else {
+                    if notes.len() >= MAX_NOTES {
+                        return Err(mml_err(pos, format!("音符は {MAX_NOTES} 個までです")));
+                    }
                     notes.push(NoteEvent {
                         track,
                         start_sec: st.t,
@@ -383,7 +390,7 @@ pub fn parse(text: &str) -> Result<MmlScore, MmlError> {
     if total_chars > MAX_TEXT_CHARS {
         return Err(mml_err(
             MAX_TEXT_CHARS,
-            "MML は 1000 文字以下にしてください",
+            format!("MML は {MAX_TEXT_CHARS} 文字以下にしてください"),
         ));
     }
 
@@ -636,21 +643,61 @@ mod tests {
 
     #[test]
     fn text_length_limit_counts_whitespace() {
-        assert!(parse(&format!("c{}", " ".repeat(999))).is_ok()); // ちょうど 1000 文字
-        assert_eq!(must_fail(&format!("c{}", " ".repeat(1000))).position, 1000);
+        assert!(parse(&format!("c{}", " ".repeat(4999))).is_ok()); // ちょうど 5000 文字
+        let e = must_fail(&format!("c{}", " ".repeat(5000)));
+        assert_eq!(e.position, 5000);
+        assert!(e.message.contains("5000"), "{}", e.message);
     }
 
     #[test]
     fn total_duration_limit_stops_at_the_offending_note() {
-        assert!(parse("c1c1c1c1c1").is_ok()); // ちょうど 10 秒
-        assert_eq!(must_fail("c1c1c1c1c1c").position, 10);
+        // `c1` は 2 秒(t120 l4)。45 個でちょうど 90 秒。
+        assert!(parse(&"c1".repeat(45)).is_ok());
+        let e = must_fail(&"c1".repeat(46));
+        assert_eq!(e.position, 90); // 46 個目の `c1`
+        assert!(e.message.contains("90 秒"), "{}", e.message);
     }
 
     #[test]
     fn loop_expansion_stops_at_the_duration_limit() {
-        // `c1` は 2 秒。`[c1]99` は先に展開され、6 個目の `c1` で 10 秒を超えたところで止まる。
+        // `c1` は 2 秒。`[c1]99` は先に展開され、46 個目の `c1` で 90 秒を超えたところで止まる。
         // 展開された命令は元の位置を引き継ぐので、エラー位置は繰り返し本体の `c1`(位置 1)を指す。
         assert_eq!(must_fail("[c1]99").position, 1);
+    }
+
+    #[test]
+    fn note_count_limit_stops_at_the_offending_note() {
+        // `t255 l64` の 1 音は約 0.0147 秒。3000 音でも約 44 秒で、90 秒にも 5000 文字にも収まる。
+        let head = "t255l64"; // 7 文字
+        let base = format!("{head}{}", "[c]99".repeat(30)); // 2970 音、157 文字
+        let ok = format!("{base}[c]30"); // ちょうど 3000 音
+        assert!(ok.chars().count() <= MAX_TEXT_CHARS);
+        let s = must_parse(&ok);
+        assert_eq!(s.notes.len(), MAX_NOTES);
+        assert!(s.total_sec < MAX_TOTAL_SEC);
+        // 3001 個目の音符(繰り返し本体の `c`、`[` は 157 文字目、`c` は 158 文字目)で止まる。
+        let e = must_fail(&format!("{base}[c]31"));
+        assert_eq!(e.position, 158);
+        assert!(e.message.contains("3000"), "{}", e.message);
+    }
+
+    #[test]
+    fn note_count_limit_is_shared_across_tracks() {
+        let t0 = format!("t255l64{}", "[c]99".repeat(30)); // 2970 音、157 文字(; は 157)
+        let ok = format!("{t0};t255l64[c]30");
+        assert_eq!(must_parse(&ok).notes.len(), MAX_NOTES);
+        // 2 本目のトラックの 31 個目で 3001 個目になる。`;` の後ろ(158〜)の `t255l64` 7 文字、`[` が 165、`c` が 166。
+        let e = must_fail(&format!("{t0};t255l64[c]31"));
+        assert_eq!(e.position, 166);
+        assert!(e.message.contains("3000"), "{}", e.message);
+    }
+
+    #[test]
+    fn tied_notes_count_as_one_for_the_note_limit() {
+        // `c64&c64` は 1 音。16 回 × 99 = 1584 音(タイを数えると 3168 個で上限超過)。
+        let text = format!("t255l64{}", "[c64&c64]99".repeat(16));
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        assert_eq!(must_parse(&text).notes.len(), 1584);
     }
 
     #[test]

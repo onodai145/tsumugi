@@ -5,7 +5,8 @@ import { commands } from "../bindings/tauri.gen";
 import { renderScore } from "./mmlRender";
 
 export const MML_PREFIX = "mml:";
-const CACHE_LIMIT = 16;
+// 90 秒の MML の data: URL は約 5.3MB。全部埋まっても約 42MB に収めるため 8 件に抑える。
+const CACHE_LIMIT = 8;
 const cache = new Map<string, Promise<string>>();
 
 async function renderMml(text: string): Promise<string> {
