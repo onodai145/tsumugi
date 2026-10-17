@@ -135,4 +135,5 @@ Issue #500(関連: #75 / #494 / PR #498、#497)
 
 - 追加: `lib/mmlLexer.ts` / `mmlUsage.ts` / `mmlLimits.ts` / `mmlPosition.ts`(とそれぞれのテスト)、`ui/settings/MmlEditor.svelte`。
 - 変更: `ui/settings/SoundChoicePicker.svelte`(+ テスト)、`frontend/package.json`(依存 3 つ)、`docs/guide/user-guide.md`(入力欄の説明)。
-- Rust 側: 変更なし(`MAX_*` 定数と同じ値をフロントのテストで固定する)。
+- Rust 側: 挙動の変更なし。`MAX_*` 定数をフロントの表と同じ値に固定するテストを `mml.rs` に 1 つ足すだけ。
+- `frontend/vite.config.ts`: CodeMirror の 3 パッケージを `optimizeDeps.include` に足す(動的 import の依存は、実行時の再最適化でフルリロードを起こすため。`tone` と同じ扱い)。
