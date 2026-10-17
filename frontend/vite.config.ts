@@ -25,6 +25,9 @@ export default defineConfig({
       "@tauri-apps/plugin-notification",
       "mfm-js",
       "tone",
+      "@codemirror/state",
+      "@codemirror/view",
+      "@codemirror/commands",
     ],
   },
   server: {
