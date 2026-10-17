@@ -70,13 +70,13 @@ describe("resolveSoundChoice", () => {
     expect(render).toHaveBeenCalledTimes(2);
   });
 
-  it("キャッシュは 16 件まで。古いものから捨てる", async () => {
-    for (let i = 0; i < 17; i++) await resolveSoundChoice(`mml:c${i}`);
-    expect(parseMml).toHaveBeenCalledTimes(17);
-    await resolveSoundChoice("mml:c16"); // 新しいものは残っている
-    expect(parseMml).toHaveBeenCalledTimes(17);
+  it("キャッシュは 8 件まで。古いものから捨てる", async () => {
+    for (let i = 0; i < 9; i++) await resolveSoundChoice(`mml:c${i}`);
+    expect(parseMml).toHaveBeenCalledTimes(9);
+    await resolveSoundChoice("mml:c8"); // 新しいものは残っている
+    expect(parseMml).toHaveBeenCalledTimes(9);
     await resolveSoundChoice("mml:c0"); // 最古は捨てられている
-    expect(parseMml).toHaveBeenCalledTimes(18);
+    expect(parseMml).toHaveBeenCalledTimes(10);
   });
 });
 

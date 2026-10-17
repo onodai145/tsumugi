@@ -147,7 +147,7 @@ l8 既定の長さ  t120 テンポ  v10 音量(0〜15)
 @3 または @bell 音色（下の一覧。何も書かなければ @0 fm）
 [cde]3 繰り返し(2〜99回、入れ子は不可)
 ; でトラックを分ける(最大4つ。テンポ・音色はトラックごとに書く)
-全体で 1000 文字・10 秒まで</pre>
+全体で 5000 文字・90 秒・3000 音まで</pre>
     <p class="m-0 mt-1 font-mono" data-testid="mml-timbres">音色: {#each TIMBRE_LIST as p, i (p.number)}{i > 0 ? " / " : ""}@{p.number} {p.name}{/each}</p>
   </details>
 {:else if mode !== "inherit"}
