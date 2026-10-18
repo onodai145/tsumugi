@@ -1,0 +1,9 @@
+[
+  { "id": "jingle", "label": "ジングル", "mml": "t150 o5 l8 @bell c e g >c4. r8 <g4 >c2" },
+  {
+    "id": "two-tracks",
+    "label": "2 トラック",
+    "mml": "t120 o5 l8 @square [cdefgfed]2 c4 ; t120 o3 l2 @triangle c g c g"
+  },
+  { "id": "arpeggio", "label": "アルペジオ", "mml": "t140 o4 l16 @lead [ceg>c<gec]4 c4" }
+]

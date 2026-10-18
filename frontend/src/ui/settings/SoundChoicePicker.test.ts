@@ -16,6 +16,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() =
 const { commands } = await import("../../lib/ipc");
 const { default: SoundChoicePicker } = await import("./SoundChoicePicker.svelte");
 const { TIMBRE_LIST } = await import("../../lib/mmlTimbres");
+const { MML_SAMPLES } = await import("../../lib/mmlSamples");
 
 const okScore = { notes: [], totalSec: 2.5, trackCount: 1 };
 
@@ -113,6 +114,79 @@ describe("SoundChoicePicker の MML モード", () => {
     const text = getByTestId("mml-timbres").textContent ?? "";
     expect(TIMBRE_LIST).toHaveLength(14);
     for (const p of TIMBRE_LIST) expect(text).toContain(`@${p.number} ${p.name}`);
+  });
+});
+
+describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {
+  it("音色ごとに、番号と名前の分かる「挿入」ボタンがある", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    for (const p of TIMBRE_LIST) {
+      expect(getByTestId(`mml-timbre-${p.name}`).getAttribute("aria-label")).toBe(`@${p.number} ${p.name} を挿入`);
+    }
+  });
+
+  it("音色のボタンを押すと、カーソル位置に @名前 が入る", async () => {
+    const { findByTestId, getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const view = await viewOf(findByTestId);
+    view.dispatch({ selection: { anchor: 2 } });
+    await fireEvent.click(getByTestId("mml-timbre-bell"));
+    expect(view.state.doc.toString()).toBe("c4 @bell ");
+  });
+
+  it("サンプルのボタンが、サンプルの数だけある", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    for (const s of MML_SAMPLES) expect(getByTestId(`mml-sample-${s.id}`).textContent).toContain(s.label);
+  });
+
+  it("入力が空なら、確認なしでサンプルが入る", async () => {
+    const { findByTestId, getByTestId, queryByTestId } = render(SoundChoicePicker, { value: "mml:" });
+    const view = await viewOf(findByTestId);
+    await fireEvent.click(getByTestId("mml-sample-jingle"));
+    await vi.waitFor(() => expect(view.state.doc.toString()).toBe(MML_SAMPLES.find((s) => s.id === "jingle")!.mml));
+    expect(queryByTestId("mml-sample-confirm")).toBeNull();
+  });
+
+  it("空白だけの入力も、空として扱う", async () => {
+    const { findByTestId, getByTestId, queryByTestId } = render(SoundChoicePicker, { value: "mml: \n " });
+    const view = await viewOf(findByTestId);
+    await fireEvent.click(getByTestId("mml-sample-two-tracks"));
+    await vi.waitFor(() => expect(view.state.doc.toString()).toBe(MML_SAMPLES.find((s) => s.id === "two-tracks")!.mml));
+    expect(queryByTestId("mml-sample-confirm")).toBeNull();
+  });
+
+  it("入力があるときは、確認が出て、まだ置き換えない", async () => {
+    const { findByTestId, getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const view = await viewOf(findByTestId);
+    await fireEvent.click(getByTestId("mml-sample-jingle"));
+    expect(getByTestId("mml-sample-confirm").textContent).toContain("置き換え");
+    expect(view.state.doc.toString()).toBe("c4");
+  });
+
+  it("確認で「置き換える」を押すと、サンプルになり、確認は消える", async () => {
+    const { findByTestId, getByTestId, queryByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const view = await viewOf(findByTestId);
+    await fireEvent.click(getByTestId("mml-sample-jingle"));
+    await fireEvent.click(getByTestId("mml-sample-confirm-ok"));
+    await vi.waitFor(() => expect(view.state.doc.toString()).toBe(MML_SAMPLES.find((s) => s.id === "jingle")!.mml));
+    expect(queryByTestId("mml-sample-confirm")).toBeNull();
+  });
+
+  it("確認で「やめる」を押すと、入力は変わらず、確認は消える", async () => {
+    const { findByTestId, getByTestId, queryByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const view = await viewOf(findByTestId);
+    await fireEvent.click(getByTestId("mml-sample-jingle"));
+    await fireEvent.click(getByTestId("mml-sample-confirm-cancel"));
+    expect(view.state.doc.toString()).toBe("c4");
+    expect(queryByTestId("mml-sample-confirm")).toBeNull();
+  });
+
+  it("確認を出したまま入力を編集したら、確認は引っ込める(古い確認で上書きしない)", async () => {
+    const { findByTestId, getByTestId, queryByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const view = await viewOf(findByTestId);
+    await fireEvent.click(getByTestId("mml-sample-jingle"));
+    view.dispatch({ changes: { from: 2, insert: " d4" } });
+    await vi.waitFor(() => expect(queryByTestId("mml-sample-confirm")).toBeNull());
+    expect(view.state.doc.toString()).toBe("c4 d4");
   });
 });
 

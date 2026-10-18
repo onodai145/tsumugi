@@ -5,6 +5,7 @@
   import { MML_PREFIX } from "../../lib/soundChoice";
   import { TIMBRE_LIST } from "../../lib/mmlTimbres";
   import { computeUsage, formatUsage, type ParsedUsage } from "../../lib/mmlUsage";
+  import { MML_SAMPLES, type MmlSample } from "../../lib/mmlSamples";
   import Dropdown from "../Dropdown.svelte";
   import { Button } from "$lib/components/ui/button";
 
@@ -59,7 +60,9 @@
   let status = $state<MmlStatus>({ kind: "idle" });
   // 直近に構文が通ったときの音数と再生時間。解析中は点滅を避けて、これを出し続ける
   let lastOk = $state<ParsedUsage | null>(null);
-  let editor = $state<{ focusAt(pos: number): void }>();
+  let editor = $state<{ focusAt(pos: number): void; insertText(text: string): void }>();
+  // 入力があるときにサンプルを押された場合の、置き換え確認の待ち。入力を編集したら引っ込める
+  let pendingSample = $state<MmlSample | null>(null);
   // 同じ画面に複数あっても id が衝突しないように
   const uid = $props.id();
 
@@ -106,6 +109,21 @@
   // 編集したら status は pending に変わるので、位置のずれた古い下線は残らない。text の一致は念のため
   const errorPosition = $derived(status.kind === "error" && status.text === mmlText ? status.position : null);
   const usage = $derived(computeUsage(mmlText, status.kind === "ok" || status.kind === "pending" ? lastOk : null));
+
+  $effect(() => {
+    void mmlText;
+    untrack(() => (pendingSample = null));
+  });
+
+  function chooseSample(sample: MmlSample) {
+    if (mmlText.trim()) pendingSample = sample;
+    else mmlText = sample.mml;
+  }
+
+  function replaceWithSample() {
+    if (pendingSample) mmlText = pendingSample.mml;
+    pendingSample = null;
+  }
 
   function jumpToError() {
     if (errorPosition !== null) editor?.focusAt(errorPosition);
@@ -183,6 +201,19 @@
       >{formatUsage(u)}</span>
     {/each}
   </p>
+  <div class="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" role="group" aria-label="サンプル" data-testid="mml-samples">
+    <span aria-hidden="true">サンプル</span>
+    {#each MML_SAMPLES as sample (sample.id)}
+      <Button type="button" variant="outline" size="xs" onclick={() => chooseSample(sample)} data-testid="mml-sample-{sample.id}">{sample.label}</Button>
+    {/each}
+  </div>
+  {#if pendingSample}
+    <div class="flex flex-wrap items-center gap-2 text-xs text-foreground" role="group" aria-label="サンプルの置き換えの確認" aria-live="polite" data-testid="mml-sample-confirm">
+      <span>入力中の内容を「{pendingSample.label}」で置き換えます。</span>
+      <Button type="button" variant="destructive" size="xs" onclick={replaceWithSample} data-testid="mml-sample-confirm-ok">置き換える</Button>
+      <Button type="button" variant="outline" size="xs" onclick={() => (pendingSample = null)} data-testid="mml-sample-confirm-cancel">やめる</Button>
+    </div>
+  {/if}
   <div class="flex items-center gap-2.5">
     <Button type="button" variant="outline" size="sm" disabled={status.kind !== "ok"} onclick={() => preview(value)}>試聴</Button>
   </div>
@@ -197,7 +228,22 @@ l8 既定の長さ  t120 テンポ  v10 音量(0〜15)
 [cde]3 繰り返し(2〜99回、入れ子は不可)
 ; でトラックを分ける(最大4つ。テンポ・音色はトラックごとに書く)
 全体で 5000 文字・90 秒・3000 音まで</pre>
-    <p class="m-0 mt-1 font-mono" data-testid="mml-timbres">音色: {#each TIMBRE_LIST as p, i (p.number)}{i > 0 ? " / " : ""}@{p.number} {p.name}{/each}</p>
+    <div class="mt-1 flex flex-wrap items-center gap-1" role="group" aria-label="音色" data-testid="mml-timbres">
+      <span aria-hidden="true">音色（押すとカーソル位置に入る）</span>
+      {#each TIMBRE_LIST as p (p.number)}
+        <!-- 押してもエディタからフォーカスを奪わない(モバイルでソフトキーボードが閉じないように) -->
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          class="font-mono"
+          aria-label="@{p.number} {p.name} を挿入"
+          onmousedown={(e) => e.preventDefault()}
+          onclick={() => editor?.insertText(`@${p.name}`)}
+          data-testid="mml-timbre-{p.name}">@{p.number} {p.name}</Button
+        >
+      {/each}
+    </div>
   </details>
 {:else if mode !== "inherit"}
   <Button type="button" variant="outline" size="sm" onclick={() => preview(mode)}>試聴</Button>

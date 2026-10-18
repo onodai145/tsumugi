@@ -470,6 +470,36 @@ mod tests {
         approx(MAX_TOTAL_SEC, 90.0);
     }
 
+    /// frontend/src/lib/mmlSampleData.json(入力欄の「サンプル」ボタンが入れる例)は、すべて実際のパーサーと上限を通る。
+    /// 文法を変えて通らなくなったサンプルを、ここで検出する。
+    #[test]
+    fn frontend_samples_parse_within_limits() {
+        #[derive(serde::Deserialize)]
+        struct Sample {
+            id: String,
+            label: String,
+            mml: String,
+        }
+        let samples: Vec<Sample> = serde_json::from_str(include_str!("../../frontend/src/lib/mmlSampleData.json"))
+            .expect("mmlSampleData.json は {id,label,mml} の配列");
+        assert!(samples.len() >= 3, "サンプルは 3 つ以上");
+        let mut ids: Vec<&str> = samples.iter().map(|s| s.id.as_str()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), samples.len(), "id が重複している");
+        for s in &samples {
+            assert!(!s.label.is_empty(), "{}: label が空", s.id);
+            let score = must_parse(&s.mml);
+            assert!(!score.notes.is_empty(), "{}: 音が無い", s.id);
+        }
+        let parsed: Vec<MmlScore> = samples.iter().map(|s| must_parse(&s.mml)).collect();
+        assert!(parsed.iter().any(|p| p.track_count >= 2), "複数トラックの例が要る");
+        assert!(
+            samples.iter().any(|s| s.mml.contains('@')),
+            "音色(@)を使う例が要る"
+        );
+    }
+
     fn must_parse(text: &str) -> MmlScore {
         parse(text).unwrap_or_else(|e| panic!("{text:?} should parse: {e:?}"))
     }
