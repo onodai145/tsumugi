@@ -146,6 +146,50 @@
     previewErr = null;
     playNotifySound(choice, (e) => (previewErr = String(e)));
   }
+
+  // MML の試聴は、生成に数分かかることがある。生成そのものは止められない(Tone.Offline は途中で止められず、
+  // 結果は soundChoice のキャッシュに入る)ので、「待たない」は結果を捨てて待つのをやめるだけ。
+  // run は試聴の世代で、待たない・編集・閉じる・押し直しで進めて、古い生成を鳴らさない。
+  let previewRun = 0;
+  let generating = $state(false);
+  let generatingSec = $state(0);
+
+  function previewMml() {
+    const run = ++previewRun;
+    previewErr = null;
+    generating = true;
+    generatingSec = 0;
+    playNotifySound(value, (e) => (previewErr = String(e)), {
+      isStale: () => run !== previewRun,
+      onSettled: () => {
+        if (run === previewRun) generating = false;
+      },
+    });
+  }
+
+  function stopWaiting() {
+    previewRun++;
+    generating = false;
+  }
+
+  $effect(() => {
+    if (!generating) return;
+    const timer = setInterval(() => generatingSec++, 1000);
+    return () => clearInterval(timer);
+  });
+
+  // 編集したら、前の入力の生成は捨てる。MML モードを抜けたときも同じ
+  $effect(() => {
+    void mmlText;
+    void mode;
+    untrack(() => {
+      if (generating) stopWaiting();
+    });
+  });
+  // 閉じたあとに生成が終わって、急に鳴らないように
+  onMount(() => () => {
+    previewRun++;
+  });
 </script>
 
 <Dropdown bind:value={mode} options={modeOptions} />
@@ -215,7 +259,11 @@
     </div>
   {/if}
   <div class="flex items-center gap-2.5">
-    <Button type="button" variant="outline" size="sm" disabled={status.kind !== "ok"} onclick={() => preview(value)}>試聴</Button>
+    <Button type="button" variant="outline" size="sm" disabled={status.kind !== "ok" || generating} onclick={previewMml} data-testid="mml-preview">{generating ? `生成中… ${generatingSec} 秒` : "試聴"}</Button>
+    {#if generating}
+      <Button type="button" variant="outline" size="sm" onclick={stopWaiting} data-testid="mml-preview-cancel">待たない</Button>
+    {/if}
+    <span class="sr-only" role="status">{generating ? "音を生成しています" : ""}</span>
   </div>
   <details class="text-xs text-muted-foreground">
     <summary class="cursor-pointer">記法</summary>
