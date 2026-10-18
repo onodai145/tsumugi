@@ -461,6 +461,15 @@ mod tests {
         assert!((a - b).abs() < 1e-9, "{a} != {b}");
     }
 
+    /// frontend/src/lib/mmlLimits.ts の MML_LIMITS と同じ表。片方だけ変えると、どちらかのテストが落ちる。
+    #[test]
+    fn limits_match_frontend_table() {
+        assert_eq!(MAX_TEXT_CHARS, 5000);
+        assert_eq!(MAX_NOTES, 3000);
+        assert_eq!(MAX_TRACKS, 4);
+        approx(MAX_TOTAL_SEC, 90.0);
+    }
+
     fn must_parse(text: &str) -> MmlScore {
         parse(text).unwrap_or_else(|e| panic!("{text:?} should parse: {e:?}"))
     }
