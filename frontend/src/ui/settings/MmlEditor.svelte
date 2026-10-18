@@ -89,6 +89,28 @@
     view.dispatch({ effects: a11y.reconfigure(a11yExtension()) });
   });
 
+  /**
+   * カーソル位置(選択中なら選択範囲)に text を入れる。音色名などが隣の文字とつながらないよう、
+   * 前後が空白でなければ空白を足す(パーサーは空白を読み飛ばす)。入れた後ろにカーソルを置いてフォーカスする。
+   */
+  export function insertText(text: string): void {
+    if (!view) return;
+    const { doc, selection } = view.state;
+    const { from, to } = selection.main;
+    const before = from > 0 ? doc.sliceString(from - 1, from) : "";
+    const after = to < doc.length ? doc.sliceString(to, to + 1) : "";
+    const lead = before !== "" && !/\s/.test(before) ? " " : "";
+    const trail = /\s/.test(after) ? "" : " ";
+    const insert = lead + text + trail;
+    view.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: from + insert.length },
+      userEvent: "input",
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
+
   /** Rust の文字位置にカーソルを置いて、見える位置までスクロールし、フォーカスする */
   export function focusAt(pos: number): void {
     if (!view) return;

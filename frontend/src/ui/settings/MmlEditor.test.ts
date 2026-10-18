@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/svelte";
 import { EditorView } from "@codemirror/view";
+import { undo } from "@codemirror/commands";
 import MmlEditor from "./MmlEditor.svelte";
 
 afterEach(() => cleanup());
@@ -81,6 +82,55 @@ describe("MmlEditor", () => {
     expect(content.getAttribute("aria-invalid")).toBe("true");
     await rerender({ value: "c4 x", invalid: false });
     expect(content.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  describe("insertText", () => {
+    function setup(value: string, anchor?: number, head?: number) {
+      const r = render(MmlEditor, { value });
+      const view = viewOf(r.getByTestId("mml-input"));
+      if (anchor !== undefined) view.dispatch({ selection: { anchor, head: head ?? anchor } });
+      return { ...r, view };
+    }
+
+    it("空の文書には、そのまま入れて、後ろに空白を足す", () => {
+      const { component, view } = setup("");
+      component.insertText("@bell");
+      expect(view.state.doc.toString()).toBe("@bell ");
+      expect(view.state.selection.main.head).toBe(6);
+    });
+
+    it("文末の音符に直接つながらないよう、前に空白を足す", () => {
+      const { component, view } = setup("c4", 2);
+      component.insertText("@bell");
+      expect(view.state.doc.toString()).toBe("c4 @bell ");
+      expect(view.state.selection.main.head).toBe(9);
+    });
+
+    it("前後がすでに空白なら、空白を足さない", () => {
+      const { component, view } = setup("c4  d4", 3);
+      component.insertText("@bell");
+      expect(view.state.doc.toString()).toBe("c4 @bell d4");
+    });
+
+    it("後ろが空白でない文字なら、空白を足してつながらないようにする", () => {
+      const { component, view } = setup("c4 d4", 3);
+      component.insertText("@bell");
+      expect(view.state.doc.toString()).toBe("c4 @bell d4");
+      expect(view.state.selection.main.head).toBe(9);
+    });
+
+    it("選択範囲は置き換える", () => {
+      const { component, view } = setup("c4 d4 e4", 3, 5);
+      component.insertText("@pulse");
+      expect(view.state.doc.toString()).toBe("c4 @pulse e4");
+    });
+
+    it("Ctrl+Z 相当の undo で元に戻る", () => {
+      const { component, view } = setup("c4", 2);
+      component.insertText("@bell");
+      undo(view);
+      expect(view.state.doc.toString()).toBe("c4");
+    });
   });
 
   it("空のとき、プレースホルダーを出す", () => {
