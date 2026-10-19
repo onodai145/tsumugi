@@ -16,7 +16,10 @@ export interface CaretCoordinates {
   height: number;
 }
 
-export function getCaretCoordinates(el: HTMLTextAreaElement, position: number): CaretCoordinates {
+export function getCaretCoordinates(
+  el: HTMLTextAreaElement | HTMLInputElement,
+  position: number,
+): CaretCoordinates {
   const div = document.createElement("div");
   div.id = "mfm-completion-caret-mirror";
   document.body.appendChild(div);
@@ -29,8 +32,11 @@ export function getCaretCoordinates(el: HTMLTextAreaElement, position: number): 
     style.visibility = "hidden";
     style.top = "0";
     style.left = "-9999px";
-    style.whiteSpace = "pre-wrap";
-    style.wordWrap = "break-word";
+    // 1 行入力(<input>)は折り返さない。top/height は textarea 用の値で、<input> では使わない
+    // (呼び出し側 caretRect.ts は <input> の縦方向に要素自身の矩形を使う)。
+    const isInput = el instanceof HTMLInputElement;
+    style.whiteSpace = isInput ? "pre" : "pre-wrap";
+    style.wordWrap = isInput ? "normal" : "break-word";
 
     for (const prop of MIRRORED_PROPERTIES) {
       const value = computed[prop as keyof CSSStyleDeclaration];
