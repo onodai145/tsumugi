@@ -46,6 +46,11 @@ enum Op {
         dots: u8,
     },
     Tie,
+    /// `^`。直前の音符に、この長さを足す(長さ省略は `l` の値)。
+    TieLen {
+        len: Option<u32>,
+        dots: u8,
+    },
     Octave(u8),
     OctaveUp,
     OctaveDown,
@@ -181,6 +186,10 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 Op::Rest { len, dots }
             }
             '&' => Op::Tie,
+            '^' => {
+                let (len, dots) = c.length_and_dots()?;
+                Op::TieLen { len, dots }
+            }
             '>' => Op::OctaveUp,
             '<' => Op::OctaveDown,
             'o' => {
@@ -338,6 +347,18 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                     return Err(mml_err(pos, "`&` の前に音符が必要です"));
                 }
                 st.tie_pos = Some(pos);
+            }
+            Op::TieLen { len, dots } => {
+                if st.tie_pos.is_some() {
+                    return Err(mml_err(pos, "`&` の直後には `^` を置けません"));
+                }
+                let Some(idx) = st.last_note else {
+                    return Err(mml_err(pos, "`^` の前に音符が必要です"));
+                };
+                let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo);
+                notes[idx].duration_sec += d;
+                st.t += d;
+                check_limit(st.t, pos)?;
             }
             Op::Rest { len, dots } => {
                 if let Some(tp) = st.tie_pos {
@@ -873,6 +894,34 @@ mod tests {
         assert!(parse(&format!("c //{}", "あ".repeat(4996))).is_ok());
         let e = must_fail(&format!("c //{}", "あ".repeat(4997)));
         assert_eq!(e.position, 5000);
+    }
+
+    #[test]
+    fn caret_extends_the_previous_note() {
+        let s = must_parse("c4^8");
+        assert_eq!(s.notes.len(), 1);
+        approx(s.notes[0].duration_sec, 0.75);
+        approx(must_parse("c4^").notes[0].duration_sec, 1.0); // 長さ省略は l(4)
+        approx(must_parse("l8 c^").notes[0].duration_sec, 0.5);
+        approx(must_parse("c4^8.").notes[0].duration_sec, 0.5 + 0.375);
+        approx(must_parse("c4^4^4").notes[0].duration_sec, 1.5);
+        approx(must_parse("c4&c8^8").notes[0].duration_sec, 1.0); // `&` との併用
+        approx(must_parse("c4^8&c8").notes[0].duration_sec, 1.0);
+        let s = must_parse("c4^8 d4");
+        approx(s.notes[1].start_sec, 0.75);
+        assert_eq!(must_parse("[c4^8]2").notes.len(), 2);
+        assert_eq!(must_parse("C4^8"), must_parse("c4 ^ 8"));
+    }
+
+    #[test]
+    fn invalid_carets() {
+        assert_eq!(must_fail("^4 c").position, 0); // 前に音符が無い
+        assert_eq!(must_fail("r4^4 c").position, 2); // 休符の後ろ
+        assert_eq!(must_fail("c4 r4 ^4").position, 6);
+        assert_eq!(must_fail("c4&^8").position, 3); // `&` の直後
+        assert_eq!(must_fail("c4^3").position, 3); // 長さが不正
+        assert_eq!(must_fail("c4^8...").position, 6); // 3 個目の付点
+        assert_eq!(must_fail("c4^8&").position, 4); // 後ろに音符が無い `&`
     }
 
     fn timbres(text: &str) -> Vec<Timbre> {
