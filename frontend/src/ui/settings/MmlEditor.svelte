@@ -92,15 +92,16 @@
   /**
    * カーソル位置(選択中なら選択範囲)に text を入れる。音色名などが隣の文字とつながらないよう、
    * 前後が空白でなければ空白を足す(パーサーは空白を読み飛ばす)。入れた後ろにカーソルを置いてフォーカスする。
+   * pad: false なら空白を足さず、そのまま入れる(入力補助キーで c → 8 → . と続けて c8. にするため)。
    */
-  export function insertText(text: string): void {
+  export function insertText(text: string, { pad = true }: { pad?: boolean } = {}): void {
     if (!view) return;
     const { doc, selection } = view.state;
     const { from, to } = selection.main;
     const before = from > 0 ? doc.sliceString(from - 1, from) : "";
     const after = to < doc.length ? doc.sliceString(to, to + 1) : "";
-    const lead = before !== "" && !/\s/.test(before) ? " " : "";
-    const trail = /\s/.test(after) ? "" : " ";
+    const lead = pad && before !== "" && !/\s/.test(before) ? " " : "";
+    const trail = pad && !/\s/.test(after) ? " " : "";
     const insert = lead + text + trail;
     view.dispatch({
       changes: { from, to, insert },

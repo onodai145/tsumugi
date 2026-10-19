@@ -131,6 +131,49 @@ describe("MmlEditor", () => {
       undo(view);
       expect(view.state.doc.toString()).toBe("c4");
     });
+
+    describe("pad: false(入力補助キー)", () => {
+      it("前後に空白を足さず、そのまま入れる", () => {
+        const { component, view } = setup("c", 1);
+        component.insertText("8", { pad: false });
+        expect(view.state.doc.toString()).toBe("c8");
+        expect(view.state.selection.main.head).toBe(2);
+      });
+
+      it("続けて入れても、つながって入る(c → 8 → . で c8.)", () => {
+        const { component, view } = setup("", 0);
+        component.insertText("c", { pad: false });
+        component.insertText("8", { pad: false });
+        component.insertText(".", { pad: false });
+        expect(view.state.doc.toString()).toBe("c8.");
+      });
+
+      it("文書の途中に入れても、後ろの文字との間に空白を足さない", () => {
+        const { component, view } = setup("cd", 1);
+        component.insertText("#", { pad: false });
+        expect(view.state.doc.toString()).toBe("c#d");
+        expect(view.state.selection.main.head).toBe(2);
+      });
+
+      it("選択範囲は置き換える", () => {
+        const { component, view } = setup("c4 d4", 1, 2);
+        component.insertText("8", { pad: false });
+        expect(view.state.doc.toString()).toBe("c8 d4");
+      });
+
+      it("undo で元に戻る", () => {
+        const { component, view } = setup("c", 1);
+        component.insertText("8", { pad: false });
+        undo(view);
+        expect(view.state.doc.toString()).toBe("c");
+      });
+    });
+
+    it("pad を省略したときは、これまでどおり前後に空白を足す", () => {
+      const { component, view } = setup("c4", 2);
+      component.insertText("@bell", {});
+      expect(view.state.doc.toString()).toBe("c4 @bell ");
+    });
   });
 
   it("空のとき、プレースホルダーを出す", () => {
