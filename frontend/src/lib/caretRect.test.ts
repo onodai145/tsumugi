@@ -189,3 +189,62 @@ describe("caretRect (contenteditable)", () => {
     expect(caretRect(el, range)).toEqual({ x: 10, y: 119, width: 1, height: 1 });
   });
 });
+
+describe("caretRect (contenteditable, collapsed range without a rect)", () => {
+  type RangeWithRects = { getClientRects?: unknown };
+  const proto = Range.prototype as unknown as RangeWithRects;
+  const original = proto.getClientRects;
+
+  beforeEach(() => {
+    // WebKit は、行頭・空行などの折りたたまれた Range で空の矩形列を返すことがある。
+    proto.getClientRects = function (this: Range) {
+      return this.collapsed ? [] : [{ left: 30, right: 38, top: 40, width: 8, height: 18 }];
+    };
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete proto.getClientRects;
+    else proto.getClientRects = original;
+  });
+
+  function makeRoot(): HTMLElement {
+    const root = document.createElement("div");
+    root.setAttribute("contenteditable", "true");
+    document.body.appendChild(root);
+    return root;
+  }
+
+  it("measures the next character when the collapsed range has no rect", () => {
+    const root = makeRoot();
+    const node = document.createTextNode("hello");
+    root.appendChild(node);
+    stubBox(root, 0, 0, 300, 200);
+    const range = document.createRange();
+    range.setStart(node, 2);
+    range.collapse(true);
+    expect(caretRect(root, range)).toEqual({ x: 30, y: 40, width: 1, height: 18 });
+  });
+
+  it("measures the previous character's right edge at the end of a text node", () => {
+    const root = makeRoot();
+    const node = document.createTextNode("hello");
+    root.appendChild(node);
+    stubBox(root, 0, 0, 300, 200);
+    const range = document.createRange();
+    range.setStart(node, 5);
+    range.collapse(true);
+    expect(caretRect(root, range)).toEqual({ x: 38, y: 40, width: 1, height: 18 });
+  });
+
+  it("uses the enclosing line element for an empty line instead of the whole editor", () => {
+    const root = makeRoot();
+    const line = document.createElement("div");
+    root.appendChild(line);
+    stubBox(root, 10, 20, 300, 200);
+    stubBox(line, 10, 60, 280, 20);
+    const range = document.createRange();
+    range.setStart(line, 0);
+    range.collapse(true);
+    expect(caretRect(root, range)).toEqual({ x: 10, y: 60, width: 1, height: 20 });
+  });
+});

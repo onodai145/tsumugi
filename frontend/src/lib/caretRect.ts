@@ -67,7 +67,7 @@ function textFieldRect(
   return toRect(box.left + caret.left, box.top + caret.top, 1, caret.height);
 }
 
-function rangeRect(range: Range): CaretRect | null {
+function firstRect(range: Range): DOMRect | null {
   if (typeof range.getClientRects !== "function") return null;
   const rects = range.getClientRects();
   const first =
@@ -77,7 +77,45 @@ function rangeRect(range: Range): CaretRect | null {
         ? range.getBoundingClientRect()
         : null;
   if (!first || (first.width === 0 && first.height === 0)) return null;
-  return toRect(first.left, first.top, 1, first.height);
+  return first;
+}
+
+/// WebKit は行頭・行末・空行などの折りたたまれた Range で空の矩形列を返すことがある。
+/// テキストノード内なら、隣の 1 文字を測って代わりにする(次の文字の左端、なければ前の文字の右端)。
+function adjacentCharRect(range: Range): CaretRect | null {
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return null;
+  const length = (node as Text).length;
+  const offset = range.startOffset;
+  const probe = range.cloneRange();
+  if (offset < length) {
+    probe.setEnd(node, offset + 1);
+    const r = firstRect(probe);
+    return r ? toRect(r.left, r.top, 1, r.height) : null;
+  }
+  if (offset > 0) {
+    probe.setStart(node, offset - 1);
+    probe.setEnd(node, offset);
+    const r = firstRect(probe);
+    return r ? toRect(r.right, r.top, 1, r.height) : null;
+  }
+  return null;
+}
+
+/// 矩形が全く取れないとき、キャレットのある行(入力欄の根より内側の最も近い要素)を代わりにする。
+/// 複数行の入力欄で、候補が欄全体の下端まで離れて出るのを避ける。
+function enclosingLineRect(range: Range, root: HTMLElement): CaretRect | null {
+  const node = range.startContainer;
+  const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  if (!element || element === root || !root.contains(element)) return null;
+  const box = element.getBoundingClientRect();
+  return toRect(box.left, box.top, 1, box.height);
+}
+
+function rangeRect(range: Range, root: HTMLElement): CaretRect | null {
+  const direct = firstRect(range);
+  if (direct) return toRect(direct.left, direct.top, 1, direct.height);
+  return adjacentCharRect(range) ?? enclosingLineRect(range, root);
 }
 
 function editableRect(el: HTMLElement, anchor: CaretAnchor): CaretRect | null {
@@ -90,7 +128,7 @@ function editableRect(el: HTMLElement, anchor: CaretAnchor): CaretRect | null {
     }
   }
   if (range && el.contains(range.startContainer)) {
-    const rect = rangeRect(range);
+    const rect = rangeRect(range, el);
     if (rect) return rect;
   }
   return fallbackRect(el);

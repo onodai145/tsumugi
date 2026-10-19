@@ -177,6 +177,19 @@ describe("installImeCursorArea", () => {
     expect(anchor.startOffset).toBe(1);
   });
 
+  // レビュー指摘: compositionend が来ないまま別の欄へ移っても、古いアンカーを引きずらない
+  it("drops a stale composition anchor when focus moves without compositionend", () => {
+    const first = focusTextarea("abcdef");
+    first.setSelectionRange(2, 2);
+    fire(first, "compositionstart");
+    settle();
+
+    const second = focusTextarea("xyz");
+    fire(second, "input");
+    settle();
+    expect(caretRectMock).toHaveBeenLastCalledWith(second, null);
+  });
+
   // Review Focus 5: 送信失敗がタイピングを妨げない
   it("does not let a failing send escape the listener", () => {
     const el = focusTextarea("abc");

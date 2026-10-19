@@ -51,6 +51,9 @@ export function installImeCursorArea(options: ImeCursorAreaOptions = {}): () => 
 
   let composing = false;
   let anchor: CaretAnchor = null;
+  // 変換を始めた入力欄。compositionend が来ないまま(欄が消える・フォーカスが移る)別の欄へ
+  // 移ったときに、古い変換状態を引きずらないために使う。
+  let anchorEl: Element | null = null;
   let pending = false;
   let rafId: number | undefined;
   let timerId: ReturnType<typeof setTimeout> | undefined;
@@ -60,6 +63,11 @@ export function installImeCursorArea(options: ImeCursorAreaOptions = {}): () => 
     try {
       const el = doc.activeElement;
       if (!isImeTarget(el)) return;
+      if (composing && el !== anchorEl) {
+        composing = false;
+        anchor = null;
+        anchorEl = null;
+      }
       const rect = caretRect(el, composing ? anchor : null);
       if (rect) send(rect);
     } catch {
@@ -79,11 +87,13 @@ export function installImeCursorArea(options: ImeCursorAreaOptions = {}): () => 
   const onCompositionStart = () => {
     composing = true;
     anchor = recordAnchor(doc);
+    anchorEl = doc.activeElement;
     schedule();
   };
   const onCompositionEnd = () => {
     composing = false;
     anchor = null;
+    anchorEl = null;
     schedule();
   };
 
