@@ -5,9 +5,12 @@
 import { caretRect, isImeTarget, type CaretAnchor, type CaretRect } from "./caretRect";
 import { setImeCursorArea } from "./ipc";
 
-/// WebKit は編集状態が変わるたびに自前(不正確)の座標を送り直すので、それより後に上書きする。
-/// 実機のプローブで効いた値。
-const SEND_DELAY_MS = 30;
+/// WebKit は編集状態が変わるたびに(変換中は 1 文字ごとに)自前の不正確な座標を送り直すので、
+/// それより後に上書きする。実機(Hyprland + fcitx5)で、待ち時間 0 + 再送 40ms が最もちらつきが
+/// 少なかった。1 回目は素早く送って候補のずれて見える時間を縮め、WebKit の送信が遅れて着いた
+/// 場合に備えて 2 回目でもう一度上書きする。
+const SEND_DELAY_MS = 0;
+const RESEND_DELAY_MS = 40;
 
 const DOCUMENT_EVENTS = [
   "focusin",
@@ -22,6 +25,8 @@ export interface ImeCursorAreaOptions {
   doc?: Document;
   send?: (rect: CaretRect) => void;
   delayMs?: number;
+  /// 1 回目の送信の何 ms 後にもう一度送るか。0 なら再送しない。
+  resendMs?: number;
 }
 
 /// 変換開始時点の位置。text 系は文字位置、contenteditable は選択範囲の先頭に畳んだ Range。
@@ -48,6 +53,7 @@ export function installImeCursorArea(options: ImeCursorAreaOptions = {}): () => 
   const doc = options.doc ?? document;
   const send = options.send ?? setImeCursorArea;
   const delayMs = options.delayMs ?? SEND_DELAY_MS;
+  const resendMs = options.resendMs ?? RESEND_DELAY_MS;
 
   let composing = false;
   let anchor: CaretAnchor = null;
@@ -57,9 +63,9 @@ export function installImeCursorArea(options: ImeCursorAreaOptions = {}): () => 
   let pending = false;
   let rafId: number | undefined;
   let timerId: ReturnType<typeof setTimeout> | undefined;
+  let resendTimerId: ReturnType<typeof setTimeout> | undefined;
 
-  const flush = () => {
-    pending = false;
+  const sendNow = () => {
     try {
       const el = doc.activeElement;
       if (!isImeTarget(el)) return;
@@ -72,6 +78,15 @@ export function installImeCursorArea(options: ImeCursorAreaOptions = {}): () => 
       if (rect) send(rect);
     } catch {
       // 位置補正の失敗でタイピングを妨げない。
+    }
+  };
+
+  const flush = () => {
+    pending = false;
+    sendNow();
+    if (resendMs > 0) {
+      if (resendTimerId !== undefined) clearTimeout(resendTimerId);
+      resendTimerId = setTimeout(sendNow, resendMs);
     }
   };
 
@@ -114,6 +129,7 @@ export function installImeCursorArea(options: ImeCursorAreaOptions = {}): () => 
     window.removeEventListener("resize", schedule);
     if (rafId !== undefined) cancelAnimationFrame(rafId);
     if (timerId !== undefined) clearTimeout(timerId);
+    if (resendTimerId !== undefined) clearTimeout(resendTimerId);
     pending = false;
   };
 }

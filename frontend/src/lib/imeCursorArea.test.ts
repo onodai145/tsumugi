@@ -41,7 +41,9 @@ beforeEach(() => {
   caretRectMock.mockReset();
   caretRectMock.mockReturnValue(RECT);
   send.mockReset();
-  uninstall = installImeCursorArea({ send });
+  // 既存のテストは仕組み(まとめ・解除など)を検証するので、待ち時間と再送を明示して固定する。
+  // 既定値そのものは下の "defaults" のテストで検証する。
+  uninstall = installImeCursorArea({ send, delayMs: 30, resendMs: 0 });
 });
 
 afterEach(() => {
@@ -127,6 +129,32 @@ describe("installImeCursorArea", () => {
     fire(el, "input");
     settle();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  // 実機調整の結果: 待ち時間は短く、WebKit の送信が遅れて着いた場合に備えてもう一度送る
+  it("uses a short delay and one resend by default", () => {
+    uninstall();
+    uninstall = installImeCursorArea({ send });
+    const el = focusTextarea("abc");
+    fire(el, "input");
+    vi.advanceTimersByTime(20); // rAF(≈16ms) + 待ち時間 0
+    expect(send).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(40); // 再送(1 回目の 40ms 後)
+    expect(send).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(200);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not leave a pending resend after uninstall", () => {
+    uninstall();
+    uninstall = installImeCursorArea({ send, delayMs: 0, resendMs: 40 });
+    const el = focusTextarea("abc");
+    fire(el, "input");
+    vi.advanceTimersByTime(20);
+    expect(send).toHaveBeenCalledTimes(1);
+    uninstall();
+    vi.advanceTimersByTime(200);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   // Review Focus 3: 変換中は開始位置に固定される
