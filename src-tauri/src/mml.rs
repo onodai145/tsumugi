@@ -2,7 +2,9 @@
 //!
 //! 外部に依存しない純粋関数。繰り返しの展開・タイの連結・テンポの解決までをここで済ませ、
 //! 各音を「開始秒・長さ秒・MIDI ノート番号・ベロシティ」で返す。音の生成はフロント(Tone.js)の責務。
-//! 方言と上限は docs/superpowers/specs/2026-10-15-issue-75-mml-ringtone-design.md を参照。
+//! 方言と上限は docs/superpowers/specs/2026-10-15-issue-75-mml-ringtone-design.md、
+//! 音色は 2026-10-16-issue-494-mml-timbre-design.md、
+//! 構文の拡張(タイ・連符・コメントなど)は 2026-10-20-issue-499-mml-syntax-extension-design.md を参照。
 
 use crate::domain::{MmlError, MmlScore, NoteEvent, Timbre};
 use crate::error::Error;
@@ -384,6 +386,45 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
     Ok(st.t)
 }
 
+/// 空白とコメントを除いた (ASCII だけ小文字化した文字, 元の文字位置) の列を作る。
+/// コメントは `// …`(改行の手前まで)と `/* … */`(入れ子にできない)。`/` だけはコメントにならず、
+/// そのまま列に残って `parse_track` が「不明な文字」にする。`;` はトラック区切りなのでコメントの開始にしない。
+/// 閉じていない `/*` は、その `/*` の位置のエラー。
+fn symbols(text: &str) -> Result<Vec<(char, usize)>, MmlError> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '/' && chars.get(i + 1) == Some(&'/') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && chars.get(i + 1) == Some(&'*') {
+            let open = i;
+            i += 2;
+            loop {
+                if i + 1 >= chars.len() {
+                    return Err(mml_err(open, "`/*` が閉じていません"));
+                }
+                if chars[i] == '*' && chars[i + 1] == '/' {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if !c.is_whitespace() {
+            out.push((c.to_ascii_lowercase(), i));
+        }
+        i += 1;
+    }
+    Ok(out)
+}
+
 /// MML テキストを解釈する。
 pub fn parse(text: &str) -> Result<MmlScore, MmlError> {
     let total_chars = text.chars().count();
@@ -394,12 +435,7 @@ pub fn parse(text: &str) -> Result<MmlScore, MmlError> {
         ));
     }
 
-    let syms: Vec<(char, usize)> = text
-        .chars()
-        .enumerate()
-        .filter(|(_, c)| !c.is_whitespace())
-        .map(|(i, c)| (c.to_ascii_lowercase(), i))
-        .collect();
+    let syms = symbols(text)?;
 
     // ';' でトラックに分ける。各区間に「直前の ';' の位置」を添える(トラック数超過の報告用)。
     let mut segments: Vec<(&[(char, usize)], usize)> = Vec::new();
@@ -773,6 +809,70 @@ mod tests {
         ));
         let err = validate_sound_choice("mml:x").unwrap_err();
         assert!(err.to_string().contains("1 文字目"), "{err}");
+    }
+
+    /// v1 の記法は、v2 でも同じ結果になる(新しい記号は v1 では構文エラーだったので、意味は変わらない)。
+    #[test]
+    fn v1_syntax_keeps_its_results() {
+        let s = must_parse("t120 o5 l8 cdefgab>c");
+        let midis: Vec<u8> = s.notes.iter().map(|n| n.midi).collect();
+        assert_eq!(midis, vec![72, 74, 76, 77, 79, 81, 83, 84]);
+        for (i, n) in s.notes.iter().enumerate() {
+            approx(n.start_sec, 0.25 * i as f64);
+            approx(n.duration_sec, 0.25);
+        }
+        approx(s.total_sec, 2.0);
+    }
+
+    #[test]
+    fn line_comments_run_to_the_end_of_the_line() {
+        assert_eq!(must_parse("c4 // d4 e4\nf4"), must_parse("c4 f4"));
+        assert_eq!(must_parse("c4 // 末尾までコメント"), must_parse("c4"));
+        assert_eq!(must_parse("// 全部コメント\nc"), must_parse("c"));
+        assert_eq!(must_parse("c4 // x\r\nd4"), must_parse("c4 d4")); // CRLF
+    }
+
+    #[test]
+    fn block_comments_may_span_lines_and_do_not_nest() {
+        assert_eq!(must_parse("c4 /* d4 */ e4"), must_parse("c4 e4"));
+        assert_eq!(must_parse("c4/*複数行\nの*/e4"), must_parse("c4e4"));
+        assert_eq!(must_parse("c/**/d"), must_parse("cd"));
+        // 入れ子はできない: 最初の `*/` で閉じ、残りの ` c */ d` は音符 c と、不明な文字 `*`
+        assert_eq!(must_fail("/* a /* b */ c */ d").position, 15);
+    }
+
+    #[test]
+    fn unterminated_block_comment_is_an_error_at_its_opening() {
+        assert_eq!(must_fail("c4 /* d4").position, 3);
+        assert_eq!(must_fail("c /*/").position, 2); // `/*/` は閉じていない
+    }
+
+    #[test]
+    fn a_lone_slash_is_still_an_unknown_character() {
+        assert_eq!(must_fail("c/d").position, 1);
+        assert_eq!(must_fail("c / / d").position, 2); // 間に空白があれば `//` ではない
+    }
+
+    #[test]
+    fn comments_do_not_split_tracks() {
+        assert_eq!(must_parse("c4 // ; d4\ne4").track_count, 1);
+        assert_eq!(must_parse("c4 /* ; */ e4").track_count, 1);
+        assert_eq!(must_parse("c4 /* x */ ; e4").track_count, 2);
+    }
+
+    #[test]
+    fn error_positions_after_comments_stay_in_the_original_text() {
+        // `/* あ */ c4 x` で x は 12 文字目(0 始まりの 11)
+        assert_eq!(must_fail("/* あ */ c4 x").position, 11);
+        assert_eq!(must_fail("// あ\nx").position, 5);
+    }
+
+    #[test]
+    fn text_length_limit_counts_comments() {
+        // `c //` が 4 文字、残り 4996 文字がコメント: ちょうど 5000 文字
+        assert!(parse(&format!("c //{}", "あ".repeat(4996))).is_ok());
+        let e = must_fail(&format!("c //{}", "あ".repeat(4997)));
+        assert_eq!(e.position, 5000);
     }
 
     fn timbres(text: &str) -> Vec<Timbre> {
