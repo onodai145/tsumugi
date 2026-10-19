@@ -6,6 +6,7 @@
   import { TIMBRE_LIST } from "../../lib/mmlTimbres";
   import { computeUsage, formatUsage, type ParsedUsage } from "../../lib/mmlUsage";
   import { MML_SAMPLES, type MmlSample } from "../../lib/mmlSamples";
+  import { MML_KEY_GROUPS } from "../../lib/mmlKeys";
   import Dropdown from "../Dropdown.svelte";
   import { Button } from "$lib/components/ui/button";
 
@@ -60,7 +61,7 @@
   let status = $state<MmlStatus>({ kind: "idle" });
   // 直近に構文が通ったときの音数と再生時間。解析中は点滅を避けて、これを出し続ける
   let lastOk = $state<ParsedUsage | null>(null);
-  let editor = $state<{ focusAt(pos: number): void; insertText(text: string): void }>();
+  let editor = $state<{ focusAt(pos: number): void; insertText(text: string, opts?: { pad?: boolean }): void }>();
   // 入力があるときにサンプルを押された場合の、置き換え確認の待ち。入力を編集したら引っ込める
   let pendingSample = $state<MmlSample | null>(null);
   // 同じ画面に複数あっても id が衝突しないように
@@ -213,6 +214,27 @@
       describedBy="{uid}-status {uid}-usage"
       invalid={status.kind === "error" || status.kind === "failed"}
     />
+    {#if app.useMobileUi()}
+      <!-- ソフトキーボードで切り替えが要る記号と、音符・長さ。押してもエディタからフォーカスを奪わない(キーボードを閉じない) -->
+      <div class="flex flex-wrap gap-x-3 gap-y-1.5" role="group" aria-label="入力補助" data-testid="mml-keys">
+        {#each MML_KEY_GROUPS as group (group.id)}
+          <div class="flex flex-wrap gap-1" role="group" aria-label={group.label}>
+            {#each group.keys as key (key.id)}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                class="min-h-10 min-w-10 px-2 font-mono"
+                aria-label={key.aria}
+                onmousedown={(e) => e.preventDefault()}
+                onclick={() => editor?.insertText(key.insert, { pad: false })}
+                data-testid="mml-key-{key.id}">{key.label}</Button
+              >
+            {/each}
+          </div>
+        {/each}
+      </div>
+    {/if}
   {:catch}
     <!-- エディタの chunk を読み込めなかったとき。MML の入力手段が黙って消えないように、素の入力欄に戻す -->
     <textarea
