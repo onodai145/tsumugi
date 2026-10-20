@@ -13,6 +13,10 @@ pub const MAX_TEXT_CHARS: usize = 5000;
 pub const MAX_TRACKS: usize = 4;
 pub const MAX_TOTAL_SEC: f64 = 90.0;
 pub const MAX_NOTES: usize = 3000;
+/// 繰り返しを展開した後の命令数の上限。音符・休符は 3000 音・90 秒で抑えられるが、音を出さない命令
+/// (`o` `v` など)は抑えられないので、ネストで展開が膨らむ入力のために命令数そのものを制限する。
+/// v1 で通る最大の展開(ループ 1 組で本体が約 4996 文字、99 回で約 49.5 万)を弾かない値。
+pub const MAX_EXPANDED_OPS: usize = 500_000;
 
 /// `sound_choice` に MML を入れるときの接頭辞。
 pub const SOUND_CHOICE_PREFIX: &str = "mml:";
@@ -146,14 +150,35 @@ impl Cursor<'_> {
     }
 }
 
+/// 開いている繰り返し `[`。
+struct LoopFrame {
+    /// `out` での本体の開始位置
+    start: usize,
+    /// `[` の元の文字位置
+    pos: usize,
+    /// `:` が置かれた `out` での位置(最後の回は、ここから後ろを飛ばす)
+    colon: Option<usize>,
+}
+
+/// 繰り返しの複製を `out` に足す。展開後の命令数が上限を超えるなら、足さずに `pos`(`]` の位置)でエラーにする。
+fn extend_checked(out: &mut Vec<Item>, part: &[Item], pos: usize) -> Result<(), MmlError> {
+    if out.len() + part.len() > MAX_EXPANDED_OPS {
+        return Err(mml_err(
+            pos,
+            format!("繰り返しを展開した命令が {MAX_EXPANDED_OPS} 個を超えました"),
+        ));
+    }
+    out.extend_from_slice(part);
+    Ok(())
+}
+
 /// 1 トラック分の文字列を命令列にする。繰り返し `[ ... ]n` はここで展開する。
-/// 繰り返しは入れ子にできないので、展開後の命令数は入力サイズ(5000 文字 × 最大 99 回)で抑えられる。
+/// 繰り返しは入れ子にできる。展開後の命令数は `MAX_EXPANDED_OPS` で抑える。
 /// 時間の上限はここでは見ず、`run_track` が実行しながら判定する。
 fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError> {
     let mut c = Cursor { syms, i: 0, end };
     let mut out: Vec<Item> = Vec::new();
-    // 開いている繰り返しの (out の開始 index, `[` の位置)
-    let mut open_loop: Option<(usize, usize)> = None;
+    let mut loops: Vec<LoopFrame> = Vec::new();
 
     while let Some(ch) = c.peek() {
         let pos = c.pos();
@@ -266,14 +291,25 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 }
             }
             '[' => {
-                if open_loop.is_some() {
-                    return Err(mml_err(pos, "繰り返しはネストできません"));
+                loops.push(LoopFrame {
+                    start: out.len(),
+                    pos,
+                    colon: None,
+                });
+                continue;
+            }
+            ':' => {
+                let Some(frame) = loops.last_mut() else {
+                    return Err(mml_err(pos, "`:` は繰り返し `[ ]` の中でだけ使えます"));
+                };
+                if frame.colon.is_some() {
+                    return Err(mml_err(pos, "`:` は繰り返し 1 つにつき 1 個までです"));
                 }
-                open_loop = Some((out.len(), pos));
+                frame.colon = Some(out.len());
                 continue;
             }
             ']' => {
-                let Some((start, _)) = open_loop.take() else {
+                let Some(LoopFrame { start, colon, .. }) = loops.pop() else {
                     return Err(mml_err(pos, "対応する `[` がありません"));
                 };
                 let count = match c.number() {
@@ -286,8 +322,15 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                     None => 2,
                 };
                 let body: Vec<Item> = out[start..].to_vec();
-                for _ in 1..count {
-                    out.extend(body.iter().cloned());
+                // 最初の 1 周は `out` に入っている。`:` があれば、最後の 1 周は `:` の手前までだけを足す
+                // (`:` が無ければ、全部を n-1 回足す。あれば、全部を n-2 回と、手前までを 1 回)。
+                let head = colon.map(|c| c - start);
+                let full_rounds = count - 1 - u32::from(head.is_some());
+                for _ in 0..full_rounds {
+                    extend_checked(&mut out, &body, pos)?;
+                }
+                if let Some(head) = head {
+                    extend_checked(&mut out, &body[..head], pos)?;
                 }
                 continue;
             }
@@ -296,8 +339,8 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
         out.push(Item { op, pos });
     }
 
-    if let Some((_, p)) = open_loop {
-        return Err(mml_err(p, "閉じていない `[` があります"));
+    if let Some(frame) = loops.last() {
+        return Err(mml_err(frame.pos, "閉じていない `[` があります"));
     }
     Ok(out)
 }
@@ -768,7 +811,6 @@ mod tests {
         assert_eq!(must_fail("[c4]100").position, 4);
         assert_eq!(must_fail("[c4").position, 0);
         assert_eq!(must_fail("c4]").position, 2);
-        assert_eq!(must_fail("[[c]2]2").position, 1);
         assert_eq!(must_fail("[c;d]2").position, 0); // ';' は繰り返しをまたげない
     }
 
@@ -1041,6 +1083,64 @@ mod tests {
             must_parse("q100 t137 c4.").notes[0].duration_sec,
             must_parse("t137 c4.").notes[0].duration_sec
         );
+    }
+
+    fn midis(t: &str) -> Vec<u8> {
+        must_parse(t).notes.iter().map(|n| n.midi).collect()
+    }
+
+    #[test]
+    fn loop_escape_skips_the_tail_on_the_last_round() {
+        assert_eq!(midis("[c:d]3"), vec![60, 62, 60, 62, 60]);
+        assert_eq!(midis("[c:d]"), vec![60, 62, 60]); // 回数省略は 2
+        assert_eq!(midis("[:c]2"), vec![60]);
+        assert_eq!(midis("[c:]2"), vec![60, 60]);
+        assert_eq!(
+            midis("[cd:e]4"),
+            vec![60, 62, 64, 60, 62, 64, 60, 62, 64, 60, 62]
+        );
+    }
+
+    #[test]
+    fn loops_can_be_nested() {
+        assert_eq!(midis("[c[d]2]2"), vec![60, 62, 62, 60, 62, 62]);
+        assert_eq!(midis("[[c]2 d]2"), vec![60, 60, 62, 60, 60, 62]);
+        // 内側のループの `:` は内側に効く
+        assert_eq!(midis("[c[d:e]2]2"), vec![60, 62, 64, 62, 60, 62, 64, 62]);
+        // 外側の `:` は、内側のループを含めた手前までが「最後の回にも鳴る部分」
+        assert_eq!(midis("[a[d]2:c]2"), vec![69, 62, 62, 60, 69, 62, 62]);
+    }
+
+    #[test]
+    fn invalid_loop_escapes() {
+        assert_eq!(must_fail("c:d").position, 1); // ループの外
+        assert_eq!(must_fail("[c:d:e]2").position, 4); // 2 個目
+        assert_eq!(must_fail("[c:d]1").position, 5); // 回数は 2〜99 のまま
+        assert_eq!(must_fail("[c;d]2").position, 0); // `;` は繰り返しをまたげない
+    }
+
+    #[test]
+    fn nested_loop_expansion_is_capped_before_it_explodes() {
+        // 4 重のネスト: 99^4 個に展開されてしまうが、50 万を超えた `]` で止まる(メモリを使い切らない)。
+        // 3 つ目の `]`(位置 11)の展開が 9801 × 99 = 970,299 個になるところで止まる。
+        let e = must_fail("[[[[c]99]99]99]99");
+        assert_eq!(e.position, 11);
+        assert!(e.message.contains("命令"), "{}", e.message);
+    }
+
+    #[test]
+    fn the_largest_v1_loop_still_parses() {
+        // v1 で通る最大級: ループ 1 組で、本体が 4994 文字、99 回の繰り返しで約 49.4 万命令。
+        // `><` はオクターブを往復するだけで音を出さない(音の上限・時間の上限では抑えられない命令)。
+        let text = format!("c[{}]99", "><".repeat(2497));
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        assert_eq!(must_parse(&text).notes.len(), 1);
+        // ネストで 50 万を超える: 内側が 198,000 命令、外側の 2 回目の複製で 594,000 になる。
+        let body = "><".repeat(1000);
+        let text = format!("c[[{body}]99]99");
+        let e = must_fail(&text);
+        assert_eq!(e.position as usize, text.chars().count() - 3); // 外側の `]`
+        assert!(e.message.contains("命令"), "{}", e.message);
     }
 
     fn timbres(text: &str) -> Vec<Timbre> {
