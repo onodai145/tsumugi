@@ -25,6 +25,8 @@ const DEFAULT_OCTAVE: i32 = 4;
 const DEFAULT_LEN: u32 = 4;
 const DEFAULT_TEMPO: u32 = 120;
 const DEFAULT_VOLUME: u32 = 10;
+/// ゲートタイム `q` の範囲(百分率)。既定は上限の 100(全長を鳴らす)。
+const MAX_GATE: u32 = 100;
 
 fn mml_err(pos: usize, message: impl Into<String>) -> MmlError {
     MmlError {
@@ -59,6 +61,8 @@ enum Op {
     Volume(u8),
     /// `v+n` / `v-n`。現在の音量に足す(範囲外はエラー)。
     VolumeDelta(i32),
+    /// `q<n>`。音を鳴らす長さの割合(百分率、1〜100)。
+    Gate(u8),
     Timbre(Timbre),
 }
 
@@ -236,6 +240,13 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                     Op::Volume(n as u8)
                 }
             }
+            'q' => {
+                let (n, p) = c.require_number(pos, 'q')?;
+                if !(1..=MAX_GATE).contains(&n) {
+                    return Err(mml_err(p, format!("ゲートタイムは 1〜{MAX_GATE} です")));
+                }
+                Op::Gate(n as u8)
+            }
             '@' => {
                 if c.peek().is_none() {
                     return Err(mml_err(pos, "`@` の後に音色の番号か名前が必要です"));
@@ -296,10 +307,15 @@ struct TrackState {
     len: u32,
     tempo: u32,
     volume: u32,
+    gate: u32,
     timbre: Timbre,
     t: f64,
     /// 直前の命令が音符だったとき、その音符の `notes` 内の index(タイの連結先)
     last_note: Option<usize>,
+    /// 直前の音符の全長(秒。ゲートを掛ける前。タイで延びる)
+    last_full: f64,
+    /// 直前の音符を作ったときのゲート(タイで延びても、先頭の音符のものを使う)
+    last_gate: u32,
     /// 直前に `&` があったとき、その位置
     tie_pos: Option<usize>,
 }
@@ -311,6 +327,15 @@ fn duration_sec(len: u32, dots: u8, tempo: u32) -> f64 {
         _ => 1.75,
     };
     4.0 / f64::from(len) * dot_factor * 60.0 / f64::from(tempo)
+}
+
+/// 全長にゲートタイム(百分率)を掛ける。100 のときは掛け算をせず、v1 と同じ値のまま返す。
+fn gated(full: f64, gate: u32) -> f64 {
+    if gate >= MAX_GATE {
+        full
+    } else {
+        full * f64::from(gate) / f64::from(MAX_GATE)
+    }
 }
 
 fn check_limit(t: f64, pos: usize) -> Result<(), MmlError> {
@@ -332,9 +357,12 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
         len: DEFAULT_LEN,
         tempo: DEFAULT_TEMPO,
         volume: DEFAULT_VOLUME,
+        gate: MAX_GATE,
         timbre: Timbre::Fm,
         t: 0.0,
         last_note: None,
+        last_full: 0.0,
+        last_gate: MAX_GATE,
         tie_pos: None,
     };
 
@@ -364,6 +392,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                 }
                 st.volume = v as u32;
             }
+            Op::Gate(n) => st.gate = u32::from(*n),
             Op::Timbre(t) => st.timbre = *t,
             Op::Tie => {
                 if st.last_note.is_none() || st.tie_pos.is_some() {
@@ -379,7 +408,8 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                     return Err(mml_err(pos, "`^` の前に音符が必要です"));
                 };
                 let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo);
-                notes[idx].duration_sec += d;
+                st.last_full += d;
+                notes[idx].duration_sec = gated(st.last_full, st.last_gate);
                 st.t += d;
                 check_limit(st.t, pos)?;
             }
@@ -403,7 +433,8 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                     if i32::from(notes[idx].midi) != midi {
                         return Err(mml_err(pos, "`&` は同じ高さの音符どうしだけをつなげます"));
                     }
-                    notes[idx].duration_sec += d;
+                    st.last_full += d;
+                    notes[idx].duration_sec = gated(st.last_full, st.last_gate);
                 } else {
                     if notes.len() >= MAX_NOTES {
                         return Err(mml_err(pos, format!("音符は {MAX_NOTES} 個までです")));
@@ -411,12 +442,14 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                     notes.push(NoteEvent {
                         track,
                         start_sec: st.t,
-                        duration_sec: d,
+                        duration_sec: gated(d, st.gate),
                         midi: midi as u8,
                         velocity: f64::from(st.volume) / 15.0,
                         timbre: st.timbre,
                     });
                     st.last_note = Some(notes.len() - 1);
+                    st.last_full = d;
+                    st.last_gate = st.gate;
                 }
                 st.t += d;
                 check_limit(st.t, pos)?;
@@ -968,6 +1001,46 @@ mod tests {
         assert_eq!(must_fail("v+0 c").position, 2); // n は 1〜15。数字の位置
         assert_eq!(must_fail("v+16 c").position, 2);
         assert_eq!(must_fail("v c").position, 0); // 絶対指定は数字が必要なまま
+    }
+
+    #[test]
+    fn gate_shortens_notes_but_not_the_timeline() {
+        let s = must_parse("q50 c4 d4");
+        approx(s.notes[0].duration_sec, 0.25);
+        approx(s.notes[1].start_sec, 0.5); // 次の音の開始は変わらない
+        approx(s.notes[1].duration_sec, 0.25);
+        approx(s.total_sec, 1.0); // 再生時間は全長で数える
+        approx(must_parse("c4 q50 d4").notes[0].duration_sec, 0.5); // 変更前の音は影響を受けない
+        approx(must_parse("q100 c4").notes[0].duration_sec, 0.5);
+        approx(must_parse("q1 c4").notes[0].duration_sec, 0.005);
+        // 休符は q の影響を受けない(そのまま進む)
+        approx(must_parse("q50 c4 r4 d4").notes[1].start_sec, 1.0);
+    }
+
+    #[test]
+    fn gate_applies_to_the_whole_tied_note() {
+        approx(must_parse("q50 c4&c4").notes[0].duration_sec, 0.5); // 全長 1.0 の半分
+        approx(must_parse("q50 c4^4").notes[0].duration_sec, 0.5);
+        // タイの途中で q を変えても、先頭の音の q を使う
+        approx(must_parse("q50 c4&q100 c4").notes[0].duration_sec, 0.5);
+        approx(must_parse("q50 c4^4&c4").notes[0].duration_sec, 0.75);
+    }
+
+    #[test]
+    fn gate_is_per_track_and_validated() {
+        approx(must_parse("q50 c4;c4").notes[1].duration_sec, 0.5);
+        assert_eq!(must_fail("q0 c").position, 1);
+        assert_eq!(must_fail("q101 c").position, 1);
+        assert_eq!(must_fail("q c").position, 0);
+    }
+
+    #[test]
+    fn default_gate_leaves_durations_bit_exact() {
+        // q100 は掛け算をしないので、q を書かない場合と、浮動小数点の値まで完全に同じになる
+        assert_eq!(
+            must_parse("q100 t137 c4.").notes[0].duration_sec,
+            must_parse("t137 c4.").notes[0].duration_sec
+        );
     }
 
     fn timbres(text: &str) -> Vec<Timbre> {
