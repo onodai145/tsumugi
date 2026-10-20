@@ -518,6 +518,8 @@ struct TrackState {
     last_notes: Vec<usize>,
     /// 直前の命令が和音だったか(和音は `&` でつなげない)
     last_chord: bool,
+    /// `^` で延ばした長さを、まだ `notes` に書いていないか(`flush_last` で書く)
+    last_dirty: bool,
     /// 和音を始めたときのオクターブ(閉じで戻す)
     chord_octave: i32,
     /// 和音の中でここまでに読んだ音の (MIDI ノート番号, 元の文字位置)
@@ -591,6 +593,18 @@ fn tuplet_scale(rest: &[Item], l_at_open: u32) -> f64 {
     unreachable!("parse_track pairs every `{{` with a `}}`")
 }
 
+/// `^` で延ばした直前の音符・和音の長さを、`notes` に書き込む。`^` のたびに和音の全部の音を書き直すと、
+/// `^` を大量に展開した入力で遅くなるので、次の音符・和音・休符・トラックの終わりで、まとめて 1 回だけ書く。
+fn flush_last(st: &mut TrackState, notes: &mut [NoteEvent]) {
+    if st.last_dirty {
+        let d = gated(st.last_full, st.last_gate);
+        for &idx in &st.last_notes {
+            notes[idx].duration_sec = d;
+        }
+        st.last_dirty = false;
+    }
+}
+
 const CHORD_TIE_MESSAGE: &str =
     "`&` は和音とは組み合わせられません(長くしたいときは `^` を使ってください)";
 
@@ -613,6 +627,7 @@ fn run_track(
         t: 0.0,
         last_notes: Vec::new(),
         last_chord: false,
+        last_dirty: false,
         chord_octave: DEFAULT_OCTAVE,
         chord_notes: Vec::new(),
         last_full: 0.0,
@@ -670,9 +685,7 @@ fn run_track(
                 }
                 let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
                 st.last_full += d;
-                for &idx in &st.last_notes {
-                    notes[idx].duration_sec = gated(st.last_full, st.last_gate);
-                }
+                st.last_dirty = true;
                 st.t += d;
                 check_limit(st.t, pos)?;
             }
@@ -681,6 +694,7 @@ fn run_track(
                     return Err(mml_err(tp, "`&` の後に音符が必要です"));
                 }
                 st.t += duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
+                flush_last(&mut st, notes);
                 st.last_notes.clear();
                 st.last_chord = false;
                 check_limit(st.t, pos)?;
@@ -699,7 +713,9 @@ fn run_track(
                     }
                     st.last_full += d;
                     notes[idx].duration_sec = gated(st.last_full, st.last_gate);
+                    st.last_dirty = false;
                 } else {
+                    flush_last(&mut st, notes);
                     if notes.len() >= MAX_NOTES {
                         return Err(mml_err(pos, format!("音符は {MAX_NOTES} 個までです")));
                     }
@@ -733,6 +749,7 @@ fn run_track(
             Op::ChordEnd { len, dots } => {
                 let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
                 let velocity = f64::from(st.volume) / 15.0 / st.chord_notes.len() as f64;
+                flush_last(&mut st, notes);
                 st.last_notes.clear();
                 for &(midi, note_pos) in &st.chord_notes {
                     if notes.len() >= MAX_NOTES {
@@ -758,6 +775,7 @@ fn run_track(
         }
     }
 
+    flush_last(&mut st, notes);
     if let Some(tp) = st.tie_pos {
         return Err(mml_err(tp, "`&` の後に音符が必要です"));
     }
@@ -1885,5 +1903,25 @@ mod tests {
         let s = must_parse("'ce' d ^4");
         approx(s.notes[0].duration_sec, 0.5);
         approx(s.notes[2].duration_sec, 1.0);
+    }
+
+    #[test]
+    fn many_carets_after_a_big_chord_do_not_rewrite_every_note() {
+        // 3000 音の和音の後ろに、連符で縮めた `^` を約 49 万個並べる(連符の中なので 90 秒の上限には届かない)。
+        // `^` のたびに和音の全部の音を書き直すと、約 15 億回の書き込みになる。
+        let text = format!("'{}'{{[[[^]99]99]50}}", "c".repeat(MAX_NOTES));
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        let started = std::time::Instant::now();
+        let s = must_parse(&text);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "parse が {:?} かかった",
+            started.elapsed()
+        );
+        // 和音の長さ 0.5 秒に、連符の長さ(四分音符 1 つ分 = 0.5 秒)を足した全長が、全部の音に入っている
+        assert_eq!(s.notes.len(), MAX_NOTES);
+        for n in [&s.notes[0], &s.notes[MAX_NOTES - 1]] {
+            assert!((n.duration_sec - 1.0).abs() < 1e-6, "{}", n.duration_sec);
+        }
     }
 }
