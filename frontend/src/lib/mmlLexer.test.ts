@@ -191,6 +191,35 @@ describe("lexMml", () => {
     ]);
   });
 
+  it("和音の状態は ; (トラックの区切り)で戻る: 1 本目の閉じていない ' が、2 本目の開き・閉じを逆にしない", () => {
+    expect(lex("'c;'ce'4")).toEqual([
+      ["'", "repeat"],
+      ["c", "note"],
+      [";", "separator"],
+      ["'", "repeat"],
+      ["c", "note"],
+      ["e", "note"],
+      ["'4", "repeat"],
+    ]);
+  });
+
+  it("コメントをまたぐトークンは、コメントの範囲で切って、コメントと重ならない", () => {
+    expect(lex("t/*x*/=60")).toEqual([
+      ["t", "command"],
+      ["/*x*/", "comment"],
+      ["=", "command"],
+      ["60", "number"],
+    ]);
+    expect(lex("v/**/+2")).toEqual([
+      ["v", "command"],
+      ["/**/", "comment"],
+      ["+", "command"],
+      ["2", "number"],
+    ]);
+    const tokens = lexMml("t/*x*/=60 @be/*y*/ll [c]/*z*/3 // w\nd");
+    for (let i = 1; i < tokens.length; i++) expect(tokens[i].from).toBeGreaterThanOrEqual(tokens[i - 1].to);
+  });
+
   it("連符は { と、} とその直後の長さ・付点(repeat)", () => {
     expect(lex("{cde}4.")).toEqual([
       ["{", "repeat"],

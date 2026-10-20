@@ -150,12 +150,27 @@ export function lexMml(text: string): MmlToken[] {
       }
     } else if (ch === ";") {
       push(i, i + 1, "separator");
+      inChord = false; // 和音の状態はトラックごと(Rust のパーサーも `;` でトラックを分けてから読む)
       i++;
     } else {
       push(i, i + 1, "unknown");
       i++;
     }
   }
-  for (const { from, to } of findComments(text)) out.push({ from, to, kind: "comment" });
-  return out.sort((a, b) => a.from - b.from);
+  // コメントをまたぐトークン(`t/*x*/=60`、`v/**/+2`)は、コメントの範囲で切って、コメントと重ならないようにする。
+  // `out` は from の昇順なので、コメントを指す添字は後ろへ進めるだけでよい。
+  const comments = findComments(text);
+  const result: MmlToken[] = [];
+  let ci = 0;
+  for (const tok of out) {
+    while (ci < comments.length && comments[ci].to <= tok.from) ci++;
+    let from = tok.from;
+    for (let k = ci; k < comments.length && comments[k].from < tok.to; k++) {
+      if (comments[k].from > from) result.push({ from, to: comments[k].from, kind: tok.kind });
+      from = Math.max(from, comments[k].to);
+    }
+    if (from < tok.to) result.push({ from, to: tok.to, kind: tok.kind });
+  }
+  for (const { from, to } of comments) result.push({ from, to, kind: "comment" });
+  return result.sort((a, b) => a.from - b.from);
 }

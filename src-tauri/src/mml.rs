@@ -301,7 +301,7 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 if seen_length {
                     return Err(mml_err(
                         pos,
-                        "`t=` はトラックの最初の音符・休符より前に書いてください",
+                        "`t=` はトラックの最初の音符・休符・和音より前に書いてください",
                     ));
                 }
                 let Some((n, p)) = c.number() else {
@@ -1923,5 +1923,29 @@ mod tests {
         for n in [&s.notes[0], &s.notes[MAX_NOTES - 1]] {
             assert!((n.duration_sec - 1.0).abs() < 1e-6, "{}", n.duration_sec);
         }
+    }
+
+    #[test]
+    fn a_later_tracks_track_limit_error_comes_before_an_earlier_tracks_run_error() {
+        // 全トラックを先に構文解析するので、5 本目のトラック数のエラーも、1 本目の 90 秒超過より先に出る
+        let e = must_fail("t32 [c1]99 ; c ; d ; e ; f");
+        assert_eq!(e.position, 23); // 5 本目の手前の `;`
+        assert!(e.message.contains("4 つまで"), "{}", e.message);
+    }
+
+    #[test]
+    fn shared_tempo_after_a_chord_is_rejected_and_the_message_names_chords() {
+        let e = must_fail("'ce' t=60");
+        assert_eq!(e.position, 5);
+        assert!(e.message.contains("和音"), "{}", e.message);
+    }
+
+    #[test]
+    fn the_octave_is_restored_after_a_chord_inside_loops_and_tuplets() {
+        let midis = |t: &str| -> Vec<u8> { must_parse(t).notes.iter().map(|n| n.midi).collect() };
+        assert_eq!(midis("['c>c' c]2"), vec![60, 72, 60, 60, 72, 60]);
+        assert_eq!(midis("{'c>c' c}4 c"), vec![60, 72, 60, 60]);
+        assert_eq!(midis("o4 'c>>>c' c"), vec![60, 96, 60]);
+        assert_eq!(midis("o7 '>c' > c"), vec![108, 108]);
     }
 }
