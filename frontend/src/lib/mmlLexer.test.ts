@@ -152,6 +152,19 @@ describe("lexMml", () => {
     ]);
   });
 
+  it("t= は 1 つのコマンド(= まで。空白をまたいでよい)と number。t120 は今までどおり", () => {
+    expect(lex("t=140 t120")).toEqual([
+      ["t=", "command"],
+      ["140", "number"],
+      ["t", "command"],
+      ["120", "number"],
+    ]);
+    expect(lex("T = 140")).toEqual([
+      ["T =", "command"],
+      ["140", "number"],
+    ]);
+  });
+
   it("連符は { と、} とその直後の長さ・付点(repeat)", () => {
     expect(lex("{cde}4.")).toEqual([
       ["{", "repeat"],

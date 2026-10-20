@@ -104,8 +104,10 @@ export function lexMml(text: string): MmlToken[] {
       push(i, i + 1, "rest");
       i = lengthAndDots(i + 1);
     } else if (NUMBERED_COMMANDS.has(ch)) {
-      // `v+2` `v-2` は、符号までを 1 つのコマンドにする
-      const cmdEnd = i + (ch === "v" && (at(i + 1) === "+" || at(i + 1) === "-") ? 2 : 1);
+      // `v+2` `v-2` は符号まで、`t=140` は `=` までを 1 つのコマンドにする
+      const signed = ch === "v" && (at(i + 1) === "+" || at(i + 1) === "-");
+      const shared = ch === "t" && at(i + 1) === "=";
+      const cmdEnd = i + (signed || shared ? 2 : 1);
       push(i, cmdEnd, "command");
       const j = digitsEnd(cmdEnd);
       if (j > cmdEnd) push(cmdEnd, j, "number");
