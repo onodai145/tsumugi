@@ -129,6 +129,9 @@ describe("SoundChoicePicker の MML モード", () => {
     const text = getByTestId("mml-syntax-help").textContent ?? "";
     expect(text).toContain("t=140");
     expect(text).toContain("全トラックの初期テンポ");
+    // 置ける場所の規則(最初の音符・休符・和音より前、繰り返し・連符の外)が書かれている
+    expect(text).toContain("最初の音符・休符・和音より前");
+    expect(text).toContain("繰り返し・連符の外");
   });
 
   it("記法ヘルプに、和音 'ceg' の書き方が出る", () => {
