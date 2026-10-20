@@ -235,7 +235,7 @@ fn read_pitch(ch: char, c: &mut Cursor) -> i32 {
     base + accidental
 }
 
-/// 時間を進める命令(音符・休符・`^`・和音の閉じ)か。`t=` の置き場所と、連符の中身の検査に使う。
+/// 時間を進める命令(音符・休符・`^`・和音の閉じ)か。連符の中身の検査(`}` の前に長さを持つ命令があるか)に使う。
 fn has_length_op(op: &Op) -> bool {
     matches!(
         op,
@@ -250,7 +250,8 @@ fn has_length_op(op: &Op) -> bool {
 fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError> {
     let mut c = Cursor { syms, i: 0, end };
     let mut out: Vec<Item> = Vec::new();
-    // ここまでに音符・休符・`^` を読んだか(`t=` の位置の検査用。`out` をなめ直すと、`t=` を並べた入力で遅くなる)。
+    // ここまでに音符・休符・和音を読んだか(`t=` の位置の検査用。`out` をなめ直すと、`t=` を並べた入力で遅くなる)。
+    // `^` は数えない: トラックの最初には置けず(置けば `run_track` が `^` のエラーにする)、`t=` の規則に関わらない。
     // 繰り返しの展開は読み済みの命令を複製するだけなので、このフラグは `out` の中身と常に一致する。
     let mut seen_length = false;
     let mut stack: Vec<Frame> = Vec::new();
@@ -493,7 +494,7 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
             }
             other => return Err(mml_err(pos, format!("不明な文字 `{other}` です"))),
         };
-        if has_length_op(&op) {
+        if matches!(op, Op::Note { .. } | Op::Rest { .. } | Op::ChordEnd { .. }) {
             seen_length = true;
         }
         out.push(Item { op, pos });
@@ -1947,5 +1948,17 @@ mod tests {
         assert_eq!(midis("{'c>c' c}4 c"), vec![60, 72, 60, 60]);
         assert_eq!(midis("o4 'c>>>c' c"), vec![60, 96, 60]);
         assert_eq!(midis("o7 '>c' > c"), vec![108, 108]);
+    }
+
+    #[test]
+    fn a_leading_caret_is_reported_as_the_caret_not_as_the_shared_tempo() {
+        // `^` はトラックの最初には置けないので、`t=` の位置の検査には数えない(本当の原因の `^` を指す)
+        let e = must_fail("^4 t=60");
+        assert_eq!(e.position, 0);
+        assert!(e.message.contains("`^`"), "{}", e.message);
+        // 音符の後の `^` を挟んだ `t=` は、今までどおり `t=` の位置のエラー
+        assert_eq!(must_fail("c ^4 t=60").position, 5);
+        // 連符の中身の検査は、今までどおり `^` を数える(`c {^4}4` は通る)
+        approx(must_parse("c {^4}4").notes[0].duration_sec, 1.0);
     }
 }
