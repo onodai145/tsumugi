@@ -165,6 +165,32 @@ describe("lexMml", () => {
     ]);
   });
 
+  it("和音は開きの ' と、閉じの ' とその直後の長さ・付点(repeat)。中は音符と < >", () => {
+    expect(lex("'ceg'4.")).toEqual([
+      ["'", "repeat"],
+      ["c", "note"],
+      ["e", "note"],
+      ["g", "note"],
+      ["'4.", "repeat"],
+    ]);
+    expect(lex("'c>c' d")).toEqual([
+      ["'", "repeat"],
+      ["c", "note"],
+      [">", "command"],
+      ["c", "note"],
+      ["'", "repeat"],
+      ["d", "note"],
+    ]);
+  });
+
+  it("閉じていない ' は、以降を和音の中として読む(開きだけ repeat)", () => {
+    expect(lex("'ce")).toEqual([
+      ["'", "repeat"],
+      ["c", "note"],
+      ["e", "note"],
+    ]);
+  });
+
   it("連符は { と、} とその直後の長さ・付点(repeat)", () => {
     expect(lex("{cde}4.")).toEqual([
       ["{", "repeat"],

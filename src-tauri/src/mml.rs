@@ -76,6 +76,17 @@ enum Op {
         len: Option<u32>,
         dots: u8,
     },
+    /// `'`(和音の開き)。
+    ChordStart,
+    /// 和音の中の音符。長さを持たず、`ChordEnd` でまとめて鳴らす。
+    ChordNote {
+        semitone: i32,
+    },
+    /// `'<長さ>`(和音の閉じ)。長さ省略は `l` の値。
+    ChordEnd {
+        len: Option<u32>,
+        dots: u8,
+    },
     Timbre(Timbre),
 }
 
@@ -199,6 +210,39 @@ fn extend_checked(
     Ok(())
 }
 
+/// 音名 `ch`(`c`〜`b`)と、続く半音記号(`#` `+` `-`)を読んで、オクターブ内の半音数を返す。
+fn read_pitch(ch: char, c: &mut Cursor) -> i32 {
+    let base = match ch {
+        'c' => 0,
+        'd' => 2,
+        'e' => 4,
+        'f' => 5,
+        'g' => 7,
+        'a' => 9,
+        _ => 11,
+    };
+    let accidental = match c.peek() {
+        Some('+') | Some('#') => {
+            c.bump();
+            1
+        }
+        Some('-') => {
+            c.bump();
+            -1
+        }
+        _ => 0,
+    };
+    base + accidental
+}
+
+/// 時間を進める命令(音符・休符・`^`・和音の閉じ)か。`t=` の置き場所と、連符の中身の検査に使う。
+fn has_length_op(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Note { .. } | Op::Rest { .. } | Op::TieLen { .. } | Op::ChordEnd { .. }
+    )
+}
+
 /// 1 トラック分の文字列を命令列にする。繰り返し `[ ... ]n` はここで展開する。
 /// 繰り返しは入れ子にできる。展開後の命令数は `MAX_EXPANDED_OPS` で抑える。
 /// 連符 `{ ... }n` は入れ子にできず、繰り返しとは括弧が交差しない限り組み合わせられる。
@@ -216,29 +260,10 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
         c.bump();
         let op = match ch {
             'c' | 'd' | 'e' | 'f' | 'g' | 'a' | 'b' => {
-                let base = match ch {
-                    'c' => 0,
-                    'd' => 2,
-                    'e' => 4,
-                    'f' => 5,
-                    'g' => 7,
-                    'a' => 9,
-                    _ => 11,
-                };
-                let accidental = match c.peek() {
-                    Some('+') | Some('#') => {
-                        c.bump();
-                        1
-                    }
-                    Some('-') => {
-                        c.bump();
-                        -1
-                    }
-                    _ => 0,
-                };
+                let semitone = read_pitch(ch, &mut c);
                 let (len, dots) = c.length_and_dots()?;
                 Op::Note {
-                    semitone: base + accidental,
+                    semitone,
                     len,
                     dots,
                 }
@@ -340,6 +365,56 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                     return Err(mml_err(c.pos(), "不明な音色です"));
                 }
             }
+            '\'' => {
+                out.push(Item {
+                    op: Op::ChordStart,
+                    pos,
+                });
+                let mut count = 0usize;
+                loop {
+                    let Some(inner) = c.peek() else {
+                        return Err(mml_err(pos, "閉じていない `'` があります"));
+                    };
+                    let inner_pos = c.pos();
+                    c.bump();
+                    match inner {
+                        '\'' => break,
+                        'c' | 'd' | 'e' | 'f' | 'g' | 'a' | 'b' => {
+                            let semitone = read_pitch(inner, &mut c);
+                            out.push(Item {
+                                op: Op::ChordNote { semitone },
+                                pos: inner_pos,
+                            });
+                            count += 1;
+                        }
+                        '<' => out.push(Item {
+                            op: Op::OctaveDown,
+                            pos: inner_pos,
+                        }),
+                        '>' => out.push(Item {
+                            op: Op::OctaveUp,
+                            pos: inner_pos,
+                        }),
+                        d if d.is_ascii_digit() => {
+                            return Err(mml_err(
+                                inner_pos,
+                                "和音の長さは、閉じの `'` の後ろに書いてください",
+                            ));
+                        }
+                        _ => {
+                            return Err(mml_err(
+                                inner_pos,
+                                "和音の中には音符と `<` `>` だけ書けます",
+                            ));
+                        }
+                    }
+                }
+                if count == 0 {
+                    return Err(mml_err(pos, "和音の中に音符が必要です"));
+                }
+                let (len, dots) = c.length_and_dots()?;
+                Op::ChordEnd { len, dots }
+            }
             '[' => {
                 stack.push(Frame::Loop {
                     start: out.len(),
@@ -410,9 +485,7 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                     None => return Err(mml_err(pos, "対応する `{` がありません")),
                 };
                 let (len, dots) = c.length_and_dots()?;
-                let has_length = out[start + 1..].iter().any(|it| {
-                    matches!(it.op, Op::Note { .. } | Op::Rest { .. } | Op::TieLen { .. })
-                });
+                let has_length = out[start + 1..].iter().any(|it| has_length_op(&it.op));
                 if !has_length {
                     return Err(mml_err(open, "連符の中に音符か休符が必要です"));
                 }
@@ -420,7 +493,7 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
             }
             other => return Err(mml_err(pos, format!("不明な文字 `{other}` です"))),
         };
-        if matches!(op, Op::Note { .. } | Op::Rest { .. } | Op::TieLen { .. }) {
+        if has_length_op(&op) {
             seen_length = true;
         }
         out.push(Item { op, pos });
@@ -441,8 +514,16 @@ struct TrackState {
     gate: u32,
     timbre: Timbre,
     t: f64,
-    /// 直前の命令が音符だったとき、その音符の `notes` 内の index(タイの連結先)
-    last_note: Option<usize>,
+    /// 直前の命令が音符・和音だったとき、その音の `notes` 内の index(`^` と `&` の連結先。休符で空になる)
+    last_notes: Vec<usize>,
+    /// 直前の命令が和音だったか(和音は `&` でつなげない)
+    last_chord: bool,
+    /// `^` で延ばした長さを、まだ `notes` に書いていないか(`flush_last` で書く)
+    last_dirty: bool,
+    /// 和音を始めたときのオクターブ(閉じで戻す)
+    chord_octave: i32,
+    /// 和音の中でここまでに読んだ音の (MIDI ノート番号, 元の文字位置)
+    chord_notes: Vec<(i32, usize)>,
     /// 直前の音符の全長(秒。ゲートを掛ける前。タイで延びる)
     last_full: f64,
     /// 直前の音符を作ったときのゲート(タイで延びても、先頭の音符のものを使う)
@@ -497,7 +578,10 @@ fn tuplet_scale(rest: &[Item], l_at_open: u32) -> f64 {
     for it in rest {
         match &it.op {
             Op::DefaultLen(n) => l = *n,
-            Op::Note { len, dots, .. } | Op::Rest { len, dots } | Op::TieLen { len, dots } => {
+            Op::Note { len, dots, .. }
+            | Op::Rest { len, dots }
+            | Op::TieLen { len, dots }
+            | Op::ChordEnd { len, dots } => {
                 sum += beats(len.unwrap_or(l), *dots);
             }
             Op::TupletEnd { len, dots } => {
@@ -508,6 +592,21 @@ fn tuplet_scale(rest: &[Item], l_at_open: u32) -> f64 {
     }
     unreachable!("parse_track pairs every `{{` with a `}}`")
 }
+
+/// `^` で延ばした直前の音符・和音の長さを、`notes` に書き込む。`^` のたびに和音の全部の音を書き直すと、
+/// `^` を大量に展開した入力で遅くなるので、次の音符・和音・休符・トラックの終わりで、まとめて 1 回だけ書く。
+fn flush_last(st: &mut TrackState, notes: &mut [NoteEvent]) {
+    if st.last_dirty {
+        let d = gated(st.last_full, st.last_gate);
+        for &idx in &st.last_notes {
+            notes[idx].duration_sec = d;
+        }
+        st.last_dirty = false;
+    }
+}
+
+const CHORD_TIE_MESSAGE: &str =
+    "`&` は和音とは組み合わせられません(長くしたいときは `^` を使ってください)";
 
 /// 命令列を実行して音を `notes` に積み、トラックの終了時刻(秒)を返す。
 /// 時間の積算は音符・休符ごとに行い、上限を超えた最初の音符・休符でエラーにして打ち切る。
@@ -526,7 +625,11 @@ fn run_track(
         gate: MAX_GATE,
         timbre: Timbre::Fm,
         t: 0.0,
-        last_note: None,
+        last_notes: Vec::new(),
+        last_chord: false,
+        last_dirty: false,
+        chord_octave: DEFAULT_OCTAVE,
+        chord_notes: Vec::new(),
         last_full: 0.0,
         last_gate: MAX_GATE,
         tie_pos: None,
@@ -565,7 +668,10 @@ fn run_track(
             Op::TupletStart => st.tuplet_scale = tuplet_scale(&items[i + 1..], st.len),
             Op::TupletEnd { .. } => st.tuplet_scale = 1.0,
             Op::Tie => {
-                if st.last_note.is_none() || st.tie_pos.is_some() {
+                if st.last_chord {
+                    return Err(mml_err(pos, CHORD_TIE_MESSAGE));
+                }
+                if st.last_notes.is_empty() || st.tie_pos.is_some() {
                     return Err(mml_err(pos, "`&` の前に音符が必要です"));
                 }
                 st.tie_pos = Some(pos);
@@ -574,12 +680,12 @@ fn run_track(
                 if st.tie_pos.is_some() {
                     return Err(mml_err(pos, "`&` の直後には `^` を置けません"));
                 }
-                let Some(idx) = st.last_note else {
+                if st.last_notes.is_empty() {
                     return Err(mml_err(pos, "`^` の前に音符が必要です"));
-                };
+                }
                 let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
                 st.last_full += d;
-                notes[idx].duration_sec = gated(st.last_full, st.last_gate);
+                st.last_dirty = true;
                 st.t += d;
                 check_limit(st.t, pos)?;
             }
@@ -588,7 +694,9 @@ fn run_track(
                     return Err(mml_err(tp, "`&` の後に音符が必要です"));
                 }
                 st.t += duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
-                st.last_note = None;
+                flush_last(&mut st, notes);
+                st.last_notes.clear();
+                st.last_chord = false;
                 check_limit(st.t, pos)?;
             }
             Op::Note {
@@ -599,13 +707,15 @@ fn run_track(
                 let midi = 12 * (st.octave + 1) + semitone;
                 let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
                 if st.tie_pos.take().is_some() {
-                    let idx = st.last_note.expect("a tie is only armed after a note");
+                    let idx = st.last_notes[0];
                     if i32::from(notes[idx].midi) != midi {
                         return Err(mml_err(pos, "`&` は同じ高さの音符どうしだけをつなげます"));
                     }
                     st.last_full += d;
                     notes[idx].duration_sec = gated(st.last_full, st.last_gate);
+                    st.last_dirty = false;
                 } else {
+                    flush_last(&mut st, notes);
                     if notes.len() >= MAX_NOTES {
                         return Err(mml_err(pos, format!("音符は {MAX_NOTES} 個までです")));
                     }
@@ -617,16 +727,55 @@ fn run_track(
                         velocity: f64::from(st.volume) / 15.0,
                         timbre: st.timbre,
                     });
-                    st.last_note = Some(notes.len() - 1);
+                    st.last_notes.clear();
+                    st.last_notes.push(notes.len() - 1);
+                    st.last_chord = false;
                     st.last_full = d;
                     st.last_gate = st.gate;
                 }
                 st.t += d;
                 check_limit(st.t, pos)?;
             }
+            Op::ChordStart => {
+                if let Some(tp) = st.tie_pos {
+                    return Err(mml_err(tp, CHORD_TIE_MESSAGE));
+                }
+                st.chord_octave = st.octave;
+                st.chord_notes.clear();
+            }
+            Op::ChordNote { semitone } => {
+                st.chord_notes.push((12 * (st.octave + 1) + semitone, pos));
+            }
+            Op::ChordEnd { len, dots } => {
+                let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
+                let velocity = f64::from(st.volume) / 15.0 / st.chord_notes.len() as f64;
+                flush_last(&mut st, notes);
+                st.last_notes.clear();
+                for &(midi, note_pos) in &st.chord_notes {
+                    if notes.len() >= MAX_NOTES {
+                        return Err(mml_err(note_pos, format!("音符は {MAX_NOTES} 個までです")));
+                    }
+                    notes.push(NoteEvent {
+                        track,
+                        start_sec: st.t,
+                        duration_sec: gated(d, st.gate),
+                        midi: midi as u8,
+                        velocity,
+                        timbre: st.timbre,
+                    });
+                    st.last_notes.push(notes.len() - 1);
+                }
+                st.last_chord = true;
+                st.last_full = d;
+                st.last_gate = st.gate;
+                st.octave = st.chord_octave;
+                st.t += d;
+                check_limit(st.t, pos)?;
+            }
         }
     }
 
+    flush_last(&mut st, notes);
     if let Some(tp) = st.tie_pos {
         return Err(mml_err(tp, "`&` の後に音符が必要です"));
     }
@@ -1622,5 +1771,157 @@ mod tests {
             "parse が {:?} かかった",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn chord_plays_all_notes_together() {
+        let s = must_parse("'ceg'");
+        assert_eq!(s.notes.len(), 3);
+        let midis: Vec<u8> = s.notes.iter().map(|n| n.midi).collect();
+        assert_eq!(midis, vec![60, 64, 67]); // 書いた順
+        for n in &s.notes {
+            approx(n.start_sec, 0.0);
+            approx(n.duration_sec, 0.5);
+        }
+        approx(s.total_sec, 0.5);
+        // 長さと付点は、閉じの `'` の後ろ。省略は `l`
+        approx(must_parse("'ceg'4.").notes[0].duration_sec, 0.75);
+        approx(must_parse("l8 'ce'").notes[0].duration_sec, 0.25);
+        // 後ろの音符は、和音の長さだけ後
+        let s = must_parse("'ceg'4 d4");
+        approx(s.notes[3].start_sec, 0.5);
+        // 大文字・空白
+        assert_eq!(must_parse("' C E G '4"), must_parse("'ceg'4"));
+        // 1 音だけの和音も、同じ音を重ねた和音も書ける
+        assert_eq!(must_parse("'c'").notes.len(), 1);
+        assert_eq!(must_parse("'cc'").notes.len(), 2);
+    }
+
+    #[test]
+    fn chord_velocity_is_divided_by_the_number_of_notes() {
+        approx(must_parse("v15 'ce'").notes[0].velocity, 0.5);
+        approx(must_parse("v15 'ceg'").notes[2].velocity, 1.0 / 3.0);
+        approx(must_parse("v15 'c'").notes[0].velocity, 1.0); // 1 音は割らない
+        approx(must_parse("v15 c").notes[0].velocity, 1.0);
+    }
+
+    #[test]
+    fn chord_accidentals_and_octaves() {
+        let midis = |t: &str| -> Vec<u8> { must_parse(t).notes.iter().map(|n| n.midi).collect() };
+        assert_eq!(midis("'c#e-g+'"), vec![61, 63, 68]);
+        assert_eq!(midis("o4 'c>c'"), vec![60, 72]);
+        assert_eq!(midis("o4 'c<c'"), vec![60, 48]);
+        // 和音の後ろは、元のオクターブに戻る
+        assert_eq!(midis("o4 'c>c' d"), vec![60, 72, 62]);
+        assert_eq!(midis("o4 'c>>c' d"), vec![60, 84, 62]);
+        // 和音の外の `>` は、今までどおり残る
+        assert_eq!(midis("'c' > d"), vec![60, 74]);
+    }
+
+    #[test]
+    fn caret_extends_every_note_of_a_chord() {
+        let s = must_parse("'ceg'4^4");
+        assert_eq!(s.notes.len(), 3);
+        for n in &s.notes {
+            approx(n.duration_sec, 1.0);
+        }
+        approx(s.total_sec, 1.0);
+        // q は全部の音に効き、延ばした全長に掛かる
+        let s = must_parse("q50 'ce'4^4");
+        approx(s.notes[0].duration_sec, 0.5);
+        approx(s.notes[1].duration_sec, 0.5);
+        let s = must_parse("q50 'ce'4 d4");
+        approx(s.notes[0].duration_sec, 0.25);
+        approx(s.notes[2].start_sec, 0.5); // 時間は全長だけ進む
+    }
+
+    #[test]
+    fn chord_combines_with_tuplets_loops_and_shared_tempo() {
+        // 連符の中の和音は、1 つの長さとして数える
+        let s = must_parse("{'ce' d e}4");
+        assert_eq!(s.notes.len(), 4);
+        approx(s.notes[0].duration_sec, 0.5 / 3.0);
+        approx(s.notes[2].start_sec, 0.5 / 3.0);
+        approx(s.total_sec, 0.5);
+        // 和音だけの連符
+        approx(must_parse("{'ce'}4").total_sec, 0.5);
+        // ループ
+        let s = must_parse("['ce']2");
+        assert_eq!(s.notes.len(), 4);
+        approx(s.notes[2].start_sec, 0.5);
+        // 共有テンポ
+        let s = must_parse("t=60 'ce'4 ; 'g'4");
+        approx(s.notes[0].duration_sec, 1.0);
+        approx(s.notes[2].duration_sec, 1.0);
+    }
+
+    #[test]
+    fn chord_counts_each_note_toward_the_limit() {
+        let ok = format!("'{}'", "c".repeat(MAX_NOTES));
+        assert_eq!(must_parse(&ok).notes.len(), MAX_NOTES);
+        let over = format!("'{}'", "c".repeat(MAX_NOTES + 1));
+        // 超えた 3001 個目の音の位置でエラー
+        assert_eq!(must_fail(&over).position as usize, MAX_NOTES + 1);
+        // ループで超える
+        let looped = format!("['{}']99", "c".repeat(100));
+        let started = std::time::Instant::now();
+        let e = must_fail(&looped);
+        assert!(e.message.contains("3000"), "{}", e.message);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn invalid_chords() {
+        assert_eq!(must_fail("'ce").position, 0); // 閉じていない
+        assert_eq!(must_fail("''").position, 0); // 空
+        assert_eq!(must_fail("'cr'").position, 2); // 中の休符
+        assert_eq!(must_fail("'c[e]2'").position, 2); // 中の `[`
+        assert_eq!(must_fail("c 'c4e'").position, 4); // 中の数字
+        assert_eq!(must_fail("'ceg'3").position, 5); // 長さが不正(今までと同じ)
+        assert_eq!(must_fail("c&'ceg'").position, 1); // `&` の後の和音
+        assert_eq!(must_fail("'ceg'&c").position, 5); // 和音の後の `&`
+        assert_eq!(must_fail("'c'&c").position, 3); // 1 音の和音でも同じ
+        assert_eq!(must_fail("o8 'c>c'").position, 5); // オクターブの範囲外(`>` の位置)
+        assert_eq!(must_fail("o1 '<c'").position, 4); // 同じく `<`
+        assert_eq!(must_fail("'ce;g'").position, 0); // `;` でトラックが分かれる
+        assert_eq!(must_fail("'ce' t=60").position, 5); // `t=` は最初の音符・和音より前
+    }
+
+    #[test]
+    fn chord_positions_stay_in_the_original_text() {
+        // コメントと空白を挟んでも、位置は元のテキストのまま
+        assert_eq!(must_fail("/* あ */ 'c x e'").position, 11); // `x` は 12 文字目
+        assert_eq!(must_parse("'c/*x*/e'"), must_parse("'ce'"));
+        assert_eq!(must_parse("' c e g '"), must_parse("'ceg'"));
+    }
+
+    #[test]
+    fn a_rest_after_a_chord_forgets_it() {
+        // 休符の後の `^` は、今までどおりエラー
+        assert_eq!(must_fail("'ce' r ^4").position, 7);
+        // 和音の後に普通の音符が来ても、`^` はその音符だけを延ばす
+        let s = must_parse("'ce' d ^4");
+        approx(s.notes[0].duration_sec, 0.5);
+        approx(s.notes[2].duration_sec, 1.0);
+    }
+
+    #[test]
+    fn many_carets_after_a_big_chord_do_not_rewrite_every_note() {
+        // 3000 音の和音の後ろに、連符で縮めた `^` を約 49 万個並べる(連符の中なので 90 秒の上限には届かない)。
+        // `^` のたびに和音の全部の音を書き直すと、約 15 億回の書き込みになる。
+        let text = format!("'{}'{{[[[^]99]99]50}}", "c".repeat(MAX_NOTES));
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        let started = std::time::Instant::now();
+        let s = must_parse(&text);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "parse が {:?} かかった",
+            started.elapsed()
+        );
+        // 和音の長さ 0.5 秒に、連符の長さ(四分音符 1 つ分 = 0.5 秒)を足した全長が、全部の音に入っている
+        assert_eq!(s.notes.len(), MAX_NOTES);
+        for n in [&s.notes[0], &s.notes[MAX_NOTES - 1]] {
+            assert!((n.duration_sec - 1.0).abs() < 1e-6, "{}", n.duration_sec);
+        }
     }
 }
