@@ -123,6 +123,13 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).not.toContain("2〜99回、入れ子は不可"); // 繰り返しは入れ子にできるようになった
     expect(text).toContain("全体で 5000 文字");
   });
+
+  it("記法ヘルプに、全トラックの初期テンポ t= の書き方が出る", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("t=140");
+    expect(text).toContain("全トラックの初期テンポ");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {
