@@ -67,6 +67,13 @@ enum Op {
     VolumeDelta(i32),
     /// `q<n>`。音を鳴らす長さの割合(百分率、1〜100)。
     Gate(u8),
+    /// `{`。対応する `}` までの音符・休符・`^` の長さを、`}` の後の長さに収める。
+    TupletStart,
+    /// `}<長さ>`。長さ省略は `{` の時点の `l` の値。
+    TupletEnd {
+        len: Option<u32>,
+        dots: u8,
+    },
     Timbre(Timbre),
 }
 
@@ -150,14 +157,22 @@ impl Cursor<'_> {
     }
 }
 
-/// 開いている繰り返し `[`。
-struct LoopFrame {
-    /// `out` での本体の開始位置
-    start: usize,
-    /// `[` の元の文字位置
-    pos: usize,
-    /// `:` が置かれた `out` での位置(最後の回は、ここから後ろを飛ばす)
-    colon: Option<usize>,
+/// 開いている括弧。繰り返し `[` と連符 `{` を、1 つのスタックで管理する(交差を弾くため)。
+enum Frame {
+    Loop {
+        /// `out` での本体の開始位置
+        start: usize,
+        /// `[` の元の文字位置
+        pos: usize,
+        /// `:` が置かれた `out` での位置(最後の回は、ここから後ろを飛ばす)
+        colon: Option<usize>,
+    },
+    Tuplet {
+        /// `out` での `TupletStart` の位置
+        start: usize,
+        /// `{` の元の文字位置
+        pos: usize,
+    },
 }
 
 /// 繰り返しの複製を `out` に足す。展開後の命令数が上限を超えるなら、足さずに `pos`(`]` の位置)でエラーにする。
@@ -174,11 +189,12 @@ fn extend_checked(out: &mut Vec<Item>, part: &[Item], pos: usize) -> Result<(), 
 
 /// 1 トラック分の文字列を命令列にする。繰り返し `[ ... ]n` はここで展開する。
 /// 繰り返しは入れ子にできる。展開後の命令数は `MAX_EXPANDED_OPS` で抑える。
+/// 連符 `{ ... }n` は入れ子にできず、繰り返しとは括弧が交差しない限り組み合わせられる。
 /// 時間の上限はここでは見ず、`run_track` が実行しながら判定する。
 fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError> {
     let mut c = Cursor { syms, i: 0, end };
     let mut out: Vec<Item> = Vec::new();
-    let mut loops: Vec<LoopFrame> = Vec::new();
+    let mut stack: Vec<Frame> = Vec::new();
 
     while let Some(ch) = c.peek() {
         let pos = c.pos();
@@ -291,26 +307,32 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 }
             }
             '[' => {
-                loops.push(LoopFrame {
+                stack.push(Frame::Loop {
                     start: out.len(),
                     pos,
                     colon: None,
                 });
                 continue;
             }
-            ':' => {
-                let Some(frame) = loops.last_mut() else {
-                    return Err(mml_err(pos, "`:` は繰り返し `[ ]` の中でだけ使えます"));
-                };
-                if frame.colon.is_some() {
+            ':' => match stack.last_mut() {
+                Some(Frame::Loop { colon, .. }) if colon.is_none() => {
+                    *colon = Some(out.len());
+                    continue;
+                }
+                Some(Frame::Loop { .. }) => {
                     return Err(mml_err(pos, "`:` は繰り返し 1 つにつき 1 個までです"));
                 }
-                frame.colon = Some(out.len());
-                continue;
-            }
+                _ => {
+                    return Err(mml_err(pos, "`:` は繰り返し `[ ]` の直下にだけ置けます"));
+                }
+            },
             ']' => {
-                let Some(LoopFrame { start, colon, .. }) = loops.pop() else {
-                    return Err(mml_err(pos, "対応する `[` がありません"));
+                let (start, colon) = match stack.pop() {
+                    Some(Frame::Loop { start, colon, .. }) => (start, colon),
+                    Some(Frame::Tuplet { pos: open, .. }) => {
+                        return Err(mml_err(open, "閉じていない `{` があります"));
+                    }
+                    None => return Err(mml_err(pos, "対応する `[` がありません")),
                 };
                 let count = match c.number() {
                     Some((n, p)) => {
@@ -334,15 +356,43 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 }
                 continue;
             }
+            '{' => {
+                if stack.iter().any(|f| matches!(f, Frame::Tuplet { .. })) {
+                    return Err(mml_err(pos, "連符はネストできません"));
+                }
+                stack.push(Frame::Tuplet {
+                    start: out.len(),
+                    pos,
+                });
+                Op::TupletStart
+            }
+            '}' => {
+                let (start, open) = match stack.pop() {
+                    Some(Frame::Tuplet { start, pos: open }) => (start, open),
+                    Some(Frame::Loop { pos: open, .. }) => {
+                        return Err(mml_err(open, "閉じていない `[` があります"));
+                    }
+                    None => return Err(mml_err(pos, "対応する `{` がありません")),
+                };
+                let (len, dots) = c.length_and_dots()?;
+                let has_length = out[start + 1..].iter().any(|it| {
+                    matches!(it.op, Op::Note { .. } | Op::Rest { .. } | Op::TieLen { .. })
+                });
+                if !has_length {
+                    return Err(mml_err(open, "連符の中に音符か休符が必要です"));
+                }
+                Op::TupletEnd { len, dots }
+            }
             other => return Err(mml_err(pos, format!("不明な文字 `{other}` です"))),
         };
         out.push(Item { op, pos });
     }
 
-    if let Some(frame) = loops.last() {
-        return Err(mml_err(frame.pos, "閉じていない `[` があります"));
+    match stack.last() {
+        Some(Frame::Loop { pos, .. }) => Err(mml_err(*pos, "閉じていない `[` があります")),
+        Some(Frame::Tuplet { pos, .. }) => Err(mml_err(*pos, "閉じていない `{` があります")),
+        None => Ok(out),
     }
-    Ok(out)
 }
 
 struct TrackState {
@@ -361,15 +411,23 @@ struct TrackState {
     last_gate: u32,
     /// 直前に `&` があったとき、その位置
     tie_pos: Option<usize>,
+    /// 連符の中で、拍の長さに掛ける縮小率(連符の外では 1.0)
+    tuplet_scale: f64,
 }
 
-fn duration_sec(len: u32, dots: u8, tempo: u32) -> f64 {
+/// 長さ(拍。四分音符が 1)。
+fn beats(len: u32, dots: u8) -> f64 {
     let dot_factor = match dots {
         0 => 1.0,
         1 => 1.5,
         _ => 1.75,
     };
-    4.0 / f64::from(len) * dot_factor * 60.0 / f64::from(tempo)
+    4.0 / f64::from(len) * dot_factor
+}
+
+/// 長さを秒にする。`scale` は連符の縮小率(連符の外では 1.0。1.0 を掛けても値は変わらない)。
+fn duration_sec(len: u32, dots: u8, tempo: u32, scale: f64) -> f64 {
+    beats(len, dots) * scale * 60.0 / f64::from(tempo)
 }
 
 /// 全長にゲートタイム(百分率)を掛ける。100 のときは掛け算をせず、v1 と同じ値のまま返す。
@@ -391,9 +449,31 @@ fn check_limit(t: f64, pos: usize) -> Result<(), MmlError> {
     Ok(())
 }
 
+/// `{` の直後の命令列 `rest`(最初の `TupletEnd` まで)から、連符の縮小率を求める。
+/// 縮小率 = `}` の後の長さ(拍) ÷ 中の音符・休符・`^` の長さの合計(拍)。中の `l` の変更も追う。
+/// `}` の長さが省略されているときは、`{` の時点の `l`(`l_at_open`)を使う。
+/// 連符は入れ子にならず、`parse_track` が `{` と `}` を必ず対にするので、`TupletEnd` は必ずある。
+fn tuplet_scale(rest: &[Item], l_at_open: u32) -> f64 {
+    let mut l = l_at_open;
+    let mut sum = 0.0;
+    for it in rest {
+        match &it.op {
+            Op::DefaultLen(n) => l = *n,
+            Op::Note { len, dots, .. } | Op::Rest { len, dots } | Op::TieLen { len, dots } => {
+                sum += beats(len.unwrap_or(l), *dots);
+            }
+            Op::TupletEnd { len, dots } => {
+                return beats(len.unwrap_or(l_at_open), *dots) / sum;
+            }
+            _ => {}
+        }
+    }
+    unreachable!("parse_track pairs every `{{` with a `}}`")
+}
+
 /// 命令列を実行して音を `notes` に積み、トラックの終了時刻(秒)を返す。
 /// 時間の積算は音符・休符ごとに行い、上限を超えた最初の音符・休符でエラーにして打ち切る。
-/// (繰り返しは `parse_track` で先に展開済み。その大きさは入力サイズで抑えられている。)
+/// (繰り返しは `parse_track` で先に展開済み。その大きさは `MAX_EXPANDED_OPS` で抑えられている。)
 fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f64, MmlError> {
     let mut st = TrackState {
         octave: DEFAULT_OCTAVE,
@@ -407,9 +487,10 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
         last_full: 0.0,
         last_gate: MAX_GATE,
         tie_pos: None,
+        tuplet_scale: 1.0,
     };
 
-    for Item { op, pos } in items {
+    for (i, Item { op, pos }) in items.iter().enumerate() {
         let pos = *pos;
         match op {
             Op::Octave(n) => st.octave = i32::from(*n),
@@ -437,6 +518,8 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
             }
             Op::Gate(n) => st.gate = u32::from(*n),
             Op::Timbre(t) => st.timbre = *t,
+            Op::TupletStart => st.tuplet_scale = tuplet_scale(&items[i + 1..], st.len),
+            Op::TupletEnd { .. } => st.tuplet_scale = 1.0,
             Op::Tie => {
                 if st.last_note.is_none() || st.tie_pos.is_some() {
                     return Err(mml_err(pos, "`&` の前に音符が必要です"));
@@ -450,7 +533,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                 let Some(idx) = st.last_note else {
                     return Err(mml_err(pos, "`^` の前に音符が必要です"));
                 };
-                let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo);
+                let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
                 st.last_full += d;
                 notes[idx].duration_sec = gated(st.last_full, st.last_gate);
                 st.t += d;
@@ -460,7 +543,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                 if let Some(tp) = st.tie_pos {
                     return Err(mml_err(tp, "`&` の後に音符が必要です"));
                 }
-                st.t += duration_sec(len.unwrap_or(st.len), *dots, st.tempo);
+                st.t += duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
                 st.last_note = None;
                 check_limit(st.t, pos)?;
             }
@@ -470,7 +553,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
                 dots,
             } => {
                 let midi = 12 * (st.octave + 1) + semitone;
-                let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo);
+                let d = duration_sec(len.unwrap_or(st.len), *dots, st.tempo, st.tuplet_scale);
                 if st.tie_pos.take().is_some() {
                     let idx = st.last_note.expect("a tie is only armed after a note");
                     if i32::from(notes[idx].midi) != midi {
@@ -1141,6 +1224,81 @@ mod tests {
         let e = must_fail(&text);
         assert_eq!(e.position as usize, text.chars().count() - 3); // 外側の `]`
         assert!(e.message.contains("命令"), "{}", e.message);
+    }
+
+    #[test]
+    fn tuplet_fits_in_the_given_length() {
+        let s = must_parse("{c d e}4");
+        assert_eq!(s.notes.len(), 3);
+        // 四分音符 1 つ分(0.5 秒)を 3 等分
+        approx(s.notes[0].start_sec, 0.0);
+        approx(s.notes[1].start_sec, 0.5 / 3.0);
+        approx(s.notes[2].start_sec, 1.0 / 3.0);
+        approx(s.notes[0].duration_sec, 0.5 / 3.0);
+        approx(s.total_sec, 0.5);
+        // 長さ省略は `{` の時点の l
+        approx(must_parse("l8 {c d e}").total_sec, 0.25);
+        // 付点
+        approx(must_parse("{c d e}4.").total_sec, 0.75);
+        // 連符の後は元の長さに戻る
+        let s = must_parse("{c d e}4 f4");
+        approx(s.notes[3].start_sec, 0.5);
+        approx(s.notes[3].duration_sec, 0.5);
+        assert_eq!(must_parse("{C D E}4"), must_parse("{c d e}4")); // 大文字・小文字は区別しない
+    }
+
+    #[test]
+    fn tuplet_divides_by_the_ratio_of_the_inner_lengths() {
+        let s = must_parse("{c4 d8}4"); // 1 拍 : 0.5 拍 を、1 拍に収める
+        approx(s.notes[0].duration_sec, 0.5 * 2.0 / 3.0);
+        approx(s.notes[1].start_sec, 0.5 * 2.0 / 3.0);
+        approx(s.total_sec, 0.5);
+        // 中の l の変更も追う(`{` の時点の l は 4、中は l8 の 3 音)
+        let s = must_parse("{l8 c d e}4");
+        approx(s.notes[0].duration_sec, 0.5 / 3.0);
+        approx(s.total_sec, 0.5);
+        // 中の `^` も長さに数える
+        let s = must_parse("{c4^4 d4}2");
+        assert_eq!(s.notes.len(), 2);
+        approx(s.notes[0].duration_sec, 2.0 / 3.0);
+        approx(s.notes[1].start_sec, 2.0 / 3.0);
+        approx(s.total_sec, 1.0);
+        // 休符も数える
+        let s = must_parse("{c r e}4");
+        assert_eq!(s.notes.len(), 2);
+        approx(s.notes[1].start_sec, 1.0 / 3.0);
+        approx(s.total_sec, 0.5);
+        // 中でテンポを変えても、縮小率(拍の比)は変わらない
+        let s = must_parse("{c t60 d e}4");
+        approx(s.total_sec, 0.5 / 3.0 + 2.0 / 3.0);
+    }
+
+    #[test]
+    fn tuplets_combine_with_loops_and_q() {
+        let s = must_parse("[{c d e}4]2");
+        assert_eq!(s.notes.len(), 6);
+        approx(s.total_sec, 1.0);
+        let s = must_parse("{[c]2 e}4");
+        assert_eq!(s.notes.len(), 3);
+        approx(s.total_sec, 0.5);
+        // q は縮めた長さに掛かる
+        let s = must_parse("q50 {c d e}4");
+        approx(s.notes[0].duration_sec, 0.5 / 3.0 / 2.0);
+        approx(s.notes[1].start_sec, 0.5 / 3.0);
+    }
+
+    #[test]
+    fn invalid_tuplets() {
+        assert_eq!(must_fail("{c d e").position, 0); // 閉じていない
+        assert_eq!(must_fail("c d e}4").position, 5); // 開いていない
+        assert_eq!(must_fail("{}4 c").position, 0); // 空
+        assert_eq!(must_fail("{o5}4 c").position, 0); // 音符も休符もない
+        assert_eq!(must_fail("{c {d}4}4").position, 3); // 入れ子
+        assert_eq!(must_fail("{c;d}4").position, 0); // `;` は連符をまたげない
+        assert_eq!(must_fail("{c d}3").position, 5); // 長さが不正
+        assert_eq!(must_fail("{[c}2]").position, 1); // 括弧の交差(`[` が閉じていない)
+        assert_eq!(must_fail("[{c]2}").position, 1); // 括弧の交差(`{` が閉じていない)
+        assert_eq!(must_fail("{c [ {d}4 ]2}4").position, 5); // ループの中でも入れ子は不可
     }
 
     fn timbres(text: &str) -> Vec<Timbre> {
