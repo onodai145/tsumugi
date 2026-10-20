@@ -220,6 +220,23 @@ describe("lexMml", () => {
     for (let i = 1; i < tokens.length; i++) expect(tokens[i].from).toBeGreaterThanOrEqual(tokens[i - 1].to);
   });
 
+  it("コメントの間の空白だけの断片は捨てる。1 つのトークンが複数のコメントをまたいでもよい", () => {
+    expect(lex("t/*a*/ /*b*/=60")).toEqual([
+      ["t", "command"],
+      ["/*a*/", "comment"],
+      ["/*b*/", "comment"],
+      ["=", "command"],
+      ["60", "number"],
+    ]);
+    expect(lex("t/*a*//*b*/=60")).toEqual([
+      ["t", "command"],
+      ["/*a*/", "comment"],
+      ["/*b*/", "comment"],
+      ["=", "command"],
+      ["60", "number"],
+    ]);
+  });
+
   it("連符は { と、} とその直後の長さ・付点(repeat)", () => {
     expect(lex("{cde}4.")).toEqual([
       ["{", "repeat"],

@@ -162,14 +162,18 @@ export function lexMml(text: string): MmlToken[] {
   const comments = findComments(text);
   const result: MmlToken[] = [];
   let ci = 0;
+  // 切ったあとの断片が空白だけ(コメントの間の空白)なら捨てる
+  const pushPiece = (from: number, to: number, kind: MmlTokenKind): void => {
+    if (/\S/u.test(text.slice(from, to))) result.push({ from, to, kind });
+  };
   for (const tok of out) {
     while (ci < comments.length && comments[ci].to <= tok.from) ci++;
     let from = tok.from;
     for (let k = ci; k < comments.length && comments[k].from < tok.to; k++) {
-      if (comments[k].from > from) result.push({ from, to: comments[k].from, kind: tok.kind });
+      if (comments[k].from > from) pushPiece(from, comments[k].from, tok.kind);
       from = Math.max(from, comments[k].to);
     }
-    if (from < tok.to) result.push({ from, to: tok.to, kind: tok.kind });
+    if (from < tok.to) pushPiece(from, tok.to, tok.kind);
   }
   for (const { from, to } of comments) result.push({ from, to, kind: "comment" });
   return result.sort((a, b) => a.from - b.from);
