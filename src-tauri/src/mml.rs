@@ -206,6 +206,9 @@ fn extend_checked(
 fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError> {
     let mut c = Cursor { syms, i: 0, end };
     let mut out: Vec<Item> = Vec::new();
+    // ここまでに音符・休符・`^` を読んだか(`t=` の位置の検査用。`out` をなめ直すと、`t=` を並べた入力で遅くなる)。
+    // 繰り返しの展開は読み済みの命令を複製するだけなので、このフラグは `out` の中身と常に一致する。
+    let mut seen_length = false;
     let mut stack: Vec<Frame> = Vec::new();
 
     while let Some(ch) = c.peek() {
@@ -270,10 +273,7 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 if !stack.is_empty() {
                     return Err(mml_err(pos, "`t=` は繰り返し・連符の外に書いてください"));
                 }
-                let has_length = out.iter().any(|it| {
-                    matches!(it.op, Op::Note { .. } | Op::Rest { .. } | Op::TieLen { .. })
-                });
-                if has_length {
+                if seen_length {
                     return Err(mml_err(
                         pos,
                         "`t=` はトラックの最初の音符・休符より前に書いてください",
@@ -420,6 +420,9 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
             }
             other => return Err(mml_err(pos, format!("不明な文字 `{other}` です"))),
         };
+        if matches!(op, Op::Note { .. } | Op::Rest { .. } | Op::TieLen { .. }) {
+            seen_length = true;
+        }
         out.push(Item { op, pos });
     }
 
@@ -1599,6 +1602,23 @@ mod tests {
         assert_eq!(s.notes.len(), 4);
         assert!(
             started.elapsed() < std::time::Duration::from_secs(2),
+            "parse が {:?} かかった",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn many_shared_tempos_after_a_big_expansion_do_not_rescan_the_track() {
+        // 音符の無い展開(約 49 万命令)の後に `t=32` を並べる。2 個目以降の `t=` は `shared_tempo` まで
+        // 弾かれないので、`t=` のたびに命令列をなめ直すと、1246 回 × 約 49 万件の走査になる。
+        let big = "[[[><]99]99]25";
+        let text = format!("{big}{}", "t=32".repeat((MAX_TEXT_CHARS - big.len()) / 4));
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        let started = std::time::Instant::now();
+        let e = must_fail(&text);
+        assert!(e.message.contains("1 回だけ"), "{}", e.message);
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
             "parse が {:?} かかった",
             started.elapsed()
         );
