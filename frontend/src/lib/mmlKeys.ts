@@ -41,6 +41,7 @@ export const MML_KEY_GROUPS: readonly MmlKeyGroup[] = [
       { id: "flat", label: "-", insert: "-", aria: "半音下げ -" },
       { id: "dot", label: ".", insert: ".", aria: "付点 ." },
       { id: "tie", label: "&", insert: "&", aria: "タイ &" },
+      { id: "tie-len", label: "^", insert: "^", aria: "長さを足すタイ ^" },
     ],
   },
   {
@@ -58,10 +59,13 @@ export const MML_KEY_GROUPS: readonly MmlKeyGroup[] = [
   },
   {
     id: "structure",
-    label: "繰り返し・トラック",
+    label: "繰り返し・連符・トラック",
     keys: [
       { id: "loop-open", label: "[", insert: "[", aria: "繰り返しの始め [" },
       { id: "loop-close", label: "]", insert: "]", aria: "繰り返しの終わり ]" },
+      { id: "loop-escape", label: ":", insert: ":", aria: "繰り返しの脱出 :" },
+      { id: "tuplet-open", label: "{", insert: "{", aria: "連符の始め {" },
+      { id: "tuplet-close", label: "}", insert: "}", aria: "連符の終わり }" },
       { id: "track", label: ";", insert: ";", aria: "トラック区切り ;" },
     ],
   },

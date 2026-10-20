@@ -115,6 +115,14 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(TIMBRE_LIST).toHaveLength(14);
     for (const p of TIMBRE_LIST) expect(text).toContain(`@${p.number} ${p.name}`);
   });
+
+  it("記法ヘルプに、タイ ^・相対音量・q・連符・ループの脱出とネスト・コメントの書き方が出る", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    for (const s of ["c4^8", "v+2", "q80", "{cde}4", "[c:d]3", "//", "/* … */"]) expect(text).toContain(s);
+    expect(text).not.toContain("2〜99回、入れ子は不可"); // 繰り返しは入れ子にできるようになった
+    expect(text).toContain("全体で 5000 文字");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {

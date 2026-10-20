@@ -21,6 +21,13 @@ describe("countTracks", () => {
     expect(countTracks("")).toBe(0);
     expect(countTracks("c4")).toBe(1);
   });
+
+  it("コメントの中の ; は数えない(パーサーはコメントを除いてからトラックに分ける)", () => {
+    expect(countTracks("c4 // ; d4\ne4")).toBe(1);
+    expect(countTracks("c4 /* ; */ e4")).toBe(1);
+    expect(countTracks("c4 /* x */ ; e4")).toBe(2);
+    expect(countTracks("// 全部コメント ;")).toBe(0);
+  });
 });
 
 describe("usageLevel", () => {

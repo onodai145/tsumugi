@@ -13,6 +13,7 @@ const MARKS: Record<MmlTokenKind, Decoration | null> = {
   number: Decoration.mark({ class: "mml-number" }),
   repeat: Decoration.mark({ class: "mml-repeat" }),
   separator: Decoration.mark({ class: "mml-separator" }),
+  comment: Decoration.mark({ class: "mml-comment" }),
 };
 
 function buildDecorations(doc: string): DecorationSet {
@@ -82,5 +83,6 @@ export const mmlTheme: Extension = EditorView.theme({
   ".mml-number": { color: "color-mix(in srgb, var(--accent) 35%, var(--text))" },
   ".mml-repeat": { fontWeight: "700" },
   ".mml-separator": { color: "var(--text-dim)", fontWeight: "700" },
+  ".mml-comment": { color: "var(--text-dim)", fontStyle: "italic" },
   ".mml-error": { textDecoration: "underline wavy var(--danger)", textUnderlineOffset: "2px" },
 });

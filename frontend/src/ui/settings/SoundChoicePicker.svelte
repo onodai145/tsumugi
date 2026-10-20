@@ -289,14 +289,17 @@
   </div>
   <details class="text-xs text-muted-foreground">
     <summary class="cursor-pointer">記法</summary>
-    <pre class="m-0 mt-1 whitespace-pre-wrap font-mono">音符 c d e f g a b（# や + で半音上げ、- で半音下げ）
+    <pre class="m-0 mt-1 whitespace-pre-wrap font-mono" data-testid="mml-syntax-help">音符 c d e f g a b（# や + で半音上げ、- で半音下げ）
 長さ 音符の後ろに 1 2 4 8 16 32 64、付点は .（例: c8. ）
-休符 r4  タイ c4&c8
+休符 r4  タイ c4&c8（同じ高さの音をつなぐ）  c4^8（直前の音に長さを足す）
 o4 オクターブ指定  &gt; で上げる  &lt; で下げる
-l8 既定の長さ  t120 テンポ  v10 音量(0〜15)
+l8 既定の長さ  t120 テンポ  v10 音量(0〜15)  v+2 v-2 音量を相対で変える(数字を省くと 1)
+q80 音を鳴らす長さの割合(1〜100、既定 100。短くするとスタッカート)
+&#123;cde&#125;4 連符(中の長さを合計して、後ろの長さ 1 つ分に収める。入れ子は不可)
 @3 または @bell 音色（下の一覧。何も書かなければ @0 fm）
-[cde]3 繰り返し(2〜99回、入れ子は不可)
+[cde]3 繰り返し(2〜99回、入れ子可)  [c:d]3 最後の回だけ : の後ろを飛ばす
 ; でトラックを分ける(最大4つ。テンポ・音色はトラックごとに書く)
+// 行末までコメント  /* … */ 範囲コメント(; を含んでもトラックは分かれない。文字数には含む)
 全体で 5000 文字・90 秒・3000 音まで</pre>
     <div class="mt-1 flex flex-wrap items-center gap-1" role="group" aria-label="音色" data-testid="mml-timbres">
       <span aria-hidden="true">音色（押すとカーソル位置に入る）</span>
