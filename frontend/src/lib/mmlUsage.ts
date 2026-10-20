@@ -1,5 +1,6 @@
 // MML の使用量(文字数・音数・トラック数・再生時間)と、上限に対する段階。
 import { MML_LIMITS, NEAR_RATIO, SEC_EPS } from "./mmlLimits";
+import { blankComments } from "./mmlComments";
 
 export type UsageLevel = "normal" | "near" | "over";
 export type UsageKey = "chars" | "notes" | "tracks" | "sec";
@@ -24,9 +25,11 @@ export function countChars(text: string): number {
   return [...text].length;
 }
 
-/** パーサーと同じく、`;` で分けた区間のうち空白以外を含むものの数 */
+/** パーサーと同じく、コメントを除いてから `;` で分けた区間のうち、空白以外を含むものの数 */
 export function countTracks(text: string): number {
-  return text.split(";").filter((seg) => seg.trim() !== "").length;
+  return blankComments(text)
+    .split(";")
+    .filter((seg) => seg.trim() !== "").length;
 }
 
 export function usageLevel(value: number | null, limit: number): UsageLevel {

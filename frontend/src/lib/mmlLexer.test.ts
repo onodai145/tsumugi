@@ -128,4 +128,80 @@ describe("lexMml", () => {
     const tokens = lexMml("t120 o5 l8 [c#4.d-8]3 r4&e @bell g; >a<b @3 x");
     for (let i = 1; i < tokens.length; i++) expect(tokens[i].from).toBeGreaterThanOrEqual(tokens[i - 1].to);
   });
+
+  it("^ はタイ(rest)で、後ろの長さと付点は number", () => {
+    expect(lex("c4^8.")).toEqual([
+      ["c", "note"],
+      ["4", "number"],
+      ["^", "rest"],
+      ["8.", "number"],
+    ]);
+  });
+
+  it("v+n と v-n は 1 つのコマンド(符号まで)と number、q は数字つきコマンド", () => {
+    expect(lex("v+2 v- q50")).toEqual([
+      ["v+", "command"],
+      ["2", "number"],
+      ["v-", "command"],
+      ["q", "command"],
+      ["50", "number"],
+    ]);
+    expect(lex("v10")).toEqual([
+      ["v", "command"],
+      ["10", "number"],
+    ]);
+  });
+
+  it("連符は { と、} とその直後の長さ・付点(repeat)", () => {
+    expect(lex("{cde}4.")).toEqual([
+      ["{", "repeat"],
+      ["c", "note"],
+      ["d", "note"],
+      ["e", "note"],
+      ["}4.", "repeat"],
+    ]);
+  });
+
+  it("ループの脱出 : は repeat", () => {
+    expect(lex("[c:d]2")).toEqual([
+      ["[", "repeat"],
+      ["c", "note"],
+      [":", "repeat"],
+      ["d", "note"],
+      ["]2", "repeat"],
+    ]);
+  });
+
+  it("行コメントは改行の手前までが comment で、中の記号は色分けしない", () => {
+    expect(lex("c // t120 [\ne")).toEqual([
+      ["c", "note"],
+      ["// t120 [", "comment"],
+      ["e", "note"],
+    ]);
+  });
+
+  it("範囲コメントは複数行にまたがり、閉じていなければ文末まで", () => {
+    expect(lex("c/* o5\n; */d")).toEqual([
+      ["c", "note"],
+      ["/* o5\n; */", "comment"],
+      ["d", "note"],
+    ]);
+    expect(lex("c /* d ; e")).toEqual([
+      ["c", "note"],
+      ["/* d ; e", "comment"],
+    ]);
+  });
+
+  it("/ 単独は unknown(コメントではない)", () => {
+    expect(lex("c/d")).toEqual([
+      ["c", "note"],
+      ["/", "unknown"],
+      ["d", "note"],
+    ]);
+  });
+
+  it("コメントを含んでも、トークンは from 昇順", () => {
+    const tokens = lexMml("t120 // x\n[c#4.^8 d-]3 /* y */ {e f}4 q80 v+1 ; g");
+    for (let i = 1; i < tokens.length; i++) expect(tokens[i].from).toBeGreaterThanOrEqual(tokens[i - 1].from);
+  });
 });

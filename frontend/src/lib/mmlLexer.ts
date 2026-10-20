@@ -1,8 +1,19 @@
 // MML の寛容な字句解析(Issue #500)。色分けのためだけに使い、構文は検証しない(検証は Rust の parse_mml)。
 // パーサーと同じく、空白を除いて ASCII だけ小文字化して読む。範囲は元のテキストの添字(UTF-16)。
+// コメント(// と /* */)は mmlComments.ts が範囲を求め、種別 comment のトークンにする。
 import { TIMBRE_LIST } from "./mmlTimbres";
+import { blankComments, findComments } from "./mmlComments";
 
-export type MmlTokenKind = "note" | "rest" | "command" | "timbre" | "number" | "repeat" | "separator" | "unknown";
+export type MmlTokenKind =
+  | "note"
+  | "rest"
+  | "command"
+  | "timbre"
+  | "number"
+  | "repeat"
+  | "separator"
+  | "comment"
+  | "unknown";
 
 export interface MmlToken {
   from: number;
@@ -17,7 +28,7 @@ interface Sym {
 }
 
 const NOTES = new Set(["a", "b", "c", "d", "e", "f", "g"]);
-const NUMBERED_COMMANDS = new Set(["o", "l", "t", "v"]);
+const NUMBERED_COMMANDS = new Set(["o", "l", "t", "v", "q"]);
 const TIMBRE_NAMES: string[] = TIMBRE_LIST.map((p) => p.name);
 
 function asciiLower(ch: string): string {
@@ -45,7 +56,8 @@ function symbols(text: string): Sym[] {
 }
 
 export function lexMml(text: string): MmlToken[] {
-  const syms = symbols(text);
+  // コメントは空白にして読み飛ばす(添字は変わらない)。コメントそのものは最後にトークンとして足す
+  const syms = symbols(blankComments(text));
   const out: MmlToken[] = [];
   const at = (i: number): string => (i < syms.length ? syms[i].ch : "");
   const push = (start: number, end: number, kind: MmlTokenKind): void => {
@@ -88,10 +100,15 @@ export function lexMml(text: string): MmlToken[] {
     } else if (ch === "&") {
       push(i, i + 1, "rest");
       i++;
+    } else if (ch === "^") {
+      push(i, i + 1, "rest");
+      i = lengthAndDots(i + 1);
     } else if (NUMBERED_COMMANDS.has(ch)) {
-      push(i, i + 1, "command");
-      const j = digitsEnd(i + 1);
-      if (j > i + 1) push(i + 1, j, "number");
+      // `v+2` `v-2` は、符号までを 1 つのコマンドにする
+      const cmdEnd = i + (ch === "v" && (at(i + 1) === "+" || at(i + 1) === "-") ? 2 : 1);
+      push(i, cmdEnd, "command");
+      const j = digitsEnd(cmdEnd);
+      if (j > cmdEnd) push(cmdEnd, j, "number");
       i = j;
     } else if (ch === "<" || ch === ">") {
       push(i, i + 1, "command");
@@ -101,11 +118,17 @@ export function lexMml(text: string): MmlToken[] {
       if (j === i + 1) j = i + 1 + timbreNameLen(i + 1);
       push(i, j, "timbre");
       i = j;
-    } else if (ch === "[") {
+    } else if (ch === "[" || ch === "{" || ch === ":") {
       push(i, i + 1, "repeat");
       i++;
     } else if (ch === "]") {
       const j = digitsEnd(i + 1);
+      push(i, j, "repeat");
+      i = j;
+    } else if (ch === "}") {
+      // `}` の後の長さと付点まで、1 つのトークンにする
+      let j = digitsEnd(i + 1);
+      while (at(j) === ".") j++;
       push(i, j, "repeat");
       i = j;
     } else if (ch === ";") {
@@ -116,5 +139,6 @@ export function lexMml(text: string): MmlToken[] {
       i++;
     }
   }
-  return out;
+  for (const { from, to } of findComments(text)) out.push({ from, to, kind: "comment" });
+  return out.sort((a, b) => a.from - b.from);
 }

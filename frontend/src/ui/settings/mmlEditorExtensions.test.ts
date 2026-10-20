@@ -49,6 +49,13 @@ describe("mmlHighlight", () => {
     expect(texts("mml-command")).toEqual(["t"]);
     expect(texts("mml-number")).toEqual(["4", "120"]);
   });
+
+  it("コメントに色のクラスを付け、中の記号は色分けしない", () => {
+    const { texts } = mount("c4 // t120 [\nd4 /* o5 */ e4");
+    expect(texts("mml-comment")).toEqual(["// t120 [", "/* o5 */"]);
+    expect(texts("mml-command")).toEqual([]);
+    expect(texts("mml-repeat")).toEqual([]);
+  });
 });
 
 describe("errorField", () => {
