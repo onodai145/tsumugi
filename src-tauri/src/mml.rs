@@ -62,6 +62,8 @@ enum Op {
     OctaveDown,
     DefaultLen(u32),
     Tempo(u32),
+    /// `t=<n>`。全トラックの初期テンポ(`parse` が集めて `run_track` に渡す。`run_track` では何もしない)。
+    SharedTempo(u32),
     Volume(u8),
     /// `v+n` / `v-n`。現在の音量に足す(範囲外はエラー)。
     VolumeDelta(i32),
@@ -262,6 +264,28 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                     return Err(mml_err(p, "長さは 1, 2, 4, 8, 16, 32, 64 のいずれかです"));
                 }
                 Op::DefaultLen(n)
+            }
+            't' if c.peek() == Some('=') => {
+                c.bump();
+                if !stack.is_empty() {
+                    return Err(mml_err(pos, "`t=` は繰り返し・連符の外に書いてください"));
+                }
+                let has_length = out.iter().any(|it| {
+                    matches!(it.op, Op::Note { .. } | Op::Rest { .. } | Op::TieLen { .. })
+                });
+                if has_length {
+                    return Err(mml_err(
+                        pos,
+                        "`t=` はトラックの最初の音符・休符より前に書いてください",
+                    ));
+                }
+                let Some((n, p)) = c.number() else {
+                    return Err(mml_err(pos, "`t=` の後に数値が必要です"));
+                };
+                if !(32..=255).contains(&n) {
+                    return Err(mml_err(p, "テンポは 32〜255 です"));
+                }
+                Op::SharedTempo(n)
             }
             't' => {
                 let (n, p) = c.require_number(pos, 't')?;
@@ -485,11 +509,16 @@ fn tuplet_scale(rest: &[Item], l_at_open: u32) -> f64 {
 /// 命令列を実行して音を `notes` に積み、トラックの終了時刻(秒)を返す。
 /// 時間の積算は音符・休符ごとに行い、上限を超えた最初の音符・休符でエラーにして打ち切る。
 /// (繰り返しは `parse_track` で先に展開済み。その大きさは `MAX_EXPANDED_OPS` で抑えられている。)
-fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f64, MmlError> {
+fn run_track(
+    track: u8,
+    items: &[Item],
+    initial_tempo: u32,
+    notes: &mut Vec<NoteEvent>,
+) -> Result<f64, MmlError> {
     let mut st = TrackState {
         octave: DEFAULT_OCTAVE,
         len: DEFAULT_LEN,
-        tempo: DEFAULT_TEMPO,
+        tempo: initial_tempo,
         volume: DEFAULT_VOLUME,
         gate: MAX_GATE,
         timbre: Timbre::Fm,
@@ -519,6 +548,7 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
             }
             Op::DefaultLen(n) => st.len = *n,
             Op::Tempo(n) => st.tempo = *n,
+            Op::SharedTempo(_) => {}
             Op::Volume(n) => st.volume = u32::from(*n),
             Op::VolumeDelta(delta) => {
                 let v = st.volume as i32 + delta;
@@ -600,6 +630,21 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
     Ok(st.t)
 }
 
+/// 全トラックの `t=` を集めて、共有の初期テンポを 1 つに決める(書かれていなければ既定の 120)。
+/// 2 個目は、その `t` の位置でエラー。
+fn shared_tempo(tracks: &[Vec<Item>]) -> Result<u32, MmlError> {
+    let mut found: Option<u32> = None;
+    for it in tracks.iter().flatten() {
+        if let Op::SharedTempo(n) = &it.op {
+            if found.is_some() {
+                return Err(mml_err(it.pos, "`t=` は 1 回だけ書けます"));
+            }
+            found = Some(*n);
+        }
+    }
+    Ok(found.unwrap_or(DEFAULT_TEMPO))
+}
+
 /// 空白とコメントを除いた (ASCII だけ小文字化した文字, 元の文字位置) の列を作る。
 /// コメントは `// …`(改行の手前まで)と `/* … */`(入れ子にできない)。`/` だけはコメントにならず、
 /// そのまま列に残って `parse_track` が「不明な文字」にする。`;` はトラック区切りなのでコメントの開始にしない。
@@ -664,18 +709,23 @@ pub fn parse(text: &str) -> Result<MmlScore, MmlError> {
     }
     segments.push((&syms[start..], sep_pos));
 
-    let mut notes: Vec<NoteEvent> = Vec::new();
-    let mut total_sec = 0.0_f64;
-    let mut track_count = 0u8;
+    // 全トラックを先に構文解析する(`t=` は、どのトラックに書かれていても全トラックの初期テンポになる)
+    let mut tracks: Vec<Vec<Item>> = Vec::new();
     for (seg, sep) in segments.into_iter().filter(|(s, _)| !s.is_empty()) {
-        if usize::from(track_count) >= MAX_TRACKS {
+        if tracks.len() >= MAX_TRACKS {
             return Err(mml_err(sep, "トラックは 4 つまでです"));
         }
-        let items = parse_track(seg, total_chars)?;
-        let end = run_track(track_count, &items, &mut notes)?;
-        total_sec = total_sec.max(end);
-        track_count += 1;
+        tracks.push(parse_track(seg, total_chars)?);
     }
+    let initial_tempo = shared_tempo(&tracks)?;
+
+    let mut notes: Vec<NoteEvent> = Vec::new();
+    let mut total_sec = 0.0_f64;
+    for (i, items) in tracks.iter().enumerate() {
+        let end = run_track(i as u8, items, initial_tempo, &mut notes)?;
+        total_sec = total_sec.max(end);
+    }
+    let track_count = tracks.len() as u8;
 
     if notes.is_empty() {
         return Err(mml_err(0, "音符がありません"));
@@ -1450,5 +1500,107 @@ mod tests {
         assert_eq!(must_fail("c; @").position, 3); // トラック末尾の `@`
         assert_eq!(must_fail("＠bell c").position, 0); // 全角の `＠` は不明な文字
         assert_eq!(must_fail("@3").position, 0); // 音符が無い(既存の規則)
+    }
+
+    #[test]
+    fn shared_tempo_applies_to_every_track() {
+        let s = must_parse("t=60 c4 ; c4");
+        approx(s.notes[0].duration_sec, 1.0);
+        approx(s.notes[1].duration_sec, 1.0);
+        // 2 本目に書いても、全トラックに効く
+        let s = must_parse("c4 ; t=60 c4");
+        approx(s.notes[0].duration_sec, 1.0);
+        approx(s.notes[1].duration_sec, 1.0);
+        // 書かなければ 120(今までどおり)
+        let s = must_parse("c4 ; c4");
+        approx(s.notes[0].duration_sec, 0.5);
+        approx(s.notes[1].duration_sec, 0.5);
+        approx(must_parse("t=240 c4").notes[0].duration_sec, 0.25);
+        approx(must_parse("t=32 c4").notes[0].duration_sec, 60.0 / 32.0);
+    }
+
+    #[test]
+    fn track_tempo_overrides_the_shared_tempo() {
+        // 先頭の `t120`: そのトラックは最初から 120、他のトラックは共有の 60
+        let s = must_parse("t=60 t120 c4 ; c4");
+        approx(s.notes[0].duration_sec, 0.5);
+        approx(s.notes[1].duration_sec, 1.0);
+        // 途中の `t120`: そのトラックは、そこから 120
+        let s = must_parse("t=60 c4 t120 c4");
+        approx(s.notes[0].duration_sec, 1.0);
+        approx(s.notes[1].start_sec, 1.0);
+        approx(s.notes[1].duration_sec, 0.5);
+        // `t=` を 2 本目に書いて、1 本目が `t120` で上書きする
+        let s = must_parse("t120 c4 ; t=60 c4");
+        approx(s.notes[0].duration_sec, 0.5);
+        approx(s.notes[1].duration_sec, 1.0);
+    }
+
+    #[test]
+    fn shared_tempo_notation_ignores_case_and_spaces() {
+        assert_eq!(must_parse("T = 60 C4"), must_parse("t=60 c4"));
+        // 他のコマンドの前でも後ろ(最初の音符より前)でも同じ
+        assert_eq!(must_parse("o5 l8 t=60 c"), must_parse("t=60 o5 l8 c"));
+    }
+
+    #[test]
+    fn a_track_with_only_the_shared_tempo_still_counts_as_a_track() {
+        let s = must_parse("t=60 ; c4 ; d4");
+        assert_eq!(s.track_count, 3);
+        assert_eq!(s.notes[0].track, 1);
+        approx(s.notes[0].duration_sec, 1.0);
+        assert_eq!(must_fail("t=60 ; c ; d ; e ; f").position, 17); // 5 本目の手前の `;`
+    }
+
+    #[test]
+    fn shared_tempo_combines_with_other_syntax() {
+        let s = must_parse("t=60 {c d e}4 ; q50 c4^4");
+        assert_eq!(s.notes.len(), 4);
+        approx(s.total_sec, 2.0); // 1 本目は 1.0 秒、2 本目は 2.0 秒
+        approx(s.notes[3].duration_sec, 1.0); // q50 は全長 2.0 秒の半分
+    }
+
+    #[test]
+    fn invalid_shared_tempo() {
+        assert_eq!(must_fail("t= c").position, 0); // 数字が無い
+        assert_eq!(must_fail("t=31 c").position, 2); // 範囲外(数字の位置)
+        assert_eq!(must_fail("t=256 c").position, 2);
+        assert_eq!(must_fail("c t=140").position, 2); // 音符の後
+        assert_eq!(must_fail("r4 t=140 c").position, 3); // 休符の後
+        assert_eq!(must_fail("c ; d t=140").position, 6); // 2 本目の音符の後
+        assert_eq!(must_fail("[t=140 c]2").position, 1); // 繰り返しの中
+        assert_eq!(must_fail("{t=140 c}4").position, 1); // 連符の中
+        assert_eq!(must_fail("t=140 t=100 c").position, 6); // 同じトラックに 2 個
+        assert_eq!(must_fail("t=140 c ; t=100 d").position, 10); // 別のトラックに 2 個
+        assert_eq!(must_fail("t=140").position, 0); // 音符が無い(今までと同じ)
+    }
+
+    #[test]
+    fn a_later_tracks_syntax_error_comes_before_an_earlier_tracks_run_error() {
+        // 全トラックを先に構文解析するので、後ろのトラックの構文エラーが先に出る(エラーが 2 つあるときだけ)
+        let e = must_fail("t32 [c1]99 ; x"); // 1 本目は 90 秒を超える
+        assert_eq!(e.position, 13);
+        assert!(e.message.contains("不明な文字"), "{}", e.message);
+        // エラーが 1 つなら、今までどおり実行時のエラー
+        let e = must_fail("t32 [c1]99");
+        assert!(e.message.contains("90"), "{}", e.message);
+    }
+
+    #[test]
+    fn four_tracks_at_the_expansion_cap_parse_quickly() {
+        // 各トラックが約 49.5 万命令に展開される(上限 50 万の内側)。全トラックを先に構文解析するので、
+        // 4 本分の命令が同時にメモリに載る。時間だけを見る(メモリのピークは測っていない)。
+        let track = format!("c[[{}]99]10", "><".repeat(250));
+        let text = format!("t=120 {track};{track};{track};{track}");
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        let started = std::time::Instant::now();
+        let s = must_parse(&text);
+        assert_eq!(s.track_count, 4);
+        assert_eq!(s.notes.len(), 4);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "parse が {:?} かかった",
+            started.elapsed()
+        );
     }
 }
