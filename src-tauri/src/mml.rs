@@ -175,15 +175,25 @@ enum Frame {
     },
 }
 
-/// 繰り返しの複製を `out` に足す。展開後の命令数が上限を超えるなら、足さずに `pos`(`]` の位置)でエラーにする。
-fn extend_checked(out: &mut Vec<Item>, part: &[Item], pos: usize) -> Result<(), MmlError> {
-    if out.len() + part.len() > MAX_EXPANDED_OPS {
+/// `out[start..start + len]` の複製を `out` の末尾に足す。展開後の命令数が上限を超えるなら、足さずに
+/// `pos`(`]` の位置)でエラーにする。`len` が 0 なら何もしない(先に本体を複製しておくと、足さない周でも
+/// 入れ子の数だけ本体のコストがかかる)。
+fn extend_checked(
+    out: &mut Vec<Item>,
+    start: usize,
+    len: usize,
+    pos: usize,
+) -> Result<(), MmlError> {
+    if len == 0 {
+        return Ok(());
+    }
+    if out.len() + len > MAX_EXPANDED_OPS {
         return Err(mml_err(
             pos,
             format!("繰り返しを展開した命令が {MAX_EXPANDED_OPS} 個を超えました"),
         ));
     }
-    out.extend_from_slice(part);
+    out.extend_from_within(start..start + len);
     Ok(())
 }
 
@@ -343,16 +353,17 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                     }
                     None => 2,
                 };
-                let body: Vec<Item> = out[start..].to_vec();
                 // 最初の 1 周は `out` に入っている。`:` があれば、最後の 1 周は `:` の手前までだけを足す
                 // (`:` が無ければ、全部を n-1 回足す。あれば、全部を n-2 回と、手前までを 1 回)。
+                // 足す内容は `out` の中の本体(`start..start + body_len`)から直接複製する。
+                let body_len = out.len() - start;
                 let head = colon.map(|c| c - start);
                 let full_rounds = count - 1 - u32::from(head.is_some());
                 for _ in 0..full_rounds {
-                    extend_checked(&mut out, &body, pos)?;
+                    extend_checked(&mut out, start, body_len, pos)?;
                 }
                 if let Some(head) = head {
-                    extend_checked(&mut out, &body[..head], pos)?;
+                    extend_checked(&mut out, start, head, pos)?;
                 }
                 continue;
             }
@@ -1209,6 +1220,27 @@ mod tests {
         let e = must_fail("[[[[c]99]99]99]99");
         assert_eq!(e.position, 11);
         assert!(e.message.contains("命令"), "{}", e.message);
+    }
+
+    #[test]
+    fn nested_empty_tail_loops_do_not_copy_the_body_quadratically() {
+        // `[:` を 800 重に入れ子にし、一番内側に約 25 万命令に展開されるループを置く。外側の `]` は
+        // どれも `:` が先頭なので 1 命令も足さない。足さない周で本体を複製していると、約 2 億個の複製で
+        // 秒単位の時間がかかる(足した命令数は上限に効かない)。
+        let text = format!(
+            "c{}[{}]99{}",
+            "[:".repeat(800),
+            "><".repeat(1250),
+            "]".repeat(800)
+        );
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        let started = std::time::Instant::now();
+        let _ = parse(&text);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "parse が {:?} かかった",
+            started.elapsed()
+        );
     }
 
     #[test]
