@@ -130,6 +130,13 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("t=140");
     expect(text).toContain("全トラックの初期テンポ");
   });
+
+  it("記法ヘルプに、和音 'ceg' の書き方が出る", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("'ceg'4");
+    expect(text).toContain("和音");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {

@@ -87,6 +87,8 @@ export function lexMml(text: string): MmlToken[] {
   };
 
   let i = 0;
+  // 和音 `'…'` の中にいるか(開きと閉じの判定)。閉じていない `'` は、文末まで和音の中として読む
+  let inChord = false;
   while (i < syms.length) {
     const ch = syms[i].ch;
     if (NOTES.has(ch)) {
@@ -133,6 +135,19 @@ export function lexMml(text: string): MmlToken[] {
       while (at(j) === ".") j++;
       push(i, j, "repeat");
       i = j;
+    } else if (ch === "'") {
+      if (!inChord) {
+        push(i, i + 1, "repeat");
+        inChord = true;
+        i++;
+      } else {
+        // 閉じの `'` は、後ろの長さと付点まで、1 つのトークンにする
+        let j = digitsEnd(i + 1);
+        while (at(j) === ".") j++;
+        push(i, j, "repeat");
+        inChord = false;
+        i = j;
+      }
     } else if (ch === ";") {
       push(i, i + 1, "separator");
       i++;
