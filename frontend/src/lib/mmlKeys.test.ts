@@ -19,11 +19,11 @@ describe("MML_KEY_GROUPS(入力補助キー)", () => {
     expect(notes.keys.map((k) => k.insert)).toEqual(["c", "d", "e", "f", "g", "a", "b", "r"]);
   });
 
-  it("修飾は # - . &、オクターブは < >、構造は [ ] ;", () => {
+  it("修飾は # - . & ^、オクターブは < >、構造は [ ] : { } ;", () => {
     const inserts = (id: string) => MML_KEY_GROUPS.find((g) => g.id === id)!.keys.map((k) => k.insert);
-    expect(inserts("modifiers")).toEqual(["#", "-", ".", "&"]);
+    expect(inserts("modifiers")).toEqual(["#", "-", ".", "&", "^"]);
     expect(inserts("octave")).toEqual(["<", ">"]);
-    expect(inserts("structure")).toEqual(["[", "]", ";"]);
+    expect(inserts("structure")).toEqual(["[", "]", ":", "{", "}", ";"]);
   });
 
   it("長さは 1 2 4 8 16 32", () => {
@@ -42,8 +42,13 @@ describe("MML_KEY_GROUPS(入力補助キー)", () => {
     }
   });
 
-  it("キーだけで打った列(c# 8. & c 16 > [ d ] 2 ; r 4 <)に、読めない文字が残らない", () => {
-    const text = ["c", "sharp", "len-8", "dot", "tie", "c", "len-16", "oct-up", "loop-open", "d", "loop-close", "len-2", "track", "r", "len-4", "oct-down"]
+  it("キーだけで打った列(c# 8. & c 16 > [ d : e ] 2 { c d } 4 ^ 8 ; r 4 <)に、読めない文字が残らない", () => {
+    const text = [
+      "c", "sharp", "len-8", "dot", "tie", "c", "len-16", "oct-up",
+      "loop-open", "d", "loop-escape", "e", "loop-close", "len-2",
+      "tuplet-open", "c", "d", "tuplet-close", "len-4", "tie-len", "len-8",
+      "track", "r", "len-4", "oct-down",
+    ]
       .map((id) => byId(id).insert)
       .join("");
     expect(lexMml(text).filter((t) => t.kind === "unknown")).toEqual([]);
