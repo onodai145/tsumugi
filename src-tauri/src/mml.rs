@@ -57,6 +57,8 @@ enum Op {
     DefaultLen(u32),
     Tempo(u32),
     Volume(u8),
+    /// `v+n` / `v-n`。現在の音量に足す(範囲外はエラー)。
+    VolumeDelta(i32),
     Timbre(Timbre),
 }
 
@@ -214,11 +216,25 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 Op::Tempo(n)
             }
             'v' => {
-                let (n, p) = c.require_number(pos, 'v')?;
-                if n > 15 {
-                    return Err(mml_err(p, "音量は 0〜15 です"));
+                if let Some(sign @ ('+' | '-')) = c.peek() {
+                    c.bump();
+                    let n = match c.number() {
+                        Some((n, p)) => {
+                            if !(1..=15).contains(&n) {
+                                return Err(mml_err(p, "相対音量は 1〜15 です"));
+                            }
+                            n
+                        }
+                        None => 1,
+                    };
+                    Op::VolumeDelta(if sign == '+' { n as i32 } else { -(n as i32) })
+                } else {
+                    let (n, p) = c.require_number(pos, 'v')?;
+                    if n > 15 {
+                        return Err(mml_err(p, "音量は 0〜15 です"));
+                    }
+                    Op::Volume(n as u8)
                 }
-                Op::Volume(n as u8)
             }
             '@' => {
                 if c.peek().is_none() {
@@ -341,6 +357,13 @@ fn run_track(track: u8, items: &[Item], notes: &mut Vec<NoteEvent>) -> Result<f6
             Op::DefaultLen(n) => st.len = *n,
             Op::Tempo(n) => st.tempo = *n,
             Op::Volume(n) => st.volume = u32::from(*n),
+            Op::VolumeDelta(delta) => {
+                let v = st.volume as i32 + delta;
+                if !(0..=15).contains(&v) {
+                    return Err(mml_err(pos, "音量は 0〜15 です"));
+                }
+                st.volume = v as u32;
+            }
             Op::Timbre(t) => st.timbre = *t,
             Op::Tie => {
                 if st.last_note.is_none() || st.tie_pos.is_some() {
@@ -922,6 +945,29 @@ mod tests {
         assert_eq!(must_fail("c4^3").position, 3); // 長さが不正
         assert_eq!(must_fail("c4^8...").position, 6); // 3 個目の付点
         assert_eq!(must_fail("c4^8&").position, 4); // 後ろに音符が無い `&`
+    }
+
+    #[test]
+    fn relative_volume() {
+        let vel = |t: &str| must_parse(t).notes[0].velocity;
+        approx(vel("v5 v+2 c"), 7.0 / 15.0);
+        approx(vel("v5 v-2 c"), 3.0 / 15.0);
+        approx(vel("v5 v+ c"), 6.0 / 15.0); // 数字省略は 1
+        approx(vel("v5 v- c"), 4.0 / 15.0);
+        approx(vel("v+5 c"), 1.0); // 既定 v10 から 15
+        approx(vel("v-10 c"), 0.0);
+        // 絶対指定の v は今までどおり
+        approx(vel("v15 c"), 1.0);
+        approx(vel("V5 V + 2 c"), 7.0 / 15.0); // 大文字・空白
+    }
+
+    #[test]
+    fn relative_volume_errors() {
+        assert_eq!(must_fail("v+6 c").position, 0); // 10 + 6 = 16 は範囲外。`v` の位置
+        assert_eq!(must_fail("v0 v- c").position, 3); // 0 - 1 は範囲外
+        assert_eq!(must_fail("v+0 c").position, 2); // n は 1〜15。数字の位置
+        assert_eq!(must_fail("v+16 c").position, 2);
+        assert_eq!(must_fail("v c").position, 0); // 絶対指定は数字が必要なまま
     }
 
     fn timbres(text: &str) -> Vec<Timbre> {
