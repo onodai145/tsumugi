@@ -172,8 +172,9 @@ export function lexMml(text: string): MmlToken[] {
         push(i, j + 1, "command");
         i = j + 1;
       } else {
+        // 展開の後ろに空白で区切って書いた長さ・付点(`$riff 4`)は、本体の最後の音符の長さになる
         push(i, j, "command");
-        i = j;
+        i = lengthAndDots(j);
       }
     } else if (ch === ";") {
       push(i, i + 1, "separator");

@@ -286,6 +286,18 @@ describe("lexMml", () => {
     ]);
   });
 
+  it("マクロの展開の後ろに空白で区切った長さ・付点は、number(`$riff 4` は本体の最後の音の長さになる)", () => {
+    expect(lex("$a 4.")).toEqual([
+      ["$a", "command"],
+      ["4.", "number"],
+    ]);
+    expect(lex("$a/**/8")).toEqual([
+      ["$a", "command"],
+      ["/**/", "comment"],
+      ["8", "number"],
+    ]);
+  });
+
   it("`$a t=60` は展開と t=、`$at=60` は名前 at(定義ではない)", () => {
     expect(lex("$a t=60")).toEqual([
       ["$a", "command"],

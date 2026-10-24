@@ -973,14 +973,17 @@ fn undefined_macro(pos: usize, name: &str, macros: &HashMap<String, Vec<Sym>>) -
 }
 
 /// `chars` の `$名前` を、本体で置き換えながら `out` に写す(本体の中の `$` も再帰的に展開する)。
-/// `stack` は展開中のマクロの名前(再帰の検出用)。`use_pos` は、いま展開している `$` の位置(上限のエラーの位置)。
+/// `stack` は展開中のマクロの名前(再帰の検出用)。`uses` は展開した回数(空の本体は文字を増やさないので、回数にも上限が要る)。
+/// `use_pos` は、いま展開している(トップレベルでは、直前に展開した)`$` の位置(上限のエラーの位置)。
 fn expand_into(
     chars: &[Sym],
     macros: &HashMap<String, Vec<Sym>>,
     stack: &mut Vec<String>,
     out: &mut Vec<Sym>,
+    uses: &mut usize,
     use_pos: usize,
 ) -> Result<(), MmlError> {
+    let mut use_pos = use_pos;
     let mut i = 0;
     while i < chars.len() {
         let (c, pos) = chars[i];
@@ -995,8 +998,18 @@ fn expand_into(
                     format!("マクロ `${name}` が自分自身を呼んでいます"),
                 ));
             }
+            if stack.is_empty() {
+                use_pos = pos;
+            }
+            *uses += 1;
+            if *uses > MAX_EXPANDED_SYMBOLS {
+                return Err(mml_err(
+                    use_pos,
+                    format!("マクロの展開が {MAX_EXPANDED_SYMBOLS} 回を超えました"),
+                ));
+            }
             stack.push(name);
-            expand_into(body, macros, stack, out, pos)?;
+            expand_into(body, macros, stack, out, uses, use_pos)?;
             stack.pop();
             i = j;
             continue;
@@ -1020,7 +1033,7 @@ fn expand_macros(chars: Vec<Sym>) -> Result<Vec<Sym>, MmlError> {
     }
     let (rest, macros) = collect_macros(&chars)?;
     let mut out = Vec::with_capacity(rest.len());
-    expand_into(&rest, &macros, &mut Vec::new(), &mut out, 0)?;
+    expand_into(&rest, &macros, &mut Vec::new(), &mut out, &mut 0, 0)?;
     Ok(out)
 }
 
@@ -2259,5 +2272,32 @@ mod tests {
         chain.push_str("$m299");
         assert!(chain.chars().count() <= MAX_TEXT_CHARS);
         assert_eq!(must_parse(&chain), must_parse("c"));
+    }
+
+    #[test]
+    fn empty_bodies_cannot_blow_up_the_expansion_count() {
+        // 空の本体は文字を増やさないが、展開の回数は 60^4 回に膨らむ。回数にも上限がある
+        let k = 60;
+        let text = format!(
+            "$e={{}} $a={{{}}} $b={{{}}} $c={{{}}} $d={{{}}} $d c",
+            "$e".repeat(k),
+            "$a".repeat(k),
+            "$b".repeat(k),
+            "$c".repeat(k)
+        );
+        assert!(text.chars().count() <= MAX_TEXT_CHARS);
+        let started = std::time::Instant::now();
+        let e = must_fail(&text);
+        assert!(e.message.contains("100000"), "{}", e.message);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn expansion_cap_at_top_level_points_at_the_last_use() {
+        // 1000 文字の本体を 100 回(ちょうど 10 万文字)使った直後の文字で上限に達する。位置は最後の `$a`
+        let def = format!("$a={{{}}}", "c".repeat(1000));
+        let text = format!("{def}{} c", "$a".repeat(100));
+        let e = must_fail(&text);
+        assert_eq!(e.position as usize, def.chars().count() + 2 * 99);
     }
 }
