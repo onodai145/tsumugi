@@ -3,6 +3,7 @@
 // コメント(// と /* */)は mmlComments.ts が範囲を求め、種別 comment のトークンにする。
 import { TIMBRE_LIST } from "./mmlTimbres";
 import { blankComments, findComments } from "./mmlComments";
+import { findMacroDefinitions } from "./mmlMacros";
 
 export type MmlTokenKind =
   | "note"
@@ -57,7 +58,12 @@ function symbols(text: string): Sym[] {
 
 export function lexMml(text: string): MmlToken[] {
   // コメントは空白にして読み飛ばす(添字は変わらない)。コメントそのものは最後にトークンとして足す
-  const syms = symbols(blankComments(text));
+  const blanked = blankComments(text);
+  const syms = symbols(blanked);
+  // マクロの定義の頭(`$`)と閉じ(`}`)の位置。定義の閉じの `}` は、後ろの長さ・付点を取り込まない
+  const defs = findMacroDefinitions(blanked);
+  const defStarts = new Set(defs.map((d) => d.from));
+  const defCloses = new Set(defs.map((d) => d.bodyTo));
   const out: MmlToken[] = [];
   const at = (i: number): string => (i < syms.length ? syms[i].ch : "");
   const push = (start: number, end: number, kind: MmlTokenKind): void => {
@@ -130,11 +136,17 @@ export function lexMml(text: string): MmlToken[] {
       push(i, j, "repeat");
       i = j;
     } else if (ch === "}") {
-      // `}` の後の長さと付点まで、1 つのトークンにする
-      let j = digitsEnd(i + 1);
-      while (at(j) === ".") j++;
-      push(i, j, "repeat");
-      i = j;
+      if (defCloses.has(syms[i].from)) {
+        // マクロの定義の閉じ。連符の `}` と違い、後ろの長さ・付点は取り込まない
+        push(i, i + 1, "repeat");
+        i++;
+      } else {
+        // `}` の後の長さと付点まで、1 つのトークンにする
+        let j = digitsEnd(i + 1);
+        while (at(j) === ".") j++;
+        push(i, j, "repeat");
+        i = j;
+      }
     } else if (ch === "'") {
       if (!inChord) {
         push(i, i + 1, "repeat");
@@ -146,6 +158,21 @@ export function lexMml(text: string): MmlToken[] {
         while (at(j) === ".") j++;
         push(i, j, "repeat");
         inChord = false;
+        i = j;
+      }
+    } else if (ch === "$") {
+      // マクロ。名前は、元のテキストで `$` の直後に途切れなく続く [a-z0-9_]+(空白・コメントで終わる)
+      let j = i + 1;
+      while (j < syms.length && /^[a-z0-9_]$/.test(syms[j].ch) && syms[j].from === syms[j - 1].to) j++;
+      if (j === i + 1) {
+        push(i, i + 1, "unknown");
+        i++;
+      } else if (defStarts.has(syms[i].from)) {
+        // 定義の頭 `$名前 =`(空白は syms に無いので、`=` は名前のすぐ後ろ)
+        push(i, j + 1, "command");
+        i = j + 1;
+      } else {
+        push(i, j, "command");
         i = j;
       }
     } else if (ch === ";") {

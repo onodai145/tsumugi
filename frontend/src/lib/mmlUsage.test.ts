@@ -28,6 +28,12 @@ describe("countTracks", () => {
     expect(countTracks("c4 /* x */ ; e4")).toBe(2);
     expect(countTracks("// 全部コメント ;")).toBe(0);
   });
+
+  it("マクロの定義だけの区間は数えない(パーサーは、定義を取り除いてからトラックに分ける)", () => {
+    expect(countTracks("$a={c} ; d")).toBe(1);
+    expect(countTracks("$a={c} $a ; $a")).toBe(2);
+    expect(countTracks("// x\n$a={c d}")).toBe(0);
+  });
 });
 
 describe("usageLevel", () => {
