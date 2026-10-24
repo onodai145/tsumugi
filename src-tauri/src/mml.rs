@@ -8,6 +8,7 @@
 
 use crate::domain::{MmlError, MmlScore, NoteEvent, Timbre};
 use crate::error::Error;
+use std::collections::HashMap;
 
 pub const MAX_TEXT_CHARS: usize = 5000;
 pub const MAX_TRACKS: usize = 4;
@@ -798,17 +799,22 @@ fn shared_tempo(tracks: &[Vec<Item>]) -> Result<u32, MmlError> {
     Ok(found.unwrap_or(DEFAULT_TEMPO))
 }
 
-/// 空白とコメントを除いた (ASCII だけ小文字化した文字, 元の文字位置) の列を作る。
-/// コメントは `// …`(改行の手前まで)と `/* … */`(入れ子にできない)。`/` だけはコメントにならず、
-/// そのまま列に残って `parse_track` が「不明な文字」にする。`;` はトラック区切りなのでコメントの開始にしない。
+/// (文字, 元の文字位置)。
+type Sym = (char, usize);
+
+/// コメントを取り除いた (文字, 元の文字位置) の列を作る。空白はそのまま残す(マクロの名前の区切りに使う)。
+/// コメントは `// …`(改行の手前まで)と `/* … */`(入れ子にできない)で、開始位置の空白 1 つに置き換える
+/// (コメントも名前の区切りとして働く)。`/` だけはコメントにならず、そのまま列に残って `parse_track` が
+/// 「不明な文字」にする。`;` はトラック区切りなのでコメントの開始にしない。
 /// 閉じていない `/*` は、その `/*` の位置のエラー。
-fn symbols(text: &str) -> Result<Vec<(char, usize)>, MmlError> {
+fn strip_comments(text: &str) -> Result<Vec<Sym>, MmlError> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if c == '/' && chars.get(i + 1) == Some(&'/') {
+            out.push((' ', i));
             while i < chars.len() && chars[i] != '\n' {
                 i += 1;
             }
@@ -816,6 +822,7 @@ fn symbols(text: &str) -> Result<Vec<(char, usize)>, MmlError> {
         }
         if c == '/' && chars.get(i + 1) == Some(&'*') {
             let open = i;
+            out.push((' ', open));
             i += 2;
             loop {
                 if i + 1 >= chars.len() {
@@ -829,11 +836,191 @@ fn symbols(text: &str) -> Result<Vec<(char, usize)>, MmlError> {
             }
             continue;
         }
-        if !c.is_whitespace() {
-            out.push((c.to_ascii_lowercase(), i));
-        }
+        out.push((c, i));
         i += 1;
     }
+    Ok(out)
+}
+
+/// 空白を除き、ASCII だけ小文字化する(パーサーが読む形)。
+fn finish_symbols(chars: &[Sym]) -> Vec<Sym> {
+    chars
+        .iter()
+        .filter(|(c, _)| !c.is_whitespace())
+        .map(|&(c, p)| (c.to_ascii_lowercase(), p))
+        .collect()
+}
+
+/// マクロを展開した後の文字数の上限。入れ子のマクロで展開が膨らむ入力を抑える。
+const MAX_EXPANDED_SYMBOLS: usize = 100_000;
+
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// `chars[i]`(`$`)の直後に途切れなく続く名前(小文字にしたもの)と、その次の添字を返す。
+fn read_macro_name(chars: &[Sym], i: usize) -> (String, usize) {
+    let mut j = i + 1;
+    let mut name = String::new();
+    while j < chars.len() && is_name_char(chars[j].0) {
+        name.push(chars[j].0.to_ascii_lowercase());
+        j += 1;
+    }
+    (name, j)
+}
+
+/// `from` から、空白を読み飛ばした次の添字。
+fn skip_whitespace(chars: &[Sym], mut from: usize) -> usize {
+    while from < chars.len() && chars[from].0.is_whitespace() {
+        from += 1;
+    }
+    from
+}
+
+/// `chars[i]`(`$`)が定義の頭(`$名前 = {`)なら、名前と `{` の添字を返す。
+fn definition_head(chars: &[Sym], i: usize) -> Option<(String, usize)> {
+    let (name, j) = read_macro_name(chars, i);
+    if name.is_empty() {
+        return None;
+    }
+    let eq = skip_whitespace(chars, j);
+    if chars.get(eq).map(|s| s.0) != Some('=') {
+        return None;
+    }
+    let open = skip_whitespace(chars, eq + 1);
+    if chars.get(open).map(|s| s.0) != Some('{') {
+        return None;
+    }
+    Some((name, open))
+}
+
+/// 定義(`$名前 = { 本体 }`)を取り除き、表に入れる。戻り値は (定義を除いた列, 名前 → 本体)。
+fn collect_macros(chars: &[Sym]) -> Result<(Vec<Sym>, HashMap<String, Vec<Sym>>), MmlError> {
+    let mut rest = Vec::with_capacity(chars.len());
+    let mut macros: HashMap<String, Vec<Sym>> = HashMap::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].0 == '$' {
+            if let Some((name, open)) = definition_head(chars, i) {
+                if macros.contains_key(&name) {
+                    return Err(mml_err(
+                        chars[i].1,
+                        format!("マクロ `${name}` は既に定義されています"),
+                    ));
+                }
+                // 本体は、対になる `}` まで(本体の中の `{ }` は深さで数える)
+                let mut depth = 1usize;
+                let mut k = open + 1;
+                while k < chars.len() {
+                    match chars[k].0 {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        ';' => {
+                            return Err(mml_err(chars[k].1, "マクロの中には `;` を書けません"));
+                        }
+                        '$' if definition_head(chars, k).is_some() => {
+                            return Err(mml_err(chars[k].1, "マクロの中には定義を書けません"));
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+                if k >= chars.len() {
+                    return Err(mml_err(
+                        chars[open].1,
+                        "マクロの本体の `{` が閉じていません",
+                    ));
+                }
+                macros.insert(name, chars[open + 1..k].to_vec());
+                i = k + 1;
+                continue;
+            }
+        }
+        rest.push(chars[i]);
+        i += 1;
+    }
+    Ok((rest, macros))
+}
+
+/// 未定義のマクロのエラー。名前の先頭が定義済みの名前と一致するときは、区切りを案内する
+/// (`$ab` は `$a` + `b` ではなく、名前 `ab` と読まれる)。
+fn undefined_macro(pos: usize, name: &str, macros: &HashMap<String, Vec<Sym>>) -> MmlError {
+    if name.is_empty() {
+        return mml_err(pos, "`$` の後にマクロの名前が必要です");
+    }
+    let known = macros
+        .keys()
+        .filter(|k| name.starts_with(k.as_str()))
+        .max_by_key(|k| k.len());
+    match known {
+        Some(k) => mml_err(
+            pos,
+            format!(
+                "未定義のマクロ `${name}` です(`${k}` を使うなら、後ろの `{}` を空白で区切ってください)",
+                &name[k.len()..]
+            ),
+        ),
+        None => mml_err(
+            pos,
+            format!("未定義のマクロ `${name}` です(定義は `$名前={{…}}` の形で書きます)"),
+        ),
+    }
+}
+
+/// `chars` の `$名前` を、本体で置き換えながら `out` に写す(本体の中の `$` も再帰的に展開する)。
+/// `stack` は展開中のマクロの名前(再帰の検出用)。`use_pos` は、いま展開している `$` の位置(上限のエラーの位置)。
+fn expand_into(
+    chars: &[Sym],
+    macros: &HashMap<String, Vec<Sym>>,
+    stack: &mut Vec<String>,
+    out: &mut Vec<Sym>,
+    use_pos: usize,
+) -> Result<(), MmlError> {
+    let mut i = 0;
+    while i < chars.len() {
+        let (c, pos) = chars[i];
+        if c == '$' {
+            let (name, j) = read_macro_name(chars, i);
+            let Some(body) = macros.get(&name) else {
+                return Err(undefined_macro(pos, &name, macros));
+            };
+            if stack.contains(&name) {
+                return Err(mml_err(
+                    pos,
+                    format!("マクロ `${name}` が自分自身を呼んでいます"),
+                ));
+            }
+            stack.push(name);
+            expand_into(body, macros, stack, out, pos)?;
+            stack.pop();
+            i = j;
+            continue;
+        }
+        if out.len() >= MAX_EXPANDED_SYMBOLS {
+            return Err(mml_err(
+                use_pos,
+                format!("マクロを展開した文字数が {MAX_EXPANDED_SYMBOLS} を超えました"),
+            ));
+        }
+        out.push((c, pos));
+        i += 1;
+    }
+    Ok(())
+}
+
+/// マクロの定義を取り除き、`$名前` を本体で置き換える。`$` を含まない MML は、そのまま返す。
+fn expand_macros(chars: Vec<Sym>) -> Result<Vec<Sym>, MmlError> {
+    if !chars.iter().any(|s| s.0 == '$') {
+        return Ok(chars);
+    }
+    let (rest, macros) = collect_macros(&chars)?;
+    let mut out = Vec::with_capacity(rest.len());
+    expand_into(&rest, &macros, &mut Vec::new(), &mut out, 0)?;
     Ok(out)
 }
 
@@ -847,7 +1034,7 @@ pub fn parse(text: &str) -> Result<MmlScore, MmlError> {
         ));
     }
 
-    let syms = symbols(text)?;
+    let syms = finish_symbols(&expand_macros(strip_comments(text)?)?);
 
     // ';' でトラックに分ける。各区間に「直前の ';' の位置」を添える(トラック数超過の報告用)。
     let mut segments: Vec<(&[(char, usize)], usize)> = Vec::new();
@@ -1960,5 +2147,117 @@ mod tests {
         assert_eq!(must_fail("c ^4 t=60").position, 5);
         // 連符の中身の検査は、今までどおり `^` を数える(`c {^4}4` は通る)
         approx(must_parse("c {^4}4").notes[0].duration_sec, 1.0);
+    }
+
+    #[test]
+    fn macros_define_and_expand() {
+        assert_eq!(
+            must_parse("$riff={c d e f} $riff $riff"),
+            must_parse("cdefcdef")
+        );
+        // 定義は、使う前でも後ろでもよい
+        assert_eq!(must_parse("$riff $riff={c d}"), must_parse("cd"));
+        // 入れ子
+        assert_eq!(must_parse("$a={$b $b} $b={c} $a"), must_parse("cc"));
+        // 空白・大文字、定義の `=` と `{` の前後の空白
+        assert_eq!(must_parse("$RIFF = { C D } $riff"), must_parse("cd"));
+        // 展開の直後の `4` は、本体の最後の音符の長さ(文字の置き換えなので)
+        assert_eq!(
+            must_parse("$riff={c d e f} $riff 4"),
+            must_parse("c d e f4")
+        );
+        // 本体の中の波括弧(連符)は、対で数える
+        assert_eq!(must_parse("$u={{c d e}4} $u"), must_parse("{c d e}4"));
+        // 本体に、状態を変えるコマンド・ループ・和音を書ける
+        assert_eq!(
+            must_parse("$p={o5 l8 [c d]2} $p"),
+            must_parse("o5 l8 [c d]2")
+        );
+        assert_eq!(must_parse("$q={'ceg'4} $q"), must_parse("'ceg'4"));
+        // 本体の中から、別のマクロを使える(使いの直後が空白でも `}` でもよい)
+        assert_eq!(must_parse("$a={c} $b={$a d} $b"), must_parse("cd"));
+        // 同じマクロを、複数のトラックで使える
+        let s = must_parse("$m={c d} $m ; $m");
+        assert_eq!(s.track_count, 2);
+        assert_eq!(s.notes.len(), 4);
+    }
+
+    #[test]
+    fn macro_names_end_at_the_first_non_name_character() {
+        // 空白(かコメント)で区切る。記号の前は、区切らなくてよい
+        assert_eq!(must_parse("$a={c} $a d"), must_parse("cd"));
+        assert_eq!(must_parse("$a={c} $a/**/d"), must_parse("cd"));
+        assert_eq!(must_parse("$a={c} $a\nd"), must_parse("cd"));
+        assert_eq!(must_parse("$a={c} $a\td"), must_parse("cd"));
+        assert_eq!(must_parse("$a={c} $a;d"), must_parse("c;d"));
+        assert_eq!(must_parse("$a={c} [$a]2"), must_parse("[c]2"));
+        // `$a` と `$ab` は別のマクロ
+        assert_eq!(must_parse("$a={c} $ab={d} $a $ab"), must_parse("cd"));
+        // `$a t=60` は `$a` の展開と `t=60`。`$at=60` は名前 `at`
+        assert_eq!(must_parse("$a={o5} $a t=60 c"), must_parse("o5 t=60 c"));
+        let e = must_fail("$a={o5} $at=60 c");
+        assert_eq!(e.position, 8);
+        assert!(
+            e.message.contains("`$a`") && e.message.contains("`t`"),
+            "{}",
+            e.message
+        );
+        // 区切らないと名前の一部になる
+        let e = must_fail("$a={c} $ad");
+        assert_eq!(e.position, 7);
+        assert!(e.message.contains("空白で区切って"), "{}", e.message);
+    }
+
+    #[test]
+    fn definition_only_sections_are_not_tracks() {
+        let s = must_parse("$a={c} ; d");
+        assert_eq!(s.track_count, 1);
+        assert_eq!(s.notes.len(), 1);
+        assert_eq!(must_parse("$a={c} $a ; $a").track_count, 2);
+        // 本体の `t=` は、展開された場所の規則で検査される
+        assert_eq!(must_parse("$t={t=60} $t c ; d"), must_parse("t=60 c ; d"));
+    }
+
+    #[test]
+    fn invalid_macros() {
+        let pos = |t: &str| must_fail(t).position;
+        assert_eq!(pos("c $zzz"), 2); // 未定義
+        assert_eq!(pos("c $"), 2); // 名前が無い
+        assert_eq!(pos("$a=c"), 0); // `={` の形でなければ定義ではなく、未定義の展開
+        assert_eq!(pos("$a={c d"), 3); // 閉じていない
+        assert_eq!(pos("$a={c;d} $a"), 5); // 本体の `;`
+        assert_eq!(pos("$a={$b={c}}"), 4); // 本体の中の定義
+        assert_eq!(pos("$a={c} $a={d}"), 7); // 二重定義
+        assert_eq!(pos("$a={$a} $a"), 4); // 再帰(本体の中の `$`)
+        assert_eq!(pos("$a={$b} $b={$a} $a"), 12); // 間接の再帰
+        assert_eq!(pos("$a={o9} $a"), 5); // 本体の誤りは、定義の中の文字を指す
+        assert_eq!(pos("/* あ */ $zzz"), 8); // コメントの後ろでも、元の位置
+        assert!(must_fail("$a={c} $ab").message.contains("空白で区切って"));
+        assert!(must_fail("c $zzz").message.contains("未定義"));
+        assert!(must_fail("$a={$a} $a").message.contains("自分自身"));
+        assert!(must_fail("c $").message.contains("名前"));
+    }
+
+    #[test]
+    fn macro_expansion_is_capped_and_deep_chains_work() {
+        // 1000 文字の本体を 101 回並べたマクロ: 展開後 10 万文字を超える
+        let big = format!(
+            "$a={{{}}} $b={{{}}} $b",
+            "c".repeat(1000),
+            "$a ".repeat(101)
+        );
+        assert!(big.chars().count() <= MAX_TEXT_CHARS);
+        let started = std::time::Instant::now();
+        let e = must_fail(&big);
+        assert!(e.message.contains("100000"), "{}", e.message);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        // 入れ子が深い連鎖(300 段)は、スタックを使い切らずに展開できる
+        let mut chain = String::from("$m0={c} ");
+        for i in 1..300 {
+            chain.push_str(&format!("$m{i}={{$m{} }} ", i - 1));
+        }
+        chain.push_str("$m299");
+        assert!(chain.chars().count() <= MAX_TEXT_CHARS);
+        assert_eq!(must_parse(&chain), must_parse("c"));
     }
 }
