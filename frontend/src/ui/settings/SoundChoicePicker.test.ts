@@ -165,6 +165,15 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("マクロ");
     expect(text).toContain("空白で区切る");
   });
+
+  it("記法ヘルプに、@drumkit の割り当て(GM の高さ)と、鳴らない高さの扱いが出る", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("@drumkit");
+    expect(text).toContain("o2 c キック");
+    expect(text).toContain("o2 d スネア");
+    expect(text).toContain("割り当てのない高さは鳴らない");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {
