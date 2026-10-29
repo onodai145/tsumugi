@@ -114,7 +114,7 @@ GM では、チャンネル 10 のノート番号が楽器に対応する(35 = A
 
 ## 実装後の確認
 
-2026-10-31、ブランチ `feat/issue-499-mml-drumkit`。隔離インスタンスは、`Xvfb :95`(1280x900)、`dbus-run-session`、`XDG_*` を `/tmp` 直下の短いパスに置き、`WAYLAND_DISPLAY` を unset、`GDK_BACKEND=x11` で、`frontend/dist` を作り直してから `cargo build` した `target/debug/tsumugi` を直接起動した。ダミーのアカウント(`misskey.invalid`)だけを `settings.json` に書いた。起動した全プロセスに一意なトークンを環境変数で付け、確認のあと、トークンで特定した PID だけを止めた(Xvfb のロックファイルと隔離ホームも削除済み)。ユーザー自身の `cargo tauri dev` には触れていない。
+2026-10-30、ブランチ `feat/issue-499-mml-drumkit`。隔離インスタンスは、`Xvfb :95`(1280x900)、`dbus-run-session`、`XDG_*` を `/tmp` 直下の短いパスに置き、`WAYLAND_DISPLAY` を unset、`GDK_BACKEND=x11` で、`frontend/dist` を作り直してから `cargo build` した `target/debug/tsumugi` を直接起動した。ダミーのアカウント(`misskey.invalid`)だけを `settings.json` に書いた。起動した全プロセスに一意なトークンを環境変数で付け、確認のあと、トークンで特定した PID だけを止めた(Xvfb のロックファイルと隔離ホームも削除済み)。ユーザー自身の `cargo tauri dev` には触れていない。
 
 仕様からの変更:
 - 楽器の音源の作り方: ノイズと金属の楽器を「1 打ごとに作る」にした最初の実装は、2772 打(`@drumkit t240 l64 o2 [[c f+ d f+]99]7`、再生 43.3 秒)の描画に 3 分以上かかった。楽器ごとに 1 つを使い回す方式に替えたら、25 秒になった。同じ MML の他の音色は、`fm` 18 秒、`drum` 17 秒、既存の `noise`(1 打ごとに作る)79 秒。同じ楽器を続けて叩くと前の余韻が切れる(実際のハイハットのチョークに近い)。
