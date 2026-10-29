@@ -31,7 +31,7 @@ export async function renderScore(score: MmlScore): Promise<string> {
       };
       for (const n of score.notes) {
         const hz = Tone.Frequency(n.midi, "midi").toFrequency();
-        voiceFor(n.track, n.timbre).trigger(hz, n.durationSec ?? 0, n.startSec ?? 0, n.velocity ?? 0);
+        voiceFor(n.track, n.timbre).trigger(hz, n.durationSec ?? 0, n.startSec ?? 0, n.velocity ?? 0, n.midi);
       }
     },
     (score.totalSec ?? 0) + TAIL_SEC,

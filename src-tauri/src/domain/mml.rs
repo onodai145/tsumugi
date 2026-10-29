@@ -20,11 +20,12 @@ pub enum Timbre {
     Bass,
     Drum,
     Noise,
+    Drumkit,
 }
 
 impl Timbre {
     /// 番号順の一覧。
-    pub const ALL: [Timbre; 14] = [
+    pub const ALL: [Timbre; 15] = [
         Timbre::Fm,
         Timbre::Square,
         Timbre::Pulse,
@@ -39,6 +40,7 @@ impl Timbre {
         Timbre::Bass,
         Timbre::Drum,
         Timbre::Noise,
+        Timbre::Drumkit,
     ];
 
     pub fn from_number(n: u32) -> Option<Timbre> {
@@ -62,6 +64,7 @@ impl Timbre {
             Timbre::Bass => "bass",
             Timbre::Drum => "drum",
             Timbre::Noise => "noise",
+            Timbre::Drumkit => "drumkit",
         }
     }
 }

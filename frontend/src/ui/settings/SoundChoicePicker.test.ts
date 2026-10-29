@@ -129,7 +129,7 @@ describe("SoundChoicePicker の MML モード", () => {
   it("音色の一覧(番号と名前)が出る", async () => {
     const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
     const text = getByTestId("mml-timbres").textContent ?? "";
-    expect(TIMBRE_LIST).toHaveLength(14);
+    expect(TIMBRE_LIST).toHaveLength(15);
     for (const p of TIMBRE_LIST) expect(text).toContain(`@${p.number} ${p.name}`);
   });
 
@@ -164,6 +164,15 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("$riff");
     expect(text).toContain("マクロ");
     expect(text).toContain("空白で区切る");
+  });
+
+  it("記法ヘルプに、@drumkit の割り当て(GM の高さ)と、鳴らない高さの扱いが出る", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("@drumkit");
+    expect(text).toContain("o2 c キック");
+    expect(text).toContain("o2 d スネア");
+    expect(text).toContain("割り当てのない高さは鳴らない");
   });
 });
 
