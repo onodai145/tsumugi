@@ -248,6 +248,22 @@
     ></textarea>
     <p class="m-0 text-xs text-destructive" data-testid="mml-editor-load-error">エディタを読み込めなかったため、簡易な入力欄を表示しています。</p>
   {/await}
+  <div class="flex flex-wrap items-center gap-1 text-xs text-muted-foreground" role="group" aria-label="音色" data-testid="mml-timbres">
+    <span aria-hidden="true">音色（押すとカーソル位置に入る）</span>
+    {#each TIMBRE_LIST as p (p.number)}
+      <!-- 押してもエディタからフォーカスを奪わない(モバイルでソフトキーボードが閉じないように) -->
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        class="font-mono"
+        aria-label="@{p.number} {p.name} を挿入"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={() => editor?.insertText(`@${p.name}`)}
+        data-testid="mml-timbre-{p.name}">@{p.number} {p.name}</Button
+      >
+    {/each}
+  </div>
   <p id="{uid}-status" class="m-0 text-xs {status.kind === 'error' || status.kind === 'failed' ? 'text-destructive' : 'text-muted-foreground'}" data-testid="mml-status">
     {#if status.kind === "ok"}再生時間 {status.totalSec.toFixed(1)} 秒
     {:else if status.kind === "error"}<button
@@ -299,27 +315,11 @@ q80 音を鳴らす長さの割合(1〜100、既定 100。短くするとスタ�
 &#123;cde&#125;4 連符(中の長さを合計して、後ろの長さ 1 つ分に収める。入れ子は不可)
 'ceg'4 和音(同時に鳴らす。長さは閉じの ' の後ろに 1 つ。中は音符と &lt; &gt; だけ。音量は音数で割る。& とは組み合わせ不可、延ばすには ^)
 $riff=&#123;c d e f&#125; マクロ(文字の置き換え)。$riff で展開。定義はどこに書いてもよい。名前の直後に英数字が続くときは空白で区切る($riff 4)。本体に ; と定義は書けない
-@3 または @bell 音色（下の一覧。何も書かなければ @0 fm）
+@3 または @bell 音色（入力欄の下の音色ボタンで入れられる。何も書かなければ @0 fm）
 [cde]3 繰り返し(2〜99回、入れ子可)  [c:d]3 最後の回だけ : の後ろを飛ばす
 ; でトラックを分ける(最大4つ。テンポ・音色はトラックごとに書く)
 // 行末までコメント  /* … */ 範囲コメント(; を含んでもトラックは分かれない。文字数には含む)
 全体で 5000 文字・90 秒・3000 音まで</pre>
-    <div class="mt-1 flex flex-wrap items-center gap-1" role="group" aria-label="音色" data-testid="mml-timbres">
-      <span aria-hidden="true">音色（押すとカーソル位置に入る）</span>
-      {#each TIMBRE_LIST as p (p.number)}
-        <!-- 押してもエディタからフォーカスを奪わない(モバイルでソフトキーボードが閉じないように) -->
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          class="font-mono"
-          aria-label="@{p.number} {p.name} を挿入"
-          onmousedown={(e) => e.preventDefault()}
-          onclick={() => editor?.insertText(`@${p.name}`)}
-          data-testid="mml-timbre-{p.name}">@{p.number} {p.name}</Button
-        >
-      {/each}
-    </div>
   </details>
 {:else if mode !== "inherit"}
   <Button type="button" variant="outline" size="sm" onclick={() => preview(mode)}>試聴</Button>

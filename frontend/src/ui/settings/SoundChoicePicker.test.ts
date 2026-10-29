@@ -109,7 +109,24 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(onvalidity).toHaveBeenLastCalledWith(false);
   });
 
-  it("記法ヘルプに音色の一覧(番号と名前)が出る", async () => {
+  it("音色のボタンは「記法」の折りたたみの外にあり、入力欄と状態行の間に常に見える(Issue #512)", async () => {
+    const { findByTestId, getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    await viewOf(findByTestId);
+    const timbres = getByTestId("mml-timbres");
+    expect(timbres.closest("details")).toBeNull();
+    expect(getByTestId("mml-input").compareDocumentPosition(timbres) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(timbres.compareDocumentPosition(getByTestId("mml-status")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(timbres.textContent).toContain("押すとカーソル位置に入る");
+  });
+
+  it("記法ヘルプは、音色を入力欄の下のボタンで選ぶと案内する(Issue #512)", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("入力欄の下の音色ボタン");
+    expect(text).not.toContain("下の一覧");
+  });
+
+  it("音色の一覧(番号と名前)が出る", async () => {
     const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
     const text = getByTestId("mml-timbres").textContent ?? "";
     expect(TIMBRE_LIST).toHaveLength(14);
