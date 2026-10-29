@@ -1069,7 +1069,7 @@ export type ThemeColors = {
  *  音色(Issue #494)。MML の `@<番号>` / `@<名前>` で指定する。番号は `ALL` の並び順(0 始まり)。
  *  番号と名前は、フロントの `lib/mmlTimbres.ts` と同じにすること(両側のテストが同じ表を持つ)。
  */
-export type Timbre = "fm" | "square" | "pulse" | "triangle" | "saw" | "sine" | "organ" | "epiano" | "bell" | "am" | "lead" | "bass" | "drum" | "noise";
+export type Timbre = "fm" | "square" | "pulse" | "triangle" | "saw" | "sine" | "organ" | "epiano" | "bell" | "am" | "lead" | "bass" | "drum" | "noise" | "drumkit";
 
 export type TqlCompletionItem = {
 	label: string,

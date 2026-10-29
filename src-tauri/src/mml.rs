@@ -130,14 +130,17 @@ impl Cursor<'_> {
         n.map(|n| (n, start))
     }
 
-    /// 先頭が音色名と一致するなら、その名前の分だけ読み進めて返す。
-    /// どの名前も他の名前の接頭辞ではない(テストで確認)ので、一致は 1 つに決まる。
+    /// 先頭が音色名と一致するなら、その名前の分だけ読み進めて返す。複数の名前が一致するときは、最も長いものを選ぶ
+    /// (`drum` は `drumkit` の接頭辞。接頭辞の組は drum と drumkit だけで、テストで確認する)。
     fn timbre_name(&mut self) -> Option<Timbre> {
         let rest = &self.syms[self.i..];
-        let t = Timbre::ALL.into_iter().find(|t| {
-            let name = t.name();
-            rest.len() >= name.len() && name.chars().zip(rest).all(|(a, (b, _))| a == *b)
-        })?;
+        let t = Timbre::ALL
+            .into_iter()
+            .filter(|t| {
+                let name = t.name();
+                rest.len() >= name.len() && name.chars().zip(rest).all(|(a, (b, _))| a == *b)
+            })
+            .max_by_key(|t| t.name().len())?;
         self.i += t.name().len();
         Some(t)
     }
@@ -1741,7 +1744,7 @@ mod tests {
     }
 
     /// Rust 側の番号・名前の表。フロントの `lib/mmlTimbres.test.ts` の `EXPECTED` と同じ並びにすること。
-    const TIMBRE_TABLE: [(u32, &str, Timbre); 14] = [
+    const TIMBRE_TABLE: [(u32, &str, Timbre); 15] = [
         (0, "fm", Timbre::Fm),
         (1, "square", Timbre::Square),
         (2, "pulse", Timbre::Pulse),
@@ -1756,6 +1759,7 @@ mod tests {
         (11, "bass", Timbre::Bass),
         (12, "drum", Timbre::Drum),
         (13, "noise", Timbre::Noise),
+        (14, "drumkit", Timbre::Drumkit),
     ];
 
     #[test]
@@ -1775,14 +1779,29 @@ mod tests {
     }
 
     #[test]
-    fn timbre_names_are_not_prefixes_of_each_other() {
+    fn only_drum_is_a_prefix_of_another_timbre_name() {
+        // 音色名の読み取りは最長一致。接頭辞の組は drum と drumkit だけで、残りの `kit` は命令の先頭にならない
+        let mut pairs = Vec::new();
         for a in Timbre::ALL {
             for b in Timbre::ALL {
-                if a != b {
-                    assert!(!b.name().starts_with(a.name()), "{} は {} の接頭辞", a.name(), b.name());
+                if a != b && b.name().starts_with(a.name()) {
+                    pairs.push((a.name(), b.name()));
                 }
             }
         }
+        assert_eq!(pairs, vec![("drum", "drumkit")]);
+    }
+
+    #[test]
+    fn timbre_name_uses_the_longest_match() {
+        assert_eq!(timbres("@drum c"), vec![Timbre::Drum]);
+        assert_eq!(timbres("@drumkit c"), vec![Timbre::Drumkit]);
+        assert_eq!(timbres("@DrumKit C"), vec![Timbre::Drumkit]);
+        assert_eq!(timbres("@drumkitc4"), vec![Timbre::Drumkit]);
+        assert_eq!(timbres("@drum t60 c"), vec![Timbre::Drum]);
+        assert_eq!(timbres("@14 c"), vec![Timbre::Drumkit]);
+        // `@drumk` は drumkit にならず、drum の後ろの `k`(不明な文字)を指す
+        assert_eq!(must_fail("@drumk c").position, 5);
     }
 
     #[test]
@@ -1842,8 +1861,8 @@ mod tests {
 
     #[test]
     fn timbre_errors_report_where_to_look() {
-        assert_eq!(must_fail("@14 c").position, 1); // 範囲外は数字の先頭
-        assert!(must_fail("@14 c").message.contains("0〜13"));
+        assert_eq!(must_fail("@15 c").position, 1); // 範囲外は数字の先頭
+        assert!(must_fail("@15 c").message.contains("0〜14"));
         assert_eq!(must_fail("@xyz c").position, 1); // 不明な名前は `@` の次
         assert!(must_fail("@xyz c").message.contains("不明な音色"));
         assert_eq!(must_fail("@bel c").position, 1); // 名前の途中までは一致しない
