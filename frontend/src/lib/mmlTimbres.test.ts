@@ -134,15 +134,20 @@ describe("drumkit の音源", () => {
     expect(polys()).toBe(2);
   });
 
-  it("ノイズと金属の楽器は、1 打ごとに音源を作る", () => {
+  it("ノイズと金属の楽器も、楽器ごとに 1 つの音源を使い回す(1 打ごとに作ると、数千打で描画が終わらない)", () => {
     const { Tone, made } = fakeTone();
     const voice = TIMBRES.drumkit.create(Tone, -3);
     const count = (cls: string) => made.filter((m) => m.cls === cls).length;
     voice.trigger(440, 0.1, 0, 0.8, 42);
-    voice.trigger(440, 0.1, 0.1, 0.8, 42);
+    voice.trigger(440, 0.1, 0.1, 0.8, 44); // 同じクローズドハイハット
+    expect(count("NoiseSynth")).toBe(1);
+    expect(count("Filter")).toBe(1);
+    voice.trigger(440, 0.1, 0.2, 0.8, 46); // オープンハイハットは別の楽器
     expect(count("NoiseSynth")).toBe(2);
-    voice.trigger(440, 0.1, 0.2, 0.8, 49);
-    voice.trigger(440, 0.1, 0.3, 0.8, 57);
+    voice.trigger(440, 0.1, 0.3, 0.8, 49);
+    voice.trigger(440, 0.1, 0.4, 0.8, 57); // 同じクラッシュ
+    expect(count("MetalSynth")).toBe(1);
+    voice.trigger(440, 0.1, 0.5, 0.8, 51); // ライドは別の楽器
     expect(count("MetalSynth")).toBe(2);
   });
 

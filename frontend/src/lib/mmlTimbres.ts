@@ -2,7 +2,7 @@
 // 音色の番号と名前は Rust の Timbre::ALL(src-tauri/src/domain/mml.rs)と同じにする。
 // gainDb は、C4 の単音の聞こえる大きさ(RMS)を fm(現行の音)にそろえる補正。実際の renderScore を WebKitGTK 2.54.1(Xvfb)で測って校正した値で、noise だけはピーク上限(0.36)を優先して小さめにしている(docs/superpowers/specs/2026-10-16-issue-494-mml-timbre-design.md の「校正結果」)。
 import type { Timbre } from "../bindings/tauri.gen";
-import { PIECE_SPECS, drumPieceFor, type DrumPiece, type MembraneSpec } from "./mmlDrumkit";
+import { PIECE_SPECS, drumPieceFor, type DrumPiece, type MembraneSpec, type MetalSpec, type NoiseSpec } from "./mmlDrumkit";
 
 export type ToneModule = typeof import("tone");
 
@@ -42,8 +42,11 @@ function poly(synth: PolyLike, volumeDb: number): Voice {
 /** `@drumkit`。音の高さ(midi)から GM の楽器を選んで鳴らす。割り当てのない高さは鳴らさない。書いた長さは無視する */
 function drumkit(Tone: ToneModule, volumeDb: number): Voice {
   const out = new Tone.Volume(volumeDb).toDestination();
-  // 膜の音源(キック・タム・スネアの胴)は、楽器ごとに 1 つ作って使い回す。ノイズと金属は単音用なので 1 打ごとに作る
+  // 音源は楽器ごとに 1 つ作って使い回す(1 打ごとに作ると、数千打で描画が終わらない)。同じ楽器を続けて叩くと、前の余韻は切れる。
+  // 単音用の音源(ノイズ・金属)は、時刻の昇順に鳴らす(`Voice.trigger` は、トラック内で時刻の昇順に呼ばれる)。
   const membranes = new Map<DrumPiece, PolyLike & { connect(to: unknown): unknown }>();
+  const noises = new Map<DrumPiece, InstanceType<ToneModule["NoiseSynth"]>>();
+  const metals = new Map<DrumPiece, InstanceType<ToneModule["MetalSynth"]>>();
   const membraneFor = (piece: DrumPiece, spec: MembraneSpec) => {
     let synth = membranes.get(piece);
     if (!synth) {
@@ -58,6 +61,37 @@ function drumkit(Tone: ToneModule, volumeDb: number): Voice {
     }
     return synth;
   };
+  const noiseFor = (piece: DrumPiece, spec: NoiseSpec) => {
+    let noise = noises.get(piece);
+    if (!noise) {
+      noise = new Tone.NoiseSynth({
+        noise: { type: "white" },
+        envelope: { attack: 0.001, decay: spec.decay, sustain: 0, release: spec.release },
+      });
+      const filter = new Tone.Filter(spec.cutoff, spec.filter);
+      noise.volume.value = spec.trimDb;
+      noise.connect(filter);
+      filter.connect(out);
+      noises.set(piece, noise);
+    }
+    return noise;
+  };
+  const metalFor = (piece: DrumPiece, spec: MetalSpec) => {
+    let metal = metals.get(piece);
+    if (!metal) {
+      metal = new Tone.MetalSynth({
+        harmonicity: spec.harmonicity,
+        modulationIndex: spec.modulationIndex,
+        octaves: spec.octaves,
+        resonance: spec.resonance,
+        envelope: { attack: 0.001, decay: spec.decay, release: spec.release },
+      });
+      metal.volume.value = spec.trimDb;
+      metal.connect(out);
+      metals.set(piece, metal);
+    }
+    return metal;
+  };
   return {
     trigger(_hz, _d, t, v, midi) {
       const piece = midi === undefined ? null : drumPieceFor(midi);
@@ -66,29 +100,11 @@ function drumkit(Tone: ToneModule, volumeDb: number): Voice {
       if (spec.kind === "membrane") {
         membraneFor(piece, spec).triggerAttackRelease(spec.hz, spec.decay, t, v);
       } else if (spec.kind === "noise") {
-        for (const offset of spec.bursts) {
-          const noise = new Tone.NoiseSynth({
-            noise: { type: "white" },
-            envelope: { attack: 0.001, decay: spec.decay, sustain: 0, release: spec.release },
-          });
-          const filter = new Tone.Filter(spec.cutoff, spec.filter);
-          noise.volume.value = spec.trimDb;
-          noise.connect(filter);
-          filter.connect(out);
-          noise.triggerAttackRelease(spec.decay, t + offset, v);
-        }
+        const noise = noiseFor(piece, spec);
+        for (const offset of spec.bursts) noise.triggerAttackRelease(spec.decay, t + offset, v);
         if (spec.body) membraneFor(piece, spec.body).triggerAttackRelease(spec.body.hz, spec.body.decay, t, v);
       } else {
-        const metal = new Tone.MetalSynth({
-          harmonicity: spec.harmonicity,
-          modulationIndex: spec.modulationIndex,
-          octaves: spec.octaves,
-          resonance: spec.resonance,
-          envelope: { attack: 0.001, decay: spec.decay, release: spec.release },
-        });
-        metal.volume.value = spec.trimDb;
-        metal.connect(out);
-        metal.triggerAttackRelease(spec.hz, spec.decay, t, v);
+        metalFor(piece, spec).triggerAttackRelease(spec.hz, spec.decay, t, v);
       }
     },
   };
