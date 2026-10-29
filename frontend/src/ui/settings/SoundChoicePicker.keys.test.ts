@@ -53,6 +53,12 @@ describe("SoundChoicePicker の入力補助キー", () => {
     expect(editor.compareDocumentPosition(keys) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("モバイル UI では、入力補助キーの下に音色のボタンが続く(Issue #512)", async () => {
+    const { findByTestId, getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    await viewOf(findByTestId);
+    expect(getByTestId("mml-keys").compareDocumentPosition(getByTestId("mml-timbres")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("デスクトップ UI では出ない", async () => {
     app.ui.uiMode = "desktop";
     const { findByTestId, queryByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
