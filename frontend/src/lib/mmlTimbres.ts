@@ -47,6 +47,15 @@ function drumkit(Tone: ToneModule, volumeDb: number): Voice {
   const membranes = new Map<DrumPiece, PolyLike & { connect(to: unknown): unknown }>();
   const noises = new Map<DrumPiece, InstanceType<ToneModule["NoiseSynth"]>>();
   const metals = new Map<DrumPiece, InstanceType<ToneModule["MetalSynth"]>>();
+  // 単音用の音源は、前の開始時刻より後でないと Tone が例外を投げる(和音で同じ楽器を同時に鳴らす、打ち出しが重なる、など)。
+  // 同じ楽器の、前の開始時刻以前の打ち出しは鳴らさない(同じ音なので、同時の重ね打ちは聞こえ方が変わらない)。
+  const lastStart = new Map<DrumPiece, number>();
+  const startable = (piece: DrumPiece, time: number): boolean => {
+    const prev = lastStart.get(piece);
+    if (prev !== undefined && time - prev <= 1e-3) return false;
+    lastStart.set(piece, time);
+    return true;
+  };
   const membraneFor = (piece: DrumPiece, spec: MembraneSpec) => {
     let synth = membranes.get(piece);
     if (!synth) {
@@ -101,10 +110,12 @@ function drumkit(Tone: ToneModule, volumeDb: number): Voice {
         membraneFor(piece, spec).triggerAttackRelease(spec.hz, spec.decay, t, v);
       } else if (spec.kind === "noise") {
         const noise = noiseFor(piece, spec);
-        for (const offset of spec.bursts) noise.triggerAttackRelease(spec.decay, t + offset, v);
+        for (const offset of spec.bursts) {
+          if (startable(piece, t + offset)) noise.triggerAttackRelease(spec.decay, t + offset, v);
+        }
         if (spec.body) membraneFor(piece, spec.body).triggerAttackRelease(spec.body.hz, spec.body.decay, t, v);
       } else {
-        metalFor(piece, spec).triggerAttackRelease(spec.hz, spec.decay, t, v);
+        if (startable(piece, t)) metalFor(piece, spec).triggerAttackRelease(spec.hz, spec.decay, t, v);
       }
     },
   };

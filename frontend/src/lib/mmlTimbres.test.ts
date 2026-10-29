@@ -73,9 +73,18 @@ function fakeTone() {
       return this;
     }
     triggerAttackRelease(...args: unknown[]) {
+      // 本物の Tone の単音用音源(NoiseSynth は第 2 引数、MetalSynth は第 3 引数が時刻)は、前の開始時刻より厳密に後でないと例外を投げる
+      const time = this.cls === "NoiseSynth" ? args[1] : this.cls === "MetalSynth" ? args[2] : undefined;
+      if (typeof time === "number") {
+        if (this.lastStart !== undefined && !(time - this.lastStart > 1e-6)) {
+          throw new Error("Start time must be strictly greater than previous start time");
+        }
+        this.lastStart = time;
+      }
       hits.push({ cls: this.cls, args, node: this });
       return this;
     }
+    lastStart: number | undefined;
   }
   const cls = (name: string) =>
     class extends FakeNode {
@@ -149,6 +158,36 @@ describe("drumkit の音源", () => {
     expect(count("MetalSynth")).toBe(1);
     voice.trigger(440, 0.1, 0.5, 0.8, 51); // ライドは別の楽器
     expect(count("MetalSynth")).toBe(2);
+  });
+
+  it("和音で同じ楽器を同じ時刻に 2 回鳴らしても、例外を投げず、1 回だけ鳴らす(38 と 40 はどちらもスネア)", () => {
+    const pairs: [number, number, string][] = [
+      [38, 40, "NoiseSynth"],
+      [42, 44, "NoiseSynth"],
+      [49, 57, "MetalSynth"],
+      [51, 59, "MetalSynth"],
+    ];
+    for (const [a, b, cls] of pairs) {
+      const { Tone, hits } = fakeTone();
+      const voice = TIMBRES.drumkit.create(Tone, -3);
+      expect(() => {
+        voice.trigger(440, 0.1, 1.0, 0.8, a);
+        voice.trigger(440, 0.1, 1.0, 0.8, b);
+      }, `${a}+${b}`).not.toThrow();
+      expect(hits.filter((h) => h.cls === cls), `${a}+${b}`).toHaveLength(1);
+    }
+  });
+
+  it("前のクラップの打ち出しと重なる次のクラップは、例外を投げず、重なった打ち出しだけ飛ばす。離れていれば 3 回とも鳴らす", () => {
+    const { Tone, hits } = fakeTone();
+    const voice = TIMBRES.drumkit.create(Tone, -3);
+    voice.trigger(440, 0.1, 1.0, 0.8, 39); // 1.000 / 1.012 / 1.024
+    expect(hits).toHaveLength(3);
+    // 次のクラップは 1.010 / 1.022 / 1.034。前の最後(1.024)以前の 2 つを飛ばし、1.034 だけ鳴らす
+    expect(() => voice.trigger(440, 0.1, 1.01, 0.8, 39)).not.toThrow();
+    expect(hits).toHaveLength(4);
+    voice.trigger(440, 0.1, 1.2, 0.8, 39);
+    expect(hits).toHaveLength(7);
   });
 
   it("ハンドクラップは短い間隔で 3 回叩く", () => {
