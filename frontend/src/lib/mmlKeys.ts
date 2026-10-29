@@ -67,6 +67,7 @@ export const MML_KEY_GROUPS: readonly MmlKeyGroup[] = [
       { id: "tuplet-open", label: "{", insert: "{", aria: "連符の始め {" },
       { id: "tuplet-close", label: "}", insert: "}", aria: "連符の終わり }" },
       { id: "chord", label: "'", insert: "'", aria: "和音の始め・終わり '" },
+      { id: "macro", label: "$", insert: "$", aria: "マクロ $" },
       { id: "track", label: ";", insert: ";", aria: "トラック区切り ;" },
     ],
   },

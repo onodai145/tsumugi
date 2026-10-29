@@ -237,6 +237,76 @@ describe("lexMml", () => {
     ]);
   });
 
+  it("マクロの定義の頭 `$名前=` と展開 `$名前` は command。本体の中身は今までどおりの色", () => {
+    expect(lex("$riff={c d}")).toEqual([
+      ["$riff=", "command"],
+      ["{", "repeat"],
+      ["c", "note"],
+      ["d", "note"],
+      ["}", "repeat"],
+    ]);
+    expect(lex("$riff d")).toEqual([
+      ["$riff", "command"],
+      ["d", "note"],
+    ]);
+  });
+
+  it("マクロの名前は、`$` の直後に途切れなく続く英数字と _(空白で終わる)", () => {
+    expect(lex("$a c")).toEqual([
+      ["$a", "command"],
+      ["c", "note"],
+    ]);
+    expect(lex("$ac")).toEqual([["$ac", "command"]]);
+    expect(lex("$a/**/c")).toEqual([
+      ["$a", "command"],
+      ["/**/", "comment"],
+      ["c", "note"],
+    ]);
+    expect(lex("c $")).toEqual([
+      ["c", "note"],
+      ["$", "unknown"],
+    ]);
+  });
+
+  it("定義の閉じの } は後ろの数字を取り込まない。本体の中の連符の }4 は取り込む", () => {
+    expect(lex("$a={c}4")).toEqual([
+      ["$a=", "command"],
+      ["{", "repeat"],
+      ["c", "note"],
+      ["}", "repeat"],
+      ["4", "unknown"],
+    ]);
+    expect(lex("$a={{c}4}")).toEqual([
+      ["$a=", "command"],
+      ["{", "repeat"],
+      ["{", "repeat"],
+      ["c", "note"],
+      ["}4", "repeat"],
+      ["}", "repeat"],
+    ]);
+  });
+
+  it("マクロの展開の後ろに空白で区切った長さ・付点は、number(`$riff 4` は本体の最後の音の長さになる)", () => {
+    expect(lex("$a 4.")).toEqual([
+      ["$a", "command"],
+      ["4.", "number"],
+    ]);
+    expect(lex("$a/**/8")).toEqual([
+      ["$a", "command"],
+      ["/**/", "comment"],
+      ["8", "number"],
+    ]);
+  });
+
+  it("`$a t=60` は展開と t=、`$at=60` は名前 at(定義ではない)", () => {
+    expect(lex("$a t=60")).toEqual([
+      ["$a", "command"],
+      ["t=", "command"],
+      ["60", "number"],
+    ]);
+    expect(lex("$at=60")[0]).toEqual(["$at", "command"]);
+  });
+
   it("連符は { と、} とその直後の長さ・付点(repeat)", () => {
     expect(lex("{cde}4.")).toEqual([
       ["{", "repeat"],

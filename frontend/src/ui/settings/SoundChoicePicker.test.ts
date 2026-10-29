@@ -140,6 +140,14 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("'ceg'4");
     expect(text).toContain("和音");
   });
+
+  it("記法ヘルプに、マクロ $riff の書き方と、名前の区切りの規則が出る", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("$riff");
+    expect(text).toContain("マクロ");
+    expect(text).toContain("空白で区切る");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {
