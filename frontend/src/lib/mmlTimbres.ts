@@ -2,12 +2,14 @@
 // 音色の番号と名前は Rust の Timbre::ALL(src-tauri/src/domain/mml.rs)と同じにする。
 // gainDb は、C4 の単音の聞こえる大きさ(RMS)を fm(現行の音)にそろえる補正。実際の renderScore を WebKitGTK 2.54.1(Xvfb)で測って校正した値で、noise だけはピーク上限(0.36)を優先して小さめにしている(docs/superpowers/specs/2026-10-16-issue-494-mml-timbre-design.md の「校正結果」)。
 import type { Timbre } from "../bindings/tauri.gen";
+import { PIECE_SPECS, drumPieceFor, type DrumPiece, type MembraneSpec } from "./mmlDrumkit";
 
 export type ToneModule = typeof import("tone");
 
 /** Offline コンテキスト内に作った音源 1 つ。 */
 export interface Voice {
-  trigger(hz: number, durationSec: number, startSec: number, velocity: number): void;
+  /** `midi` はノート番号。打楽器の `drumkit` だけが使う(音の高さで楽器を選ぶ) */
+  trigger(hz: number, durationSec: number, startSec: number, velocity: number, midi?: number): void;
 }
 
 export interface TimbrePreset {
@@ -35,6 +37,61 @@ function poly(synth: PolyLike, volumeDb: number): Voice {
   synth.toDestination();
   synth.volume.value = volumeDb;
   return { trigger: (hz, d, t, v) => synth.triggerAttackRelease(hz, d, t, v) };
+}
+
+/** `@drumkit`。音の高さ(midi)から GM の楽器を選んで鳴らす。割り当てのない高さは鳴らさない。書いた長さは無視する */
+function drumkit(Tone: ToneModule, volumeDb: number): Voice {
+  const out = new Tone.Volume(volumeDb).toDestination();
+  // 膜の音源(キック・タム・スネアの胴)は、楽器ごとに 1 つ作って使い回す。ノイズと金属は単音用なので 1 打ごとに作る
+  const membranes = new Map<DrumPiece, PolyLike & { connect(to: unknown): unknown }>();
+  const membraneFor = (piece: DrumPiece, spec: MembraneSpec) => {
+    let synth = membranes.get(piece);
+    if (!synth) {
+      synth = new Tone.PolySynth(Tone.MembraneSynth, {
+        pitchDecay: spec.pitchDecay,
+        octaves: spec.octaves,
+        envelope: { attack: 0.001, decay: spec.decay, sustain: 0, release: spec.release },
+      });
+      synth.volume.value = spec.trimDb;
+      synth.connect(out);
+      membranes.set(piece, synth);
+    }
+    return synth;
+  };
+  return {
+    trigger(_hz, _d, t, v, midi) {
+      const piece = midi === undefined ? null : drumPieceFor(midi);
+      if (!piece) return;
+      const spec = PIECE_SPECS[piece];
+      if (spec.kind === "membrane") {
+        membraneFor(piece, spec).triggerAttackRelease(spec.hz, spec.decay, t, v);
+      } else if (spec.kind === "noise") {
+        for (const offset of spec.bursts) {
+          const noise = new Tone.NoiseSynth({
+            noise: { type: "white" },
+            envelope: { attack: 0.001, decay: spec.decay, sustain: 0, release: spec.release },
+          });
+          const filter = new Tone.Filter(spec.cutoff, spec.filter);
+          noise.volume.value = spec.trimDb;
+          noise.connect(filter);
+          filter.connect(out);
+          noise.triggerAttackRelease(spec.decay, t + offset, v);
+        }
+        if (spec.body) membraneFor(piece, spec.body).triggerAttackRelease(spec.body.hz, spec.body.decay, t, v);
+      } else {
+        const metal = new Tone.MetalSynth({
+          harmonicity: spec.harmonicity,
+          modulationIndex: spec.modulationIndex,
+          octaves: spec.octaves,
+          resonance: spec.resonance,
+          envelope: { attack: 0.001, decay: spec.decay, release: spec.release },
+        });
+        metal.volume.value = spec.trimDb;
+        metal.connect(out);
+        metal.triggerAttackRelease(spec.hz, spec.decay, t, v);
+      }
+    },
+  };
 }
 
 const BASIC_ENV = { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.1 };
@@ -188,6 +245,13 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
       synth.volume.value = db;
       return { trigger: (_hz, d, t, v) => void synth.triggerAttackRelease(d, t, v) };
     },
+  },
+  drumkit: {
+    number: 14,
+    name: "drumkit",
+    gainDb: 0,
+    releaseSec: 0.2,
+    create: (Tone, db) => drumkit(Tone, db),
   },
 };
 

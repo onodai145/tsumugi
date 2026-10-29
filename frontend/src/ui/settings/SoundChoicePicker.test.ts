@@ -129,7 +129,7 @@ describe("SoundChoicePicker の MML モード", () => {
   it("音色の一覧(番号と名前)が出る", async () => {
     const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
     const text = getByTestId("mml-timbres").textContent ?? "";
-    expect(TIMBRE_LIST).toHaveLength(14);
+    expect(TIMBRE_LIST).toHaveLength(15);
     for (const p of TIMBRE_LIST) expect(text).toContain(`@${p.number} ${p.name}`);
   });
 

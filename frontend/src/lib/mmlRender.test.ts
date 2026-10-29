@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MmlScore, NoteEvent, Timbre } from "../bindings/tauri.gen";
 
-type Call = { hz: number; d: number; t: number; v: number };
+type Call = { hz: number; d: number; t: number; v: number; midi?: number };
 const created: { timbre: string; volumeDb: number; calls: Call[] }[] = [];
 
 vi.mock("./mmlTimbres", () => {
@@ -14,7 +14,9 @@ vi.mock("./mmlTimbres", () => {
     create: (_Tone: unknown, volumeDb: number) => {
       const rec = { timbre: name, volumeDb, calls: [] as Call[] };
       created.push(rec);
-      return { trigger: (hz: number, d: number, t: number, v: number) => rec.calls.push({ hz, d, t, v }) };
+      return {
+        trigger: (hz: number, d: number, t: number, v: number, midi?: number) => rec.calls.push({ hz, d, t, v, midi }),
+      };
     },
   });
   return { TIMBRES: { fm: mk("fm", 0), square: mk("square", -10), noise: mk("noise", -4.5, true) } };
@@ -58,7 +60,7 @@ describe("renderScore", () => {
     await renderScore(score([note(0, "fm", 0), note(0, "fm", 0.5), note(0, "fm", 1)]));
     expect(created).toHaveLength(1);
     expect(created[0].calls.map((c) => c.t)).toEqual([0, 0.5, 1]);
-    expect(created[0].calls[0]).toEqual({ hz: 600, d: 0.25, t: 0, v: 0.5 });
+    expect(created[0].calls[0]).toEqual({ hz: 600, d: 0.25, t: 0, v: 0.5, midi: 60 });
   });
 
   it("別の音色・別のトラックは別の音源になる", async () => {
@@ -70,6 +72,11 @@ describe("renderScore", () => {
     await renderScore(score([note(0, "noise", 0), note(0, "noise", 0.5), note(0, "noise", 1)]));
     expect(created).toHaveLength(3);
     expect(created.every((c) => c.calls.length === 1)).toBe(true);
+  });
+
+  it("音源の trigger に、ノート番号 midi も渡す", async () => {
+    await renderScore(score([note(0, "fm", 0, 36), note(0, "fm", 0.5, 42)]));
+    expect(created[0].calls.map((c) => c.midi)).toEqual([36, 42]);
   });
 
   it("音量は gainDb に、複数トラックのときだけ 1/トラック数 の減衰を足す", async () => {
