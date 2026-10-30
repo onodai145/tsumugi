@@ -102,6 +102,28 @@ describe("renderScore", () => {
     expect(created.map((c) => c.calls.length).sort()).toEqual([1, 1, 2]);
   });
 
+  it("デチューンは音源の組に数えず、鳴らす周波数に 2^(セント/1200) を掛ける", async () => {
+    const detuned = (cents: number): TimbreParams => ({ envelope: null, vibrato: null, detune: cents });
+    await renderScore(
+      score([note(0, "fm", 0, 60, detuned(1200)), note(0, "fm", 0.5, 60, detuned(-1200)), note(0, "fm", 1, 60, detuned(0)), note(0, "fm", 1.5, 60)]),
+    );
+    expect(created).toHaveLength(1); // 同じ音源(パラメーターは null)
+    expect(created[0].params).toBeNull();
+    expect(created[0].calls.map((c) => c.hz)).toEqual([1200, 300, 600, 600]);
+  });
+
+  it("デチューンがあっても、エンベロープ・ビブラートが同じなら 1 つの音源で、音源に渡すパラメーターの detune は 0", async () => {
+    await renderScore(score([note(0, "fm", 0, 60, { ...P1, detune: 100 }), note(0, "fm", 0.5, 60, { ...P1, detune: -100 })]));
+    expect(created).toHaveLength(1);
+    expect(created[0].params).toEqual({ ...P1, detune: 0 });
+    expect(created[0].calls.map((c) => c.hz)).toEqual([600 * 2 ** (100 / 1200), 600 * 2 ** (-100 / 1200)]);
+  });
+
+  it("打楽器は、デチューンも無視する", async () => {
+    await renderScore(score([note(0, "drum", 0, 60, { envelope: null, vibrato: null, detune: 1200 })]));
+    expect(created[0].calls[0].hz).toBe(600);
+  });
+
   it("打楽器の音色は、パラメーターが違っても 1 つの音源を使い回し、パラメーターは null で作る", async () => {
     await renderScore(score([note(0, "drum", 0, 60, P1), note(0, "drum", 0.5, 60, P2), note(0, "drum", 1)]));
     expect(created).toHaveLength(1);

@@ -52,6 +52,7 @@ sakuramml-rust(README と `docs/syntax-note.md` `syntax-command-list.md` `syntax
 | 解除 | `y0` `m0` `k0`(`0` 1 つ)で、音色の既定に戻す | 「何も指定しない」と同じ状態に戻せる。 |
 | 打楽器 | `drum` `noise` `drumkit` は無視する | 高さの持続がなく、効果が意味を持たない。 |
 | NoteEvent | 音ごとに `params` を持たせる(すべて既定なら `null`) | 描画側が、音ごとにどのパラメーターか分かる必要がある。 |
+| デチューンの実現 | 音源に渡さず、描画側が、鳴らす周波数に `2^(セント/1200)` を掛ける | 音源の組に数えない。実測で、デチューンを 201 通りにすると、音源を分ける方式は描画に 169 秒かかった(「実装後の確認」)。聞こえ方は同じ(周波数が同じ割合でずれる)。 |
 
 ## 記法と意味
 
@@ -90,7 +91,7 @@ sakuramml-rust(README と `docs/syntax-note.md` `syntax-command-list.md` `syntax
 
 ## フロントの変更
 
-- 描画: パラメーターの組ごとに、別の音源を作る。`PolySynth` は、描画中に設定を時刻つきで変えられないため。音源は、(トラック, 音色, パラメーターの組)で使い回す。エンベロープは `synth.set({ envelope })`(`DuoSynth` は `voice0` と `voice1`、`MonoSynth` は `envelope`)、デチューンは `synth.set({ detune })`、ビブラートは `Tone.Vibrato`(エフェクト)を音源の出力に挟む。
+- 描画: パラメーターの組(エンベロープ・ビブラート)ごとに、別の音源を作る。`PolySynth` は、描画中に設定を時刻つきで変えられないため。音源は、(トラック, 音色, エンベロープ・ビブラートの組)で使い回す。エンベロープは `synth.set({ envelope })`(`DuoSynth` は `voice0` と `voice1`、`MonoSynth` は `envelope`)、ビブラートは `Tone.Vibrato`(エフェクト)を音源の出力に挟む。デチューンは音源に渡さず、鳴らす周波数に `2^(セント/1200)` を掛ける(音源の組に数えない。打楽器は無視)。
 - 字句解析(`mmlLexer.ts`): `y` `m` `k` を command、後ろの数字を number、カンマを separator にする。
 - 入力補助キー(`mmlKeys.ts`): 「音色パラメーター」のグループ(`y` `m` `k` `,`)を足す。
 - 「記法」ヘルプ、ユーザーガイド: 書き方と範囲を足す。

@@ -46,9 +46,10 @@ interface Fx {
 type AnyPoly = import("tone").PolySynth<any>;
 
 /**
- * 出力に繋いで音量を設定する。`fx.params` があれば、エンベロープ(`envelope` だけ。modulationEnvelope は変えない)とデチューンを
- * `set` で反映し、ビブラートは `Tone.Vibrato` を出力に挟む。`PolySynth` は描画中に設定を時刻つきで変えられないので、
- * パラメーターの組ごとに別の音源を作る(呼び出し側 `renderScore` の責任)。
+ * 出力に繋いで音量を設定する。`fx.params` があれば、エンベロープ(`envelope` だけ。modulationEnvelope は変えない)を `set` で反映し、
+ * ビブラートは `Tone.Vibrato` を出力に挟む。デチューンは `renderScore` が鳴らす周波数の倍率にするので、ここでは扱わない。
+ * `PolySynth` は描画中に設定を時刻つきで変えられないので、パラメーターの組(エンベロープ・ビブラート)ごとに別の音源を作る
+ * (呼び出し側 `renderScore` の責任)。
  */
 function poly(synth: AnyPoly, volumeDb: number, fx?: Fx): Voice {
   synth.volume.value = volumeDb;
@@ -65,7 +66,6 @@ function poly(synth: AnyPoly, volumeDb: number, fx?: Fx): Voice {
       const options = fx.duo ? { voice0: { envelope: e }, voice1: { envelope: e } } : { envelope: e };
       synth.set(options as never);
     }
-    if (params.detune !== 0) synth.set({ detune: params.detune });
   }
   if (fx && params?.vibrato) {
     const vibrato = new fx.Tone.Vibrato(params.vibrato.rateHz, Math.min(1, params.vibrato.depth / 100));

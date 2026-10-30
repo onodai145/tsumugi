@@ -264,10 +264,11 @@ describe("音色のパラメーター(Issue #499)", () => {
     expect(polyOf(made).sets).toEqual([{ voice0: { envelope: e }, voice1: { envelope: e } }]);
   });
 
-  it("デチューンは set({ detune })", () => {
+  it("デチューンは音源に渡さない(描画側が、鳴らす周波数の倍率にする。音源の組に数えないため)", () => {
     const { Tone, made } = fakeTone();
     TIMBRES.square.create(Tone, -3, params({ detune: -12 }));
-    expect(polyOf(made).sets).toEqual([{ detune: -12 }]);
+    expect(polyOf(made).sets).toEqual([]);
+    expect(polyOf(made).destinations).toBe(1);
   });
 
   it("ビブラートは Tone.Vibrato(速さ, 深さ/100)を出力に挟み、音源を出力に二重に繋がない", () => {
@@ -281,11 +282,11 @@ describe("音色のパラメーター(Issue #499)", () => {
     expect((vibrato.node as unknown as { destinations: number }).destinations).toBe(1);
   });
 
-  it("全旋律音色が、3 つのパラメーターをすべて受け取れる", () => {
+  it("全旋律音色が、3 つのパラメーターを渡されても動く", () => {
     for (const name of MELODIC) {
       const { Tone, made } = fakeTone();
       expect(() => TIMBRES[name].create(Tone, -3, params({ envelope: ENV, vibrato: { rateHz: 5, depth: 30 }, detune: 7 })), name).not.toThrow();
-      expect(polyOf(made).sets.length, name).toBe(2);
+      expect(polyOf(made).sets.length, name).toBe(1); // エンベロープだけ。デチューンは音源に渡さない
     }
   });
 

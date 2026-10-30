@@ -20,8 +20,12 @@ export async function renderScore(score: MmlScore): Promise<string> {
       const voiceFor = (track: number, timbre: Timbre, noteParams: TimbreParams | null): Voice => {
         const preset = TIMBRES[timbre];
         const volumeDb = preset.gainDb + trackDb;
-        // 打楽器は、パラメーターを無視する(パラメーターが違っても 1 つの音源を使い回す)
-        const params = preset.percussive ? null : noteParams;
+        // 打楽器は、パラメーターを無視する(パラメーターが違っても 1 つの音源を使い回す)。
+        // デチューンは音源に渡さず、鳴らす周波数の倍率にする(下)。音源の組は、エンベロープとビブラートだけで決める
+        const params =
+          preset.percussive || !noteParams || (!noteParams.envelope && !noteParams.vibrato)
+            ? null
+            : { envelope: noteParams.envelope, vibrato: noteParams.vibrato, detune: 0 };
         if (preset.perNote) return preset.create(Tone, volumeDb, params);
         // PolySynth は描画中に設定を時刻つきで変えられないので、パラメーターの組ごとに別の音源を作る
         const key = `${track}:${timbre}:${params === null ? "" : JSON.stringify(params)}`;
@@ -33,7 +37,9 @@ export async function renderScore(score: MmlScore): Promise<string> {
         return voice;
       };
       for (const n of score.notes) {
-        const hz = Tone.Frequency(n.midi, "midi").toFrequency();
+        // デチューン(セント)は、周波数に 2^(セント/1200) を掛ける。打楽器は無視する
+        const cents = TIMBRES[n.timbre].percussive ? 0 : (n.params?.detune ?? 0);
+        const hz = Tone.Frequency(n.midi, "midi").toFrequency() * (cents === 0 ? 1 : 2 ** (cents / 1200));
         voiceFor(n.track, n.timbre, n.params ?? null).trigger(hz, n.durationSec ?? 0, n.startSec ?? 0, n.velocity ?? 0, n.midi);
       }
     },
