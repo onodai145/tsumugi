@@ -177,6 +177,10 @@ impl Cursor<'_> {
             };
             out.push(n);
         }
+        // 決めた数より多いとき(`y1,2,3,4,5`、末尾のカンマ)は、余分なカンマの位置を、同じ使い方の文で指す
+        if self.peek() == Some(',') {
+            return Err(mml_err(self.pos(), usage));
+        }
         Ok(out)
     }
 
@@ -505,6 +509,12 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                             return Err(mml_err(
                                 inner_pos,
                                 "和音の長さは、閉じの `'` の後ろに書いてください",
+                            ));
+                        }
+                        'y' | 'm' | 'k' => {
+                            return Err(mml_err(
+                                inner_pos,
+                                "`y` `m` `k` は和音の中には書けません(和音の前に書いてください)",
                             ));
                         }
                         _ => {
@@ -2593,7 +2603,27 @@ mod tests {
             let e = must_fail(text);
             assert_eq!(e.position, 2, "{text}");
             assert!(e.message.contains("和音の中"), "{text}: {}", e.message);
+            // 和音の前に書くよう案内する
+            assert!(e.message.contains("和音の前"), "{text}: {}", e.message);
         }
+        // y m k 以外は、今までの案内のまま
+        assert!(must_fail("'cz'4").message.contains("音符と"));
+    }
+
+    #[test]
+    fn too_many_numbers_are_reported_with_the_usage_message() {
+        let e = must_fail("y1,2,3,4,5 c");
+        assert_eq!(e.position, 8); // 5 つ目の数の前のカンマ
+        assert!(e.message.contains("4 つの数"), "{}", e.message);
+        let e = must_fail("y1,2,3,4, c");
+        assert_eq!(e.position, 8); // 末尾のカンマ
+        assert!(e.message.contains("4 つの数"), "{}", e.message);
+        let e = must_fail("m5,30,2 c");
+        assert_eq!(e.position, 5);
+        assert!(e.message.contains("2 つの数"), "{}", e.message);
+        // 4 つ・2 つちょうどなら通る
+        assert!(params_of("y1,2,3,4 c")[0].is_some());
+        assert!(params_of("m5,30 c")[0].is_some());
     }
 
     #[test]

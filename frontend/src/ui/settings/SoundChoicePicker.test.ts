@@ -183,6 +183,9 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("k+12");
     expect(text).toContain("y0 m0 k0");
     expect(text).toContain("打楽器");
+    // 範囲と、y が 4 つの数をすべて要ること
+    expect(text).toContain("0〜2000");
+    expect(text).toContain("4 つ");
   });
 });
 
