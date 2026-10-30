@@ -1,25 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MmlScore, NoteEvent, Timbre } from "../bindings/tauri.gen";
+import type { MmlScore, NoteEvent, Timbre, TimbreParams } from "../bindings/tauri.gen";
 
 type Call = { hz: number; d: number; t: number; v: number; midi?: number };
-const created: { timbre: string; volumeDb: number; calls: Call[] }[] = [];
+const created: { timbre: string; volumeDb: number; params: unknown; calls: Call[] }[] = [];
 
 vi.mock("./mmlTimbres", () => {
-  const mk = (name: string, gainDb: number, perNote = false) => ({
+  const mk = (name: string, gainDb: number, perNote = false, percussive = false) => ({
     number: 0,
     name,
     gainDb,
     releaseSec: 0.1,
     perNote,
-    create: (_Tone: unknown, volumeDb: number) => {
-      const rec = { timbre: name, volumeDb, calls: [] as Call[] };
+    percussive,
+    create: (_Tone: unknown, volumeDb: number, params?: unknown) => {
+      const rec = { timbre: name, volumeDb, params, calls: [] as Call[] };
       created.push(rec);
       return {
         trigger: (hz: number, d: number, t: number, v: number, midi?: number) => rec.calls.push({ hz, d, t, v, midi }),
       };
     },
   });
-  return { TIMBRES: { fm: mk("fm", 0), square: mk("square", -10), noise: mk("noise", -4.5, true) } };
+  return {
+    TIMBRES: { fm: mk("fm", 0), square: mk("square", -10), noise: mk("noise", -4.5, true, true), drum: mk("drum", -6, false, true) },
+  };
 });
 
 const offline = vi.fn(async (cb: () => void, _dur: number, _ch: number, sr: number) => {
@@ -34,13 +37,14 @@ vi.mock("tone", () => ({
 
 const { renderScore, TAIL_SEC } = await import("./mmlRender");
 
-const note = (track: number, timbre: Timbre, startSec = 0, midi = 60): NoteEvent => ({
+const note = (track: number, timbre: Timbre, startSec = 0, midi = 60, params: TimbreParams | null = null): NoteEvent => ({
   track,
   startSec,
   durationSec: 0.25,
   midi,
   velocity: 0.5,
   timbre,
+  params,
 });
 const score = (notes: NoteEvent[], trackCount = 1, totalSec = 1): MmlScore => ({ notes, totalSec, trackCount });
 
@@ -77,6 +81,37 @@ describe("renderScore", () => {
   it("音源の trigger に、ノート番号 midi も渡す", async () => {
     await renderScore(score([note(0, "fm", 0, 36), note(0, "fm", 0.5, 42)]));
     expect(created[0].calls.map((c) => c.midi)).toEqual([36, 42]);
+  });
+
+  const P1: TimbreParams = { envelope: { attackMs: 10, decayMs: 200, sustain: 60, releaseMs: 300 }, vibrato: null, detune: 0 };
+  const P2: TimbreParams = { envelope: null, vibrato: { rateHz: 5, depth: 30 }, detune: 12 };
+
+  it("音源を作るとき、パラメーターを渡す。パラメーターなしは null", async () => {
+    await renderScore(score([note(0, "fm", 0, 60, P1), note(0, "square", 0.5)]));
+    expect(created.map((c) => [c.timbre, c.params])).toEqual([
+      ["fm", P1],
+      ["square", null],
+    ]);
+  });
+
+  it("同じ (トラック, 音色, パラメーター) の音は 1 つの音源、パラメーターが違えば別の音源", async () => {
+    await renderScore(
+      score([note(0, "fm", 0, 60, P1), note(0, "fm", 0.5, 62, { ...P1 }), note(0, "fm", 1, 64, P2), note(0, "fm", 1.5, 65)]),
+    );
+    expect(created).toHaveLength(3);
+    expect(created.map((c) => c.calls.length).sort()).toEqual([1, 1, 2]);
+  });
+
+  it("打楽器の音色は、パラメーターが違っても 1 つの音源を使い回し、パラメーターは null で作る", async () => {
+    await renderScore(score([note(0, "drum", 0, 60, P1), note(0, "drum", 0.5, 60, P2), note(0, "drum", 1)]));
+    expect(created).toHaveLength(1);
+    expect(created[0].params).toBeNull();
+    expect(created[0].calls).toHaveLength(3);
+  });
+
+  it("単音用(perNote)の打楽器も、パラメーターは null で作る", async () => {
+    await renderScore(score([note(0, "noise", 0, 60, P1)]));
+    expect(created[0].params).toBeNull();
   });
 
   it("音量は gainDb に、複数トラックのときだけ 1/トラック数 の減衰を足す", async () => {

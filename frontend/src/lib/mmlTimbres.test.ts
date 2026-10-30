@@ -69,7 +69,14 @@ function fakeTone() {
       this.connected.push(to);
       return this;
     }
+    destinations = 0;
+    sets: unknown[] = [];
     toDestination() {
+      this.destinations++;
+      return this;
+    }
+    set(options: unknown) {
+      this.sets.push(options);
       return this;
     }
     triggerAttackRelease(...args: unknown[]) {
@@ -99,6 +106,12 @@ function fakeTone() {
     NoiseSynth: cls("NoiseSynth"),
     MetalSynth: cls("MetalSynth"),
     Filter: cls("Filter"),
+    Vibrato: cls("Vibrato"),
+    Synth: cls("Synth"),
+    FMSynth: cls("FMSynth"),
+    AMSynth: cls("AMSynth"),
+    DuoSynth: cls("DuoSynth"),
+    MonoSynth: cls("MonoSynth"),
   } as unknown as ToneModule;
   return { Tone, made, hits };
 }
@@ -206,5 +219,82 @@ describe("drumkit の音源", () => {
     TIMBRES.drumkit.create(Tone, -7.5);
     const volume = made.find((m) => m.cls === "Volume")!;
     expect(volume.args[0]).toBe(-7.5);
+  });
+});
+
+describe("音色のパラメーター(Issue #499)", () => {
+  const MELODIC: Timbre[] = ["fm", "square", "pulse", "triangle", "saw", "sine", "organ", "epiano", "bell", "am", "lead", "bass"];
+  const ENV = { attackMs: 10, decayMs: 200, sustain: 60, releaseMs: 300 };
+  const params = (p: Partial<{ envelope: typeof ENV | null; vibrato: { rateHz: number; depth: number } | null; detune: number }>) => ({
+    envelope: null,
+    vibrato: null,
+    detune: 0,
+    ...p,
+  });
+  const polyOf = (made: ReturnType<typeof fakeTone>["made"]) => made.find((m) => m.cls === "PolySynth")!.node as unknown as { sets: unknown[]; destinations: number; connected: unknown[] };
+
+  it("打楽器だけが percussive で、パラメーターを無視する", () => {
+    expect(TIMBRE_LIST.filter((p) => p.percussive).map((p) => p.name)).toEqual(["drum", "noise", "drumkit"]);
+  });
+
+  it("パラメーターなしでは、set もビブラートも使わず、そのまま出力に繋ぐ", () => {
+    for (const name of MELODIC) {
+      const { Tone, made } = fakeTone();
+      TIMBRES[name].create(Tone, -3);
+      TIMBRES[name].create(Tone, -3, null);
+      expect(made.filter((m) => m.cls === "Vibrato"), name).toHaveLength(0);
+      for (const m of made.filter((x) => x.cls === "PolySynth")) {
+        const node = m.node as unknown as { sets: unknown[]; destinations: number };
+        expect(node.sets, name).toEqual([]);
+        expect(node.destinations, name).toBe(1);
+      }
+    }
+  });
+
+  it("エンベロープは、秒とサステインの割合にして set する(modulationEnvelope は触らない)", () => {
+    const { Tone, made } = fakeTone();
+    TIMBRES.fm.create(Tone, -3, params({ envelope: ENV }));
+    expect(polyOf(made).sets).toEqual([{ envelope: { attack: 0.01, decay: 0.2, sustain: 0.6, release: 0.3 } }]);
+  });
+
+  it("lead(DuoSynth)は、2 つの声の両方のエンベロープを置き換える", () => {
+    const { Tone, made } = fakeTone();
+    TIMBRES.lead.create(Tone, -3, params({ envelope: ENV }));
+    const e = { attack: 0.01, decay: 0.2, sustain: 0.6, release: 0.3 };
+    expect(polyOf(made).sets).toEqual([{ voice0: { envelope: e }, voice1: { envelope: e } }]);
+  });
+
+  it("デチューンは set({ detune })", () => {
+    const { Tone, made } = fakeTone();
+    TIMBRES.square.create(Tone, -3, params({ detune: -12 }));
+    expect(polyOf(made).sets).toEqual([{ detune: -12 }]);
+  });
+
+  it("ビブラートは Tone.Vibrato(速さ, 深さ/100)を出力に挟み、音源を出力に二重に繋がない", () => {
+    const { Tone, made } = fakeTone();
+    TIMBRES.saw.create(Tone, -3, params({ vibrato: { rateHz: 5, depth: 30 } }));
+    const vibrato = made.find((m) => m.cls === "Vibrato")!;
+    expect(vibrato.args).toEqual([5, 0.3]);
+    const synth = polyOf(made);
+    expect(synth.connected).toEqual([vibrato.node]);
+    expect(synth.destinations).toBe(0);
+    expect((vibrato.node as unknown as { destinations: number }).destinations).toBe(1);
+  });
+
+  it("全旋律音色が、3 つのパラメーターをすべて受け取れる", () => {
+    for (const name of MELODIC) {
+      const { Tone, made } = fakeTone();
+      expect(() => TIMBRES[name].create(Tone, -3, params({ envelope: ENV, vibrato: { rateHz: 5, depth: 30 }, detune: 7 })), name).not.toThrow();
+      expect(polyOf(made).sets.length, name).toBe(2);
+    }
+  });
+
+  it("打楽器は、パラメーターを渡されても何もしない", () => {
+    for (const name of ["drum", "drumkit"] as const) {
+      const { Tone, made } = fakeTone();
+      TIMBRES[name].create(Tone, -3, params({ envelope: ENV, vibrato: { rateHz: 5, depth: 30 }, detune: 7 }));
+      expect(made.filter((m) => m.cls === "Vibrato"), name).toHaveLength(0);
+      for (const m of made.filter((x) => x.cls === "PolySynth")) expect((m.node as unknown as { sets: unknown[] }).sets, name).toEqual([]);
+    }
   });
 });
