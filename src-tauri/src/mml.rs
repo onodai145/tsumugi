@@ -6,7 +6,9 @@
 //! 音色は 2026-10-16-issue-494-mml-timbre-design.md、
 //! 構文の拡張(タイ・連符・コメントなど)は 2026-10-20-issue-499-mml-syntax-extension-design.md を参照。
 
-use crate::domain::{MmlError, MmlScore, NoteEvent, Timbre};
+use crate::domain::{
+    EnvelopeParams, MmlError, MmlScore, NoteEvent, Timbre, TimbreParams, VibratoParams,
+};
 use crate::error::Error;
 use std::collections::HashMap;
 
@@ -70,6 +72,12 @@ enum Op {
     VolumeDelta(i32),
     /// `q<n>`。音を鳴らす長さの割合(百分率、1〜100)。
     Gate(u8),
+    /// `y a,d,s,r`(`None` は `y0` の解除)。
+    Envelope(Option<EnvelopeParams>),
+    /// `m 速さ,深さ`(`None` は `m0` の解除)。
+    Vibrato(Option<VibratoParams>),
+    /// `k セント`(`0` は解除)。
+    Detune(i16),
     /// `{`。対応する `}` までの音符・休符・`^` の長さを、`}` の後の長さに収める。
     TupletStart,
     /// `}<長さ>`。長さ省略は `{` の時点の `l` の値。
@@ -148,6 +156,28 @@ impl Cursor<'_> {
     fn require_number(&mut self, cmd_pos: usize, cmd: char) -> Result<(u32, usize), MmlError> {
         self.number()
             .ok_or_else(|| mml_err(cmd_pos, format!("`{cmd}` の後に数値が必要です")))
+    }
+
+    /// `y a,d,s,r` / `m 速さ,深さ` の、カンマで区切った `count` 個の数。最初の数は読み済みで、その (値, 先頭の位置) を渡す。
+    /// 足りないときは、足りなくなった位置(次の文字)を `usage` のメッセージで指す。
+    fn comma_numbers(
+        &mut self,
+        first: (u32, usize),
+        count: usize,
+        usage: &str,
+    ) -> Result<Vec<(u32, usize)>, MmlError> {
+        let mut out = vec![first];
+        while out.len() < count {
+            if self.peek() != Some(',') {
+                return Err(mml_err(self.pos(), usage));
+            }
+            self.bump();
+            let Some(n) = self.number() else {
+                return Err(mml_err(self.pos(), usage));
+            };
+            out.push(n);
+        }
+        Ok(out)
     }
 
     /// 音符・休符の後ろの「長さ(省略可)」と「付点」を読む。
@@ -352,6 +382,77 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 }
                 Op::Gate(n as u8)
             }
+            'y' => {
+                let usage = "`y` は `y0`(解除)か `y a,d,s,r`(4 つの数)です";
+                let first = c.require_number(pos, 'y')?;
+                if c.peek() != Some(',') {
+                    if first.0 != 0 {
+                        return Err(mml_err(c.pos(), usage));
+                    }
+                    Op::Envelope(None)
+                } else {
+                    let nums = c.comma_numbers(first, 4, usage)?;
+                    let limits = [
+                        (2000, "アタックは 0〜2000 ミリ秒です"),
+                        (2000, "ディケイは 0〜2000 ミリ秒です"),
+                        (100, "サステインは 0〜100 です"),
+                        (600, "リリースは 0〜600 ミリ秒です"),
+                    ];
+                    for (&(n, p), (max, message)) in nums.iter().zip(limits) {
+                        if n > max {
+                            return Err(mml_err(p, message));
+                        }
+                    }
+                    Op::Envelope(Some(EnvelopeParams {
+                        attack_ms: nums[0].0,
+                        decay_ms: nums[1].0,
+                        sustain: nums[2].0 as u8,
+                        release_ms: nums[3].0,
+                    }))
+                }
+            }
+            'm' => {
+                let usage = "`m` は `m0`(解除)か `m 速さ,深さ`(2 つの数)です";
+                let first = c.require_number(pos, 'm')?;
+                if c.peek() != Some(',') {
+                    if first.0 != 0 {
+                        return Err(mml_err(c.pos(), usage));
+                    }
+                    Op::Vibrato(None)
+                } else {
+                    let nums = c.comma_numbers(first, 2, usage)?;
+                    if !(1..=20).contains(&nums[0].0) {
+                        return Err(mml_err(nums[0].1, "ビブラートの速さは 1〜20 Hz です"));
+                    }
+                    if !(1..=100).contains(&nums[1].0) {
+                        return Err(mml_err(nums[1].1, "ビブラートの深さは 1〜100 です"));
+                    }
+                    Op::Vibrato(Some(VibratoParams {
+                        rate_hz: nums[0].0 as u8,
+                        depth: nums[1].0 as u8,
+                    }))
+                }
+            }
+            'k' => {
+                let negative = match c.peek() {
+                    Some('+') => {
+                        c.bump();
+                        false
+                    }
+                    Some('-') => {
+                        c.bump();
+                        true
+                    }
+                    _ => false,
+                };
+                let Some((n, p)) = c.number() else {
+                    return Err(mml_err(pos, "`k` の後に数値が必要です"));
+                };
+                if n > 100 {
+                    return Err(mml_err(p, "デチューンは −100〜100 セントです"));
+                }
+                Op::Detune(if negative { -(n as i16) } else { n as i16 })
+            }
             '@' => {
                 if c.peek().is_none() {
                     return Err(mml_err(pos, "`@` の後に音色の番号か名前が必要です"));
@@ -518,6 +619,9 @@ struct TrackState {
     volume: u32,
     gate: u32,
     timbre: Timbre,
+    envelope: Option<EnvelopeParams>,
+    vibrato: Option<VibratoParams>,
+    detune: i16,
     t: f64,
     /// 直前の命令が音符・和音だったとき、その音の `notes` 内の index(`^` と `&` の連結先。休符で空になる)
     last_notes: Vec<usize>,
@@ -552,6 +656,19 @@ fn beats(len: u32, dots: u8) -> f64 {
 /// 長さを秒にする。`scale` は連符の縮小率(連符の外では 1.0。1.0 を掛けても値は変わらない)。
 fn duration_sec(len: u32, dots: u8, tempo: u32, scale: f64) -> f64 {
     beats(len, dots) * scale * 60.0 / f64::from(tempo)
+}
+
+/// いまのトラックの状態から、音に付ける `params`(どれも既定なら `None`)。
+fn timbre_params(st: &TrackState) -> Option<TimbreParams> {
+    if st.envelope.is_none() && st.vibrato.is_none() && st.detune == 0 {
+        None
+    } else {
+        Some(TimbreParams {
+            envelope: st.envelope,
+            vibrato: st.vibrato,
+            detune: st.detune,
+        })
+    }
 }
 
 /// 全長にゲートタイム(百分率)を掛ける。100 のときは掛け算をせず、v1 と同じ値のまま返す。
@@ -629,6 +746,9 @@ fn run_track(
         volume: DEFAULT_VOLUME,
         gate: MAX_GATE,
         timbre: Timbre::Fm,
+        envelope: None,
+        vibrato: None,
+        detune: 0,
         t: 0.0,
         last_notes: Vec::new(),
         last_chord: false,
@@ -670,6 +790,9 @@ fn run_track(
             }
             Op::Gate(n) => st.gate = u32::from(*n),
             Op::Timbre(t) => st.timbre = *t,
+            Op::Envelope(e) => st.envelope = *e,
+            Op::Vibrato(v) => st.vibrato = *v,
+            Op::Detune(d) => st.detune = *d,
             Op::TupletStart => st.tuplet_scale = tuplet_scale(&items[i + 1..], st.len),
             Op::TupletEnd { .. } => st.tuplet_scale = 1.0,
             Op::Tie => {
@@ -731,6 +854,7 @@ fn run_track(
                         midi: midi as u8,
                         velocity: f64::from(st.volume) / 15.0,
                         timbre: st.timbre,
+                        params: timbre_params(&st),
                     });
                     st.last_notes.clear();
                     st.last_notes.push(notes.len() - 1);
@@ -767,6 +891,7 @@ fn run_track(
                         midi: midi as u8,
                         velocity,
                         timbre: st.timbre,
+                        params: timbre_params(&st),
                     });
                     st.last_notes.push(notes.len() - 1);
                 }
@@ -1780,7 +1905,7 @@ mod tests {
 
     #[test]
     fn only_drum_is_a_prefix_of_another_timbre_name() {
-        // 音色名の読み取りは最長一致。接頭辞の組は drum と drumkit だけで、残りの `kit` は命令の先頭にならない
+        // 音色名の読み取りは最長一致。接頭辞の組は drum と drumkit だけ(`@drum` の後に `k0` と続く MML は、drum + デチューンになる)
         let mut pairs = Vec::new();
         for a in Timbre::ALL {
             for b in Timbre::ALL {
@@ -2318,5 +2443,182 @@ mod tests {
         let text = format!("{def}{} c", "$a".repeat(100));
         let e = must_fail(&text);
         assert_eq!(e.position as usize, def.chars().count() + 2 * 99);
+    }
+
+    fn params_of(text: &str) -> Vec<Option<TimbreParams>> {
+        must_parse(text).notes.iter().map(|n| n.params).collect()
+    }
+
+    fn envelope(a: u32, d: u32, s: u8, r: u32) -> EnvelopeParams {
+        EnvelopeParams {
+            attack_ms: a,
+            decay_ms: d,
+            sustain: s,
+            release_ms: r,
+        }
+    }
+
+    #[test]
+    fn params_are_none_unless_written() {
+        assert_eq!(params_of("c d e"), vec![None; 3]);
+        assert_eq!(params_of("y0 m0 k0 c"), vec![None]);
+    }
+
+    #[test]
+    fn envelope_is_read_and_applies_to_following_notes() {
+        let want = Some(TimbreParams {
+            envelope: Some(envelope(10, 200, 60, 300)),
+            vibrato: None,
+            detune: 0,
+        });
+        assert_eq!(params_of("c y10,200,60,300 d e"), vec![None, want, want]);
+        assert_eq!(params_of("Y10, 200 ,60,300 d")[0], want);
+        // 先頭が 0 でカンマが続くときは、解除ではなく 4 つの数
+        let zero = Some(TimbreParams {
+            envelope: Some(envelope(0, 200, 60, 300)),
+            vibrato: None,
+            detune: 0,
+        });
+        assert_eq!(params_of("y0,200,60,300 c"), vec![zero]);
+        // 境界値
+        assert!(params_of("y2000,2000,100,600 c")[0].is_some());
+        assert!(params_of("y0,0,0,0 c")[0].is_some());
+        // 解除
+        assert_eq!(params_of("y10,200,60,300 y0 c"), vec![None]);
+    }
+
+    #[test]
+    fn envelope_errors_report_where_to_look() {
+        assert_eq!(must_fail("y c").position, 0); // 数字がない
+        assert!(must_fail("y c").message.contains("数値"));
+        assert_eq!(must_fail("y10 c").position, 4); // 0 以外の 1 つ: 次の文字
+        assert!(must_fail("y10 c").message.contains("y0"));
+        assert_eq!(must_fail("y10,200,60 c").position, 11); // 4 つに足りない
+        assert_eq!(must_fail("y10,200, c").position, 9); // カンマの後に数字がない(次の文字)
+        assert_eq!(must_fail("y2001,0,0,0 c").position, 1); // 範囲外は数字の先頭
+        assert!(must_fail("y2001,0,0,0 c").message.contains("アタック"));
+        assert_eq!(must_fail("y0,2001,0,0 c").position, 3);
+        assert!(must_fail("y0,2001,0,0 c").message.contains("ディケイ"));
+        assert_eq!(must_fail("y0,0,101,0 c").position, 5);
+        assert!(must_fail("y0,0,101,0 c").message.contains("サステイン"));
+        assert_eq!(must_fail("y0,0,0,601 c").position, 7);
+        assert!(must_fail("y0,0,0,601 c").message.contains("リリース"));
+    }
+
+    #[test]
+    fn vibrato_is_read_and_errors_report_where_to_look() {
+        let want = Some(TimbreParams {
+            envelope: None,
+            vibrato: Some(VibratoParams {
+                rate_hz: 5,
+                depth: 30,
+            }),
+            detune: 0,
+        });
+        assert_eq!(params_of("m5,30 c m0 d"), vec![want, None]);
+        assert!(params_of("m20,100 c")[0].is_some());
+        assert!(params_of("m1,1 c")[0].is_some());
+        assert_eq!(must_fail("m c").position, 0);
+        assert_eq!(must_fail("m5 c").position, 3); // 0 以外の 1 つ(次の文字)
+        assert!(must_fail("m5 c").message.contains("m0"));
+        assert_eq!(must_fail("m21,1 c").position, 1);
+        assert!(must_fail("m21,1 c").message.contains("速さ"));
+        assert_eq!(must_fail("m0,5 c").position, 1); // 速さ 0 は範囲外
+        assert_eq!(must_fail("m5,101 c").position, 3);
+        assert!(must_fail("m5,101 c").message.contains("深さ"));
+        assert_eq!(must_fail("m5,0 c").position, 3); // 深さ 0 は範囲外
+    }
+
+    #[test]
+    fn detune_is_read_with_an_optional_sign() {
+        let detune = |text: &str| params_of(text)[0].map(|p| p.detune);
+        assert_eq!(detune("k12 c"), Some(12));
+        assert_eq!(detune("k+12 c"), Some(12));
+        assert_eq!(detune("k-12 c"), Some(-12));
+        assert_eq!(detune("k100 c"), Some(100));
+        assert_eq!(detune("k-100 c"), Some(-100));
+        assert_eq!(detune("k12 k0 c"), None);
+        assert_eq!(must_fail("k c").position, 0);
+        assert!(must_fail("k c").message.contains("数値"));
+        assert_eq!(must_fail("k- c").position, 0); // 符号だけ
+        assert_eq!(must_fail("k+ c").position, 0);
+        assert_eq!(must_fail("k101 c").position, 1);
+        assert_eq!(must_fail("k+101 c").position, 2); // 符号の次の数字
+        assert_eq!(must_fail("k-101 c").position, 2);
+    }
+
+    #[test]
+    fn params_combine_and_follow_track_state_rules() {
+        let all = Some(TimbreParams {
+            envelope: Some(envelope(1, 2, 3, 4)),
+            vibrato: Some(VibratoParams {
+                rate_hz: 5,
+                depth: 6,
+            }),
+            detune: 7,
+        });
+        assert_eq!(params_of("y1,2,3,4 m5,6 k7 c"), vec![all]);
+        // トラックごとに独立
+        assert_eq!(params_of("y1,2,3,4 c; c")[1], None);
+        // 音色を切り替えても保たれる
+        assert_eq!(
+            params_of("y1,2,3,4 c @1 d")[0],
+            params_of("y1,2,3,4 c @1 d")[1]
+        );
+        assert!(params_of("y1,2,3,4 c @1 d")[1].is_some());
+        // 繰り返しの中、マクロの中
+        assert_eq!(
+            params_of("[y1,2,3,4 c y0 c]2"),
+            vec![
+                params_of("y1,2,3,4 c")[0],
+                None,
+                params_of("y1,2,3,4 c")[0],
+                None
+            ]
+        );
+        assert!(params_of("$f={y1,2,3,4} $f c")[0].is_some());
+        // タイでつないだ音は 1 つの音(先頭の音の params)
+        let tied = must_parse("y1,2,3,4 c&c");
+        assert_eq!(tied.notes.len(), 1);
+        assert!(tied.notes[0].params.is_some());
+        // 和音の各音は、和音の前の状態
+        let chord = params_of("y1,2,3,4 'ce'");
+        assert_eq!(chord.len(), 2);
+        assert!(chord.iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn params_are_rejected_inside_a_chord() {
+        for text in ["'cy1,2,3,4'4", "'cm5,6'4", "'ck12'4"] {
+            let e = must_fail(text);
+            assert_eq!(e.position, 2, "{text}");
+            assert!(e.message.contains("和音の中"), "{text}: {}", e.message);
+        }
+    }
+
+    #[test]
+    fn drum_followed_by_detune_is_still_distinct_from_drumkit() {
+        assert_eq!(timbres("@drumk0 c"), vec![Timbre::Drum]); // `@drum` + `k0`
+        assert_eq!(timbres("@drumkit c"), vec![Timbre::Drumkit]);
+        assert_eq!(timbres("@drumk12 c"), vec![Timbre::Drum]);
+        assert_eq!(must_fail("@drumk c").position, 5); // `k` の後に数字がない
+    }
+
+    #[test]
+    fn note_event_serializes_params_as_camel_case_or_null() {
+        let note = &must_parse("c").notes[0];
+        assert_eq!(
+            serde_json::to_value(note).unwrap()["params"],
+            serde_json::Value::Null
+        );
+        let note = &must_parse("y10,200,60,300 m5,30 k-12 c").notes[0];
+        assert_eq!(
+            serde_json::to_value(note).unwrap()["params"],
+            serde_json::json!({
+                "envelope": { "attackMs": 10, "decayMs": 200, "sustain": 60, "releaseMs": 300 },
+                "vibrato": { "rateHz": 5, "depth": 30 },
+                "detune": -12
+            })
+        );
     }
 }

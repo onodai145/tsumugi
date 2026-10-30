@@ -30,7 +30,10 @@ pub use cache_backend::CacheBackendConfig;
 pub use clip::Clip;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::{SourceItem, UserList};
-pub use mml::{MmlError, MmlParseResult, MmlScore, NoteEvent, Timbre};
+pub use mml::{
+    EnvelopeParams, MmlError, MmlParseResult, MmlScore, NoteEvent, Timbre, TimbreParams,
+    VibratoParams,
+};
 pub use mute::MuteConfig;
 pub use note::{DriveFile, Note, Poll, PollChoice, Translation, Visibility};
 pub use notification::Notification;
