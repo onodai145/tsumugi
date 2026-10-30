@@ -1340,7 +1340,7 @@ export type UserProfile = {
 	isSelf: boolean,
 };
 
-/**  `m 速さ,深さ` のビブラート。`rate_hz` は 1〜20(Hz)、`depth` は 1〜100(相対値)。 */
+/**  `m 速さ,深さ` のビブラート。`rate_hz` は 1〜20(Hz)、`depth` は 1〜100(音程の揺れの片側の幅、おおよそのセント。遅い速さでは頭打ち)。 */
 export type VibratoParams = {
 	rateHz: number,
 	depth: number,

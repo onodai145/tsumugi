@@ -271,15 +271,30 @@ describe("音色のパラメーター(Issue #499)", () => {
     expect(polyOf(made).destinations).toBe(1);
   });
 
-  it("ビブラートは Tone.Vibrato(速さ, 深さ/100)を出力に挟み、音源を出力に二重に繋がない", () => {
+  it("ビブラートは Tone.Vibrato を出力に挟み、音源を出力に二重に繋がない。深さは、速さに依らず、片側の揺れの幅(セント)になる", () => {
     const { Tone, made } = fakeTone();
     TIMBRES.saw.create(Tone, -3, params({ vibrato: { rateHz: 5, depth: 30 } }));
     const vibrato = made.find((m) => m.cls === "Vibrato")!;
-    expect(vibrato.args).toEqual([5, 0.3]);
+    // Tone.Vibrato の揺れは「速さ × 深さ × 約 27 セント」(実測)なので、深さ(セント)を速さで割って渡す
+    expect(vibrato.args[0]).toBe(5);
+    expect(vibrato.args[1]).toBeCloseTo(30 / (27 * 5), 10);
     const synth = polyOf(made);
     expect(synth.connected).toEqual([vibrato.node]);
     expect(synth.destinations).toBe(0);
     expect((vibrato.node as unknown as { destinations: number }).destinations).toBe(1);
+  });
+
+  it("ビブラートの深さは、速さが違っても同じセントの揺れになるよう割る。遅い速さでは上限(1)で頭打ち", () => {
+    const depthFor = (rateHz: number, depth: number): number => {
+      const { Tone, made } = fakeTone();
+      TIMBRES.sine.create(Tone, -3, params({ vibrato: { rateHz, depth } }));
+      return made.find((m) => m.cls === "Vibrato")!.args[1] as number;
+    };
+    // 同じ深さでも、速さが 4 倍なら Tone に渡す値は 1/4(揺れの大きさ = 渡す値 × 速さ で一定)
+    expect(depthFor(20, 40) * 20).toBeCloseTo(depthFor(5, 40) * 5, 10);
+    expect(depthFor(5, 100)).toBeCloseTo(100 / 135, 10);
+    expect(depthFor(1, 100)).toBe(1); // 1 Hz では ±27 セントまで
+    expect(depthFor(20, 1)).toBeCloseTo(1 / 540, 10);
   });
 
   it("全旋律音色が、3 つのパラメーターを渡されても動く", () => {

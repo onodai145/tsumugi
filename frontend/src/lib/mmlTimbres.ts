@@ -68,7 +68,9 @@ function poly(synth: AnyPoly, volumeDb: number, fx?: Fx): Voice {
     }
   }
   if (fx && params?.vibrato) {
-    const vibrato = new fx.Tone.Vibrato(params.vibrato.rateHz, Math.min(1, params.vibrato.depth / 100));
+    // Tone.Vibrato は遅延時間を揺らすので、音程の揺れは「速さ × 深さ × 約 27 セント」になる(実測: 深さ 0.1 で、1 / 5 / 20 Hz がそれぞれ
+    // ±2.7 / ±13.6 / ±53.8 セント)。`m` の深さを、速さに依らない片側の揺れの幅(セント)にするため、速さで割って渡す(上限は 1)
+    const vibrato = new fx.Tone.Vibrato(params.vibrato.rateHz, Math.min(1, params.vibrato.depth / (27 * params.vibrato.rateHz)));
     vibrato.toDestination();
     synth.connect(vibrato);
   } else {
