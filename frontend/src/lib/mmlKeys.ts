@@ -58,6 +58,16 @@ export const MML_KEY_GROUPS: readonly MmlKeyGroup[] = [
     keys: ["1", "2", "4", "8", "16", "32"].map((n) => ({ id: `len-${n}`, label: n, insert: n, aria: `長さ ${n}` })),
   },
   {
+    id: "params",
+    label: "音色パラメーター",
+    keys: [
+      { id: "param-y", label: "y", insert: "y", aria: "エンベロープ y" },
+      { id: "param-m", label: "m", insert: "m", aria: "ビブラート m" },
+      { id: "param-k", label: "k", insert: "k", aria: "デチューン k" },
+      { id: "param-comma", label: ",", insert: ",", aria: "区切り ," },
+    ],
+  },
+  {
     id: "structure",
     label: "繰り返し・連符・トラック",
     keys: [

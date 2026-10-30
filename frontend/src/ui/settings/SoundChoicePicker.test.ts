@@ -174,6 +174,16 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("o2 d スネア");
     expect(text).toContain("割り当てのない高さは鳴らない");
   });
+
+  it("記法ヘルプに、音色パラメーター y m k の書き方と、解除の書き方が出る(Issue #499)", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("y10,200,60,300");
+    expect(text).toContain("m5,30");
+    expect(text).toContain("k+12");
+    expect(text).toContain("y0 m0 k0");
+    expect(text).toContain("打楽器");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {

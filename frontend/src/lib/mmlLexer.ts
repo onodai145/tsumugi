@@ -120,6 +120,20 @@ export function lexMml(text: string): MmlToken[] {
       const j = digitsEnd(cmdEnd);
       if (j > cmdEnd) push(cmdEnd, j, "number");
       i = j;
+    } else if (ch === "y" || ch === "m" || ch === "k") {
+      // 音色パラメーター(Issue #499): `y a,d,s,r` `m 速さ,深さ` `k セント`。`k+` `k-` は符号まで、カンマは command にする
+      const signed = ch === "k" && (at(i + 1) === "+" || at(i + 1) === "-");
+      const cmdEnd = i + (signed ? 2 : 1);
+      push(i, cmdEnd, "command");
+      let j = digitsEnd(cmdEnd);
+      if (j > cmdEnd) push(cmdEnd, j, "number");
+      while (at(j) === ",") {
+        push(j, j + 1, "command");
+        const next = digitsEnd(j + 1);
+        if (next > j + 1) push(j + 1, next, "number");
+        j = next;
+      }
+      i = j;
     } else if (ch === "<" || ch === ">") {
       push(i, i + 1, "command");
       i++;
