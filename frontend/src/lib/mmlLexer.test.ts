@@ -298,6 +298,53 @@ describe("lexMml", () => {
     ]);
   });
 
+  it("音色パラメーター y m k は command、数字は number、カンマは command(Issue #499)", () => {
+    expect(lex("y10,200,60,300")).toEqual([
+      ["y", "command"],
+      ["10", "number"],
+      [",", "command"],
+      ["200", "number"],
+      [",", "command"],
+      ["60", "number"],
+      [",", "command"],
+      ["300", "number"],
+    ]);
+    expect(lex("m5,30 k-12 k+7 y0")).toEqual([
+      ["m", "command"],
+      ["5", "number"],
+      [",", "command"],
+      ["30", "number"],
+      ["k-", "command"],
+      ["12", "number"],
+      ["k+", "command"],
+      ["7", "number"],
+      ["y", "command"],
+      ["0", "number"],
+    ]);
+  });
+
+  it("y m k の後ろに数字がなくても、読めない文字にはしない。途中のカンマだけ・末尾のカンマも", () => {
+    expect(lex("y")).toEqual([["y", "command"]]);
+    expect(lex("m5,")).toEqual([
+      ["m", "command"],
+      ["5", "number"],
+      [",", "command"],
+    ]);
+    expect(lex("k c")).toEqual([
+      ["k", "command"],
+      ["c", "note"],
+    ]);
+  });
+
+  it("@drumk0 は、音色 @drum と、デチューン k0 に分かれる。@drumkit は 1 つの音色", () => {
+    expect(lex("@drumk0")).toEqual([
+      ["@drum", "timbre"],
+      ["k", "command"],
+      ["0", "number"],
+    ]);
+    expect(lex("@drumkit")).toEqual([["@drumkit", "timbre"]]);
+  });
+
   it("`$a t=60` は展開と t=、`$at=60` は名前 at(定義ではない)", () => {
     expect(lex("$a t=60")).toEqual([
       ["$a", "command"],

@@ -672,6 +672,14 @@ export type EmojiDef = {
 	aliases: string[],
 };
 
+/**  音色のパラメーター(Issue #499)。MML の `y a,d,s,r` のエンベロープ。時間はミリ秒、`sustain` は 0〜100(%)。 */
+export type EnvelopeParams = {
+	attackMs: number,
+	decayMs: number,
+	sustain: number,
+	releaseMs: number,
+};
+
 export type Error = 
 /**  ネットワーク到達不可・タイムアウト等 */
 { kind: "network"; message: string } | 
@@ -874,6 +882,8 @@ export type NoteEvent = {
 	velocity: number | null,
 	/**  音色(`@` で指定。指定が無ければ `fm`) */
 	timbre: Timbre,
+	/**  `y` `m` `k` のパラメーター(どれも書かれていなければ `None`) */
+	params: TimbreParams | null,
 };
 
 export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };
@@ -1070,6 +1080,16 @@ export type ThemeColors = {
  *  番号と名前は、フロントの `lib/mmlTimbres.ts` と同じにすること(両側のテストが同じ表を持つ)。
  */
 export type Timbre = "fm" | "square" | "pulse" | "triangle" | "saw" | "sine" | "organ" | "epiano" | "bell" | "am" | "lead" | "bass" | "drum" | "noise" | "drumkit";
+
+/**
+ *  音に付くパラメーター。`y` `m` `k` のどれも書かれていなければ、`NoteEvent.params` は `None`。
+ *  `detune` は `k` のセント(−100〜100。0 は指定なし)。
+ */
+export type TimbreParams = {
+	envelope: EnvelopeParams | null,
+	vibrato: VibratoParams | null,
+	detune: number,
+};
 
 export type TqlCompletionItem = {
 	label: string,
@@ -1318,6 +1338,12 @@ export type UserProfile = {
 	user: User,
 	isFollowing: boolean | null,
 	isSelf: boolean,
+};
+
+/**  `m 速さ,深さ` のビブラート。`rate_hz` は 1〜20(Hz)、`depth` は 1〜100(音程の揺れの片側の幅、おおよそのセント。遅い速さでは頭打ち)。 */
+export type VibratoParams = {
+	rateHz: number,
+	depth: number,
 };
 
 /**  Specified = direct */

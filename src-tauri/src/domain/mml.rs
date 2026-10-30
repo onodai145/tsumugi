@@ -69,6 +69,34 @@ impl Timbre {
     }
 }
 
+/// 音色のパラメーター(Issue #499)。MML の `y a,d,s,r` のエンベロープ。時間はミリ秒、`sustain` は 0〜100(%)。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvelopeParams {
+    pub attack_ms: u32,
+    pub decay_ms: u32,
+    pub sustain: u8,
+    pub release_ms: u32,
+}
+
+/// `m 速さ,深さ` のビブラート。`rate_hz` は 1〜20(Hz)、`depth` は 1〜100(音程の揺れの片側の幅、おおよそのセント。遅い速さでは頭打ち)。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct VibratoParams {
+    pub rate_hz: u8,
+    pub depth: u8,
+}
+
+/// 音に付くパラメーター。`y` `m` `k` のどれも書かれていなければ、`NoteEvent.params` は `None`。
+/// `detune` は `k` のセント(−100〜100。0 は指定なし)。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TimbreParams {
+    pub envelope: Option<EnvelopeParams>,
+    pub vibrato: Option<VibratoParams>,
+    pub detune: i16,
+}
+
 /// MML から展開した 1 音(Issue #75)。時刻は秒で、テンポ変化・繰り返し・タイは解決済み。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +111,8 @@ pub struct NoteEvent {
     pub velocity: f64,
     /// 音色(`@` で指定。指定が無ければ `fm`)
     pub timbre: Timbre,
+    /// `y` `m` `k` のパラメーター(どれも書かれていなければ `None`)
+    pub params: Option<TimbreParams>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
