@@ -196,6 +196,17 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("1〜1000");
     expect(text).toContain("p0");
   });
+
+  it("記法ヘルプに、リバーブ x とディレイ z の書き方・範囲・解除・種類の上限が出る(Issue #499)", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("x30,2000");
+    expect(text).toContain("リバーブ");
+    expect(text).toContain("z25,300,40");
+    expect(text).toContain("ディレイ");
+    expect(text).toContain("x0 z0");
+    expect(text).toContain("4 種");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {

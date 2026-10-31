@@ -120,8 +120,8 @@ export function lexMml(text: string): MmlToken[] {
       const j = digitsEnd(cmdEnd);
       if (j > cmdEnd) push(cmdEnd, j, "number");
       i = j;
-    } else if (ch === "y" || ch === "m" || ch === "k") {
-      // 音色パラメーター(Issue #499): `y a,d,s,r` `m 速さ,深さ` `k セント`。`k+` `k-` は符号まで、カンマは command にする
+    } else if (ch === "y" || ch === "m" || ch === "k" || ch === "x" || ch === "z") {
+      // 音色パラメーター(Issue #499): `y a,d,s,r` `m 速さ,深さ` `k セント`、エフェクト: `x 量,長さ` `z 量,間隔,繰り返し`。`k+` `k-` は符号まで、カンマは command にする
       const signed = ch === "k" && (at(i + 1) === "+" || at(i + 1) === "-");
       const cmdEnd = i + (signed ? 2 : 1);
       push(i, cmdEnd, "command");
