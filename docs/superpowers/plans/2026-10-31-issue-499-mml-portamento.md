@@ -715,7 +715,7 @@ const basic =
 - [ ] **Step 7: テストと型を通す**
 
 Run: `cd frontend && npx vitest run src/lib/mmlRender.test.ts src/lib/mmlTimbres.test.ts 2>&1 | tail -15; pnpm check 2>&1 | tail -5`
-Expected: すべて通る。型エラーが出たら Step 5 の注記の通り、キャストで通す。落ちるテストは、テストを弱めずコードを直す(「11 種すべて」のテストが、継承クラスの判定で不安定なら、`Object.getPrototypeOf(Cls.prototype)` が `Tone` の元の声のクラスの `prototype` であることの検査に替えてよい。ただし検査自体は残す)。
+Expected: すべて通る。型エラーが出たら Step 5 の注記の通り、キャストで通す。落ちるテストは、テストを弱めずコードを直す(「12 種すべて」のテストが、継承クラスの判定で不安定なら、`Object.getPrototypeOf(Cls.prototype)` が `Tone` の元の声のクラスの `prototype` であることの検査に替えてよい。ただし検査自体は残す)。
 
 - [ ] **Step 8: 全体のテストとコミット**
 
