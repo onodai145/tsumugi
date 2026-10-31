@@ -4,6 +4,7 @@ import {
   DELAY_TRIM_DB,
   MAX_EFFECT_TAIL_SEC,
   REVERB_PREDELAY_SEC,
+  SEND_RAMP_SEC,
   REVERB_TRIM_DB,
   createTrackEffects,
   delayTailSec,
@@ -165,8 +166,11 @@ describe("createTrackEffects", () => {
     const fx = createTrackEffects(Tone, notes, END);
     for (const n of notes) fx.apply(n);
     const sends = of("Gain").filter((g) => g.args[0] === 0); // 作った順: 2000ms の組、500ms の組
-    expect(sends[0].sets).toEqual([[0.3, 0], [0.6, 0.5], [0, 1]]);
-    expect(sends[1].sets).toEqual([[0.4, 1], [0, 1.5]]);
+    // 各音の始まりで、直前の量を置いてから、短いランプで新しい量へ(前の音の余韻の途中で、送りが段差で変わらないように)
+    expect(sends[0].sets).toEqual([[0, 0], [0.3, 0.5], [0.6, 1]]);
+    expect(sends[0].ramps).toEqual([[0.3, 0 + SEND_RAMP_SEC], [0.6, 0.5 + SEND_RAMP_SEC], [0, 1 + SEND_RAMP_SEC]]);
+    expect(sends[1].sets).toEqual([[0, 1], [0.4, 1.5]]);
+    expect(sends[1].ramps).toEqual([[0.4, 1 + SEND_RAMP_SEC], [0, 1.5 + SEND_RAMP_SEC]]);
   });
 
   it("同じ状態が続くときは、送りを重ねて設定しない(0 のままの組にも設定しない)", () => {
@@ -174,7 +178,9 @@ describe("createTrackEffects", () => {
     const notes = [note(0, 0, { reverb: r(30, 2000) }), note(0, 0.5, { reverb: r(30, 2000) }), note(0, 1, { reverb: r(30, 2000) })];
     const fx = createTrackEffects(Tone, notes, END);
     for (const n of notes) fx.apply(n);
-    expect(of("Gain").find((g) => g.args[0] === 0)!.sets).toEqual([[0.3, 0]]);
+    const send = of("Gain").find((g) => g.args[0] === 0)!;
+    expect(send.sets).toEqual([[0, 0]]);
+    expect(send.ramps).toEqual([[0.3, 0 + SEND_RAMP_SEC]]);
   });
 
   it("リバーブとディレイを同時に使う音は、両方の送りを量にする", () => {
@@ -183,7 +189,7 @@ describe("createTrackEffects", () => {
     const fx = createTrackEffects(Tone, [n], END);
     fx.apply(n);
     const sends = of("Gain").filter((g) => g.args[0] === 0);
-    expect(sends.map((s) => s.sets)).toEqual([[[0.3, 0.25]], [[0.5, 0.25]]]);
+    expect(sends.map((s) => s.ramps)).toEqual([[[0.3, 0.25 + SEND_RAMP_SEC]], [[0.5, 0.25 + SEND_RAMP_SEC]]]);
   });
 
   it("トラックをまたいで送りが混ざらない", () => {
@@ -194,7 +200,7 @@ describe("createTrackEffects", () => {
     fx.apply(a);
     fx.apply(b);
     const sends = of("Gain").filter((g) => g.args[0] === 0);
-    expect(sends.map((s) => s.sets)).toEqual([[[0.3, 0]], [[0.6, 0]]]);
+    expect(sends.map((s) => s.ramps)).toEqual([[[0.3, 0 + SEND_RAMP_SEC]], [[0.6, 0 + SEND_RAMP_SEC]]]);
   });
 
   it("補正の Gain は、描画の終わりの 0.3 秒前から終わりまでに 0 へフェードする(5 秒で頭打ちの尾が急に切れないように)", () => {
