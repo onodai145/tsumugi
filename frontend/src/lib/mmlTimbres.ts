@@ -6,6 +6,9 @@ import { PIECE_SPECS, drumPieceFor, type DrumPiece, type MembraneSpec, type Meta
 
 export type ToneModule = typeof import("tone");
 
+/** 音源のつなぎ先(エフェクトのバス、Issue #499)。`create` の `out` で渡す。省略すると出力へつなぐ */
+export type VoiceOutput = import("tone").ToneAudioNode;
+
 /** ポルタメント(Issue #499)。`fromHz` から鳴らす周波数まで、`sec` 秒で指数的に(音程が等速で)動く。`renderScore` が作る */
 export interface VoiceGlide {
   fromHz: number;
@@ -31,8 +34,8 @@ export interface TimbrePreset {
   perNote?: boolean;
   /** true なら打楽器で、`y` `m` `k` のパラメーターを無視する(描画は、パラメーターが違っても音源を使い回す) */
   percussive?: boolean;
-  /** `Tone.Offline` のコールバック内で呼ぶ。出力先と音量(`volumeDb`)を設定済みの音源を返す。`params` は旋律の音色だけが使う。 */
-  create(Tone: ToneModule, volumeDb: number, params?: TimbreParams | null): Voice;
+  /** `Tone.Offline` のコールバック内で呼ぶ。出力先と音量(`volumeDb`)を設定済みの音源を返す。`params` は旋律の音色だけが使う。`out` があれば、出力でなくそこへつなぐ(エフェクトのバス)。 */
+  create(Tone: ToneModule, volumeDb: number, params?: TimbreParams | null, out?: VoiceOutput): Voice;
 }
 
 interface PolyLike {
@@ -46,6 +49,8 @@ interface Fx {
   Tone: ToneModule;
   params: TimbreParams | null | undefined;
   duo?: boolean;
+  /** 音源のつなぎ先。省略すると出力 */
+  out?: VoiceOutput;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -83,6 +88,12 @@ function glideSynth<V extends Ctor>(Tone: ToneModule, Base: V, options: Construc
   return synth;
 }
 
+/** `out` があればそこへ、無ければ出力へつなぐ */
+function connectOut(node: { connect(to: VoiceOutput): unknown; toDestination(): unknown }, out?: VoiceOutput): void {
+  if (out) node.connect(out);
+  else node.toDestination();
+}
+
 /**
  * 出力に繋いで音量を設定する。`fx.params` があれば、エンベロープ(`envelope` だけ。modulationEnvelope は変えない)を `set` で反映し、
  * ビブラートは `Tone.Vibrato` を出力に挟む。デチューンは `renderScore` が鳴らす周波数の倍率にするので、ここでは扱わない。
@@ -109,10 +120,10 @@ function poly(synth: AnyPoly, volumeDb: number, fx?: Fx): Voice {
     // Tone.Vibrato は遅延時間を揺らすので、音程の揺れは「速さ × 深さ × 約 27 セント」になる(実測: 深さ 0.1 で、1 / 5 / 20 Hz がそれぞれ
     // ±2.7 / ±13.6 / ±53.8 セント)。`m` の深さを、速さに依らない片側の揺れの幅(セント)にするため、速さで割って渡す(上限は 1)
     const vibrato = new fx.Tone.Vibrato(params.vibrato.rateHz, Math.min(1, params.vibrato.depth / (27 * params.vibrato.rateHz)));
-    vibrato.toDestination();
+    connectOut(vibrato, fx.out);
     synth.connect(vibrato);
   } else {
-    synth.toDestination();
+    connectOut(synth, fx?.out);
   }
   return {
     trigger: (hz, d, t, v, _midi, glide) => {
@@ -126,8 +137,9 @@ function poly(synth: AnyPoly, volumeDb: number, fx?: Fx): Voice {
 }
 
 /** `@drumkit`。音の高さ(midi)から GM の楽器を選んで鳴らす。割り当てのない高さは鳴らさない。書いた長さは無視する */
-function drumkit(Tone: ToneModule, volumeDb: number): Voice {
-  const out = new Tone.Volume(volumeDb).toDestination();
+function drumkit(Tone: ToneModule, volumeDb: number, dest?: VoiceOutput): Voice {
+  const out = new Tone.Volume(volumeDb);
+  connectOut(out, dest);
   // 音源は楽器ごとに 1 つ作って使い回す(1 打ごとに作ると、数千打で描画が終わらない)。同じ楽器を続けて叩くと、前の余韻は切れる。
   // 単音用の音源(ノイズ・金属)は、時刻の昇順に鳴らす(`Voice.trigger` は、トラック内で時刻の昇順に呼ばれる)。
   const membranes = new Map<DrumPiece, PolyLike & { connect(to: unknown): unknown }>();
@@ -211,8 +223,8 @@ const BASIC_ENV = { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.1 };
 type SynthOscillator = NonNullable<NonNullable<ConstructorParameters<ToneModule["Synth"]>[0]>["oscillator"]>;
 const basic =
   (oscillator: SynthOscillator) =>
-  (Tone: ToneModule, db: number, params?: TimbreParams | null): Voice =>
-    poly(glideSynth(Tone, Tone.Synth, { oscillator, envelope: BASIC_ENV }), db, { Tone, params });
+  (Tone: ToneModule, db: number, params?: TimbreParams | null, out?: VoiceOutput): Voice =>
+    poly(glideSynth(Tone, Tone.Synth, { oscillator, envelope: BASIC_ENV }), db, { Tone, params, out });
 
 export const TIMBRES: Record<Timbre, TimbrePreset> = {
   fm: {
@@ -220,7 +232,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     name: "fm",
     gainDb: 0,
     releaseSec: 0.1,
-    create: (Tone, db, params) =>
+    create: (Tone, db, params, out) =>
       poly(
         glideSynth(Tone, Tone.FMSynth, {
           harmonicity: 3,
@@ -228,7 +240,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
           envelope: { attack: 0.005, decay: 0.1, sustain: 0.4, release: 0.1 },
         }),
         db,
-        { Tone, params },
+        { Tone, params, out },
       ),
   },
   square: { number: 1, name: "square", gainDb: -13.1, releaseSec: 0.1, create: basic({ type: "square" }) },
@@ -241,14 +253,14 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     name: "organ",
     gainDb: -14.2,
     releaseSec: 0.05,
-    create: (Tone, db, params) =>
+    create: (Tone, db, params, out) =>
       poly(
         glideSynth(Tone, Tone.Synth, {
           oscillator: { type: "custom", partials: [1, 0.6, 0.4, 0.25, 0.15] },
           envelope: { attack: 0.01, decay: 0.05, sustain: 1, release: 0.05 },
         }),
         db,
-        { Tone, params },
+        { Tone, params, out },
       ),
   },
   epiano: {
@@ -256,7 +268,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     name: "epiano",
     gainDb: -0.5,
     releaseSec: 0.3,
-    create: (Tone, db, params) =>
+    create: (Tone, db, params, out) =>
       poly(
         glideSynth(Tone, Tone.FMSynth, {
           harmonicity: 2,
@@ -265,7 +277,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
           modulationEnvelope: { attack: 0.005, decay: 0.3, sustain: 0.3, release: 0.3 },
         }),
         db,
-        { Tone, params },
+        { Tone, params, out },
       ),
   },
   bell: {
@@ -273,7 +285,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     name: "bell",
     gainDb: 0.1,
     releaseSec: 0.5,
-    create: (Tone, db, params) =>
+    create: (Tone, db, params, out) =>
       poly(
         glideSynth(Tone, Tone.FMSynth, {
           harmonicity: 5.07,
@@ -282,7 +294,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
           modulationEnvelope: { attack: 0.001, decay: 0.4, sustain: 0.1, release: 0.4 },
         }),
         db,
-        { Tone, params },
+        { Tone, params, out },
       ),
   },
   am: {
@@ -290,14 +302,14 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     name: "am",
     gainDb: 4.3,
     releaseSec: 0.2,
-    create: (Tone, db, params) =>
+    create: (Tone, db, params, out) =>
       poly(
         glideSynth(Tone, Tone.AMSynth, {
           envelope: { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.2 },
           modulationEnvelope: { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.2 },
         }),
         db,
-        { Tone, params },
+        { Tone, params, out },
       ),
   },
   lead: {
@@ -305,7 +317,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     name: "lead",
     gainDb: -15.9,
     releaseSec: 0.15,
-    create: (Tone, db, params) => {
+    create: (Tone, db, params, out) => {
       const voice = { envelope: { attack: 0.01, decay: 0.1, sustain: 0.6, release: 0.15 } };
       return poly(
         glideSynth(Tone, Tone.DuoSynth, {
@@ -316,7 +328,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
           voice1: voice,
         }),
         db,
-        { Tone, params, duo: true },
+        { Tone, params, out, duo: true },
       );
     },
   },
@@ -325,7 +337,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     name: "bass",
     gainDb: -10.0,
     releaseSec: 0.2,
-    create: (Tone, db, params) =>
+    create: (Tone, db, params, out) =>
       poly(
         glideSynth(Tone, Tone.MonoSynth, {
           oscillator: { type: "sawtooth" },
@@ -334,7 +346,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
           filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.2, baseFrequency: 200, octaves: 3 },
         }),
         db,
-        { Tone, params },
+        { Tone, params, out },
       ),
   },
   drum: {
@@ -343,12 +355,13 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     gainDb: -6.1,
     releaseSec: 0.3,
     percussive: true,
-    create: (Tone, db) =>
+    create: (Tone, db, _params, out) =>
       poly(
         new Tone.PolySynth(Tone.MembraneSynth, {
           envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.3 },
         }),
         db,
+        { Tone, params: null, out },
       ),
   },
   noise: {
@@ -358,12 +371,13 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     releaseSec: 0.05,
     percussive: true,
     perNote: true,
-    create: (Tone, db) => {
+    create: (Tone, db, _params, out) => {
       // NoiseSynth は単音用で PolySynth に包めない。音程は無視する。
       const synth = new Tone.NoiseSynth({
         noise: { type: "white" },
         envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.05 },
-      }).toDestination();
+      });
+      connectOut(synth, out);
       synth.volume.value = db;
       return { trigger: (_hz, d, t, v) => void synth.triggerAttackRelease(d, t, v) };
     },
@@ -374,7 +388,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     gainDb: 0,
     releaseSec: 0.2,
     percussive: true,
-    create: (Tone, db) => drumkit(Tone, db),
+    create: (Tone, db, _params, out) => drumkit(Tone, db, out),
   },
 };
 

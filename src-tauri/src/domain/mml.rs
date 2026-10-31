@@ -110,6 +110,23 @@ pub struct Glide {
     pub ms: u16,
 }
 
+/// リバーブ(Issue #499)。`level` は送る量(1〜100 %)、`decay_ms` は残響の長さ(100〜5000 ミリ秒)。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReverbParams {
+    pub level: u8,
+    pub decay_ms: u16,
+}
+
+/// ディレイ(Issue #499)。`level` は送る量(1〜100 %)、`time_ms` は間隔(50〜1000 ミリ秒)、`feedback` は繰り返し(0〜90 %)。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DelayParams {
+    pub level: u8,
+    pub time_ms: u16,
+    pub feedback: u8,
+}
+
 /// MML から展開した 1 音(Issue #75)。時刻は秒で、テンポ変化・繰り返し・タイは解決済み。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -128,6 +145,10 @@ pub struct NoteEvent {
     pub params: Option<TimbreParams>,
     /// `p` のポルタメント(滑らない音は `None`)
     pub glide: Option<Glide>,
+    /// `x` のリバーブ(効かせない音は `None`)
+    pub reverb: Option<ReverbParams>,
+    /// `z` のディレイ(効かせない音は `None`)
+    pub delay: Option<DelayParams>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

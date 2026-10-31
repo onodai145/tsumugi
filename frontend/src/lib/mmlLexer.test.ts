@@ -80,13 +80,13 @@ describe("lexMml", () => {
   });
 
   it("構文が誤っていても例外を出さず、最後まで分類する(解析は parseMml の仕事)", () => {
-    expect(lex("c4 x")).toEqual([
+    expect(lex("c4 j")).toEqual([
       ["c", "note"],
       ["4", "number"],
-      ["x", "unknown"],
+      ["j", "unknown"],
     ]);
     expect(lex("@")).toEqual([["@", "timbre"]]);
-    expect(lexMml("@zzz").map((t) => t.kind)).toEqual(["timbre", "unknown", "unknown", "unknown"]);
+    expect(lexMml("@jjj").map((t) => t.kind)).toEqual(["timbre", "unknown", "unknown", "unknown"]);
     expect(lexMml("]]").map((t) => t.kind)).toEqual(["repeat", "repeat"]);
   });
 
@@ -332,6 +332,25 @@ describe("lexMml", () => {
       ["0", "number"],
     ]);
   });
+  it("エフェクト x z は command、数字は number、カンマは command(Issue #499)", () => {
+    expect(lex("x30,2000 z25,300,40 x0 z0")).toEqual([
+      ["x", "command"],
+      ["30", "number"],
+      [",", "command"],
+      ["2000", "number"],
+      ["z", "command"],
+      ["25", "number"],
+      [",", "command"],
+      ["300", "number"],
+      [",", "command"],
+      ["40", "number"],
+      ["x", "command"],
+      ["0", "number"],
+      ["z", "command"],
+      ["0", "number"],
+    ]);
+  });
+
   it("y m k の後ろに数字がなくても、読めない文字にはしない。途中のカンマだけ・末尾のカンマも", () => {
     expect(lex("y")).toEqual([["y", "command"]]);
     expect(lex("m5,")).toEqual([
