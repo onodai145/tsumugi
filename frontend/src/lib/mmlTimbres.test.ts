@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Timbre } from "../bindings/tauri.gen";
 import { TAIL_SEC } from "./mmlRender";
-import { TIMBRES, TIMBRE_LIST, glideVoice, type ToneModule } from "./mmlTimbres";
+import { TIMBRES, TIMBRE_LIST, glideVoice, type ToneModule, type VoiceOutput } from "./mmlTimbres";
 
 // Rust 側(domain/mml.rs の Timbre::ALL と mml.rs の TIMBRE_TABLE)と同じ並び。変えるときは両方を直す。
 const EXPECTED: [number, Timbre][] = [
@@ -397,6 +397,61 @@ describe("音色のパラメーター(Issue #499)", () => {
       TIMBRES[name].create(Tone, -3, params({ envelope: ENV, vibrato: { rateHz: 5, depth: 30 }, detune: 7 }));
       expect(made.filter((m) => m.cls === "Vibrato"), name).toHaveLength(0);
       for (const m of made.filter((x) => x.cls === "PolySynth")) expect((m.node as unknown as { sets: unknown[] }).sets, name).toEqual([]);
+    }
+  });
+});
+
+describe("エフェクトのバスへのつなぎ(Issue #499)", () => {
+  const MELODIC: Timbre[] = ["fm", "square", "pulse", "triangle", "saw", "sine", "organ", "epiano", "bell", "am", "lead", "bass"];
+  const out = { name: "bus" } as unknown as VoiceOutput;
+  type Wired = { destinations: number; connected: unknown[] };
+  const wired = (made: ReturnType<typeof fakeTone>["made"], cls: string) => made.find((m) => m.cls === cls)!.node as unknown as Wired;
+
+  it("out を渡すと、旋律の 12 種は出力でなく out に繋ぐ", () => {
+    for (const name of MELODIC) {
+      const { Tone, made } = fakeTone();
+      TIMBRES[name].create(Tone, -3, null, out);
+      const poly = wired(made, "PolySynth");
+      expect(poly.destinations, name).toBe(0);
+      expect(poly.connected, name).toEqual([out]);
+    }
+  });
+
+  it("ビブラートがあるときは、ビブラートが out に繋ぎ、音源はビブラートに繋ぐ", () => {
+    const { Tone, made } = fakeTone();
+    TIMBRES.fm.create(Tone, -3, { envelope: null, vibrato: { rateHz: 5, depth: 30 }, detune: 0 }, out);
+    const vibrato = wired(made, "Vibrato");
+    expect(vibrato.connected).toEqual([out]);
+    expect(vibrato.destinations).toBe(0);
+    const poly = wired(made, "PolySynth");
+    expect(poly.destinations).toBe(0);
+    expect(poly.connected).toEqual([made.find((m) => m.cls === "Vibrato")!.node]);
+  });
+
+  it("打楽器(drum・noise・drumkit)も out に繋ぐ", () => {
+    const percussion: [Timbre, string][] = [["drum", "PolySynth"], ["noise", "NoiseSynth"], ["drumkit", "Volume"]];
+    for (const [name, cls] of percussion) {
+      const { Tone, made } = fakeTone();
+      TIMBRES[name].create(Tone, -3, null, out);
+      const node = wired(made, cls);
+      expect(node.destinations, name).toBe(0);
+      expect(node.connected, name).toEqual([out]);
+    }
+  });
+
+  it("out を渡さなければ、全 15 種が今までどおり出力へ繋ぐ", () => {
+    const all: [Timbre, string][] = [
+      ...MELODIC.map((n): [Timbre, string] => [n, "PolySynth"]),
+      ["drum", "PolySynth"],
+      ["noise", "NoiseSynth"],
+      ["drumkit", "Volume"],
+    ];
+    for (const [name, cls] of all) {
+      const { Tone, made } = fakeTone();
+      TIMBRES[name].create(Tone, -3);
+      const node = wired(made, cls);
+      expect(node.destinations, name).toBe(1);
+      expect(node.connected, name).toEqual([]);
     }
   });
 });

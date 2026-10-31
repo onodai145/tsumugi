@@ -1,8 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Glide, MmlScore, NoteEvent, Timbre, TimbreParams } from "../bindings/tauri.gen";
+import type { DelayParams, Glide, MmlScore, NoteEvent, ReverbParams, Timbre, TimbreParams } from "../bindings/tauri.gen";
+import { MAX_EFFECT_TAIL_SEC } from "./mmlEffects";
 
 type Call = { hz: number; d: number; t: number; v: number; midi?: number; glide?: { fromHz: number; sec: number } };
-const created: { timbre: string; volumeDb: number; params: unknown; calls: Call[] }[] = [];
+const created: { timbre: string; volumeDb: number; params: unknown; out: unknown; calls: Call[] }[] = [];
+
+/** Tone のエフェクト用ノードの代役。作ったもの・送りの設定を記録する */
+const toneNodes: { kind: string; args: unknown[]; connected: unknown[]; destinations: number; sets: [number, number][] }[] = [];
+let reverbReady: Promise<unknown> = Promise.resolve();
+class FakeToneNode {
+  connected: unknown[] = [];
+  destinations = 0;
+  sets: [number, number][] = [];
+  gain = { setValueAtTime: (v: number, t: number) => void this.sets.push([v, t]) };
+  ready: Promise<unknown>;
+  constructor(
+    public kind: string,
+    public args: unknown[],
+  ) {
+    this.ready = kind === "Reverb" ? reverbReady : Promise.resolve();
+    toneNodes.push(this);
+  }
+  connect(to: unknown) {
+    this.connected.push(to);
+    return this;
+  }
+  toDestination() {
+    this.destinations++;
+    return this;
+  }
+}
+const toneClass = (kind: string) =>
+  class extends FakeToneNode {
+    constructor(...args: unknown[]) {
+      super(kind, args);
+    }
+  };
 
 vi.mock("./mmlTimbres", () => {
   const mk = (name: string, gainDb: number, perNote = false, percussive = false) => ({
@@ -12,8 +45,8 @@ vi.mock("./mmlTimbres", () => {
     releaseSec: 0.1,
     perNote,
     percussive,
-    create: (_Tone: unknown, volumeDb: number, params?: unknown) => {
-      const rec = { timbre: name, volumeDb, params, calls: [] as Call[] };
+    create: (_Tone: unknown, volumeDb: number, params?: unknown, out?: unknown) => {
+      const rec = { timbre: name, volumeDb, params, out, calls: [] as Call[] };
       created.push(rec);
       return {
         trigger: (hz: number, d: number, t: number, v: number, midi?: number, glide?: { fromHz: number; sec: number }) =>
@@ -26,14 +59,17 @@ vi.mock("./mmlTimbres", () => {
   };
 });
 
-const offline = vi.fn(async (cb: () => void, _dur: number, _ch: number, sr: number) => {
-  cb();
+const offline = vi.fn(async (cb: () => void | Promise<void>, _dur: number, _ch: number, sr: number) => {
+  await cb();
   return { get: () => ({ sampleRate: sr, getChannelData: () => new Float32Array([0, 0.5, -0.5]) }) };
 });
 vi.mock("tone", () => ({
   Offline: offline,
   Frequency: (midi: number) => ({ toFrequency: () => midi * 10 }),
   gainToDb: (g: number) => 20 * Math.log10(g),
+  Gain: toneClass("Gain"),
+  Reverb: toneClass("Reverb"),
+  FeedbackDelay: toneClass("FeedbackDelay"),
 }));
 
 const { renderScore, TAIL_SEC } = await import("./mmlRender");
@@ -62,6 +98,8 @@ const score = (notes: NoteEvent[], trackCount = 1, totalSec = 1): MmlScore => ({
 beforeEach(() => {
   created.length = 0;
   offline.mockClear();
+  toneNodes.length = 0;
+  reverbReady = Promise.resolve();
 });
 
 describe("renderScore", () => {
@@ -207,5 +245,74 @@ describe("renderScore: ポルタメント(Issue #499)", () => {
   it("打楽器は glide を無視する", async () => {
     await renderScore(score([note(0, "drum", 0.5, 64, null, g(60, 80)), note(0, "noise", 1, 64, null, g(60, 80))]));
     expect(created.every((c) => c.calls.every((x) => x.glide === undefined))).toBe(true);
+  });
+});
+
+describe("renderScore: エフェクト(Issue #499)", () => {
+  const withFx = (n: NoteEvent, fx: { reverb?: ReverbParams; delay?: DelayParams }): NoteEvent => ({
+    ...n,
+    reverb: fx.reverb ?? null,
+    delay: fx.delay ?? null,
+  });
+  const reverb = (level: number, decayMs: number): ReverbParams => ({ level, decayMs });
+  const delay = (level: number, timeMs: number, feedback: number): DelayParams => ({ level, timeMs, feedback });
+
+  it("エフェクトを使わない MML は、音源のつなぎ先を渡さず、エフェクト用のノードも作らない", async () => {
+    await renderScore(score([note(0, "fm"), note(1, "square")], 2));
+    expect(created.every((c) => c.out === undefined)).toBe(true);
+    expect(toneNodes).toHaveLength(0);
+  });
+
+  it("エフェクトを使うトラックだけ、音源をそのトラックのバスにつなぐ", async () => {
+    await renderScore(score([withFx(note(0, "fm"), { reverb: reverb(30, 2000) }), note(1, "fm")], 2));
+    const bus = toneNodes.find((n) => n.kind === "Gain")!;
+    expect(created[0].out).toBe(bus);
+    expect(created[1].out).toBeUndefined();
+  });
+
+  it("エフェクトの量・種類が違っても、音源の組は増えない", async () => {
+    await renderScore(
+      score([
+        withFx(note(0, "fm", 0), { reverb: reverb(30, 2000) }),
+        withFx(note(0, "fm", 0.5), { reverb: reverb(60, 500) }),
+        withFx(note(0, "fm", 1), { delay: delay(25, 300, 40) }),
+        note(0, "fm", 1.5),
+      ]),
+    );
+    expect(created).toHaveLength(1);
+    expect(created[0].calls).toHaveLength(4);
+  });
+
+  it("描画の長さは、曲の長さ + TAIL_SEC + エフェクトの尾(最大 5 秒)", async () => {
+    await renderScore(score([withFx(note(0, "fm"), { reverb: reverb(30, 2000) })], 1, 2));
+    expect(offline.mock.calls[0][1]).toBeCloseTo(2 + TAIL_SEC + 2.01, 6);
+    offline.mockClear();
+    await renderScore(score([withFx(note(0, "fm"), { delay: delay(100, 1000, 90) })], 1, 2));
+    expect(offline.mock.calls[0][1]).toBeCloseTo(2 + TAIL_SEC + MAX_EFFECT_TAIL_SEC, 6);
+  });
+
+  it("送りは、各音の始まりの時刻に、その音の組の量にする。ほかの組は 0 にする", async () => {
+    await renderScore(
+      score([
+        withFx(note(0, "fm", 0), { reverb: reverb(30, 2000) }),
+        withFx(note(0, "fm", 0.5), { reverb: reverb(60, 2000) }),
+        withFx(note(0, "fm", 1), { reverb: reverb(40, 500) }),
+        note(0, "fm", 1.5),
+      ]),
+    );
+    const sends = toneNodes.filter((n) => n.kind === "Gain" && n.args[0] === 0); // 2000ms の組、500ms の組
+    expect(sends[0].sets).toEqual([[0.3, 0], [0.6, 0.5], [0, 1]]);
+    expect(sends[1].sets).toEqual([[0.4, 1], [0, 1.5]]);
+  });
+
+  it("リバーブの準備(インパルス応答の生成)が終わるまで、音を鳴らさない", async () => {
+    let release!: () => void;
+    reverbReady = new Promise<void>((resolve) => (release = resolve));
+    const done = renderScore(score([withFx(note(0, "fm"), { reverb: reverb(30, 2000) })]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(created).toHaveLength(0);
+    release();
+    await done;
+    expect(created[0].calls).toHaveLength(1);
   });
 });

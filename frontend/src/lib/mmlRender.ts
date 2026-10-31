@@ -1,7 +1,9 @@
 // MmlScore を Tone.js の Tone.Offline で WAV にする(Issue #75、音色は Issue #494)。
 // ここでは音を出さない。出力は data: URL で、再生は Rust(play_notify_sound)が行う。
 // Tone.js は重いので遅延 import し、通常の起動コストに乗せない。
+// エフェクト(リバーブ・ディレイ、Issue #499)のバスと送りは mmlEffects.ts。
 import type { MmlScore, Timbre, TimbreParams } from "../bindings/tauri.gen";
+import { createTrackEffects, effectTailSec } from "./mmlEffects";
 import { TIMBRES, type Voice } from "./mmlTimbres";
 import { encodeWavMono16, wavToDataUrl } from "./wav";
 
@@ -12,9 +14,13 @@ export const TAIL_SEC = 0.6;
 export async function renderScore(score: MmlScore): Promise<string> {
   const Tone = await import("tone");
   const buffer = await Tone.Offline(
-    () => {
+    async () => {
       // 複数トラックを足すと 1.0 を超えて WAV 化で頭打ちになるので、トラック数で割って揃える(単一トラックは補正なし)。
       const trackDb = score.trackCount > 1 ? Tone.gainToDb(1 / score.trackCount) : 0;
+      // エフェクト(Issue #499)。使うトラックにだけバスを作る(使わないトラックは、今までどおり音源を出力へ直接つなぐ)。
+      // リバーブのインパルス応答の生成が終わるまで待ってから、音源を作って鳴らす。
+      const effects = createTrackEffects(Tone, score.notes);
+      await effects.ready();
       // 音源は (トラック, 音色) ごとに最初に使うときに作る。
       const voices = new Map<string, Voice>();
       const voiceFor = (track: number, timbre: Timbre, noteParams: TimbreParams | null): Voice => {
@@ -26,17 +32,21 @@ export async function renderScore(score: MmlScore): Promise<string> {
           preset.percussive || !noteParams || (!noteParams.envelope && !noteParams.vibrato)
             ? null
             : { envelope: noteParams.envelope, vibrato: noteParams.vibrato, detune: 0 };
-        if (preset.perNote) return preset.create(Tone, volumeDb, params);
+        // つなぎ先はトラックごとに決まるので、音源の組(下の key)には入れない
+        const out = effects.outFor(track);
+        if (preset.perNote) return preset.create(Tone, volumeDb, params, out);
         // PolySynth は描画中に設定を時刻つきで変えられないので、パラメーターの組ごとに別の音源を作る
         const key = `${track}:${timbre}:${params === null ? "" : JSON.stringify(params)}`;
         let voice = voices.get(key);
         if (!voice) {
-          voice = preset.create(Tone, volumeDb, params);
+          voice = preset.create(Tone, volumeDb, params, out);
           voices.set(key, voice);
         }
         return voice;
       };
       for (const n of score.notes) {
+        // 音の始まりの時刻に、エフェクトへの送りを切り替える(音は、トラックごとに時刻の昇順)
+        effects.apply(n);
         const percussive = TIMBRES[n.timbre].percussive;
         // デチューン(セント)は、周波数に 2^(セント/1200) を掛ける。打楽器は無視する
         const cents = percussive ? 0 : (n.params?.detune ?? 0);
@@ -52,7 +62,8 @@ export async function renderScore(score: MmlScore): Promise<string> {
         voiceFor(n.track, n.timbre, n.params ?? null).trigger(hz, durationSec, n.startSec ?? 0, n.velocity ?? 0, n.midi, glide);
       }
     },
-    (score.totalSec ?? 0) + TAIL_SEC,
+    // 音源の余韻(TAIL_SEC)の後に、エフェクトの尾(使わなければ 0)が続く
+    (score.totalSec ?? 0) + TAIL_SEC + effectTailSec(score.notes),
     1,
     SAMPLE_RATE,
   );
