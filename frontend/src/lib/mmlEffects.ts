@@ -9,6 +9,8 @@ export const REVERB_PREDELAY_SEC = 0.01;
 export const MAX_EFFECT_TAIL_SEC = 5;
 /** ディレイの繰り返しが、元の 1/1000(−60 dB)まで下がったら、尾を終える */
 const DELAY_FLOOR = 0.001;
+/** エフェクトの出力を、描画の終わりの手前から 0 までフェードさせる長さ(秒)。尾が上限で頭打ちになっても、急に切れない */
+const FADE_OUT_SEC = 0.3;
 /** エフェクトの出力の補正(dB)。リバーブは畳み込みで音量が変わるので、実測で決める(計画の Task 2 のゲート) */
 export const REVERB_TRIM_DB = 0;
 export const DELAY_TRIM_DB = 0;
@@ -67,9 +69,10 @@ const gainOf = (db: number) => 10 ** (db / 20);
 
 /**
  * エフェクトを使うトラックにだけ、バスと、組ごとの「送り → エフェクト → 補正 → 出力」を作る。
+ * `endSec` は描画の終わりの時刻(秒)。エフェクトの出力は、その `FADE_OUT_SEC` 前から 0 までフェードする。
  * `Tone.Offline` のコールバックの中で、音源を作る前に呼ぶ。
  */
-export function createTrackEffects(Tone: ToneModule, notes: NoteEvent[]): TrackEffects {
+export function createTrackEffects(Tone: ToneModule, notes: NoteEvent[], endSec: number): TrackEffects {
   const tracks = new Map<number, TrackFx>();
   const pending: Promise<unknown>[] = [];
 
@@ -85,6 +88,8 @@ export function createTrackEffects(Tone: ToneModule, notes: NoteEvent[]): TrackE
   const addGroup = (fx: TrackFx, key: string, effect: ToneNode, trimDb: number, level: Group["level"]) => {
     const send = new Tone.Gain(0);
     const trim = new Tone.Gain(gainOf(trimDb)).toDestination();
+    trim.gain.setValueAtTime(gainOf(trimDb), Math.max(0, endSec - FADE_OUT_SEC));
+    trim.gain.linearRampToValueAtTime(0, endSec);
     fx.bus.connect(send);
     send.connect(effect);
     effect.connect(trim);

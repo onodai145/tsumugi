@@ -6,13 +6,17 @@ type Call = { hz: number; d: number; t: number; v: number; midi?: number; glide?
 const created: { timbre: string; volumeDb: number; params: unknown; out: unknown; calls: Call[] }[] = [];
 
 /** Tone のエフェクト用ノードの代役。作ったもの・送りの設定を記録する */
-const toneNodes: { kind: string; args: unknown[]; connected: unknown[]; destinations: number; sets: [number, number][] }[] = [];
+const toneNodes: { kind: string; args: unknown[]; connected: unknown[]; destinations: number; sets: [number, number][]; ramps: [number, number][] }[] = [];
 let reverbReady: Promise<unknown> = Promise.resolve();
 class FakeToneNode {
   connected: unknown[] = [];
   destinations = 0;
   sets: [number, number][] = [];
-  gain = { setValueAtTime: (v: number, t: number) => void this.sets.push([v, t]) };
+  ramps: [number, number][] = [];
+  gain = {
+    setValueAtTime: (v: number, t: number) => void this.sets.push([v, t]),
+    linearRampToValueAtTime: (v: number, t: number) => void this.ramps.push([v, t]),
+  };
   ready: Promise<unknown>;
   constructor(
     public kind: string,
@@ -59,8 +63,16 @@ vi.mock("./mmlTimbres", () => {
   };
 });
 
+let activeRenders = 0;
+let maxActiveRenders = 0;
 const offline = vi.fn(async (cb: () => void | Promise<void>, _dur: number, _ch: number, sr: number) => {
-  await cb();
+  activeRenders++;
+  maxActiveRenders = Math.max(maxActiveRenders, activeRenders);
+  try {
+    await cb();
+  } finally {
+    activeRenders--;
+  }
   return { get: () => ({ sampleRate: sr, getChannelData: () => new Float32Array([0, 0.5, -0.5]) }) };
 });
 vi.mock("tone", () => ({
@@ -100,6 +112,8 @@ beforeEach(() => {
   offline.mockClear();
   toneNodes.length = 0;
   reverbReady = Promise.resolve();
+  activeRenders = 0;
+  maxActiveRenders = 0;
 });
 
 describe("renderScore", () => {
@@ -314,5 +328,35 @@ describe("renderScore: エフェクト(Issue #499)", () => {
     release();
     await done;
     expect(created[0].calls).toHaveLength(1);
+  });
+
+  it("リバーブ入りの描画が同時に走っても、Tone のコンテキストが混ざらないよう、1 つずつ順に走らせる", async () => {
+    let release!: () => void;
+    reverbReady = new Promise<void>((resolve) => (release = resolve));
+    const s = score([withFx(note(0, "fm"), { reverb: reverb(30, 2000) })]);
+    const first = renderScore(s);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // 1 つ目が、リバーブの準備待ちに入ってから
+    const second = renderScore(s);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(maxActiveRenders).toBe(1);
+    expect(offline).toHaveBeenCalledTimes(1); // 2 つ目は、1 つ目が終わるまで始まらない
+    release();
+    await Promise.all([first, second]);
+    expect(offline).toHaveBeenCalledTimes(2);
+    expect(maxActiveRenders).toBe(1);
+  });
+
+  it("描画が失敗しても、次の描画は走る", async () => {
+    offline.mockRejectedValueOnce(new Error("boom"));
+    await expect(renderScore(score([note(0, "fm")]))).rejects.toThrow("boom");
+    await expect(renderScore(score([note(0, "fm")]))).resolves.toMatch(/^data:audio\/wav/);
+  });
+
+  it("エフェクトの出力は、描画の終わりの手前で 0 までフェードする(尾が頭打ちで急に切れないように)", async () => {
+    await renderScore(score([withFx(note(0, "fm"), { delay: delay(100, 1000, 90) })], 1, 2));
+    const end = 2 + TAIL_SEC + MAX_EFFECT_TAIL_SEC;
+    const trim = toneNodes.find((n) => n.kind === "Gain" && n.args[0] === 1 && n.destinations === 1 && n.connected.length === 0)!;
+    expect(trim.ramps).toEqual([[0, end]]);
+    expect(trim.sets.at(-1)![1]).toBeCloseTo(end - 0.3, 6);
   });
 });

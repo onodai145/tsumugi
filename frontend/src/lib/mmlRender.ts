@@ -11,15 +11,29 @@ const SAMPLE_RATE = 22050;
 /** 音色の余韻(リリース)が切れないように足す秒数。全プリセットの releaseSec はこれ以下にする */
 export const TAIL_SEC = 0.6;
 
-export async function renderScore(score: MmlScore): Promise<string> {
+/**
+ * `Tone.Offline` は、使うコンテキストを Tone 全体の変数で切り替える。リバーブの準備を待つ間に別の描画が始まると、
+ * 音源が別の描画のコンテキストに作られて壊れる(Issue #499)ので、描画は 1 つずつ順に走らせる。
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+export function renderScore(score: MmlScore): Promise<string> {
+  const run = queue.then(() => renderScoreNow(score));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function renderScoreNow(score: MmlScore): Promise<string> {
   const Tone = await import("tone");
+  // 音源の余韻(TAIL_SEC)の後に、エフェクトの尾(使わなければ 0)が続く
+  const durationSec = (score.totalSec ?? 0) + TAIL_SEC + effectTailSec(score.notes);
   const buffer = await Tone.Offline(
     async () => {
       // 複数トラックを足すと 1.0 を超えて WAV 化で頭打ちになるので、トラック数で割って揃える(単一トラックは補正なし)。
       const trackDb = score.trackCount > 1 ? Tone.gainToDb(1 / score.trackCount) : 0;
       // エフェクト(Issue #499)。使うトラックにだけバスを作る(使わないトラックは、今までどおり音源を出力へ直接つなぐ)。
       // リバーブのインパルス応答の生成が終わるまで待ってから、音源を作って鳴らす。
-      const effects = createTrackEffects(Tone, score.notes);
+      const effects = createTrackEffects(Tone, score.notes, durationSec);
       await effects.ready();
       // 音源は (トラック, 音色) ごとに最初に使うときに作る。
       const voices = new Map<string, Voice>();
@@ -62,8 +76,7 @@ export async function renderScore(score: MmlScore): Promise<string> {
         voiceFor(n.track, n.timbre, n.params ?? null).trigger(hz, durationSec, n.startSec ?? 0, n.velocity ?? 0, n.midi, glide);
       }
     },
-    // 音源の余韻(TAIL_SEC)の後に、エフェクトの尾(使わなければ 0)が続く
-    (score.totalSec ?? 0) + TAIL_SEC + effectTailSec(score.notes),
+    durationSec,
     1,
     SAMPLE_RATE,
   );
