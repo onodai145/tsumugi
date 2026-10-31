@@ -116,7 +116,9 @@ function poly(synth: AnyPoly, volumeDb: number, fx?: Fx): Voice {
   }
   return {
     trigger: (hz, d, t, v, _midi, glide) => {
-      // 滑る指定は、鳴らす時刻で表に入れる。声が、アタックで同じ時刻の `setNote` を呼ぶときに取り出す
+      // 滑る指定は、鳴らす時刻で表に入れる。声が、アタックで同じ時刻の `setNote` を呼ぶときに取り出して消す。
+      // ここで消してはいけない: 未来の時刻の音は `PolySynth` が `setTimeout` で後から鳴らす(`Tone.Offline` の中では、全部の音がまず時刻 0 に呼ばれる)。
+      // 同時発音数の上限で Tone が音を落としたときは、指定が表に残るが、表は描画ごとに作る音源のもので、同じ時刻の別の単音は無いので害はない
       if (glide) GLIDES.get(synth)?.set(t, glide);
       synth.triggerAttackRelease(hz, d, t, v);
     },
