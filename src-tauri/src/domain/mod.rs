@@ -31,8 +31,8 @@ pub use clip::Clip;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::{SourceItem, UserList};
 pub use mml::{
-    EnvelopeParams, Glide, MmlError, MmlParseResult, MmlScore, NoteEvent, Timbre, TimbreParams,
-    VibratoParams,
+    DelayParams, EnvelopeParams, Glide, MmlError, MmlParseResult, MmlScore, NoteEvent,
+    ReverbParams, Timbre, TimbreParams, VibratoParams,
 };
 pub use mute::MuteConfig;
 pub use note::{DriveFile, Note, Poll, PollChoice, Translation, Visibility};

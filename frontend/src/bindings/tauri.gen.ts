@@ -601,6 +601,13 @@ export type DebugMetrics = {
 	resumeCacheFallback: number,
 };
 
+/**  ディレイ(Issue #499)。`level` は送る量(1〜100 %)、`time_ms` は間隔(50〜1000 ミリ秒)、`feedback` は繰り返し(0〜90 %)。 */
+export type DelayParams = {
+	level: number,
+	timeMs: number,
+	feedback: number,
+};
+
 export type Draft = {
 	id: string,
 	accountId: string,
@@ -892,6 +899,10 @@ export type NoteEvent = {
 	params: TimbreParams | null,
 	/**  `p` のポルタメント(滑らない音は `None`) */
 	glide: Glide | null,
+	/**  `x` のリバーブ(効かせない音は `None`) */
+	reverb: ReverbParams | null,
+	/**  `z` のディレイ(効かせない音は `None`) */
+	delay: DelayParams | null,
 };
 
 export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };
@@ -983,6 +994,12 @@ export type ReactionUser = {
 	user: User,
 	/**  Misskey形式キー（Unicode生 or :name@host:） */
 	reaction: string,
+};
+
+/**  リバーブ(Issue #499)。`level` は送る量(1〜100 %)、`decay_ms` は残響の長さ(100〜5000 ミリ秒)。 */
+export type ReverbParams = {
+	level: number,
+	decayMs: number,
 };
 
 /**  接続先サーバーが対応する予約投稿機能。フロントはこれを見て予約ボタンの出し分けをする。 */

@@ -54,6 +54,8 @@ const note = (
   timbre,
   params,
   glide,
+  reverb: null,
+  delay: null,
 });
 const score = (notes: NoteEvent[], trackCount = 1, totalSec = 1): MmlScore => ({ notes, totalSec, trackCount });
 

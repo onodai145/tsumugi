@@ -7,7 +7,8 @@
 //! 構文の拡張(タイ・連符・コメントなど)は 2026-10-20-issue-499-mml-syntax-extension-design.md を参照。
 
 use crate::domain::{
-    EnvelopeParams, Glide, MmlError, MmlScore, NoteEvent, Timbre, TimbreParams, VibratoParams,
+    DelayParams, EnvelopeParams, Glide, MmlError, MmlScore, NoteEvent, ReverbParams, Timbre,
+    TimbreParams, VibratoParams,
 };
 use crate::error::Error;
 use std::collections::HashMap;
@@ -36,6 +37,20 @@ const DEFAULT_VOLUME: u32 = 10;
 const MAX_GATE: u32 = 100;
 /// ポルタメント `p` の最大(ミリ秒)。
 const MAX_PORTAMENTO_MS: u32 = 1000;
+/// エフェクト `x` `z` の範囲。量は百分率、時間はミリ秒、繰り返しは百分率。
+const MAX_EFFECT_LEVEL: u32 = 100;
+const MIN_REVERB_DECAY_MS: u32 = 100;
+const MAX_REVERB_DECAY_MS: u32 = 5000;
+const MIN_DELAY_TIME_MS: u32 = 50;
+const MAX_DELAY_TIME_MS: u32 = 1000;
+const MAX_DELAY_FEEDBACK: u32 = 90;
+/// 1 トラックに書ける、リバーブ(長さ)とディレイ((間隔, 繰り返し))の、種類の数の上限。
+/// 種類ごとに描画のエフェクトを作る(リバーブは作るたびに重い)ので、数を抑える。
+const MAX_EFFECT_KINDS: usize = 4;
+const REVERB_KINDS_MESSAGE: &str =
+    "1 トラックに書けるリバーブは 4 種類までです(長さが違うものを数えます)";
+const DELAY_KINDS_MESSAGE: &str =
+    "1 トラックに書けるディレイは 4 種類までです(間隔・繰り返しが違うものを数えます)";
 
 fn mml_err(pos: usize, message: impl Into<String>) -> MmlError {
     MmlError {
@@ -82,6 +97,10 @@ enum Op {
     Detune(i16),
     /// `p<n>`。ポルタメントの時間(ミリ秒。`0` は解除)。
     Portamento(u16),
+    /// `x 量,長さ`(`None` は `x0` の解除)。
+    Reverb(Option<ReverbParams>),
+    /// `z 量,間隔,繰り返し`(`None` は `z0` の解除)。
+    Delay(Option<DelayParams>),
     /// `{`。対応する `}` までの音符・休符・`^` の長さを、`}` の後の長さに収める。
     TupletStart,
     /// `}<長さ>`。長さ省略は `{` の時点の `l` の値。
@@ -473,6 +492,54 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 }
                 Op::Portamento(n as u16)
             }
+            'x' => {
+                let usage = "`x` は `x0`(解除)か `x 量,長さ`(2 つの数)です";
+                let first = c.require_number(pos, 'x')?;
+                if c.peek() != Some(',') {
+                    if first.0 != 0 {
+                        return Err(mml_err(c.pos(), usage));
+                    }
+                    Op::Reverb(None)
+                } else {
+                    let nums = c.comma_numbers(first, 2, usage)?;
+                    if !(1..=MAX_EFFECT_LEVEL).contains(&nums[0].0) {
+                        return Err(mml_err(nums[0].1, "リバーブの量は 1〜100 です"));
+                    }
+                    if !(MIN_REVERB_DECAY_MS..=MAX_REVERB_DECAY_MS).contains(&nums[1].0) {
+                        return Err(mml_err(nums[1].1, "残響の長さは 100〜5000 ミリ秒です"));
+                    }
+                    Op::Reverb(Some(ReverbParams {
+                        level: nums[0].0 as u8,
+                        decay_ms: nums[1].0 as u16,
+                    }))
+                }
+            }
+            'z' => {
+                let usage = "`z` は `z0`(解除)か `z 量,間隔,繰り返し`(3 つの数)です";
+                let first = c.require_number(pos, 'z')?;
+                if c.peek() != Some(',') {
+                    if first.0 != 0 {
+                        return Err(mml_err(c.pos(), usage));
+                    }
+                    Op::Delay(None)
+                } else {
+                    let nums = c.comma_numbers(first, 3, usage)?;
+                    if !(1..=MAX_EFFECT_LEVEL).contains(&nums[0].0) {
+                        return Err(mml_err(nums[0].1, "ディレイの量は 1〜100 です"));
+                    }
+                    if !(MIN_DELAY_TIME_MS..=MAX_DELAY_TIME_MS).contains(&nums[1].0) {
+                        return Err(mml_err(nums[1].1, "ディレイの間隔は 50〜1000 ミリ秒です"));
+                    }
+                    if nums[2].0 > MAX_DELAY_FEEDBACK {
+                        return Err(mml_err(nums[2].1, "ディレイの繰り返しは 0〜90 です"));
+                    }
+                    Op::Delay(Some(DelayParams {
+                        level: nums[0].0 as u8,
+                        time_ms: nums[1].0 as u16,
+                        feedback: nums[2].0 as u8,
+                    }))
+                }
+            }
             '@' => {
                 if c.peek().is_none() {
                     return Err(mml_err(pos, "`@` の後に音色の番号か名前が必要です"));
@@ -527,10 +594,10 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                                 "和音の長さは、閉じの `'` の後ろに書いてください",
                             ));
                         }
-                        'y' | 'm' | 'k' | 'p' => {
+                        'y' | 'm' | 'k' | 'p' | 'x' | 'z' => {
                             return Err(mml_err(
                                 inner_pos,
-                                "`y` `m` `k` `p` は和音の中には書けません(和音の前に書いてください)",
+                                "`y` `m` `k` `p` `x` `z` は和音の中には書けません(和音の前に書いてください)",
                             ));
                         }
                         _ => {
@@ -650,6 +717,14 @@ struct TrackState {
     detune: i16,
     /// `p` のポルタメントの時間(ミリ秒。0 は無効)
     portamento_ms: u16,
+    /// `x` のリバーブ(`None` は無効)
+    reverb: Option<ReverbParams>,
+    /// `z` のディレイ(`None` は無効)
+    delay: Option<DelayParams>,
+    /// このトラックで使ったリバーブの長さ(ミリ秒)の種類。`MAX_EFFECT_KINDS` まで
+    reverb_kinds: Vec<u16>,
+    /// このトラックで使ったディレイの (間隔(ミリ秒), 繰り返し) の種類。`MAX_EFFECT_KINDS` まで
+    delay_kinds: Vec<(u16, u8)>,
     t: f64,
     /// 直前の命令が音符・和音だったとき、その音の `notes` 内の index(`^` と `&` の連結先。休符で空になる)
     last_notes: Vec<usize>,
@@ -794,6 +869,10 @@ fn run_track(
         vibrato: None,
         detune: 0,
         portamento_ms: 0,
+        reverb: None,
+        delay: None,
+        reverb_kinds: Vec::new(),
+        delay_kinds: Vec::new(),
         t: 0.0,
         last_notes: Vec::new(),
         last_chord: false,
@@ -839,6 +918,29 @@ fn run_track(
             Op::Vibrato(v) => st.vibrato = *v,
             Op::Detune(d) => st.detune = *d,
             Op::Portamento(n) => st.portamento_ms = *n,
+            Op::Reverb(r) => {
+                if let Some(p) = r {
+                    if !st.reverb_kinds.contains(&p.decay_ms) {
+                        if st.reverb_kinds.len() >= MAX_EFFECT_KINDS {
+                            return Err(mml_err(pos, REVERB_KINDS_MESSAGE));
+                        }
+                        st.reverb_kinds.push(p.decay_ms);
+                    }
+                }
+                st.reverb = *r;
+            }
+            Op::Delay(d) => {
+                if let Some(p) = d {
+                    let kind = (p.time_ms, p.feedback);
+                    if !st.delay_kinds.contains(&kind) {
+                        if st.delay_kinds.len() >= MAX_EFFECT_KINDS {
+                            return Err(mml_err(pos, DELAY_KINDS_MESSAGE));
+                        }
+                        st.delay_kinds.push(kind);
+                    }
+                }
+                st.delay = *d;
+            }
             Op::TupletStart => st.tuplet_scale = tuplet_scale(&items[i + 1..], st.len),
             Op::TupletEnd { .. } => st.tuplet_scale = 1.0,
             Op::Tie => {
@@ -903,6 +1005,8 @@ fn run_track(
                         timbre: st.timbre,
                         params: timbre_params(&st),
                         glide,
+                        reverb: st.reverb,
+                        delay: st.delay,
                     });
                     st.last_notes.clear();
                     st.last_notes.push(notes.len() - 1);
@@ -941,6 +1045,8 @@ fn run_track(
                         timbre: st.timbre,
                         params: timbre_params(&st),
                         glide: None,
+                        reverb: st.reverb,
+                        delay: st.delay,
                     });
                     st.last_notes.push(notes.len() - 1);
                 }
@@ -1570,16 +1676,16 @@ mod tests {
 
     #[test]
     fn unknown_characters_report_their_position() {
-        let e = must_fail("c4 x");
+        let e = must_fail("c4 j");
         assert_eq!(e.position, 3);
-        assert!(e.message.contains('x'));
+        assert!(e.message.contains('j'));
         assert_eq!(must_fail("c4 あ").position, 3);
     }
 
     #[test]
     fn error_positions_count_whitespace() {
-        assert_eq!(must_fail("c4  x").position, 4);
-        assert_eq!(must_fail("c4\r\nx").position, 4);
+        assert_eq!(must_fail("c4  j").position, 4);
+        assert_eq!(must_fail("c4\r\nj").position, 4);
     }
 
     #[test]
@@ -1600,7 +1706,7 @@ mod tests {
             validate_sound_choice("mml:"),
             Err(crate::error::Error::Invalid(_))
         ));
-        let err = validate_sound_choice("mml:x").unwrap_err();
+        let err = validate_sound_choice("mml:j").unwrap_err();
         assert!(err.to_string().contains("1 文字目"), "{err}");
     }
 
@@ -1655,9 +1761,9 @@ mod tests {
 
     #[test]
     fn error_positions_after_comments_stay_in_the_original_text() {
-        // `/* あ */ c4 x` で x は 12 文字目(0 始まりの 11)
-        assert_eq!(must_fail("/* あ */ c4 x").position, 11);
-        assert_eq!(must_fail("// あ\nx").position, 5);
+        // `/* あ */ c4 j` で j は 12 文字目(0 始まりの 11)
+        assert_eq!(must_fail("/* あ */ c4 j").position, 11);
+        assert_eq!(must_fail("// あ\nj").position, 5);
     }
 
     #[test]
@@ -2124,7 +2230,7 @@ mod tests {
     #[test]
     fn a_later_tracks_syntax_error_comes_before_an_earlier_tracks_run_error() {
         // 全トラックを先に構文解析するので、後ろのトラックの構文エラーが先に出る(エラーが 2 つあるときだけ)
-        let e = must_fail("t32 [c1]99 ; x"); // 1 本目は 90 秒を超える
+        let e = must_fail("t32 [c1]99 ; j"); // 1 本目は 90 秒を超える
         assert_eq!(e.position, 13);
         assert!(e.message.contains("不明な文字"), "{}", e.message);
         // エラーが 1 つなら、今までどおり実行時のエラー
@@ -2284,7 +2390,7 @@ mod tests {
     #[test]
     fn chord_positions_stay_in_the_original_text() {
         // コメントと空白を挟んでも、位置は元のテキストのまま
-        assert_eq!(must_fail("/* あ */ 'c x e'").position, 11); // `x` は 12 文字目
+        assert_eq!(must_fail("/* あ */ 'c j e'").position, 11); // `j` は 12 文字目
         assert_eq!(must_parse("'c/*x*/e'"), must_parse("'ce'"));
         assert_eq!(must_parse("' c e g '"), must_parse("'ceg'"));
     }
@@ -2638,15 +2744,22 @@ mod tests {
 
     #[test]
     fn params_are_rejected_inside_a_chord() {
-        for text in ["'cy1,2,3,4'4", "'cm5,6'4", "'ck12'4", "'cp80'4"] {
+        for text in [
+            "'cy1,2,3,4'4",
+            "'cm5,6'4",
+            "'ck12'4",
+            "'cp80'4",
+            "'cx30,500'4",
+            "'cz25,300,40'4",
+        ] {
             let e = must_fail(text);
             assert_eq!(e.position, 2, "{text}");
             assert!(e.message.contains("和音の中"), "{text}: {}", e.message);
             // 和音の前に書くよう案内する
             assert!(e.message.contains("和音の前"), "{text}: {}", e.message);
         }
-        // y m k 以外は、今までの案内のまま
-        assert!(must_fail("'cz'4").message.contains("音符と"));
+        // 書けない命令以外は、今までの案内のまま
+        assert!(must_fail("'cw'4").message.contains("音符と"));
     }
 
     #[test]
@@ -2833,5 +2946,194 @@ mod tests {
             .map(|t| t.name())
             .collect();
         assert_eq!(percussive, vec!["drum", "noise", "drumkit"]);
+    }
+
+    fn fx_of(text: &str) -> Vec<(Option<ReverbParams>, Option<DelayParams>)> {
+        must_parse(text)
+            .notes
+            .iter()
+            .map(|n| (n.reverb, n.delay))
+            .collect()
+    }
+
+    fn reverb(level: u8, decay_ms: u16) -> Option<ReverbParams> {
+        Some(ReverbParams { level, decay_ms })
+    }
+
+    fn delay(level: u8, time_ms: u16, feedback: u8) -> Option<DelayParams> {
+        Some(DelayParams {
+            level,
+            time_ms,
+            feedback,
+        })
+    }
+
+    #[test]
+    fn effects_are_none_unless_set() {
+        assert_eq!(fx_of("c e g"), vec![(None, None); 3]);
+        assert_eq!(fx_of("x0 z0 c e"), vec![(None, None); 2]);
+        assert_eq!(
+            fx_of("x30,2000 z25,300,40 c x0 z0 e"),
+            vec![(reverb(30, 2000), delay(25, 300, 40)), (None, None)]
+        );
+    }
+
+    #[test]
+    fn reverb_is_read_with_a_range() {
+        assert_eq!(fx_of("x30,2000 c")[0].0, reverb(30, 2000));
+        assert_eq!(fx_of("x1,100 c")[0].0, reverb(1, 100));
+        assert_eq!(fx_of("x100,5000 c")[0].0, reverb(100, 5000));
+        // 後から書いたものが効く
+        assert_eq!(fx_of("x30,2000 x60,500 c")[0].0, reverb(60, 500));
+        for (text, position, word) in [
+            ("x0,2000 c", 1, "リバーブの量"),
+            ("x101,2000 c", 1, "リバーブの量"),
+            ("x30,99 c", 4, "残響の長さ"),
+            ("x30,5001 c", 4, "残響の長さ"),
+        ] {
+            let e = must_fail(text);
+            assert_eq!(e.position, position, "{text}");
+            assert!(e.message.contains(word), "{text}: {}", e.message);
+        }
+    }
+
+    #[test]
+    fn delay_is_read_with_a_range() {
+        assert_eq!(fx_of("z25,300,40 c")[0].1, delay(25, 300, 40));
+        assert_eq!(fx_of("z1,50,0 c")[0].1, delay(1, 50, 0));
+        assert_eq!(fx_of("z100,1000,90 c")[0].1, delay(100, 1000, 90));
+        for (text, position, word) in [
+            ("z0,300,40 c", 1, "ディレイの量"),
+            ("z101,300,40 c", 1, "ディレイの量"),
+            ("z25,49,40 c", 4, "間隔"),
+            ("z25,1001,40 c", 4, "間隔"),
+            ("z25,300,91 c", 8, "繰り返し"),
+        ] {
+            let e = must_fail(text);
+            assert_eq!(e.position, position, "{text}");
+            assert!(e.message.contains(word), "{text}: {}", e.message);
+        }
+    }
+
+    #[test]
+    fn effect_usage_errors_point_at_the_missing_part() {
+        // 数字がない: 命令の文字
+        for text in ["x c", "z c", "x", "z"] {
+            let e = must_fail(text);
+            assert_eq!(e.position, 0, "{text}");
+            assert!(e.message.contains("数値"), "{text}: {}", e.message);
+        }
+        // 0 以外の単独の数 / 数が足りない: 足りなくなった位置(次の文字)
+        let e = must_fail("x30 c");
+        assert_eq!(e.position, 4);
+        assert!(e.message.contains("x0"), "{}", e.message);
+        let e = must_fail("z25 c");
+        assert_eq!(e.position, 4);
+        assert!(e.message.contains("z0"), "{}", e.message);
+        let e = must_fail("z25,300 c");
+        assert_eq!(e.position, 8);
+        assert!(e.message.contains("3 つの数"), "{}", e.message);
+        // 多すぎる: 余分なカンマの位置
+        let e = must_fail("x30,2000,5 c");
+        assert_eq!(e.position, 8);
+        assert!(e.message.contains("2 つの数"), "{}", e.message);
+    }
+
+    #[test]
+    fn effects_are_track_state_and_independent() {
+        // 書いた後の音から効き、リバーブとディレイは別々に解除できる
+        assert_eq!(
+            fx_of("z25,300,40 c x30,2000 e x0 g"),
+            vec![
+                (None, delay(25, 300, 40)),
+                (reverb(30, 2000), delay(25, 300, 40)),
+                (None, delay(25, 300, 40)),
+            ]
+        );
+        // 音色を切り替えても保たれる
+        let both = (reverb(30, 2000), None);
+        assert_eq!(fx_of("x30,2000 c @lead e"), vec![both; 2]);
+        // トラックごとに独立
+        assert_eq!(
+            fx_of("x30,2000 c ; c"),
+            vec![(reverb(30, 2000), None), (None, None)]
+        );
+    }
+
+    #[test]
+    fn effects_work_inside_loops_macros_tuplets_and_ties() {
+        let on = (reverb(30, 2000), None);
+        assert_eq!(
+            fx_of("[x30,2000 c x0 e]2"),
+            vec![on, (None, None), on, (None, None)]
+        );
+        assert_eq!(fx_of("$f={x30,2000} $f c"), vec![on]);
+        assert_eq!(fx_of("{x30,2000 c e g}4"), vec![on; 3]);
+        // タイで延びた 1 つの音は、1 つの音として効く
+        assert_eq!(fx_of("x30,2000 c&c"), vec![on]);
+    }
+
+    #[test]
+    fn effects_apply_to_every_chord_note_and_to_percussion() {
+        assert_eq!(
+            fx_of("z25,300,40 'ceg'4"),
+            vec![(None, delay(25, 300, 40)); 3]
+        );
+        for timbre in ["@drum", "@noise", "@drumkit"] {
+            assert_eq!(
+                fx_of(&format!("{timbre} x30,2000 c")),
+                vec![(reverb(30, 2000), None)],
+                "{timbre}"
+            );
+        }
+    }
+
+    #[test]
+    fn at_most_four_reverb_and_four_delay_kinds_per_track() {
+        // 長さが違う 4 種までは通る。同じ長さに戻っても、量だけが違っても、数え直さない
+        assert!(parse("x30,500 c x30,1000 c x30,1500 c x30,2000 c x30,500 c x99,2000 c").is_ok());
+        let text = "x30,500 c x30,1000 c x30,1500 c x30,2000 c x30,2500 c";
+        let e = must_fail(text);
+        assert_eq!(e.position as usize, text.rfind("x30,2500").unwrap());
+        assert!(e.message.contains("リバーブ"), "{}", e.message);
+        assert!(e.message.contains('4'), "{}", e.message);
+        // x0 は数えない
+        assert!(parse("x30,500 c x0 c x30,1000 c x30,1500 c x30,2000 c x0 c").is_ok());
+        // ディレイは (間隔, 繰り返し) の組で数える。量だけが違うものは同じ種類
+        assert!(parse("z10,100,10 c z20,100,10 c z10,100,20 c z10,200,10 c z10,200,20 c").is_ok());
+        let text = "z10,100,10 c z10,100,20 c z10,200,10 c z10,200,20 c z10,300,10 c";
+        let e = must_fail(text);
+        assert_eq!(e.position as usize, text.rfind("z10,300,10").unwrap());
+        assert!(e.message.contains("ディレイ"), "{}", e.message);
+        assert!(e.message.contains('4'), "{}", e.message);
+        // リバーブとディレイは別に数える(4 + 4)
+        assert!(parse(
+            "x30,500 z10,100,10 c x30,1000 z10,100,20 c x30,1500 z10,200,10 c x30,2000 z10,200,20 c"
+        )
+        .is_ok());
+        // 繰り返しの展開では増えない
+        assert!(parse("l64 [x30,500 c x30,1000 c x30,1500 c x30,2000 c]99").is_ok());
+        // トラックごとに数える
+        assert!(parse(
+            "x30,500 c x30,1000 c x30,1500 c x30,2000 c ; x30,2500 c x30,3000 c x30,3500 c x30,4000 c"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn note_event_serializes_effects_as_camel_case_or_null() {
+        let score = must_parse("x30,2000 z25,300,40 c x0 z0 e");
+        let first = serde_json::to_value(&score.notes[0]).unwrap();
+        assert_eq!(
+            first["reverb"],
+            serde_json::json!({ "level": 30, "decayMs": 2000 })
+        );
+        assert_eq!(
+            first["delay"],
+            serde_json::json!({ "level": 25, "timeMs": 300, "feedback": 40 })
+        );
+        let second = serde_json::to_value(&score.notes[1]).unwrap();
+        assert_eq!(second["reverb"], serde_json::Value::Null);
+        assert_eq!(second["delay"], serde_json::Value::Null);
     }
 }
