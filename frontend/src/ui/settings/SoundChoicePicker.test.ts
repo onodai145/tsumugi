@@ -187,6 +187,15 @@ describe("SoundChoicePicker の MML モード", () => {
     expect(text).toContain("0〜2000");
     expect(text).toContain("4 つ");
   });
+
+  it("記法ヘルプに、ポルタメント p の書き方・範囲・解除が出る(Issue #499)", () => {
+    const { getByTestId } = render(SoundChoicePicker, { value: "mml:c4" });
+    const text = getByTestId("mml-syntax-help").textContent ?? "";
+    expect(text).toContain("p80");
+    expect(text).toContain("ポルタメント");
+    expect(text).toContain("1〜1000");
+    expect(text).toContain("p0");
+  });
 });
 
 describe("SoundChoicePicker の音色・サンプルの挿入(Issue #500)", () => {

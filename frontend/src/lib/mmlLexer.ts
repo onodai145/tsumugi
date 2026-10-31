@@ -29,7 +29,7 @@ interface Sym {
 }
 
 const NOTES = new Set(["a", "b", "c", "d", "e", "f", "g"]);
-const NUMBERED_COMMANDS = new Set(["o", "l", "t", "v", "q"]);
+const NUMBERED_COMMANDS = new Set(["o", "l", "t", "v", "q", "p"]);
 const TIMBRE_NAMES: string[] = TIMBRE_LIST.map((p) => p.name);
 
 function asciiLower(ch: string): string {
