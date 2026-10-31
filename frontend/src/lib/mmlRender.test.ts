@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MmlScore, NoteEvent, Timbre, TimbreParams } from "../bindings/tauri.gen";
+import type { Glide, MmlScore, NoteEvent, Timbre, TimbreParams } from "../bindings/tauri.gen";
 
 type Call = { hz: number; d: number; t: number; v: number; midi?: number };
 const created: { timbre: string; volumeDb: number; params: unknown; calls: Call[] }[] = [];
@@ -37,7 +37,14 @@ vi.mock("tone", () => ({
 
 const { renderScore, TAIL_SEC } = await import("./mmlRender");
 
-const note = (track: number, timbre: Timbre, startSec = 0, midi = 60, params: TimbreParams | null = null): NoteEvent => ({
+const note = (
+  track: number,
+  timbre: Timbre,
+  startSec = 0,
+  midi = 60,
+  params: TimbreParams | null = null,
+  glide: Glide | null = null,
+): NoteEvent => ({
   track,
   startSec,
   durationSec: 0.25,
@@ -45,6 +52,7 @@ const note = (track: number, timbre: Timbre, startSec = 0, midi = 60, params: Ti
   velocity: 0.5,
   timbre,
   params,
+  glide,
 });
 const score = (notes: NoteEvent[], trackCount = 1, totalSec = 1): MmlScore => ({ notes, totalSec, trackCount });
 

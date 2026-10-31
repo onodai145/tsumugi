@@ -31,7 +31,7 @@ pub use clip::Clip;
 pub use column::{Column, ColumnGroup, ColumnKind, FilterQuery};
 pub use list::{SourceItem, UserList};
 pub use mml::{
-    EnvelopeParams, MmlError, MmlParseResult, MmlScore, NoteEvent, Timbre, TimbreParams,
+    EnvelopeParams, Glide, MmlError, MmlParseResult, MmlScore, NoteEvent, Timbre, TimbreParams,
     VibratoParams,
 };
 pub use mute::MuteConfig;

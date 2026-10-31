@@ -7,7 +7,7 @@
 //! 構文の拡張(タイ・連符・コメントなど)は 2026-10-20-issue-499-mml-syntax-extension-design.md を参照。
 
 use crate::domain::{
-    EnvelopeParams, MmlError, MmlScore, NoteEvent, Timbre, TimbreParams, VibratoParams,
+    EnvelopeParams, Glide, MmlError, MmlScore, NoteEvent, Timbre, TimbreParams, VibratoParams,
 };
 use crate::error::Error;
 use std::collections::HashMap;
@@ -34,6 +34,8 @@ const DEFAULT_TEMPO: u32 = 120;
 const DEFAULT_VOLUME: u32 = 10;
 /// ゲートタイム `q` の範囲(百分率)。既定は上限の 100(全長を鳴らす)。
 const MAX_GATE: u32 = 100;
+/// ポルタメント `p` の最大(ミリ秒)。
+const MAX_PORTAMENTO_MS: u32 = 1000;
 
 fn mml_err(pos: usize, message: impl Into<String>) -> MmlError {
     MmlError {
@@ -78,6 +80,8 @@ enum Op {
     Vibrato(Option<VibratoParams>),
     /// `k セント`(`0` は解除)。
     Detune(i16),
+    /// `p<n>`。ポルタメントの時間(ミリ秒。`0` は解除)。
+    Portamento(u16),
     /// `{`。対応する `}` までの音符・休符・`^` の長さを、`}` の後の長さに収める。
     TupletStart,
     /// `}<長さ>`。長さ省略は `{` の時点の `l` の値。
@@ -457,6 +461,18 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                 }
                 Op::Detune(if negative { -(n as i16) } else { n as i16 })
             }
+            'p' => {
+                let (n, p) = c.require_number(pos, 'p')?;
+                if n > MAX_PORTAMENTO_MS {
+                    return Err(mml_err(
+                        p,
+                        format!(
+                            "ポルタメントの時間は 1〜{MAX_PORTAMENTO_MS} ミリ秒です(`p0` で解除)"
+                        ),
+                    ));
+                }
+                Op::Portamento(n as u16)
+            }
             '@' => {
                 if c.peek().is_none() {
                     return Err(mml_err(pos, "`@` の後に音色の番号か名前が必要です"));
@@ -511,10 +527,10 @@ fn parse_track(syms: &[(char, usize)], end: usize) -> Result<Vec<Item>, MmlError
                                 "和音の長さは、閉じの `'` の後ろに書いてください",
                             ));
                         }
-                        'y' | 'm' | 'k' => {
+                        'y' | 'm' | 'k' | 'p' => {
                             return Err(mml_err(
                                 inner_pos,
-                                "`y` `m` `k` は和音の中には書けません(和音の前に書いてください)",
+                                "`y` `m` `k` `p` は和音の中には書けません(和音の前に書いてください)",
                             ));
                         }
                         _ => {
@@ -632,6 +648,8 @@ struct TrackState {
     envelope: Option<EnvelopeParams>,
     vibrato: Option<VibratoParams>,
     detune: i16,
+    /// `p` のポルタメントの時間(ミリ秒。0 は無効)
+    portamento_ms: u16,
     t: f64,
     /// 直前の命令が音符・和音だったとき、その音の `notes` 内の index(`^` と `&` の連結先。休符で空になる)
     last_notes: Vec<usize>,
@@ -679,6 +697,22 @@ fn timbre_params(st: &TrackState) -> Option<TimbreParams> {
             detune: st.detune,
         })
     }
+}
+
+/// 新しい単音 `midi` が滑るなら、その指定。条件は、ポルタメントが有効で、直前が休符をはさまない単音(和音でない)で、
+/// 高さが違い、どちらも旋律の音色であること(`docs/superpowers/specs/2026-10-31-issue-499-mml-portamento-design.md`)。
+fn glide_for(st: &TrackState, notes: &[NoteEvent], midi: i32) -> Option<Glide> {
+    if st.portamento_ms == 0 || st.last_chord || st.timbre.is_percussive() {
+        return None;
+    }
+    let prev = &notes[*st.last_notes.first()?];
+    if prev.timbre.is_percussive() || i32::from(prev.midi) == midi {
+        return None;
+    }
+    Some(Glide {
+        from_midi: prev.midi,
+        ms: st.portamento_ms,
+    })
 }
 
 /// 全長にゲートタイム(百分率)を掛ける。100 のときは掛け算をせず、v1 と同じ値のまま返す。
@@ -759,6 +793,7 @@ fn run_track(
         envelope: None,
         vibrato: None,
         detune: 0,
+        portamento_ms: 0,
         t: 0.0,
         last_notes: Vec::new(),
         last_chord: false,
@@ -803,6 +838,7 @@ fn run_track(
             Op::Envelope(e) => st.envelope = *e,
             Op::Vibrato(v) => st.vibrato = *v,
             Op::Detune(d) => st.detune = *d,
+            Op::Portamento(n) => st.portamento_ms = *n,
             Op::TupletStart => st.tuplet_scale = tuplet_scale(&items[i + 1..], st.len),
             Op::TupletEnd { .. } => st.tuplet_scale = 1.0,
             Op::Tie => {
@@ -853,6 +889,7 @@ fn run_track(
                     notes[idx].duration_sec = gated(st.last_full, st.last_gate);
                     st.last_dirty = false;
                 } else {
+                    let glide = glide_for(&st, notes, midi);
                     flush_last(&mut st, notes);
                     if notes.len() >= MAX_NOTES {
                         return Err(mml_err(pos, format!("音符は {MAX_NOTES} 個までです")));
@@ -865,6 +902,7 @@ fn run_track(
                         velocity: f64::from(st.volume) / 15.0,
                         timbre: st.timbre,
                         params: timbre_params(&st),
+                        glide,
                     });
                     st.last_notes.clear();
                     st.last_notes.push(notes.len() - 1);
@@ -902,6 +940,7 @@ fn run_track(
                         velocity,
                         timbre: st.timbre,
                         params: timbre_params(&st),
+                        glide: None,
                     });
                     st.last_notes.push(notes.len() - 1);
                 }
@@ -2599,7 +2638,7 @@ mod tests {
 
     #[test]
     fn params_are_rejected_inside_a_chord() {
-        for text in ["'cy1,2,3,4'4", "'cm5,6'4", "'ck12'4"] {
+        for text in ["'cy1,2,3,4'4", "'cm5,6'4", "'ck12'4", "'cp80'4"] {
             let e = must_fail(text);
             assert_eq!(e.position, 2, "{text}");
             assert!(e.message.contains("和音の中"), "{text}: {}", e.message);
@@ -2650,5 +2689,149 @@ mod tests {
                 "detune": -12
             })
         );
+    }
+
+    fn glides_of(text: &str) -> Vec<Option<Glide>> {
+        must_parse(text).notes.iter().map(|n| n.glide).collect()
+    }
+
+    fn glide(from_midi: u8, ms: u16) -> Option<Glide> {
+        Some(Glide { from_midi, ms })
+    }
+
+    #[test]
+    fn glide_is_none_unless_p_is_set() {
+        assert_eq!(glides_of("c e g"), vec![None; 3]);
+        assert_eq!(glides_of("p0 c e"), vec![None; 2]);
+        // 解除した後は滑らない
+        assert_eq!(glides_of("p80 c p0 e"), vec![None; 2]);
+    }
+
+    #[test]
+    fn portamento_is_read_as_milliseconds_with_a_range() {
+        assert_eq!(glides_of("p80 c e")[1], glide(60, 80));
+        assert_eq!(glides_of("p1 c e")[1], glide(60, 1));
+        assert_eq!(glides_of("p1000 c e")[1], glide(60, 1000));
+        // 後から書いたものが効く
+        assert_eq!(glides_of("p80 p200 c e")[1], glide(60, 200));
+        let e = must_fail("p1001 c");
+        assert_eq!(e.position, 1); // 数字の先頭
+        assert!(e.message.contains("1000"), "{}", e.message);
+        let e = must_fail("p c");
+        assert_eq!(e.position, 0);
+        assert!(e.message.contains("数値"), "{}", e.message);
+    }
+
+    #[test]
+    fn glide_starts_from_the_previous_single_note() {
+        assert_eq!(
+            glides_of("p80 c e g"),
+            vec![None, glide(60, 80), glide(64, 80)]
+        );
+        // オクターブが違うだけでも、高さが違えば滑る
+        assert_eq!(glides_of("p80 c > c")[1], glide(60, 80));
+    }
+
+    #[test]
+    fn glide_needs_adjacent_single_notes_of_different_pitch() {
+        // 休符をはさむと滑らない。その次の音からは、また滑る
+        assert_eq!(glides_of("p80 c r e"), vec![None; 2]);
+        assert_eq!(
+            glides_of("p80 c e r g a"),
+            vec![None, glide(60, 80), None, glide(67, 80)]
+        );
+        // 同じ高さは滑らない。その次の音は、その高さから滑る
+        assert_eq!(glides_of("p80 c c"), vec![None; 2]);
+        assert_eq!(glides_of("p80 c c e")[2], glide(60, 80));
+        // 和音の音も、和音の直後の音も滑らない。その次の音からは滑る
+        assert_eq!(
+            glides_of("p80 c 'eg' a b"),
+            vec![None, None, None, None, glide(69, 80)]
+        );
+    }
+
+    #[test]
+    fn glide_after_a_tie_starts_from_the_tied_pitch() {
+        assert_eq!(glides_of("p80 c&c e"), vec![None, glide(60, 80)]);
+        assert_eq!(
+            glides_of("p80 c e&e g"),
+            vec![None, glide(60, 80), glide(64, 80)]
+        );
+        assert_eq!(glides_of("p80 c^4 e"), vec![None, glide(60, 80)]);
+    }
+
+    #[test]
+    fn glide_is_independent_of_gate_tuplets_and_loops() {
+        // ゲートを短くして、前の音が先に消えても、休符を書いていないので滑る
+        assert_eq!(glides_of("p80 q50 c e"), vec![None, glide(60, 80)]);
+        assert_eq!(
+            glides_of("p80 {c e g}4"),
+            vec![None, glide(60, 80), glide(64, 80)]
+        );
+        // 繰り返しの 2 周目の先頭は、1 周目の最後の音から滑る
+        assert_eq!(
+            glides_of("p80 [c e]2"),
+            vec![None, glide(60, 80), glide(64, 80), glide(60, 80)]
+        );
+    }
+
+    #[test]
+    fn glide_ignores_percussive_timbres_on_either_side() {
+        for percussive in ["@drum", "@noise", "@drumkit"] {
+            assert_eq!(glides_of(&format!("p80 {percussive} c e")), vec![None; 2]);
+            // 前の音が打楽器
+            assert_eq!(
+                glides_of(&format!("p80 {percussive} c @1 e")),
+                vec![None; 2],
+                "{percussive}"
+            );
+            // 次の音が打楽器
+            assert_eq!(
+                glides_of(&format!("p80 @1 c {percussive} e")),
+                vec![None; 2],
+                "{percussive}"
+            );
+        }
+        // 音色が違う旋律どうしは滑る
+        assert_eq!(glides_of("p80 @1 c @2 e")[1], glide(60, 80));
+    }
+
+    #[test]
+    fn portamento_is_per_track_and_works_in_macros() {
+        let score = must_parse("p80 c e; c e");
+        let of_track = |t: u8| -> Vec<Option<Glide>> {
+            score
+                .notes
+                .iter()
+                .filter(|n| n.track == t)
+                .map(|n| n.glide)
+                .collect()
+        };
+        assert_eq!(of_track(0), vec![None, glide(60, 80)]);
+        assert_eq!(of_track(1), vec![None; 2]);
+        assert_eq!(glides_of("$f={p80} $f c e"), vec![None, glide(60, 80)]);
+    }
+
+    #[test]
+    fn note_event_serializes_glide_as_camel_case_or_null() {
+        let score = must_parse("p80 c e");
+        assert_eq!(
+            serde_json::to_value(&score.notes[0]).unwrap()["glide"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            serde_json::to_value(&score.notes[1]).unwrap()["glide"],
+            serde_json::json!({ "fromMidi": 60, "ms": 80 })
+        );
+    }
+
+    #[test]
+    fn only_drum_noise_and_drumkit_are_percussive() {
+        let percussive: Vec<&str> = Timbre::ALL
+            .iter()
+            .filter(|t| t.is_percussive())
+            .map(|t| t.name())
+            .collect();
+        assert_eq!(percussive, vec!["drum", "noise", "drumkit"]);
     }
 }
