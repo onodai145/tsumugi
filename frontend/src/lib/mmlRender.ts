@@ -37,10 +37,19 @@ export async function renderScore(score: MmlScore): Promise<string> {
         return voice;
       };
       for (const n of score.notes) {
+        const percussive = TIMBRES[n.timbre].percussive;
         // デチューン(セント)は、周波数に 2^(セント/1200) を掛ける。打楽器は無視する
-        const cents = TIMBRES[n.timbre].percussive ? 0 : (n.params?.detune ?? 0);
-        const hz = Tone.Frequency(n.midi, "midi").toFrequency() * (cents === 0 ? 1 : 2 ** (cents / 1200));
-        voiceFor(n.track, n.timbre, n.params ?? null).trigger(hz, n.durationSec ?? 0, n.startSec ?? 0, n.velocity ?? 0, n.midi);
+        const cents = percussive ? 0 : (n.params?.detune ?? 0);
+        const ratio = cents === 0 ? 1 : 2 ** (cents / 1200);
+        const hz = Tone.Frequency(n.midi, "midi").toFrequency() * ratio;
+        // ポルタメント: 滑りの長さは音の長さ以下に縮める。滑り始めにも、同じ倍率を掛ける
+        const durationSec = n.durationSec ?? 0;
+        const slideSec = n.glide ? Math.min(n.glide.ms / 1000, durationSec) : 0;
+        const glide =
+          n.glide && !percussive && slideSec > 0
+            ? { fromHz: Tone.Frequency(n.glide.fromMidi, "midi").toFrequency() * ratio, sec: slideSec }
+            : undefined;
+        voiceFor(n.track, n.timbre, n.params ?? null).trigger(hz, durationSec, n.startSec ?? 0, n.velocity ?? 0, n.midi, glide);
       }
     },
     (score.totalSec ?? 0) + TAIL_SEC,

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Glide, MmlScore, NoteEvent, Timbre, TimbreParams } from "../bindings/tauri.gen";
 
-type Call = { hz: number; d: number; t: number; v: number; midi?: number };
+type Call = { hz: number; d: number; t: number; v: number; midi?: number; glide?: { fromHz: number; sec: number } };
 const created: { timbre: string; volumeDb: number; params: unknown; calls: Call[] }[] = [];
 
 vi.mock("./mmlTimbres", () => {
@@ -16,7 +16,8 @@ vi.mock("./mmlTimbres", () => {
       const rec = { timbre: name, volumeDb, params, calls: [] as Call[] };
       created.push(rec);
       return {
-        trigger: (hz: number, d: number, t: number, v: number, midi?: number) => rec.calls.push({ hz, d, t, v, midi }),
+        trigger: (hz: number, d: number, t: number, v: number, midi?: number, glide?: { fromHz: number; sec: number }) =>
+          rec.calls.push({ hz, d, t, v, midi, glide }),
       };
     },
   });
@@ -164,5 +165,45 @@ describe("renderScore", () => {
   it("レンダリング結果が空なら例外にする", async () => {
     offline.mockResolvedValueOnce({ get: () => undefined } as never);
     await expect(renderScore(score([note(0, "fm")]))).rejects.toThrow("空");
+  });
+});
+
+describe("renderScore: ポルタメント(Issue #499)", () => {
+  const g = (fromMidi: number, ms: number): Glide => ({ fromMidi, ms });
+
+  it("glide を、滑り始めの周波数 fromHz と秒 sec にして、音源の trigger に渡す", async () => {
+    await renderScore(score([note(0, "fm", 0, 60), note(0, "fm", 0.5, 64, null, g(60, 80))]));
+    expect(created[0].calls[0].glide).toBeUndefined();
+    expect(created[0].calls[1].hz).toBe(640);
+    expect(created[0].calls[1].glide).toEqual({ fromHz: 600, sec: 0.08 });
+  });
+
+  it("滑りが音の長さ(0.25 秒)より長いときは、音の長さに縮める", async () => {
+    await renderScore(score([note(0, "fm", 0.5, 64, null, g(60, 1000))]));
+    expect(created[0].calls[0].glide).toEqual({ fromHz: 600, sec: 0.25 });
+  });
+
+  it("音の長さが 0 のときは、glide を渡さない(0 秒の滑りはない)", async () => {
+    const n = { ...note(0, "fm", 0.5, 64, null, g(60, 80)), durationSec: 0 };
+    await renderScore(score([n]));
+    expect(created[0].calls[0].glide).toBeUndefined();
+  });
+
+  it("デチューンは、滑り始めと目的の高さの両方に同じ倍率で掛かる", async () => {
+    const octave: TimbreParams = { envelope: null, vibrato: null, detune: 1200 };
+    await renderScore(score([note(0, "fm", 0.5, 64, octave, g(60, 80))]));
+    expect(created[0].calls[0].hz).toBe(1280);
+    expect(created[0].calls[0].glide).toEqual({ fromHz: 1200, sec: 0.08 });
+  });
+
+  it("glide があっても、音源の組は増えない", async () => {
+    await renderScore(score([note(0, "fm", 0, 60), note(0, "fm", 0.5, 64, null, g(60, 80)), note(0, "fm", 1, 67, null, g(64, 80))]));
+    expect(created).toHaveLength(1);
+    expect(created[0].calls).toHaveLength(3);
+  });
+
+  it("打楽器は glide を無視する", async () => {
+    await renderScore(score([note(0, "drum", 0.5, 64, null, g(60, 80)), note(0, "noise", 1, 64, null, g(60, 80))]));
+    expect(created.every((c) => c.calls.every((x) => x.glide === undefined))).toBe(true);
   });
 });
