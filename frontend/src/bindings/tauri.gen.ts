@@ -717,6 +717,12 @@ export type FollowListEntry = {
 	cursor: string,
 };
 
+/**  ポルタメント(Issue #499)。この音は、`from_midi` の高さから目的の高さまで、`ms` ミリ秒(音の長さより長ければ音の長さ)で滑って入る。 */
+export type Glide = {
+	fromMidi: number,
+	ms: number,
+};
+
 /**
  *  振動パターン。値はAndroid Kotlin側(HapticsPlugin.kt)のVibrationEffectマッピングと対応する。
  *  Light/Medium のみ現時点で呼び出し元があり、Success/Warning/Errorは将来の用途
@@ -884,6 +890,8 @@ export type NoteEvent = {
 	timbre: Timbre,
 	/**  `y` `m` `k` のパラメーター(どれも書かれていなければ `None`) */
 	params: TimbreParams | null,
+	/**  `p` のポルタメント(滑らない音は `None`) */
+	glide: Glide | null,
 };
 
 export type NoteUpdate = { type: "reacted"; reaction: string } | { type: "unreacted"; reaction: string } | { type: "pollVoted"; choice: number } | { type: "deleted" };

@@ -24,7 +24,7 @@ describe("MML_KEY_GROUPS(入力補助キー)", () => {
     expect(inserts("modifiers")).toEqual(["#", "-", ".", "&", "^"]);
     expect(inserts("octave")).toEqual(["<", ">"]);
     expect(inserts("structure")).toEqual(["[", "]", ":", "{", "}", "'", "$", ";"]);
-    expect(inserts("params")).toEqual(["y", "m", "k", ","]);
+    expect(inserts("params")).toEqual(["y", "m", "k", "p", ","]);
   });
 
   it("長さは 1 2 4 8 16 32", () => {
@@ -43,13 +43,13 @@ describe("MML_KEY_GROUPS(入力補助キー)", () => {
     }
   });
 
-  it("キーだけで打った列(c# 8. & c 16 > [ d : e ] 2 { c d } 4 ^ 8 ' c e g ' 4 y 4 , 8 m 4 k 2 c $ c ; r 4 <)に、読めない文字が残らない", () => {
+  it("キーだけで打った列(c# 8. & c 16 > [ d : e ] 2 { c d } 4 ^ 8 ' c e g ' 4 y 4 , 8 m 4 k 2 p 8 c $ c ; r 4 <)に、読めない文字が残らない", () => {
     const text = [
       "c", "sharp", "len-8", "dot", "tie", "c", "len-16", "oct-up",
       "loop-open", "d", "loop-escape", "e", "loop-close", "len-2",
       "tuplet-open", "c", "d", "tuplet-close", "len-4", "tie-len", "len-8",
       "chord", "c", "e", "g", "chord", "len-4",
-      "param-y", "len-4", "param-comma", "len-8", "param-m", "len-4", "param-k", "len-2", "c",
+      "param-y", "len-4", "param-comma", "len-8", "param-m", "len-4", "param-k", "len-2", "param-p", "len-8", "c",
       "macro", "c",
       "track", "r", "len-4", "oct-down",
     ]

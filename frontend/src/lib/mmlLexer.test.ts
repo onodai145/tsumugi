@@ -323,6 +323,15 @@ describe("lexMml", () => {
     ]);
   });
 
+
+  it("ポルタメント p は command、数字は number(Issue #499)", () => {
+    expect(lex("p80 p0")).toEqual([
+      ["p", "command"],
+      ["80", "number"],
+      ["p", "command"],
+      ["0", "number"],
+    ]);
+  });
   it("y m k の後ろに数字がなくても、読めない文字にはしない。途中のカンマだけ・末尾のカンマも", () => {
     expect(lex("y")).toEqual([["y", "command"]]);
     expect(lex("m5,")).toEqual([

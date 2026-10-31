@@ -64,6 +64,7 @@ export const MML_KEY_GROUPS: readonly MmlKeyGroup[] = [
       { id: "param-y", label: "y", insert: "y", aria: "エンベロープ y" },
       { id: "param-m", label: "m", insert: "m", aria: "ビブラート m" },
       { id: "param-k", label: "k", insert: "k", aria: "デチューン k" },
+      { id: "param-p", label: "p", insert: "p", aria: "ポルタメント p" },
       { id: "param-comma", label: ",", insert: ",", aria: "区切り ," },
     ],
   },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Timbre } from "../bindings/tauri.gen";
 import { TAIL_SEC } from "./mmlRender";
-import { TIMBRES, TIMBRE_LIST, type ToneModule } from "./mmlTimbres";
+import { TIMBRES, TIMBRE_LIST, glideVoice, type ToneModule } from "./mmlTimbres";
 
 // Rust 側(domain/mml.rs の Timbre::ALL と mml.rs の TIMBRE_TABLE)と同じ並び。変えるときは両方を直す。
 const EXPECTED: [number, Timbre][] = [
@@ -115,6 +115,92 @@ function fakeTone() {
   } as unknown as ToneModule;
   return { Tone, made, hits };
 }
+
+/** `glideVoice` の土台にする、`Monophonic` の代役。`frequency` の呼び出しと、元の `setNote` の呼び出しを記録する */
+class FakeMonophonic {
+  calls: unknown[][] = [];
+  frequency = {
+    setValueAtTime: (...a: unknown[]) => this.calls.push(["set", ...a]),
+    exponentialRampToValueAtTime: (...a: unknown[]) => this.calls.push(["ramp", ...a]),
+  };
+  setNote(note: unknown, time?: number) {
+    this.calls.push(["base", note, time]);
+    return this;
+  }
+}
+
+describe("glideVoice(ポルタメント、Issue #499)", () => {
+  it("指定が無い時刻は、元の setNote のまま", () => {
+    const Voice = glideVoice(FakeMonophonic, new Map());
+    const v = new Voice();
+    v.setNote(440, 1);
+    expect(v.calls).toEqual([["base", 440, 1]]);
+  });
+
+  it("指定のある時刻は、fromHz に置いて、目的の高さへ指数的に動かす(元の setNote は呼ばない)", () => {
+    const glides = new Map([[1.25, { fromHz: 300, sec: 0.08 }]]);
+    const v = new (glideVoice(FakeMonophonic, glides))();
+    v.setNote(440, 1.25);
+    expect(v.calls).toHaveLength(2);
+    expect(v.calls[0]).toEqual(["set", 300, 1.25]);
+    expect(v.calls[1][0]).toBe("ramp");
+    expect(v.calls[1][1]).toBe(440);
+    expect(v.calls[1][2]).toBeCloseTo(1.33, 9);
+  });
+
+  it("指定は 1 回使うと消え、ほかの時刻には影響しない", () => {
+    const glides = new Map([[1, { fromHz: 300, sec: 0.1 }]]);
+    const v = new (glideVoice(FakeMonophonic, glides))();
+    v.setNote(440, 2); // 別の時刻
+    expect(glides.size).toBe(1);
+    v.setNote(440, 1);
+    expect(glides.size).toBe(0);
+    v.setNote(440, 1); // 2 回目は元の setNote
+    expect(v.calls.map((c) => c[0])).toEqual(["base", "set", "ramp", "base"]);
+  });
+
+  it("音名など数値でない note は、指定があっても元の setNote", () => {
+    const v = new (glideVoice(FakeMonophonic, new Map([[1, { fromHz: 300, sec: 0.1 }]])))();
+    v.setNote("C4", 1);
+    expect(v.calls).toEqual([["base", "C4", 1]]);
+  });
+});
+
+describe("旋律の音源とポルタメント(Issue #499)", () => {
+  it("PolySynth に渡す声は glideVoice の継承クラスで、trigger の glide が、その時刻の setNote に届く", () => {
+    const { Tone, made } = fakeTone();
+    (Tone as unknown as Record<string, unknown>).FMSynth = FakeMonophonic;
+    const voice = TIMBRES.fm.create(Tone, -3);
+    voice.trigger(440, 0.5, 1.25, 0.8, 64, { fromHz: 300, sec: 0.08 });
+    voice.trigger(440, 0.5, 2, 0.8, 64); // 滑らない音
+    const Cls = made.find((m) => m.cls === "PolySynth")!.args[0] as new () => FakeMonophonic;
+    expect(Object.getPrototypeOf(Cls.prototype)).toBe(FakeMonophonic.prototype); // 元の声の継承クラス
+    const slid = new Cls();
+    slid.setNote(440, 1.25);
+    expect(slid.calls.map((c) => c[0])).toEqual(["set", "ramp"]);
+    const plain = new Cls();
+    plain.setNote(440, 2);
+    expect(plain.calls.map((c) => c[0])).toEqual(["base"]);
+  });
+
+  it("旋律の 12 種すべてが、元の声(Synth・FMSynth・AMSynth・DuoSynth・MonoSynth のどれか)の継承クラスを PolySynth に渡す", () => {
+    for (const p of TIMBRE_LIST.filter((p) => !p.percussive)) {
+      const { Tone, made } = fakeTone();
+      p.create(Tone, -3);
+      const Cls = made.find((m) => m.cls === "PolySynth")!.args[0] as object;
+      const bases = ["Synth", "FMSynth", "AMSynth", "DuoSynth", "MonoSynth"].map((n) => (Tone as unknown as Record<string, unknown>)[n]);
+      expect(bases, p.name).toContain(Object.getPrototypeOf(Cls)); // 元の声そのものではなく、その継承クラス
+      expect(bases, p.name).not.toContain(Cls);
+    }
+  });
+
+  it("打楽器の音源は、glide が付いても例外を出さず、そのまま鳴らす", () => {
+    const { Tone, hits } = fakeTone();
+    const voice = TIMBRES.drum.create(Tone, -3);
+    expect(() => voice.trigger(440, 0.5, 1, 0.8, 60, { fromHz: 300, sec: 0.08 })).not.toThrow();
+    expect(hits).toHaveLength(1);
+  });
+});
 
 describe("drumkit の音源", () => {
   it("drumkit は単音用ではない(1 トラックに 1 つ作って使い回す)", () => {

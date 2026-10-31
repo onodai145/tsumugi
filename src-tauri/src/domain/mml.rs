@@ -67,6 +67,11 @@ impl Timbre {
             Timbre::Drumkit => "drumkit",
         }
     }
+
+    /// 打楽器(音の高さを持たない `drum` `noise` `drumkit`)か。`y` `m` `k` `p` はこれらに効かない。
+    pub fn is_percussive(self) -> bool {
+        matches!(self, Timbre::Drum | Timbre::Noise | Timbre::Drumkit)
+    }
 }
 
 /// 音色のパラメーター(Issue #499)。MML の `y a,d,s,r` のエンベロープ。時間はミリ秒、`sustain` は 0〜100(%)。
@@ -97,6 +102,14 @@ pub struct TimbreParams {
     pub detune: i16,
 }
 
+/// ポルタメント(Issue #499)。この音は、`from_midi` の高さから目的の高さまで、`ms` ミリ秒(音の長さより長ければ音の長さ)で滑って入る。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Glide {
+    pub from_midi: u8,
+    pub ms: u16,
+}
+
 /// MML から展開した 1 音(Issue #75)。時刻は秒で、テンポ変化・繰り返し・タイは解決済み。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -113,6 +126,8 @@ pub struct NoteEvent {
     pub timbre: Timbre,
     /// `y` `m` `k` のパラメーター(どれも書かれていなければ `None`)
     pub params: Option<TimbreParams>,
+    /// `p` のポルタメント(滑らない音は `None`)
+    pub glide: Option<Glide>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

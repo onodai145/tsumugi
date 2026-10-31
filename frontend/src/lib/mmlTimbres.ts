@@ -6,10 +6,16 @@ import { PIECE_SPECS, drumPieceFor, type DrumPiece, type MembraneSpec, type Meta
 
 export type ToneModule = typeof import("tone");
 
+/** ポルタメント(Issue #499)。`fromHz` から鳴らす周波数まで、`sec` 秒で指数的に(音程が等速で)動く。`renderScore` が作る */
+export interface VoiceGlide {
+  fromHz: number;
+  sec: number;
+}
+
 /** Offline コンテキスト内に作った音源 1 つ。 */
 export interface Voice {
-  /** `midi` はノート番号。打楽器の `drumkit` だけが使う(音の高さで楽器を選ぶ) */
-  trigger(hz: number, durationSec: number, startSec: number, velocity: number, midi?: number): void;
+  /** `midi` はノート番号。打楽器の `drumkit` だけが使う(音の高さで楽器を選ぶ)。`glide` は旋律の音源だけが使う */
+  trigger(hz: number, durationSec: number, startSec: number, velocity: number, midi?: number, glide?: VoiceGlide): void;
 }
 
 export interface TimbrePreset {
@@ -45,6 +51,38 @@ interface Fx {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyPoly = import("tone").PolySynth<any>;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Ctor = new (...args: any[]) => any;
+
+/**
+ * `PolySynth` が音ごとに作る声(`Synth` `FMSynth` など。どれも `Monophonic`)を、周波数を滑らせられるようにした継承クラス。
+ * `glides` に、鳴らす時刻で入れた指定があれば、その声の `setNote`(アタックのときに周波数を置く)で、`fromHz` に置いて
+ * 目的の高さへ指数的に動かす。Tone の `portamento` は、鳴り続けている同じ声にだけ効くので使えない(`PolySynth` は音ごとに別の声を使う)。
+ */
+export function glideVoice<T extends Ctor>(Base: T, glides: Map<number, VoiceGlide>): T {
+  return class extends Base {
+    setNote(note: unknown, time?: number) {
+      const glide = time === undefined ? undefined : glides.get(time);
+      if (time === undefined || !glide || typeof note !== "number") return super.setNote(note, time);
+      glides.delete(time);
+      this.frequency.setValueAtTime(glide.fromHz, time);
+      this.frequency.exponentialRampToValueAtTime(note, time + glide.sec);
+      return this;
+    }
+  };
+}
+
+/** `poly` が `trigger` の glide を入れる、`PolySynth` ごとの表(時刻 → 滑りの指定) */
+const GLIDES = new WeakMap<object, Map<number, VoiceGlide>>();
+
+/** 滑れる声を使う `PolySynth`。`options` は、元の声のコンストラクターの引数 */
+function glideSynth<V extends Ctor>(Tone: ToneModule, Base: V, options: ConstructorParameters<V>[0]): AnyPoly {
+  const glides = new Map<number, VoiceGlide>();
+  const synth = new Tone.PolySynth(glideVoice(Base, glides) as never, options as never) as unknown as AnyPoly;
+  GLIDES.set(synth, glides);
+  return synth;
+}
+
 /**
  * 出力に繋いで音量を設定する。`fx.params` があれば、エンベロープ(`envelope` だけ。modulationEnvelope は変えない)を `set` で反映し、
  * ビブラートは `Tone.Vibrato` を出力に挟む。デチューンは `renderScore` が鳴らす周波数の倍率にするので、ここでは扱わない。
@@ -76,7 +114,15 @@ function poly(synth: AnyPoly, volumeDb: number, fx?: Fx): Voice {
   } else {
     synth.toDestination();
   }
-  return { trigger: (hz, d, t, v) => synth.triggerAttackRelease(hz, d, t, v) };
+  return {
+    trigger: (hz, d, t, v, _midi, glide) => {
+      // 滑る指定は、鳴らす時刻で表に入れる。声が、アタックで同じ時刻の `setNote` を呼ぶときに取り出して消す。
+      // ここで消してはいけない: 未来の時刻の音は `PolySynth` が `setTimeout` で後から鳴らす(`Tone.Offline` の中では、全部の音がまず時刻 0 に呼ばれる)。
+      // 同時発音数の上限で Tone が音を落としたときは、指定が表に残るが、表は描画ごとに作る音源のもので、同じ時刻の別の単音は無いので害はない
+      if (glide) GLIDES.get(synth)?.set(t, glide);
+      synth.triggerAttackRelease(hz, d, t, v);
+    },
+  };
 }
 
 /** `@drumkit`。音の高さ(midi)から GM の楽器を選んで鳴らす。割り当てのない高さは鳴らさない。書いた長さは無視する */
@@ -166,7 +212,7 @@ type SynthOscillator = NonNullable<NonNullable<ConstructorParameters<ToneModule[
 const basic =
   (oscillator: SynthOscillator) =>
   (Tone: ToneModule, db: number, params?: TimbreParams | null): Voice =>
-    poly(new Tone.PolySynth(Tone.Synth, { oscillator, envelope: BASIC_ENV }), db, { Tone, params });
+    poly(glideSynth(Tone, Tone.Synth, { oscillator, envelope: BASIC_ENV }), db, { Tone, params });
 
 export const TIMBRES: Record<Timbre, TimbrePreset> = {
   fm: {
@@ -176,7 +222,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     releaseSec: 0.1,
     create: (Tone, db, params) =>
       poly(
-        new Tone.PolySynth(Tone.FMSynth, {
+        glideSynth(Tone, Tone.FMSynth, {
           harmonicity: 3,
           modulationIndex: 8,
           envelope: { attack: 0.005, decay: 0.1, sustain: 0.4, release: 0.1 },
@@ -197,7 +243,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     releaseSec: 0.05,
     create: (Tone, db, params) =>
       poly(
-        new Tone.PolySynth(Tone.Synth, {
+        glideSynth(Tone, Tone.Synth, {
           oscillator: { type: "custom", partials: [1, 0.6, 0.4, 0.25, 0.15] },
           envelope: { attack: 0.01, decay: 0.05, sustain: 1, release: 0.05 },
         }),
@@ -212,7 +258,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     releaseSec: 0.3,
     create: (Tone, db, params) =>
       poly(
-        new Tone.PolySynth(Tone.FMSynth, {
+        glideSynth(Tone, Tone.FMSynth, {
           harmonicity: 2,
           modulationIndex: 3,
           envelope: { attack: 0.005, decay: 0.6, sustain: 0.2, release: 0.3 },
@@ -229,7 +275,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     releaseSec: 0.5,
     create: (Tone, db, params) =>
       poly(
-        new Tone.PolySynth(Tone.FMSynth, {
+        glideSynth(Tone, Tone.FMSynth, {
           harmonicity: 5.07,
           modulationIndex: 12,
           envelope: { attack: 0.001, decay: 0.8, sustain: 0.05, release: 0.5 },
@@ -246,7 +292,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     releaseSec: 0.2,
     create: (Tone, db, params) =>
       poly(
-        new Tone.PolySynth(Tone.AMSynth, {
+        glideSynth(Tone, Tone.AMSynth, {
           envelope: { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.2 },
           modulationEnvelope: { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.2 },
         }),
@@ -262,7 +308,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     create: (Tone, db, params) => {
       const voice = { envelope: { attack: 0.01, decay: 0.1, sustain: 0.6, release: 0.15 } };
       return poly(
-        new Tone.PolySynth(Tone.DuoSynth, {
+        glideSynth(Tone, Tone.DuoSynth, {
           harmonicity: 1,
           vibratoAmount: 0.3,
           vibratoRate: 5,
@@ -281,7 +327,7 @@ export const TIMBRES: Record<Timbre, TimbrePreset> = {
     releaseSec: 0.2,
     create: (Tone, db, params) =>
       poly(
-        new Tone.PolySynth(Tone.MonoSynth, {
+        glideSynth(Tone, Tone.MonoSynth, {
           oscillator: { type: "sawtooth" },
           filter: { Q: 1, type: "lowpass", rolloff: -24 },
           envelope: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.2 },
