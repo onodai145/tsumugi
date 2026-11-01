@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DelayParams, Glide, MmlScore, NoteEvent, ReverbParams, Timbre, TimbreParams } from "../bindings/tauri.gen";
-import { MAX_EFFECT_TAIL_SEC } from "./mmlEffects";
+import { MAX_EFFECT_TAIL_SEC, SEND_RAMP_SEC } from "./mmlEffects";
 
 type Call = { hz: number; d: number; t: number; v: number; midi?: number; glide?: { fromHz: number; sec: number } };
 const created: { timbre: string; volumeDb: number; params: unknown; out: unknown; calls: Call[] }[] = [];
@@ -8,6 +8,8 @@ const created: { timbre: string; volumeDb: number; params: unknown; out: unknown
 /** Tone のエフェクト用ノードの代役。作ったもの・送りの設定を記録する */
 const toneNodes: { kind: string; args: unknown[]; connected: unknown[]; destinations: number; sets: [number, number][]; ramps: [number, number][] }[] = [];
 let reverbReady: Promise<unknown> = Promise.resolve();
+const toneContext = { name: "original-context" };
+const setContext = vi.fn();
 class FakeToneNode {
   connected: unknown[] = [];
   destinations = 0;
@@ -82,6 +84,8 @@ vi.mock("tone", () => ({
   Gain: toneClass("Gain"),
   Reverb: toneClass("Reverb"),
   FeedbackDelay: toneClass("FeedbackDelay"),
+  getContext: () => toneContext,
+  setContext,
 }));
 
 const { renderScore, TAIL_SEC } = await import("./mmlRender");
@@ -114,6 +118,7 @@ beforeEach(() => {
   reverbReady = Promise.resolve();
   activeRenders = 0;
   maxActiveRenders = 0;
+  setContext.mockClear();
 });
 
 describe("renderScore", () => {
@@ -315,8 +320,8 @@ describe("renderScore: エフェクト(Issue #499)", () => {
       ]),
     );
     const sends = toneNodes.filter((n) => n.kind === "Gain" && n.args[0] === 0); // 2000ms の組、500ms の組
-    expect(sends[0].sets).toEqual([[0.3, 0], [0.6, 0.5], [0, 1]]);
-    expect(sends[1].sets).toEqual([[0.4, 1], [0, 1.5]]);
+    expect(sends[0].ramps).toEqual([[0.3, 0 + SEND_RAMP_SEC], [0.6, 0.5 + SEND_RAMP_SEC], [0, 1 + SEND_RAMP_SEC]]);
+    expect(sends[1].ramps).toEqual([[0.4, 1 + SEND_RAMP_SEC], [0, 1.5 + SEND_RAMP_SEC]]);
   });
 
   it("リバーブの準備(インパルス応答の生成)が終わるまで、音を鳴らさない", async () => {
@@ -358,5 +363,16 @@ describe("renderScore: エフェクト(Issue #499)", () => {
     const trim = toneNodes.find((n) => n.kind === "Gain" && n.args[0] === 1 && n.destinations === 1 && n.connected.length === 0)!;
     expect(trim.ramps).toEqual([[0, end]]);
     expect(trim.sets.at(-1)![1]).toBeCloseTo(end - 0.3, 6);
+  });
+
+  it("描画が失敗しても、Tone の全体のコンテキストを描画の前のものに戻す", async () => {
+    offline.mockRejectedValueOnce(new Error("boom"));
+    await expect(renderScore(score([note(0, "fm")]))).rejects.toThrow("boom");
+    expect(setContext).toHaveBeenLastCalledWith(toneContext);
+  });
+
+  it("描画が成功したときも、コンテキストは描画の前のものに戻っている", async () => {
+    await renderScore(score([note(0, "fm")]));
+    expect(setContext).toHaveBeenLastCalledWith(toneContext);
   });
 });

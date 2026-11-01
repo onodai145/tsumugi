@@ -25,9 +25,11 @@ export function renderScore(score: MmlScore): Promise<string> {
 
 async function renderScoreNow(score: MmlScore): Promise<string> {
   const Tone = await import("tone");
+  // 描画の前のコンテキスト。`Tone.Offline` は途中で失敗するとコンテキストを戻さないので、成功・失敗にかかわらず自分で戻す
+  const originalContext = Tone.getContext();
   // 音源の余韻(TAIL_SEC)の後に、エフェクトの尾(使わなければ 0)が続く
   const durationSec = (score.totalSec ?? 0) + TAIL_SEC + effectTailSec(score.notes);
-  const buffer = await Tone.Offline(
+  const rendering = Tone.Offline(
     async () => {
       // 複数トラックを足すと 1.0 を超えて WAV 化で頭打ちになるので、トラック数で割って揃える(単一トラックは補正なし)。
       const trackDb = score.trackCount > 1 ? Tone.gainToDb(1 / score.trackCount) : 0;
@@ -80,6 +82,12 @@ async function renderScoreNow(score: MmlScore): Promise<string> {
     1,
     SAMPLE_RATE,
   );
+  let buffer: Awaited<typeof rendering>;
+  try {
+    buffer = await rendering;
+  } finally {
+    Tone.setContext(originalContext);
+  }
   const audio = buffer.get();
   if (!audio) throw new Error("レンダリング結果が空でした");
   return wavToDataUrl(encodeWavMono16([audio.getChannelData(0)], audio.sampleRate));

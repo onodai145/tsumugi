@@ -11,6 +11,8 @@ export const MAX_EFFECT_TAIL_SEC = 5;
 const DELAY_FLOOR = 0.001;
 /** エフェクトの出力を、描画の終わりの手前から 0 までフェードさせる長さ(秒)。尾が上限で頭打ちになっても、急に切れない */
 const FADE_OUT_SEC = 0.3;
+/** 送りを切り替えるランプの長さ(秒)。前の音の余韻の途中で、送りが段差で変わってクリックにならないように */
+export const SEND_RAMP_SEC = 0.005;
 /** エフェクトの出力の補正(dB)。リバーブは畳み込みで音量が変わるので、実測で決める(計画の Task 2 のゲート) */
 export const REVERB_TRIM_DB = 0;
 export const DELAY_TRIM_DB = 0;
@@ -130,7 +132,9 @@ export function createTrackEffects(Tone: ToneModule, notes: NoteEvent[], endSec:
       for (const g of fx.groups.values()) {
         const level = g.level(n);
         if ((fx.sent.get(g) ?? 0) === level) continue;
-        g.send.gain.setValueAtTime(level, t);
+        // 直前の量を置いてから、短いランプで新しい量へ
+        g.send.gain.setValueAtTime(fx.sent.get(g) ?? 0, t);
+        g.send.gain.linearRampToValueAtTime(level, t + SEND_RAMP_SEC);
         fx.sent.set(g, level);
       }
     },
