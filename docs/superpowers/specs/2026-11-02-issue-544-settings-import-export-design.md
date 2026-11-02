@@ -96,7 +96,9 @@ PC間の移行、バックアップ、設定の共有のために、アカウン
 | `import_settings(path) -> ImportResult` | 読み込み、再検証、保存、`AppState` 更新を行う |
 | `accounts_without_token() -> Vec<String>` | トークンを持たないアカウントIDの一覧 |
 
-`ImportPreview`: カラム数、アカウント数、うち要ログインの数、カスタムCSSの有無、カスタムテーマの有無。
+`ImportPreview`: カラム数、アカウント数、うち要ログインの数、カスタムCSSの有無、カスタムテーマの有無、外部サービスのURL設定の有無。
+
+外部サービスのURL設定の有無(`hasCustomEndpoints`)は、`ui.searchEngineUrl` または `ui.summalyProxyUrl` が `UiPrefs::default()` の値と異なるときに真になる。共有されたファイルで、URLプレビューや検索の送信先を他人のサーバーに向けられるため、確認ダイアログで知らせる。取り込み自体は拒否しない。
 `ImportResult`: 取り込んだカラム数、要ログインのアカウントID一覧。
 
 ## インポートの規則(`plan_import`)
@@ -153,7 +155,7 @@ PC間の移行、バックアップ、設定の共有のために、アカウン
 - インポート:
   1. `open` ダイアログでJSONを選ぶ。
   2. `inspect_settings_file(path)` で検証する。
-  3. `ConfirmDialog`(`danger`)に概要(カラムN件・アカウントN件(うち要ログインN件)・カスタムCSS/テーマの有無)と「現在の設定とカラムは置き換えられます」を出す。
+  3. `ConfirmDialog`(`danger`)に概要(カラムN件・アカウントN件(うち要ログインN件)・カスタムCSS/テーマの有無・外部サービスのURL設定の有無)と「現在の設定とカラムは置き換えられます」を出す。
   4. 承認で `import_settings(path)` を呼び、`location.reload()` する。
 - 確認後にファイルが書き換わる場合に備え、`import_settings` でも再検証する。
 - 要ログインの表示: `AccountsSection.svelte` が `accounts_without_token` を呼び、該当アカウントに「要ログイン」バッジを出し、「再認証」ボタンを強調する。`Account` 型は変更しない。

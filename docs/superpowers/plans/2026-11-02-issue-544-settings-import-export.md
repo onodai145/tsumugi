@@ -342,7 +342,7 @@ git commit -m "feat(settings): 設定全体を複製・差し替えする snapsh
   - `pub const EXPORT_FORMAT: &str`、`EXPORT_VERSION: u32`、`MAX_IMPORT_BYTES: usize`
   - `pub struct ExportFile { format, version, exported_at, app_version, data: ExportData }`
   - `pub struct ExportData { accounts, groups, columns, mute, notify, ui, pane_layout }`
-  - `pub struct ImportPreview { column_count: i32, account_count: i32, accounts_needing_login: i32, has_custom_css: bool, has_custom_themes: bool }`(`specta::Type`、`camelCase`)
+  - `pub struct ImportPreview { column_count: i32, account_count: i32, accounts_needing_login: i32, has_custom_css: bool, has_custom_themes: bool, has_custom_endpoints: bool }`(`specta::Type`、`camelCase`)
   - `pub struct ImportResult { column_count: i32, accounts_needing_login: Vec<String> }`(`specta::Type`、`camelCase`)
   - `pub fn parse_export(bytes: &[u8]) -> Result<ExportFile>`
   - `pub fn build_export(data: &SettingsData, app_version: &str, exported_at: &str) -> ExportFile`
@@ -408,6 +408,9 @@ pub struct ImportPreview {
     pub accounts_needing_login: i32,
     pub has_custom_css: bool,
     pub has_custom_themes: bool,
+    /// 検索エンジンまたはURLプレビュー(summaly)のURLが、既定値と異なる。共有ファイルで、
+    /// 送信先を他人のサーバーに向けられるため、確認ダイアログで知らせる。
+    pub has_custom_endpoints: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type, PartialEq)]
@@ -773,8 +776,28 @@ git commit -m "feat(settings): 設定ファイルの形式と読み書きの純�
                 accounts_needing_login: 2,
                 has_custom_css: true,
                 has_custom_themes: false,
+                has_custom_endpoints: false,
             }
         );
+    }
+
+    #[test]
+    fn preview_flags_external_service_urls_that_differ_from_the_defaults() {
+        let defaults = UiPrefs::default();
+
+        // 既定値のままなら、立たない
+        let plan = plan_import(&SettingsData::default(), file_with(empty_data())).unwrap();
+        assert!(!plan.preview.has_custom_endpoints);
+
+        // URLプレビューの取得先を変えたら立つ
+        let mut data = empty_data();
+        data.ui.summaly_proxy_url = "https://evil.example/summaly".into();
+        assert!(plan_import(&SettingsData::default(), file_with(data)).unwrap().preview.has_custom_endpoints);
+
+        // 検索エンジンのURLを変えたら立つ
+        let mut data = empty_data();
+        data.ui.search_engine_url = format!("{}x", defaults.search_engine_url);
+        assert!(plan_import(&SettingsData::default(), file_with(data)).unwrap().preview.has_custom_endpoints);
     }
 
     #[test]
@@ -1074,6 +1097,10 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         accounts_needing_login: accounts_needing_login.len() as i32,
         has_custom_css: !ui.custom_css.trim().is_empty(),
         has_custom_themes: !ui.custom_themes.is_empty() || !ui.custom_syntax_themes.is_empty(),
+        has_custom_endpoints: {
+            let defaults = UiPrefs::default();
+            ui.search_engine_url != defaults.search_engine_url || ui.summaly_proxy_url != defaults.summaly_proxy_url
+        },
     };
     let data = SettingsData {
         accounts,
@@ -1718,6 +1745,7 @@ const preview: ImportPreview = {
   accountsNeedingLogin: 1,
   hasCustomCss: true,
   hasCustomThemes: false,
+  hasCustomEndpoints: false,
 };
 
 let reload: ReturnType<typeof vi.fn>;
@@ -1793,6 +1821,32 @@ describe("SettingsTransfer: インポート", () => {
 
     await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(importSpy).toHaveBeenCalledWith("/tmp/in.json");
+  });
+
+  it("送信先URLが初期値から変えられているときは、確認ダイアログで知らせる", async () => {
+    vi.mocked(dialog.open).mockResolvedValue("/tmp/in.json");
+    vi.spyOn(commands, "inspectSettingsFile").mockResolvedValue({
+      status: "ok",
+      data: { ...preview, hasCustomEndpoints: true },
+    } as never);
+    render(SettingsTransfer, { props: { reload } });
+
+    await fireEvent.click(screen.getByText("インポート…"));
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/検索エンジンまたはURLプレビューの送信先URLが、初期値から変更されています/)).toBeTruthy(),
+    );
+  });
+
+  it("送信先URLが初期値のままなら、その注意書きは出さない", async () => {
+    vi.mocked(dialog.open).mockResolvedValue("/tmp/in.json");
+    vi.spyOn(commands, "inspectSettingsFile").mockResolvedValue({ status: "ok", data: preview } as never);
+    render(SettingsTransfer, { props: { reload } });
+
+    await fireEvent.click(screen.getByText("インポート…"));
+
+    await vi.waitFor(() => expect(screen.getByText(/カラム3件/)).toBeTruthy());
+    expect(screen.queryByText(/送信先URL/)).toBeNull();
   });
 
   it("確認でキャンセルしたら、取り込まない", async () => {
@@ -1894,6 +1948,9 @@ Expected: FAIL(`SettingsTransfer.svelte` が無い)。
     }
     if (p.hasCustomCss) lines.push("カスタムCSSを含みます。");
     if (p.hasCustomThemes) lines.push("カスタムテーマを含みます。");
+    if (p.hasCustomEndpoints) {
+      lines.push("検索エンジンまたはURLプレビューの送信先URLが、初期値から変更されています。");
+    }
     lines.push("現在の設定とカラムは置き換えられます。");
     return lines.join("\n");
   }
@@ -2286,7 +2343,7 @@ push後、CIの結果をMonitorや待機ループで追わない(利用者が自
 
 **2. プレースホルダーの確認:** 「TBD」「後で」「適切に処理」の類は無い。条件分岐として書いた「通らなければ〜」は、Task 4 のフィールド型、Task 5 のコンパイルエラー、Task 7 の既存テストのモックの3か所。いずれも該当ファイルを見れば決まる内容で、確認先を書いてある。
 
-**3. 型と名前の整合:** `SettingsData`(`pub(crate)`、Task 2)→ `build_export` / `plan_import`(Task 3・4)→ `import_settings_bytes`(Task 5)。`ImportPreview { column_count, account_count, accounts_needing_login, has_custom_css, has_custom_themes }` は Task 3 で定義し、Task 4 の期待値・Task 5 のテスト・Task 7 の `preview.columnCount` などで同じ名前。`ImportResult { column_count, accounts_needing_login }` は Task 3・5・7 で一致。`has_token`(Task 1)→ `accounts_without_token_ids`(Task 5)。コマンド名 `export_settings` → `exportSettings`、`inspect_settings_file` → `inspectSettingsFile`、`import_settings` → `importSettings`、`accounts_without_token` → `accountsWithoutToken`(Task 5・7・8 で一致)。
+**3. 型と名前の整合:** `SettingsData`(`pub(crate)`、Task 2)→ `build_export` / `plan_import`(Task 3・4)→ `import_settings_bytes`(Task 5)。`ImportPreview { column_count, account_count, accounts_needing_login, has_custom_css, has_custom_themes, has_custom_endpoints }` は Task 3 で定義し、Task 4 の期待値・Task 5 のテスト・Task 7 の `preview.columnCount` などで同じ名前。`ImportResult { column_count, accounts_needing_login }` は Task 3・5・7 で一致。`has_token`(Task 1)→ `accounts_without_token_ids`(Task 5)。コマンド名 `export_settings` → `exportSettings`、`inspect_settings_file` → `inspectSettingsFile`、`import_settings` → `importSettings`、`accounts_without_token` → `accountsWithoutToken`(Task 5・7・8 で一致)。
 
 **4. Review Focus の対応:** 1・2・4 → Task 4 のテスト、3・4 → Task 3 のテスト、5 → Task 6 のテスト、6 → Task 1 と Task 5 のテスト。
 
