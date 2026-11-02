@@ -102,3 +102,21 @@ describe("Settings モバイルのタブ帯(Issue #450)", () => {
     expect(getByTestId("settings-section").firstElementChild).toBe(child);
   });
 });
+
+describe("Settings の高さ上限(モーダル外にスクロールが出ない)", () => {
+  // jsdom ではレイアウトを測れないため、構造で守る。Modal の枠(border+p-4+ヘッダー+余白)は54pxあり、
+  // 内側に max-h-[calc(84vh-3rem)] を手計算で置くと 3rem(48px)との差 6px ぶんダイアログが上限を超え、
+  // 上下の画面余白(16vh)と合わせて画面全体にスクロールバーが出ていた。上限は Modal の maxHeight(枠込み)に任せる。
+  it("PC版では上限を Modal の maxHeight(枠込み)で与え、内側に手計算の max-h を置かない", () => {
+    const { getByRole, getByTestId } = renderSettings();
+    expect((getByRole("dialog") as HTMLElement).style.maxHeight).toBe("83vh");
+    expect(getByTestId("settings-section").closest("[class*='max-h-']")).toBeNull();
+  });
+
+  it("モバイル版(全画面)では maxHeight を渡さない", async () => {
+    app.ui = { ...app.ui, uiMode: "mobile" };
+    const { getByRole } = renderSettings();
+    await tick();
+    expect((getByRole("dialog") as HTMLElement).style.maxHeight).toBe("");
+  });
+});

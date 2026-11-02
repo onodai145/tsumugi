@@ -114,18 +114,21 @@
   {/if}
 {/snippet}
 
-<Modal title="設定" {onclose} width="640px">
+<Modal title="設定" {onclose} width="640px" maxHeight={mobileUi ? undefined : "83vh"}>
   <!-- PC/モバイルで要素を同じ位置・同じ種類のままクラスだけ切り替える。{#if}で分岐すると
        UIモード切替(レイアウトの保存直後)で本文セクションが作り直され、「保存しました」等の表示が消える。
        PC: rounded-b-[11px]はModal.svelteのrounded-xl(12px) - border(1px)を差し引いた値
        （このdivはModalの内側にネガティブマージンで縁までにじみ出すため、外側の角丸に沿わせる必要がある）。
        スタイルガイド(docs/design/style-guide.md §2)が認める「親要素のborder-width分を差し引く」例外。
+       PC: 高さ上限はModalのmaxHeight(83vh、枠のborder/p-4/ヘッダー込み)に任せ、このdivは残りを埋める(min-h-0 flex-1)。
+       内側に max-h-[calc(84vh-3rem)] のような手計算を置くと、Modalの枠(54px)との差ぶんだけ上限を超え、
+       上下の画面余白(16vh)と合わせて画面全体にスクロールバーが出る。83vhは丸め誤差で100vhを1pxでも超えないための余裕。
        モバイル: Modal(全画面)本文のp-4を-mx-4/-mt-4で打ち消し、タブ帯を左右いっぱい・上端に張り付ける。
        下端のp-4(+セーフエリア)は残す。 -->
   <div
     class={mobileUi
       ? "-mx-4 -mt-4"
-      : "-mx-4 -mb-4 flex max-h-[calc(84vh-3rem)] flex-col overflow-hidden rounded-b-[11px]"}
+      : "-mx-4 -mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-[11px]"}
   >
     <div class={mobileUi ? "contents" : "flex min-h-0 flex-1 border-t border-border"}>
       <svelte:element
