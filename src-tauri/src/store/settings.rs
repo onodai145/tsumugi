@@ -45,26 +45,26 @@ impl ServerMuteSnapshot {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct SettingsData {
+pub(crate) struct SettingsData {
     #[serde(default)]
-    accounts: Vec<Account>,
+    pub(crate) accounts: Vec<Account>,
     #[serde(default)]
-    groups: Vec<ColumnGroup>,
+    pub(crate) groups: Vec<ColumnGroup>,
     #[serde(default)]
-    columns: Vec<Column>,
+    pub(crate) columns: Vec<Column>,
     #[serde(default)]
-    mute: MuteConfig,
+    pub(crate) mute: MuteConfig,
     #[serde(default)]
-    notify: NotifyConfig,
+    pub(crate) notify: NotifyConfig,
     #[serde(default)]
-    ui: UiPrefs,
+    pub(crate) ui: UiPrefs,
     #[serde(default)]
-    pane_layout: Option<PaneNode>,
+    pub(crate) pane_layout: Option<PaneNode>,
     #[serde(default)]
-    cache_backend: CacheBackendConfig,
+    pub(crate) cache_backend: CacheBackendConfig,
     /// アカウントID -> サーバー側ミュートの前回の同期時点の集合(Issue #454)。
     #[serde(default)]
-    server_mute_snapshots: HashMap<String, ServerMuteSnapshot>,
+    pub(crate) server_mute_snapshots: HashMap<String, ServerMuteSnapshot>,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -107,6 +107,20 @@ impl SettingsStore {
             std::fs::write(&tmp_path, json)?;
             std::fs::rename(&tmp_path, path)?;
         }
+        Ok(())
+    }
+
+    /// 設定全体の複製(設定のエクスポート/インポート用、Issue #544)。
+    pub(crate) fn snapshot(&self) -> SettingsData {
+        self.data.lock().unwrap().clone()
+    }
+
+    /// 設定全体を差し替える(設定のインポート用、Issue #544)。保存に成功してから
+    /// メモリ上の状態を差し替えるので、失敗したときは何も変わらない。
+    pub(crate) fn replace(&self, new: SettingsData) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        self.save(&new)?;
+        *guard = new;
         Ok(())
     }
 
@@ -1213,5 +1227,35 @@ mod tests {
         let data: SettingsData = serde_json::from_str(r#"{"accounts":[]}"#).unwrap();
 
         assert!(data.server_mute_snapshots.is_empty());
+    }
+
+    #[test]
+    fn replace_swaps_the_whole_settings_and_snapshot_returns_a_copy() {
+        let s = SettingsStore::new_in_memory();
+        s.upsert_account(&account("old")).unwrap();
+        let mut new = s.snapshot();
+        new.accounts = vec![account("new")];
+        new.mute = MuteConfig { ng_words: vec!["x".into()], ..MuteConfig::default() };
+
+        s.replace(new).unwrap();
+
+        let snap = s.snapshot();
+        assert_eq!(snap.accounts, vec![account("new")]);
+        assert_eq!(snap.mute.ng_words, vec!["x".to_string()]);
+    }
+
+    #[test]
+    fn replace_keeps_the_previous_state_when_saving_fails() {
+        let dir = std::env::temp_dir().join(format!("tsumugi-replace-fail-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let s = SettingsStore::new(dir.join("settings.json"), dir.join("backgrounds")).unwrap();
+        s.upsert_account(&account("old")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap(); // 以後の保存は失敗する
+
+        let mut new = s.snapshot();
+        new.accounts = vec![account("new")];
+
+        assert!(s.replace(new).is_err());
+        assert_eq!(s.snapshot().accounts, vec![account("old")], "保存に失敗したら、メモリ上の状態は変わらない");
     }
 }
