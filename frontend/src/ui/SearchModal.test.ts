@@ -417,11 +417,18 @@ describe("SearchModal モバイル(Issue #450)", () => {
     app.ui = { ...app.ui, uiMode: "auto" };
   });
 
-  it("PC版では高さ上限・角丸付きのフレーム", () => {
+  // Modal の枠(border+p-4+ヘッダー+余白)は54pxあり、内側に max-h-[calc(84vh-3rem)] を手計算で置くと
+  // 3rem(48px)との差 6px ぶんダイアログが上限を超え、上下の画面余白(16vh)と合わせて画面全体にスクロールが出る(#542)。
+  // 上限は Modal の maxHeight(枠込み)に任せ、内側は残りを埋める(Settings と同じ)。jsdom ではレイアウトを測れないので構造で守る。
+  it("PC版では高さ上限を Modal の maxHeight(枠込み)で与え、内側に手計算の max-h を置かない", () => {
     app.accounts = [makeAccount()];
     render(SearchModal, { props: { onclose: () => {} } });
     const body = document.querySelector('[data-testid="search-body"]') as HTMLElement;
-    expect(body.className).toMatch(/max-h-\[calc\(84vh-3rem\)\]/);
+    expect((document.querySelector('[role="dialog"]') as HTMLElement).style.maxHeight).toBe("83vh");
+    expect(body.className).not.toMatch(/max-h-/);
+    expect(body.className).toMatch(/min-h-0/);
+    expect(body.className).toMatch(/flex-1/);
+    expect(body.className).toMatch(/rounded-b-\[11px\]/);
   });
 
   it("モバイルでは高さ上限と下の角丸を外し、Modal本文いっぱいに広げる", () => {
