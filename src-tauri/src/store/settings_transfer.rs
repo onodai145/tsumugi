@@ -7,6 +7,7 @@ use crate::error::{Error, Result};
 use crate::store::settings::SettingsData;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::{HashMap, HashSet};
 
 pub const EXPORT_FORMAT: &str = "tsumugi-settings";
 pub const EXPORT_VERSION: u32 = 1;
@@ -106,10 +107,162 @@ pub fn parse_export(bytes: &[u8]) -> Result<ExportFile> {
     serde_json::from_value(value).map_err(|e| Error::Invalid(format!("設定ファイルの内容が不正です: {e}")))
 }
 
+/// インポートの計画。`data` を `SettingsStore::replace` に渡す。
+#[derive(Debug)]
+pub struct ImportPlan {
+    pub data: SettingsData,
+    pub preview: ImportPreview,
+    /// ファイルにだけあり、トークンなしで追加するアカウントのID。
+    pub accounts_needing_login: Vec<String>,
+}
+
+fn invalid(msg: impl Into<String>) -> Error {
+    Error::Invalid(msg.into())
+}
+
+/// 素のホスト名か。スキーム・パス・ポート・認証情報を含まず、空でないこと。
+fn is_bare_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && !host.contains("..")
+        && host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-')
+}
+
+fn ensure_unique<'a>(ids: impl Iterator<Item = &'a str>, what: &str) -> Result<()> {
+    let mut seen = HashSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            return Err(invalid(format!("{what}のIDが重複しています")));
+        }
+    }
+    Ok(())
+}
+
+fn collect_leaf_group_ids<'a>(node: &'a PaneNode, out: &mut Vec<&'a str>) {
+    match node {
+        PaneNode::Leaf { group_id, .. } => out.push(group_id),
+        PaneNode::Split { children, .. } => {
+            for child in children {
+                collect_leaf_group_ids(&child.node, out);
+            }
+        }
+    }
+}
+
+/// ファイルの内容と現在の設定から、インポート後の設定を組み立てる。ファイルは信頼しない。
+/// 1つでも検証に落ちたらファイル全体を拒否する(部分的に取り込まない)。
+pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPlan> {
+    if file.format != EXPORT_FORMAT {
+        return Err(invalid("tsumugiの設定ファイルではありません"));
+    }
+    if file.version != EXPORT_VERSION {
+        return Err(invalid(format!("未対応のバージョン(v{})です", file.version)));
+    }
+    let d = file.data;
+
+    ensure_unique(d.accounts.iter().map(|a| a.id.as_str()), "アカウント")?;
+    ensure_unique(d.groups.iter().map(|g| g.id.as_str()), "グループ")?;
+    ensure_unique(d.columns.iter().map(|c| c.id.as_str()), "カラム")?;
+
+    let mut identities = HashSet::new();
+    for a in &d.accounts {
+        if !is_bare_host(&a.host) {
+            let shown: String = a.host.chars().take(64).collect();
+            return Err(invalid(format!("アカウントのホスト名が不正です: {shown}")));
+        }
+        if !identities.insert((a.host.to_ascii_lowercase(), a.user_id.clone())) {
+            return Err(invalid("同じアカウントが複数含まれています"));
+        }
+    }
+
+    // ファイル側のアカウントID -> 取り込み後のアカウントID
+    let mut id_map: HashMap<String, String> = HashMap::new();
+    let mut accounts = current.accounts.clone();
+    let mut accounts_needing_login = Vec::new();
+    for fa in &d.accounts {
+        let local = current
+            .accounts
+            .iter()
+            .find(|la| la.host.eq_ignore_ascii_case(&fa.host) && la.user_id == fa.user_id);
+        match local {
+            Some(la) => {
+                id_map.insert(fa.id.clone(), la.id.clone());
+            }
+            None => {
+                if current.accounts.iter().any(|la| la.id == fa.id) {
+                    return Err(invalid("アカウントのIDがこの端末の別のアカウントと衝突しています"));
+                }
+                id_map.insert(fa.id.clone(), fa.id.clone());
+                accounts.push(fa.clone());
+                accounts_needing_login.push(fa.id.clone());
+            }
+        }
+    }
+
+    let group_ids: HashSet<&str> = d.groups.iter().map(|g| g.id.as_str()).collect();
+    let mut columns = Vec::with_capacity(d.columns.len());
+    for c in &d.columns {
+        let Some(local_id) = id_map.get(&c.account_id) else {
+            return Err(invalid("カラムが存在しないアカウントを参照しています"));
+        };
+        if !group_ids.contains(c.group_id.as_str()) {
+            return Err(invalid("カラムが存在しないグループを参照しています"));
+        }
+        crate::mml::validate_sound_choice(&c.notify_sound_choice)?;
+        let mut c = c.clone();
+        c.account_id = local_id.clone();
+        columns.push(c);
+    }
+
+    if let Some(root) = &d.pane_layout {
+        let mut leaves = Vec::new();
+        collect_leaf_group_ids(root, &mut leaves);
+        if leaves.iter().any(|g| !group_ids.contains(g)) {
+            return Err(invalid("ペイン配置が存在しないグループを参照しています"));
+        }
+    }
+    crate::mml::validate_sound_choice(&d.notify.sound_choice)?;
+
+    let mut ui = d.ui;
+    ui.background_kind = None;
+    ui.background_path = None;
+    ui.default_account_id = id_map.get(&ui.default_account_id).cloned().unwrap_or_default();
+    ui.note_cache_limit = ui.note_cache_limit.clamp(0, 100_000);
+    ui.note_cache_max_age_days = ui.note_cache_max_age_days.clamp(0, 3_650);
+    ui.note_cache_max_size_mb = ui.note_cache_max_size_mb.clamp(0, 10_000);
+    ui.gap_fill_limit = ui.gap_fill_limit.clamp(0, 1_000);
+
+    let preview = ImportPreview {
+        column_count: columns.len() as i32,
+        account_count: d.accounts.len() as i32,
+        accounts_needing_login: accounts_needing_login.len() as i32,
+        has_custom_css: !ui.custom_css.trim().is_empty(),
+        has_custom_themes: !ui.custom_themes.is_empty() || !ui.custom_syntax_themes.is_empty(),
+        has_custom_endpoints: {
+            let defaults = UiPrefs::default();
+            ui.search_engine_url != defaults.search_engine_url || ui.summaly_proxy_url != defaults.summaly_proxy_url
+        },
+    };
+    let data = SettingsData {
+        accounts,
+        groups: d.groups,
+        columns,
+        mute: d.mute,
+        notify: d.notify,
+        ui,
+        pane_layout: d.pane_layout,
+        cache_backend: current.cache_backend.clone(),
+        server_mute_snapshots: current.server_mute_snapshots.clone(),
+    };
+    Ok(ImportPlan { data, preview, accounts_needing_login })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{BackgroundKind, ColumnKind, FilterQuery};
+    use crate::domain::{BackgroundKind, ColumnKind, FilterQuery, PaneChild, PaneNode, SplitDirection};
 
     pub(super) fn account(id: &str, host: &str, user_id: &str) -> Account {
         Account {
@@ -254,5 +407,302 @@ mod tests {
         let big = vec![b' '; MAX_IMPORT_BYTES + 1];
         let err = parse_export(&big).unwrap_err().to_string();
         assert!(err.contains("ファイルが大きすぎます"), "{err}");
+    }
+
+    fn current_with_local_account() -> SettingsData {
+        let mut d = SettingsData::default();
+        d.accounts = vec![account("local1", "misskey.io", "u1")];
+        d.groups = vec![group("old-g", 0)];
+        d.columns = vec![column("old-c", "local1", "old-g")];
+        d
+    }
+
+    fn plan_err(current: &SettingsData, file: ExportFile) -> String {
+        plan_import(current, file).err().expect("拒否されるはず").to_string()
+    }
+
+    #[test]
+    fn matching_accounts_keep_the_local_id_and_columns_follow_it() {
+        let current = current_with_local_account();
+        let mut data = empty_data();
+        data.accounts = vec![account("file1", "misskey.io", "u1")];
+        data.groups = vec![group("g1", 0)];
+        data.columns = vec![column("c1", "file1", "g1")];
+        data.ui.default_account_id = "file1".into();
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        assert_eq!(plan.data.accounts.len(), 1, "端末側のアカウントがそのまま残る");
+        assert_eq!(plan.data.accounts[0].id, "local1");
+        assert_eq!(plan.data.columns[0].account_id, "local1");
+        assert_eq!(plan.data.ui.default_account_id, "local1");
+        assert!(plan.accounts_needing_login.is_empty());
+        assert_eq!(plan.data.columns.len(), 1, "端末側のカラムはファイルの内容で置き換わる");
+        assert_eq!(plan.data.columns[0].id, "c1");
+    }
+
+    #[test]
+    fn host_comparison_ignores_ascii_case() {
+        let current = current_with_local_account();
+        let mut data = empty_data();
+        data.accounts = vec![account("file1", "Misskey.IO", "u1")];
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        assert_eq!(plan.data.accounts.len(), 1, "同じアカウントとして対応づく");
+        assert!(plan.accounts_needing_login.is_empty());
+    }
+
+    #[test]
+    fn new_accounts_are_added_without_a_token_and_local_only_accounts_remain() {
+        let current = current_with_local_account();
+        let mut data = empty_data();
+        data.accounts = vec![account("file2", "other.example", "u9")];
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        let ids: Vec<&str> = plan.data.accounts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["local1", "file2"], "端末側のアカウントは残り、ファイル側が追加される");
+        assert_eq!(plan.accounts_needing_login, vec!["file2".to_string()]);
+        assert_eq!(plan.preview.accounts_needing_login, 1);
+    }
+
+    #[test]
+    fn device_specific_settings_are_carried_over_from_the_current_state() {
+        let mut current = current_with_local_account();
+        current.server_mute_snapshots.insert("local1".into(), Default::default());
+
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+
+        assert!(plan.data.server_mute_snapshots.contains_key("local1"));
+    }
+
+    #[test]
+    fn background_is_reset_and_the_four_rust_side_numbers_are_clamped() {
+        let current = SettingsData::default();
+        let mut data = empty_data();
+        data.ui.background_kind = Some(BackgroundKind::Video);
+        data.ui.background_path = Some("/elsewhere/bg.mp4".into());
+        data.ui.note_cache_limit = 9_999_999;
+        data.ui.note_cache_max_age_days = -5;
+        data.ui.note_cache_max_size_mb = 99_999;
+        data.ui.gap_fill_limit = 5_000;
+        data.ui.ui_scale = 9_999; // フロントが適用時に丸めるので、ここでは触らない
+
+        let ui = plan_import(&current, file_with(data)).unwrap().data.ui;
+
+        assert_eq!(ui.background_kind, None);
+        assert_eq!(ui.background_path, None);
+        assert_eq!(ui.note_cache_limit, 100_000);
+        assert_eq!(ui.note_cache_max_age_days, 0);
+        assert_eq!(ui.note_cache_max_size_mb, 10_000);
+        assert_eq!(ui.gap_fill_limit, 1_000);
+        assert_eq!(ui.ui_scale, 9_999);
+    }
+
+    #[test]
+    fn default_account_id_pointing_nowhere_is_cleared() {
+        let mut data = empty_data();
+        data.ui.default_account_id = "ghost".into();
+
+        let plan = plan_import(&SettingsData::default(), file_with(data)).unwrap();
+
+        assert_eq!(plan.data.ui.default_account_id, "");
+    }
+
+    #[test]
+    fn preview_counts_and_flags_custom_content() {
+        let mut data = empty_data();
+        data.accounts = vec![account("f1", "a.example", "u1"), account("f2", "b.example", "u2")];
+        data.groups = vec![group("g1", 0)];
+        data.columns = vec![column("c1", "f1", "g1"), column("c2", "f2", "g1"), column("c3", "f2", "g1")];
+        data.ui.custom_css = "  body{}  ".into();
+
+        let preview = plan_import(&SettingsData::default(), file_with(data)).unwrap().preview;
+
+        assert_eq!(
+            preview,
+            ImportPreview {
+                column_count: 3,
+                account_count: 2,
+                accounts_needing_login: 2,
+                has_custom_css: true,
+                has_custom_themes: false,
+                has_custom_endpoints: false,
+            }
+        );
+    }
+
+    #[test]
+    fn preview_flags_external_service_urls_that_differ_from_the_defaults() {
+        let defaults = UiPrefs::default();
+
+        // 既定値のままなら、立たない
+        let plan = plan_import(&SettingsData::default(), file_with(empty_data())).unwrap();
+        assert!(!plan.preview.has_custom_endpoints);
+
+        // URLプレビューの取得先を変えたら立つ
+        let mut data = empty_data();
+        data.ui.summaly_proxy_url = "https://evil.example/summaly".into();
+        assert!(plan_import(&SettingsData::default(), file_with(data)).unwrap().preview.has_custom_endpoints);
+
+        // 検索エンジンのURLを変えたら立つ
+        let mut data = empty_data();
+        data.ui.search_engine_url = format!("{}x", defaults.search_engine_url);
+        assert!(plan_import(&SettingsData::default(), file_with(data)).unwrap().preview.has_custom_endpoints);
+    }
+
+    #[test]
+    fn an_empty_data_section_is_planned_as_zero_columns() {
+        let preview = plan_import(&current_with_local_account(), file_with(empty_data())).unwrap().preview;
+
+        assert_eq!(preview.column_count, 0);
+        assert_eq!(preview.account_count, 0);
+    }
+
+    #[test]
+    fn rejects_wrong_format_and_unsupported_version() {
+        let mut f = file_with(empty_data());
+        f.format = "other".into();
+        assert!(plan_err(&SettingsData::default(), f).contains("tsumugiの設定ファイルではありません"));
+
+        let mut f = file_with(empty_data());
+        f.version = 0;
+        assert!(plan_err(&SettingsData::default(), f).contains("未対応のバージョン"));
+    }
+
+    #[test]
+    fn rejects_duplicate_ids() {
+        let mut data = empty_data();
+        data.accounts = vec![account("x", "a.example", "u1"), account("x", "b.example", "u2")];
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("アカウントのIDが重複"));
+
+        let mut data = empty_data();
+        data.groups = vec![group("g", 0), group("g", 1)];
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("グループのIDが重複"));
+
+        let mut data = empty_data();
+        data.accounts = vec![account("a", "a.example", "u1")];
+        data.groups = vec![group("g", 0)];
+        data.columns = vec![column("c", "a", "g"), column("c", "a", "g")];
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("カラムのIDが重複"));
+    }
+
+    #[test]
+    fn rejects_the_same_host_and_user_listed_twice() {
+        let mut data = empty_data();
+        data.accounts = vec![account("f1", "misskey.io", "u1"), account("f2", "MISSKEY.io", "u1")];
+
+        let err = plan_err(&SettingsData::default(), file_with(data));
+
+        assert!(err.contains("同じアカウントが複数含まれています"), "{err}");
+    }
+
+    #[test]
+    fn rejects_a_new_account_whose_id_collides_with_another_local_account() {
+        let current = current_with_local_account(); // local1 = misskey.io / u1
+        let mut data = empty_data();
+        data.accounts = vec![account("local1", "other.example", "u9")]; // 同じIDだが別のアカウント
+
+        let err = plan_err(&current, file_with(data));
+
+        assert!(err.contains("この端末の別のアカウントと衝突"), "{err}");
+    }
+
+    #[test]
+    fn rejects_hosts_that_are_not_bare_host_names() {
+        for bad in [
+            "https://evil.example",
+            "evil.example/path",
+            "evil.example:8080",
+            "user@evil.example",
+            "",
+            ".evil.example",
+            "evil..example",
+            "evil example",
+        ] {
+            let mut data = empty_data();
+            data.accounts = vec![account("f1", bad, "u1")];
+            let err = plan_err(&SettingsData::default(), file_with(data));
+            assert!(err.contains("ホスト名が不正"), "{bad:?}: {err}");
+        }
+        // 素のホスト名とIPアドレスは通る(通すが、トークンがないので許可リストには入らない)
+        for ok in ["misskey.io", "127.0.0.1", "xn--abc.example"] {
+            let mut data = empty_data();
+            data.accounts = vec![account("f1", ok, "u1")];
+            assert!(plan_import(&SettingsData::default(), file_with(data)).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn rejects_dangling_references() {
+        let mut data = empty_data();
+        data.groups = vec![group("g", 0)];
+        data.columns = vec![column("c", "ghost-account", "g")];
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("存在しないアカウントを参照"));
+
+        let mut data = empty_data();
+        data.accounts = vec![account("a", "a.example", "u1")];
+        data.columns = vec![column("c", "a", "ghost-group")];
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("存在しないグループを参照"));
+
+        let mut data = empty_data();
+        data.groups = vec![group("g", 0)];
+        data.pane_layout = Some(PaneNode::Split {
+            id: "s".into(),
+            direction: SplitDirection::Row,
+            children: vec![
+                PaneChild { node: PaneNode::new_leaf("g"), size: 1.0, auto: false },
+                PaneChild { node: PaneNode::new_leaf("ghost-group"), size: 1.0, auto: false },
+            ],
+        });
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("ペイン配置が存在しないグループを参照"));
+    }
+
+    #[test]
+    fn rejects_invalid_mml_sound_choices() {
+        let mut data = empty_data();
+        data.notify.sound_choice = "mml:j".into();
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("MML が不正です"));
+
+        let mut data = empty_data();
+        data.accounts = vec![account("a", "a.example", "u1")];
+        data.groups = vec![group("g", 0)];
+        let mut c = column("c", "a", "g");
+        c.notify_sound_choice = "mml:j".into();
+        data.columns = vec![c];
+        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("MML が不正です"));
+    }
+
+    #[test]
+    fn a_valid_pane_layout_is_kept_as_is() {
+        let mut data = empty_data();
+        data.groups = vec![group("g", 0)];
+        let layout = PaneNode::new_leaf("g"); // new_leaf はノードIDをランダムに振るので、1つを使い回す
+        data.pane_layout = Some(layout.clone());
+
+        let plan = plan_import(&SettingsData::default(), file_with(data)).unwrap();
+
+        assert_eq!(plan.data.pane_layout, Some(layout));
+    }
+
+    #[test]
+    fn export_then_import_on_the_same_state_changes_nothing_except_the_background() {
+        let mut current = current_with_local_account();
+        current.ui.custom_css = "a{}".into();
+        current.ui.background_path = Some("/x/bg.png".into());
+        current.ui.background_kind = Some(BackgroundKind::Image);
+        current.ui.default_account_id = "local1".into();
+        let file = build_export(&current, "1.0.0", "2026-11-02T00:00:00Z");
+
+        let plan = plan_import(&current, file).unwrap();
+
+        assert_eq!(plan.data.accounts, current.accounts);
+        assert_eq!(plan.data.columns, current.columns);
+        assert_eq!(plan.data.groups, current.groups);
+        assert_eq!(plan.data.ui.custom_css, "a{}");
+        assert_eq!(plan.data.ui.default_account_id, "local1");
+        assert_eq!(plan.data.ui.background_path, None);
+        assert!(plan.accounts_needing_login.is_empty());
     }
 }
