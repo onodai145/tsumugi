@@ -119,7 +119,8 @@ PC間の移行、バックアップ、設定の共有のために、アカウン
 - すべての `column.groupId` が、ファイル内の `groups` に存在すること。
 - ペイン配置(`paneLayout`)の各 Leaf が参照する `groupId` が、ファイル内の `groups` に存在すること。ペイン配置はグループIDだけを参照し、カラムIDは参照しない。
 - アカウントの `host` が、スキーム(`://`)・パス・ポート・認証情報を含まない素のホスト名であること。
-- `ui` の数値フィールドが、`set_ui_prefs` と同じ範囲チェックに通ること。範囲外は拒否せず、範囲内に丸める。
+- `notify.soundChoice` と、すべての `column.notifySoundChoice` が、`mml::validate_sound_choice` を通ること(`set_notify` と同じ検証。`mml:` で始まる不正なMMLを拒否する)。
+- `ui` のうち、Rust側が直接使う数値を、設定の「データ」タブと同じ範囲に丸めること(拒否はしない): `noteCacheLimit` は 0〜100000、`noteCacheMaxAgeDays` は 0〜3650、`noteCacheMaxSizeMb` は 0〜10000、`gapFillLimit` は 0〜1000。それ以外の数値は、`set_ui_prefs` と同じく不透明に保存し、フロントが適用時に丸める(`ui_scale` など。`UiPrefs` の docコメントの方針どおり)。
 - ファイルサイズが8MiB以下であること(読んだバイト列の長さで判定する。Androidの `content://` はサイズを事前に取れない場合があるため)。
 
 `defaultAccountId` がファイル内のどのアカウントも指さない場合は、空文字にする。
@@ -130,16 +131,18 @@ PC間の移行、バックアップ、設定の共有のために、アカウン
 2. `SettingsStore::replace` が、ロックを1回取り、既存の `save()`(一時ファイルに書いて rename)で保存する。メモリ上の状態は、保存に成功してから差し替える。
 3. `AppState` を更新する。
    - `accounts`: 新しい一覧で作り直す。
-   - `mute`: 新しい値に差し替える。
+   - `mute`: 新しい値で `apply_mute_config` を呼ぶ(`pub(crate)` にする)。`state.mute` の差し替えに加え、カラムごとのbackfill境界を捨てる。カラムが置き換わるため、古い境界を残さない。
    - `fetch_allowlist`: 下の「SSRF対策」に従って作り直す。
-   - 全カラムのストリーム接続を閉じる(`connections.close`)。
+   - 置き換え前の全カラムのストリーム接続を閉じる(`connections.close`)。
 4. `ImportResult` を返す。フロントがWebViewをリロードし、カラムとストアをRustの保存内容から作り直す。
 
 ### SSRF対策
 
 `fetch_allowlist` は、アカウントのホストをプライベートIP拒否の対象から除外する(Issue #377)。インポートしたトークンなしアカウントのホストをここに入れると、細工したファイルで `127.0.0.1` などを除外対象にできてしまう。
 
-- `fetch_allowlist` に入れるのは、トークンを持つアカウントのホストだけにする。`refresh_fetch_allowlist()` を、トークンの有無を見る形に変える(この変更は `refresh_fetch_allowlist()` の挙動に影響する。呼び出し元の確認は実装計画で行う)。
+- `fetch_allowlist` に入れるのは、トークンを持つアカウントのホストだけにする。次の2か所を、トークンの有無を見る形に変える。
+  - `AppState::refresh_fetch_allowlist()`(呼び出し元は `commands/account.rs` の `complete_miauth` と `remove_account`、`register_test_account`)。
+  - `AppState::new_with_sound` の起動時の初期構築。インポート後にアプリを再起動しても、トークンなしアカウントのホストが許可リストに入らないようにするため、こちらも必須。
 - 再認証でトークンが付いたとき(`complete_miauth`)には、すでに `refresh_fetch_allowlist()` が呼ばれるので、そのホストが許可リストに入る。
 
 ## UI
@@ -186,7 +189,8 @@ Rust(単体、`settings_transfer.rs`):
   - 端末側にだけあるアカウントが残る。
   - ファイルにだけあるアカウントがトークンなしで追加される。
 - 拒否ケース: 形式違い、`version` が新しすぎる、IDの重複、`accountId` の宙ぶらりん、グループ参照の宙ぶらりん、ペイン配置の参照切れ、スキームやパスを含む `host`、IDの衝突。
-- `ui` の範囲外の値が範囲内に丸められる。
+- `ui` のうち、キャッシュ上限3項目とギャップ埋めの範囲外の値が、範囲内に丸められる。
+- 不正な `mml:` の `notify.soundChoice` と `column.notifySoundChoice` が拒否される。
 - エクスポートしてからインポートした結果が、背景を除いて元と一致する。
 - `SettingsStore::replace`: 書き込み不能なパスで保存に失敗したとき、メモリ上の状態が変わらない。
 
@@ -218,7 +222,7 @@ Rust(`AppState` 統合):
 4. 開くダイアログのJSONフィルターが、Androidで効かない場合に内容検証で弾けること。
 5. `Column` / `NotifyConfig` / `MuteConfig` に、`account_id` を参照するフィールドがほかにないこと(調査では `Column.account_id` と `UiPrefs.defaultAccountId` の2か所だった)。
 6. トークンなしアカウントのカラムが出すエラー表示が、利用者に分かる文言であること。分からなければ、「このアカウントは再認証が必要です」を出す。
-7. `refresh_fetch_allowlist()` の呼び出し元すべてで、トークンの有無で絞る変更が問題を起こさないこと。
+7. `refresh_fetch_allowlist()` の呼び出し元(`complete_miauth`、`remove_account`、テスト用の `register_test_account`)と、起動時の初期構築で、トークンの有無で絞る変更が問題を起こさないこと。
 
 ## 関連する既存の問題
 
