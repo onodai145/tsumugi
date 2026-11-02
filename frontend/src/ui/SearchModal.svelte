@@ -203,15 +203,17 @@
   });
 </script>
 
-<Modal title="検索" {onclose} width="620px" maxHeight={mobileUi ? "100%" : undefined}>
+<Modal title="検索" {onclose} width="620px" maxHeight={mobileUi ? "100%" : "83vh"}>
   <!-- Modal.svelte のp-4を打ち消してフォーム+結果を1つの高さ制限付きフレックス列にする
-       (Settings.svelte と同じ「-mx-4 -mb-4 + max-h + overflow-hidden」パターン)。
-       ウィンドウが低くてもモーダル全体が画面外にはみ出さず、結果欄は残り空間いっぱいに
-       広がる（固定max-hだったこれまでは常に狭かった）。 -->
+       (Settings.svelte と同じ「-mx-4 -mb-4 + min-h-0 flex-1 + overflow-hidden」パターン)。
+       PC: 高さ上限はModalのmaxHeight(83vh、枠のborder/p-4/ヘッダー込み)に任せ、このdivは残りを埋める。
+       内側に max-h-[calc(84vh-3rem)] のような手計算を置くと、Modalの枠(54px)との差ぶんだけ上限を超え、
+       上下の画面余白(16vh)と合わせて画面全体にスクロールが出る(#542)。83vhは丸め誤差で100vhを超えないための余裕。
+       ウィンドウが低くてもモーダル全体が画面外にはみ出さず、結果欄は残り空間いっぱいに広がる。 -->
   <div
     class={mobileUi
       ? "-mx-4 flex min-h-0 flex-1 flex-col"
-      : "-mx-4 -mb-4 flex max-h-[calc(84vh-3rem)] flex-col overflow-hidden rounded-b-[11px]"}
+      : "-mx-4 -mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-[11px]"}
     data-testid="search-body"
   >
     <form onsubmit={runSearch} class="flex flex-none flex-col gap-2.5 px-4">
