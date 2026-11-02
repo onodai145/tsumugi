@@ -96,7 +96,9 @@
   {:else if active === "externalIntegration"}
     <ExternalIntegrationSection />
   {:else if active === "data"}
-    <DataSection />
+    <!-- 保存バー(sticky)の効く範囲を DataSection の中に限る。包まないと、下の
+         CacheBackendSettings までスクロールしても DataSection の保存バーが被さる。 -->
+    <div><DataSection /></div>
     <hr class="my-5 border-0 border-t border-border" />
     <CacheBackendSettings />
   {:else if active === "notify"}

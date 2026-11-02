@@ -1,6 +1,6 @@
 <script lang="ts">
+  import SaveBar from "./SaveBar.svelte";
   import { app } from "../../lib/store.svelte";
-  import { Button } from "$lib/components/ui/button";
 
   let width = $state(app.ui.defaultColumnWidth);
   let uiMode = $state(app.ui.uiMode ?? "auto");
@@ -75,8 +75,4 @@
   大きくすると画像を大きく見られます。
 </p>
 
-<div class="flex items-center justify-end gap-3">
-  {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}
-  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
-</div>
-{#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
+<SaveBar {busy} {saved} {err} onsave={save} />

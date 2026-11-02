@@ -1,7 +1,7 @@
 <script lang="ts">
+  import SaveBar from "./SaveBar.svelte";
   import { app } from "../../lib/store.svelte";
   import SoundChoicePicker from "./SoundChoicePicker.svelte";
-  import { Button } from "$lib/components/ui/button";
 
   let desktop = $state(app.notify.desktop);
   let sound = $state(app.notify.sound);
@@ -53,8 +53,4 @@
   {#if !hasNotifyEnabledTab}<br /><span class="text-[var(--warning)]">※ 現在、通知がONのタブがありません。タブをダブルクリック→「このタブの通知」で有効にしてください。</span>{/if}
 </p>
 
-<div class="flex items-center justify-end gap-3">
-  {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}
-  <Button type="button" disabled={busy || soundInvalid} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
-</div>
-{#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
+<SaveBar {busy} disabled={soundInvalid} {saved} {err} onsave={save} />

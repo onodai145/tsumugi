@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SaveBar from "./SaveBar.svelte";
   import { app } from "../../lib/store.svelte";
   import {
     BACKGROUND_FIT_MODE_OPTIONS,
@@ -218,8 +219,4 @@
   <p class="mb-4 mt-0 text-xs text-muted-foreground">数値が低いほど背景画像が透けて見えます。</p>
 {/if}
 
-<div class="flex items-center justify-end gap-3">
-  {#if saved}<span class="text-sm text-[var(--success)]">保存しました</span>{/if}
-  <Button type="button" disabled={busy} onclick={save}>{busy ? "保存中…" : "保存"}</Button>
-</div>
-{#if err}<p class="mt-2 mb-0 text-sm text-destructive">{err}</p>{/if}
+<SaveBar {busy} {saved} {err} onsave={save} />
