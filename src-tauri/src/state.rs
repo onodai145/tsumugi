@@ -1,6 +1,6 @@
 //! Tauri が管理するアプリ状態（command から `State<AppState>` で参照）。
 
-use crate::domain::{EmojiDef, MuteConfig, Note, Notification};
+use crate::domain::{Account, EmojiDef, MuteConfig, Note, Notification};
 use crate::fence::ColumnFence;
 use crate::filter::mute::WordMuteRule;
 use crate::session::{AccountManager, SecretStore};
@@ -194,7 +194,7 @@ impl AppState {
         });
         let mute = settings.load_mute().unwrap_or_default();
         let fetch_allowlist = crate::net_guard::FetchAllowlist::default();
-        fetch_allowlist.replace(accounts.iter().map(|a| a.host.as_str()));
+        fetch_allowlist.replace(hosts_with_token(&accounts, secrets.as_ref()));
         Self {
             http: reqwest::Client::builder()
                 .user_agent(USER_AGENT)
@@ -376,10 +376,16 @@ impl AppState {
         )
     }
 
-    /// `accounts` の全ホストで取得先の許可リストを差し替える。アカウントの追加・削除の直後に呼ぶ。
+    /// `accounts` のうちトークンを持つものの全ホストで、取得先の許可リストを差し替える。
+    /// アカウントの追加・削除・再認証の直後に呼ぶ。
     pub fn refresh_fetch_allowlist(&self) {
-        let hosts: Vec<String> = self.accounts.lock().unwrap().list().into_iter().map(|a| a.host).collect();
-        self.fetch_allowlist.replace(hosts);
+        let accounts = self.accounts.lock().unwrap().list();
+        self.fetch_allowlist.replace(hosts_with_token(&accounts, self.secrets.as_ref()));
+    }
+
+    /// そのアカウントのトークンがキーリングにあるか。読み取りに失敗したら `false`。
+    pub fn has_token(&self, account_id: &str) -> bool {
+        token_present(self.secrets.as_ref(), account_id)
     }
 
     /// account_id から (host, token) を引く。未登録なら Invalid、token 欠落なら Unauthorized。
@@ -458,10 +464,31 @@ impl AppState {
     }
 }
 
+/// 許可リストに入れるホスト。**トークンを持つアカウントのものだけ**(Issue #544)。
+/// トークンなしのアカウント(設定インポート直後など)のホストを入れると、細工した設定ファイルで
+/// `127.0.0.1` などをSSRFガード(Issue #377)の除外対象にできてしまう。キーリングの読み取り失敗は
+/// 「トークンなし」として扱う。アカウントIDはログに出さない。
+fn hosts_with_token(accounts: &[Account], secrets: &dyn SecretStore) -> Vec<String> {
+    accounts
+        .iter()
+        .filter(|a| token_present(secrets, &a.id))
+        .map(|a| a.host.clone())
+        .collect()
+}
+
+fn token_present(secrets: &dyn SecretStore, account_id: &str) -> bool {
+    match secrets.get(account_id) {
+        Ok(token) => token.is_some(),
+        Err(e) => {
+            log::warn!("failed to read a token from the secret store: {e}");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Account;
 
     #[test]
     fn server_version_is_remembered_per_account_and_forgettable() {
@@ -526,6 +553,63 @@ mod tests {
         state.accounts.lock().unwrap().remove("acc1").unwrap();
         state.refresh_fetch_allowlist();
         assert!(!state.fetch_allowlist.contains_host("misskey.test"));
+    }
+
+    fn test_account(id: &str, host: &str) -> Account {
+        Account {
+            id: id.into(),
+            host: host.into(),
+            username: "me".into(),
+            user_id: format!("u-{id}"),
+            display_name: "Me".into(),
+            avatar_url: None,
+            instance: None,
+            is_cat: false,
+            avatar_blurhash: None,
+        }
+    }
+
+    #[test]
+    fn refresh_fetch_allowlist_skips_accounts_without_token() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.register_test_account("acc1"); // host=misskey.test、トークンあり
+        state.accounts.lock().unwrap().upsert(test_account("acc2", "internal.example")); // トークンなし
+        state.refresh_fetch_allowlist();
+
+        assert!(state.fetch_allowlist.contains_host("misskey.test"));
+        assert!(!state.fetch_allowlist.contains_host("internal.example"));
+    }
+
+    #[test]
+    fn startup_allowlist_excludes_accounts_without_token() {
+        let settings = SettingsStore::new_in_memory();
+        settings.upsert_account(&test_account("with", "misskey.test")).unwrap();
+        settings.upsert_account(&test_account("without", "internal.example")).unwrap();
+        let secrets = crate::session::MemoryStore::default();
+        secrets.set("with", "tok").unwrap();
+        let cache = NoteCacheStore::new(crate::store::SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        ));
+
+        let state = AppState::new_with_sound(
+            Box::new(secrets),
+            settings,
+            DraftStore::new_in_memory(),
+            cache,
+            std::env::temp_dir(),
+            SoundPlayer::new_for_test(),
+        );
+
+        assert!(state.fetch_allowlist.contains_host("misskey.test"));
+        assert!(!state.fetch_allowlist.contains_host("internal.example"));
+    }
+
+    #[test]
+    fn has_token_reflects_the_secret_store() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.register_test_account("acc1");
+        assert!(state.has_token("acc1"));
+        assert!(!state.has_token("nobody"));
     }
 
     #[test]
