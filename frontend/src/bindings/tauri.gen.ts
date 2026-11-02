@@ -370,6 +370,14 @@ export const commands = {
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当。Issue #11）。
 	 */
 	syncServerMutes: (accountId: string) => typedError<SyncMuteResult, Error>(__TAURI_INVOKE("sync_server_mutes", { accountId })),
+	/**  設定を `path` に書き出す。Androidでは `path` は `content://` URI でもよい。 */
+	exportSettings: (path: string) => typedError<null, Error>(__TAURI_INVOKE("export_settings", { path })),
+	/**  設定ファイルを検証して概要を返す。何も書き込まない。 */
+	inspectSettingsFile: (path: string) => typedError<ImportPreview, Error>(__TAURI_INVOKE("inspect_settings_file", { path })),
+	/**  設定ファイルを読み込み、現在の設定を置き換える。呼び出し元はこのあとWebViewをリロードする。 */
+	importSettings: (path: string) => typedError<ImportResult, Error>(__TAURI_INVOKE("import_settings", { path })),
+	/**  トークンを持たないアカウントのID一覧。UIの「要ログイン」表示に使う。 */
+	accountsWithoutToken: () => typedError<string[], Error>(__TAURI_INVOKE("accounts_without_token")),
 	/**  自分のクリップ一覧を取得。 */
 	listClips: (accountId: string) => typedError<Clip[], Error>(__TAURI_INVOKE("list_clips", { accountId })),
 	/**  クリップを新規作成する。 */
@@ -736,6 +744,27 @@ export type Glide = {
  *  (投稿失敗フィードバック、破壊的操作の確認など)を見越した先行定義（Issue #26設計参照）。
  */
 export type HapticPattern = "light" | "medium" | "success" | "warning" | "error";
+
+/**  インポート前に利用者へ見せる概要。 */
+export type ImportPreview = {
+	columnCount: number,
+	accountCount: number,
+	/**  ファイルにだけあり、トークンなしで追加されるアカウントの数。 */
+	accountsNeedingLogin: number,
+	hasCustomCss: boolean,
+	hasCustomThemes: boolean,
+	/**
+	 *  検索エンジンまたはURLプレビュー(summaly)のURLが、既定値と異なる。共有ファイルで、
+	 *  送信先を他人のサーバーに向けられるため、確認ダイアログで知らせる。
+	 */
+	hasCustomEndpoints: boolean,
+};
+
+export type ImportResult = {
+	columnCount: number,
+	/**  トークンなしで追加したアカウントのID。再認証が必要。 */
+	accountsNeedingLogin: string[],
+};
 
 /**
  *  投稿元インスタンスの表示情報（Instance Ticker用、Issue #103）。

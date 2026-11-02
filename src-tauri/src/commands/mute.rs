@@ -211,7 +211,7 @@ pub async fn set_mute(state: State<'_, AppState>, config: MuteConfig) -> Result<
 }
 
 /// ミュート設定を保存して差し替え、全カラムの backfill 境界を捨てる(`set_mute` の本体)。
-async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
+pub(crate) async fn apply_mute_config(state: &AppState, config: MuteConfig) -> Result<()> {
     apply_mute_config_with(state, config, || state.cache.clear_all_fetch_boundaries()).await
 }
 
@@ -304,6 +304,42 @@ pub(crate) async fn read_file_bytes(
         tokio::fs::read(path)
             .await
             .map_err(|e| Error::Invalid(format!("cannot read file {path}: {e}")))
+    }
+}
+
+/// ファイルへ書く共通処理(Issue #544)。
+///
+/// Android は SAF の保存ダイアログが `content://` URI を返し、`tokio::fs::write` では書けない
+/// (ENOENT になる)ため、`tauri-plugin-fs` 経由で書く。`write` + `truncate` は Android 側で
+/// `"wt"` モードになり、上書き時に古い末尾が残らない。
+pub(crate) async fn write_file_bytes(
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: &AppHandle,
+    path: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    #[cfg(target_os = "android")]
+    {
+        use std::io::Write;
+        let app = app.clone();
+        let path_owned = path.to_string();
+        let bytes = bytes.to_vec();
+        let file_path: tauri_plugin_fs::FilePath = path.parse().unwrap();
+        tauri::async_runtime::spawn_blocking(move || -> std::io::Result<()> {
+            let mut opts = tauri_plugin_fs::OpenOptions::new();
+            opts.write(true).truncate(true);
+            let mut file = app.fs().open(file_path, opts)?;
+            file.write_all(&bytes)?;
+            file.flush()
+        })
+        .await
+        .map_err(|e| Error::Invalid(format!("cannot write file {path_owned}: {e}")))?
+        .map_err(|e| Error::Invalid(format!("cannot write file {path_owned}: {e}")))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        tokio::fs::write(path, bytes)
+            .await
+            .map_err(|e| Error::Invalid(format!("cannot write file {path}: {e}")))
     }
 }
 
