@@ -123,6 +123,18 @@ impl ColumnFence {
         self.columns.lock().unwrap().contains_key(column_id)
     }
 
+    /// `epoch` が、そのカラムの現在の世代と一致するか。ロックを取らない読み取りだけの照会。
+    /// エントリが無い(`remove` 済み・未登録)なら偽。書き込みの可否を決めるものではなく(それは
+    /// `write_if_current`)、失敗した取得が「定義の変更で捨てられた」のか「それ以外の失敗」なのかを
+    /// 見分けるために使う(Issue #555)。境界の世代は見ない。
+    pub fn is_current(&self, column_id: &str, epoch: &Epoch) -> bool {
+        self.columns
+            .lock()
+            .unwrap()
+            .get(column_id)
+            .is_some_and(|entry| entry.epoch.load(Ordering::SeqCst) == epoch.column)
+    }
+
     /// エントリを消す(`close_column` が `invalidate` の後に呼ぶ)。以降、そのカラムの
     /// 旧い世代による `write_if_current` は `None` になる。
     pub fn remove(&self, column_id: &str) {
@@ -370,5 +382,37 @@ mod tests {
         invalidating.await.unwrap();
 
         assert_eq!(writing.await.unwrap(), Some(false));
+    }
+
+    #[tokio::test]
+    async fn is_current_is_true_until_the_column_is_invalidated() {
+        let fence = ColumnFence::default();
+        let epoch = fence.begin("c1");
+        assert!(fence.is_current("c1", &epoch));
+
+        fence.invalidate("c1", || async {}).await;
+
+        assert!(!fence.is_current("c1", &epoch), "update_column / close_column の後は古い");
+    }
+
+    #[tokio::test]
+    async fn is_current_ignores_the_boundary_generation() {
+        let fence = ColumnFence::default();
+        let epoch = fence.begin("c1");
+
+        fence.invalidate_boundaries(|| async {}).await;
+
+        assert!(fence.is_current("c1", &epoch), "境界の世代はカラムの世代と別。境界が捨てられても現行");
+    }
+
+    #[test]
+    fn is_current_is_false_for_a_removed_or_unknown_column() {
+        let fence = ColumnFence::default();
+        let epoch = fence.begin("c1");
+        fence.remove("c1");
+        assert!(!fence.is_current("c1", &epoch), "remove 済み");
+
+        let other = fence.begin("c2");
+        assert!(!fence.is_current("ghost", &other), "エントリの無いカラム");
     }
 }
