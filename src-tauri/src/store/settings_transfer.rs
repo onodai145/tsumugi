@@ -130,6 +130,21 @@ fn is_bare_host(host: &str) -> bool {
         && host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-')
 }
 
+/// アカウントの `host` として妥当か。素のホスト名に、任意で `:<1..=65535>` のポートが付いた形だけ通す
+/// (ログイン経路がポート付きホストを保存するため)。IPv6リテラル・認証情報・スキーム・パスは通さない。
+fn is_valid_account_host(host: &str) -> bool {
+    match host.split_once(':') {
+        None => is_bare_host(host),
+        Some((name, port)) => {
+            is_bare_host(name)
+                && !port.is_empty()
+                && !port.starts_with('0')
+                && port.bytes().all(|b| b.is_ascii_digit())
+                && port.parse::<u16>().is_ok()
+        }
+    }
+}
+
 fn ensure_unique<'a>(ids: impl Iterator<Item = &'a str>, what: &str) -> Result<()> {
     let mut seen = HashSet::new();
     for id in ids {
@@ -168,7 +183,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
 
     let mut identities = HashSet::new();
     for a in &d.accounts {
-        if !is_bare_host(&a.host) {
+        if !is_valid_account_host(&a.host) {
             let shown: String = a.host.chars().take(64).collect();
             return Err(invalid(format!("アカウントのホスト名が不正です: {shown}")));
         }
@@ -655,12 +670,25 @@ mod tests {
         for bad in [
             "https://evil.example",
             "evil.example/path",
-            "evil.example:8080",
             "user@evil.example",
             "",
             ".evil.example",
             "evil..example",
             "evil example",
+            // ポートは `host:1..=65535` の形だけ通す
+            "evil.example:",
+            ":8080",
+            "evil.example:0",
+            "evil.example:08080",
+            "evil.example:65536",
+            "evil.example:80:80",
+            "evil.example:http",
+            "evil.example:+80",
+            "evil.example:-80",
+            "evil.example: 80",
+            "[::1]:80",
+            "user@evil.example:80",
+            "https://evil.example:80",
         ] {
             let mut data = empty_data();
             data.accounts = vec![account("f1", bad, "u1")];
@@ -673,6 +701,45 @@ mod tests {
             data.accounts = vec![account("f1", ok, "u1")];
             assert!(plan_import(&SettingsData::default(), file_with(data)).is_ok(), "{ok}");
         }
+    }
+
+    #[test]
+    fn accepts_hosts_with_a_port() {
+        for ok in ["misskey.local:8443", "127.0.0.1:3000", "xn--abc.example:443", "misskey.io:65535", "misskey.io:1"] {
+            let mut data = empty_data();
+            data.accounts = vec![account("f1", ok, "u1")];
+            assert!(plan_import(&SettingsData::default(), file_with(data)).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn a_port_host_account_matches_the_local_account_with_the_same_host_and_port() {
+        let mut current = SettingsData::default();
+        current.accounts = vec![account("local1", "misskey.local:8443", "u1")];
+        current.groups = vec![group("old-g", 0)];
+        let mut data = empty_data();
+        data.accounts = vec![account("file1", "MISSKEY.local:8443", "u1")];
+        data.groups = vec![group("g1", 0)];
+        data.columns = vec![column("c1", "file1", "g1")];
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        assert_eq!(plan.data.accounts.len(), 1, "新しいアカウントは増えない");
+        assert_eq!(plan.data.accounts[0].id, "local1");
+        assert!(plan.accounts_needing_login.is_empty());
+        assert_eq!(plan.data.columns[0].account_id, "local1");
+    }
+
+    #[test]
+    fn a_different_port_is_a_different_account() {
+        let mut current = SettingsData::default();
+        current.accounts = vec![account("local1", "misskey.local:8443", "u1")];
+        let mut data = empty_data();
+        data.accounts = vec![account("file1", "misskey.local:9000", "u1")];
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        assert_eq!(plan.accounts_needing_login, vec!["file1".to_string()]);
     }
 
     #[test]
