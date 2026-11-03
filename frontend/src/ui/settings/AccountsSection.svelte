@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
+  import { commands, unwrap } from "../../lib/ipc";
   import type { Account } from "../../bindings/tauri.gen";
   import { Button } from "$lib/components/ui/button";
   import Avatar from "../Avatar.svelte";
@@ -8,6 +9,25 @@
     onAddAccount,
     onReauth,
   }: { onAddAccount: () => void; onReauth: (account: Account) => void } = $props();
+
+  // トークンを持たないアカウントのID(設定のインポート直後など。Issue #544)。
+  // app.accounts が変わる(再認証・追加・削除)たびに取り直す。取得に失敗してもバッジが出ないだけ。
+  let needsLogin = $state<Set<string>>(new Set());
+  // 古い応答が新しい結果を上書きしないよう、最後に発行した取得だけを反映する。
+  let fetchSeq = 0;
+  $effect(() => {
+    void app.accounts;
+    const seq = ++fetchSeq;
+    void (async () => {
+      let ids: Set<string>;
+      try {
+        ids = new Set(await unwrap(commands.accountsWithoutToken()));
+      } catch {
+        ids = new Set();
+      }
+      if (seq === fetchSeq) needsLogin = ids;
+    })();
+  });
 
   let busyId = $state<string | null>(null);
   let confirmId = $state<string | null>(null);
@@ -53,7 +73,7 @@
         </Avatar>
         <div class="min-w-0 flex-1">
           <!-- text-[0.68rem]はスタイルガイド(docs/design/style-guide.md §5)の対象外。極小バッジのため例外的に即値を維持。 -->
-          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge ml-1.5 rounded px-1.5 py-px text-[0.68rem] font-semibold text-primary">既定</span>{/if}</div>
+          <div class="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold">{a.displayName || a.username}{#if a.id === app.defaultAccountId()}<span class="default-badge ml-1.5 rounded px-1.5 py-px text-[0.68rem] font-semibold text-primary">既定</span>{/if}{#if needsLogin.has(a.id)}<span class="ml-1.5 rounded px-1.5 py-px text-[0.68rem] font-semibold text-destructive" data-testid="needs-login-badge">要ログイン</span>{/if}</div>
           <div class="overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">@{a.username}@{a.host}</div>
         </div>
         {#if confirmId === a.id}
@@ -68,7 +88,7 @@
           {#if a.id !== app.defaultAccountId()}
             <Button type="button" variant="outline" size="xs" onclick={() => makeDefault(a.id)}>既定に設定</Button>
           {/if}
-          <Button type="button" variant="outline" size="xs" onclick={() => onReauth(a)}>再認証</Button>
+          <Button type="button" variant={needsLogin.has(a.id) ? "default" : "outline"} size="xs" onclick={() => onReauth(a)}>再認証</Button>
           <Button type="button" variant="outline" size="xs" onclick={() => (confirmId = a.id)}>削除</Button>
         {/if}
       </li>

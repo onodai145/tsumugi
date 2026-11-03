@@ -10,6 +10,7 @@ pub mod haptics;
 pub mod mute;
 pub mod note;
 pub mod scheduled;
+pub mod settings_transfer;
 pub mod sound;
 pub mod user;
 

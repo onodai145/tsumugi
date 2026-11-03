@@ -1183,6 +1183,29 @@ class AppStore {
     return session.sessionId;
   }
 
+  /// 再認証・追加の直後に、そのアカウントのカラムのうち画面に出ていないものを開き直す。
+  /// 設定のインポート(Issue #544)でトークンなしのまま取り込んだアカウントのカラムは、
+  /// 起動時の resumeColumn が認証エラーで失敗してタブが挿入されない。認証が通った時点で、
+  /// 再起動なしに表示する。失敗はログのみ(再認証自体の成否には影響させない)。
+  async #resumeAccountColumns(accountId: string) {
+    try {
+      const shown = new Set(this.groups.flatMap((g) => g.tabs.map((t) => t.id)));
+      const defs = await unwrap(commands.listColumns());
+      for (const def of defs) {
+        if (def.accountId !== accountId || shown.has(def.id)) continue;
+        try {
+          const opened = await unwrap(commands.resumeColumn(def.id));
+          this.#insertTab(opened);
+          this.#captureInitial(opened.column.id, opened.notes);
+        } catch (e) {
+          this.#logFailure(e);
+        }
+      }
+    } catch (e) {
+      this.#logFailure(e);
+    }
+  }
+
   async completeAccount(sessionId: string) {
     const account = await unwrap(commands.completeMiauth(sessionId));
     const existingIdx = this.accounts.findIndex((a) => a.id === account.id);
@@ -1194,6 +1217,7 @@ class AppStore {
       this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
     await this.#syncServerMutes(account.id);
+    await this.#resumeAccountColumns(account.id);
   }
 
   /// 定期同期の1回分。発火時点の全アカウントを同期する(アカウントの追加・削除に追従する)。

@@ -9,6 +9,7 @@ pub mod draft;
 pub mod scheduled_post;
 pub mod note_cache;
 pub mod settings;
+pub mod settings_transfer;
 mod sqlite_backend;
 pub(crate) mod postgres_backend;
 pub(crate) mod postgres_user_ref;

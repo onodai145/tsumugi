@@ -1,5 +1,6 @@
 <script lang="ts">
   import SaveBar from "./SaveBar.svelte";
+  import SettingsTransfer from "./SettingsTransfer.svelte";
   import { app } from "../../lib/store.svelte";
 
   let noteCacheLimit = $state(app.ui.noteCacheLimit ?? 10000);
@@ -71,5 +72,7 @@
   アプリを閉じていた間に流れたノートを、起動時にこの件数まで遡ってREST取得します。
   0にすると従来どおりキャッシュのみ表示します。
 </p>
+
+<SettingsTransfer />
 
 <SaveBar {busy} {saved} {err} onsave={save} />

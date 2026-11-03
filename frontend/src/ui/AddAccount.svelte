@@ -3,6 +3,7 @@
   import { app } from "../lib/store.svelte";
   import { X } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
+  import SettingsImport from "./settings/SettingsImport.svelte";
 
   // onclose があれば「戻る」導線を出す（ログイン済みで設定経由で開いた場合）。
   // 初回（アカウント0件）は onclose 未指定で戻る先が無いため非表示。
@@ -10,9 +11,12 @@
   let {
     onclose,
     reauthAccount,
+    reloadAfterImport,
   }: {
     onclose?: () => void;
     reauthAccount?: { id: string; host: string; username: string };
+    // 設定インポート後の読み込み直し。未指定ならWebView全体をリロードする。テスト用。
+    reloadAfterImport?: () => void;
   } = $props();
 
   // reauthAccount は再認証フロー開始時に設定され、その後の変更は想定していない。初期値参照でよい。
@@ -21,6 +25,7 @@
   let sessionId = $state<string | null>(null);
   let busy = $state(false);
   let err = $state<string | null>(null);
+  let importErr = $state<string | null>(null);
 
   onMount(() => {
     if (reauthAccount) void start();
@@ -115,4 +120,16 @@
     </Button>
   {/if}
   {#if err}<p class="mt-3 text-sm break-words text-destructive">{err}</p>{/if}
+  <!-- 新規インストール(アカウント0件)では設定タブに辿り着けないため、ここから設定を取り込めるようにする。 -->
+  {#if !reauthAccount && app.accounts.length === 0}
+    <div class="mt-5 border-t border-border pt-4">
+      <p class="mb-2 mt-0 text-sm text-muted-foreground">別のPCから移行する場合</p>
+      <div class="flex flex-wrap gap-2">
+        <SettingsImport reload={reloadAfterImport} onerror={(m) => (importErr = m)} />
+      </div>
+      {#if importErr}
+        <p class="mb-0 mt-3 text-sm break-words text-destructive" data-testid="add-account-import-error">{importErr}</p>
+      {/if}
+    </div>
+  {/if}
 </div>
