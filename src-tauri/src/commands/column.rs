@@ -330,7 +330,17 @@ pub async fn resume_column(
     state: State<'_, AppState>,
     column_id: String,
 ) -> Result<OpenedColumn> {
-    let (epoch, column) = begin_and_load_column(&state, &column_id)?;
+    resume_column_core(&app, &state, &column_id).await
+}
+
+/// `resume_column` の本体。`State` を引数に取らない形にして、テストできるようにしている
+/// (`update_column_core` と同じ狙い)。
+async fn resume_column_core<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    column_id: &str,
+) -> Result<OpenedColumn> {
+    let (epoch, column) = begin_and_load_column(state, column_id)?;
     let group = state
         .settings
         .load_groups()?
@@ -342,7 +352,7 @@ pub async fn resume_column(
     let resolved = if is_notif {
         None
     } else {
-        Some(resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?)
+        Some(resolve_sources(state, &column.account_id, &column.kind, &column.filter).await?)
     };
 
     // 通知以外はキャッシュ優先で即時表示（空なら REST）
@@ -354,7 +364,7 @@ pub async fn resume_column(
         // 復元一覧が穴をまたがないよう、有効境界以上に絞る。結果が空なら下の「キャッシュが空」
         // 経路(REST初回取得)に入る(Issue #432)。
         let restore_e = match resolved.as_ref() {
-            Some(r) => restore_boundary(&state, &column.id, r).await,
+            Some(r) => restore_boundary(state, &column.id, r).await,
             None => None,
         };
         let mut notes = restrict_to_boundary(cached, restore_e.as_deref());
@@ -364,7 +374,7 @@ pub async fn resume_column(
     };
 
     let (fresh_notes, notifications) = if notes.is_empty() {
-        open_stream_and_fetch(&app, &state, &column, resolved, host, token, &epoch).await?
+        open_stream_and_fetch(app, state, &column, resolved, host, token, &epoch).await?
     } else {
         // キャッシュがある: まずキャッシュを即返して体感速度を維持し、閉じていた間のギャップ埋めは
         // バックグラウンドで行って ColumnGapFill イベントでまとめて反映する（1件ずつ ColumnNote を
@@ -377,7 +387,7 @@ pub async fn resume_column(
             .unwrap_or(0)
             .max(0);
         let newest_known_id = notes[0].id.clone(); // load_cached は created_at 降順（先頭が最新）
-        open_streams_only(&app, &state, &column, &resolved, host, token);
+        open_streams_only(app, state, &column, &resolved, host, token);
         if gap_limit > 0 {
             let app2 = app.clone();
             let column_id = column.id.clone();
@@ -3783,6 +3793,52 @@ mod tests {
         let (notes, notifications) = result.unwrap();
         assert_eq!(notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n9"], "ページが実際にパースされて流れる");
         assert!(notifications.is_empty());
+    }
+
+    /// `OpenedColumn` のノートid一覧(順序つき)。
+    fn opened_ids(opened: &OpenedColumn) -> Vec<&str> {
+        opened.notes.iter().map(|n| n.id.as_str()).collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_serves_the_cache_when_the_boundary_is_set() {
+        let mock = MockServer::start().await;
+        mount_one_note_page(&mock).await; // 呼ばれたら、n9 が返って気づける
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n5", 500)]).await.unwrap();
+        state.cache.replace_fetch_boundaries("c1", &[(0, "n1".to_string())]).await.unwrap();
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n5"], "境界が確定済みなら、キャッシュをそのまま返す");
+        assert_eq!(state.cache_metrics.resume_hit(), 1);
+        assert_eq!(state.cache_metrics.resume_fallback(), 0);
+        assert_eq!(mock.received_requests().await.unwrap().len(), 0, "起動時にRESTを叩かない");
+        assert_eq!(state.connections.open_count(), 1, "ストリームは開く");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_fetches_the_first_page_when_the_cache_is_empty() {
+        let mock = MockServer::start().await;
+        mount_one_note_page(&mock).await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n9"], "キャッシュが空なら初回取得");
+        assert_eq!(state.cache_metrics.resume_fallback(), 1);
+        assert_eq!(state.cache_metrics.resume_hit(), 0);
+        assert_eq!(
+            state.cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![(0, "n9".to_string())],
+            "初回取得で境界が確定する"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
