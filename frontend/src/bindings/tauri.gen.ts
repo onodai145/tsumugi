@@ -335,6 +335,12 @@ export const commands = {
 	clearAutoDraft: (accountId: string) => typedError<null, Error>(__TAURI_INVOKE("clear_auto_draft", { accountId })),
 	/**  振動を発火する。失敗してもUXに影響しないため、呼び出し側(フロント)で例外を握りつぶす想定。 */
 	vibrate: (pattern: HapticPattern) => typedError<null, Error>(__TAURI_INVOKE("vibrate", { pattern })),
+	/**
+	 *  IME の変換候補の位置(キャレット矩形)を上書きする。座標は viewport 座標(CSS px)。
+	 *  Linux かつ Wayland セッションのときだけ動き、それ以外は何もしない。
+	 *  失敗しても入力には影響しないため、呼び出し側(フロント)で握りつぶす想定。
+	 */
+	setImeCursorArea: (x: number, y: number, width: number, height: number) => typedError<null, Error>(__TAURI_INVOKE("set_ime_cursor_area", { x, y, width, height })),
 	/**  現在の NG 設定を取得。 */
 	getMute: () => typedError<MuteConfig, Error>(__TAURI_INVOKE("get_mute")),
 	/**  NG 設定を更新（永続化＋以降の受信に即反映）。 */

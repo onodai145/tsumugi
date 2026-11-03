@@ -74,3 +74,10 @@ export function playNotifySound(choice: string, onError?: (e: unknown) => void, 
 export function vibrate(pattern: HapticPattern): void {
   void unwrap(commands.vibrate(pattern)).catch(() => {});
 }
+
+/// IME の変換候補ウィンドウの位置を補正する(Issue #502)。座標は viewport 座標(CSS px)。
+/// Linux/Wayland 以外では Rust 側が何もしない。位置補正の失敗は入力に影響しないため握りつぶす
+/// (vibrateと同じfire-and-forgetパターン)。
+export function setImeCursorArea(rect: { x: number; y: number; width: number; height: number }): void {
+  void unwrap(commands.setImeCursorArea(rect.x, rect.y, rect.width, rect.height)).catch(() => {});
+}

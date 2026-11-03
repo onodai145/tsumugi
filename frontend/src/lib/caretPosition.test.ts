@@ -37,4 +37,13 @@ describe("getCaretCoordinates", () => {
     const el = makeTextarea("");
     expect(() => getCaretCoordinates(el, 0)).not.toThrow();
   });
+
+  it("accepts an HTMLInputElement and leaves no mirror behind", () => {
+    const input = document.createElement("input");
+    input.value = "hello world";
+    document.body.appendChild(input);
+    const coords = getCaretCoordinates(input, 5);
+    expect(Number.isNaN(coords.left)).toBe(false);
+    expect(document.getElementById("mfm-completion-caret-mirror")).toBeNull();
+  });
 });

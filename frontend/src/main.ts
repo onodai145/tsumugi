@@ -1,7 +1,9 @@
 import { mount } from 'svelte'
 import './app.css'
 import App from './App.svelte'
+import { installImeCursorArea } from './lib/imeCursorArea'
 import { commands } from './lib/ipc'
+import { isLinuxPlatform } from './lib/platform'
 
 // WebView既定の右クリックメニュー(「戻る」「ページの検証」等、デスクトップアプリには
 // そぐわないブラウザ由来の項目)を隠す(Issue #7)。ただし入力欄(投稿欄等)では
@@ -26,6 +28,10 @@ if (import.meta.env.DEV) {
     if (e.key === 'F12') commands.openDevtools()
   })
 }
+
+// Linux/Wayland: WebKitGTK が IM に渡すキャレット位置が不正確で、変換候補が入力位置からずれる
+// (Issue #502)。実キャレット位置を求めて IM に上書きする。Wayland かの判定は Rust 側。
+if (isLinuxPlatform) installImeCursorArea()
 
 const app = mount(App, {
   target: document.getElementById('app')!,
