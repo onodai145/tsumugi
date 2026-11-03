@@ -195,7 +195,10 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
                     return Err(invalid("アカウントのIDがこの端末の別のアカウントと衝突しています"));
                 }
                 id_map.insert(fa.id.clone(), fa.id.clone());
-                accounts.push(fa.clone());
+                // ファイルのURLは信頼しない。アバターやInstance Tickerの画像としてWebViewが
+                // 読み込むと、IPアドレスの漏えいや追跡に使われる。再ログインと
+                // `refreshInstanceMeta` で正しい値が入る。
+                accounts.push(Account { avatar_url: None, instance: None, ..fa.clone() });
                 accounts_needing_login.push(fa.id.clone());
             }
         }
@@ -465,6 +468,44 @@ mod tests {
         assert_eq!(ids, vec!["local1", "file2"], "端末側のアカウントは残り、ファイル側が追加される");
         assert_eq!(plan.accounts_needing_login, vec!["file2".to_string()]);
         assert_eq!(plan.preview.accounts_needing_login, 1);
+    }
+
+    #[test]
+    fn new_accounts_lose_the_external_urls_the_file_supplied() {
+        let current = current_with_local_account();
+        let mut fa = account("file2", "other.example", "u9");
+        fa.avatar_url = Some("https://evil.example/a.png".into());
+        fa.instance = Some(crate::domain::InstanceInfo {
+            name: Some("Evil".into()),
+            icon_url: Some("https://evil.example/i.png".into()),
+            theme_color: Some("#ff0000".into()),
+        });
+        let mut data = empty_data();
+        data.accounts = vec![fa];
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        let stored = plan.data.accounts.iter().find(|a| a.id == "file2").unwrap();
+        assert_eq!(stored.avatar_url, None, "ファイル由来のURLは<img>に読み込ませない");
+        assert_eq!(stored.instance, None);
+        assert_eq!(stored.host, "other.example", "それ以外のフィールドは残る");
+    }
+
+    #[test]
+    fn a_matched_account_keeps_all_of_the_local_fields() {
+        let mut current = current_with_local_account();
+        current.accounts[0].display_name = "Local Name".into();
+        current.accounts[0].avatar_url = Some("https://misskey.io/local.png".into());
+        let local = current.accounts[0].clone();
+        let mut fa = account("file1", "misskey.io", "u1");
+        fa.display_name = "File Name".into();
+        fa.avatar_url = Some("https://evil.example/a.png".into());
+        let mut data = empty_data();
+        data.accounts = vec![fa];
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        assert_eq!(plan.data.accounts, vec![local], "端末側のアカウントがそのまま残る");
     }
 
     #[test]

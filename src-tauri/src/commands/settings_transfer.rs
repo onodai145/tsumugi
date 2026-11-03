@@ -2,10 +2,13 @@
 //! ファイルの読み書きはコマンドだけが行い、中身の処理は `*_bytes` 関数に分けてテストする。
 
 use crate::commands::mute::{apply_mute_config, read_file_bytes, write_file_bytes};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::session::AccountManager;
 use crate::state::AppState;
-use crate::store::settings_transfer::{build_export, parse_export, plan_import, ImportPreview, ImportResult};
+use crate::store::settings_transfer::{
+    build_export, parse_export, plan_import, ExportFile, ImportPlan, ImportPreview, ImportResult,
+};
+use crate::store::settings::SettingsData;
 use tauri::{AppHandle, State};
 
 fn now_rfc3339() -> String {
@@ -24,17 +27,28 @@ pub(crate) fn export_settings_bytes(state: &AppState) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec_pretty(&file)?)
 }
 
+/// `plan_import` に、この端末のkeyringとの照合を足したもの。ファイルにだけあるアカウントのIDが、
+/// 孤立して残っているトークン(settings.jsonに無いID)と一致すると、そのトークンが許可リスト
+/// 入りのホストに送られかねない。ファイルは信頼しないので、衝突したらファイルごと拒否する。
+fn plan_checked(state: &AppState, current: &SettingsData, file: ExportFile) -> Result<ImportPlan> {
+    let plan = plan_import(current, file)?;
+    if plan.accounts_needing_login.iter().any(|id| state.has_token(id)) {
+        return Err(Error::Invalid("アカウントのIDがこの端末の保存済みトークンと衝突しています".into()));
+    }
+    Ok(plan)
+}
+
 /// 検証だけ行い、概要を返す(何も書き込まない)。
 pub(crate) fn inspect_settings_bytes(state: &AppState, bytes: &[u8]) -> Result<ImportPreview> {
     let file = parse_export(bytes)?;
-    Ok(plan_import(&state.settings.snapshot(), file)?.preview)
+    Ok(plan_checked(state, &state.settings.snapshot(), file)?.preview)
 }
 
 /// 検証し、保存し、実行中の状態を更新する。保存に失敗したら何も変わらない。
 pub(crate) async fn import_settings_bytes(state: &AppState, bytes: &[u8]) -> Result<ImportResult> {
     let file = parse_export(bytes)?;
     let current = state.settings.snapshot();
-    let plan = plan_import(&current, file)?;
+    let plan = plan_checked(state, &current, file)?;
 
     // 置き換え前のカラムのストリームは、保存に成功してから止める(失敗時に何も変えないため)。
     state.settings.replace(plan.data.clone())?;
@@ -64,11 +78,9 @@ pub(crate) async fn import_settings_bytes(state: &AppState, bytes: &[u8]) -> Res
 
 /// トークンを持たないアカウントのID。
 pub(crate) fn accounts_without_token_ids(state: &AppState) -> Vec<String> {
-    state
-        .accounts
-        .lock()
-        .unwrap()
-        .list()
+    // keyring(D-Bus)の問い合わせ中にアカウント一覧のロックを持たない。
+    let accounts = state.accounts.lock().unwrap().list();
+    accounts
         .into_iter()
         .filter(|a| !state.has_token(&a.id))
         .map(|a| a.id)
@@ -237,6 +249,24 @@ mod tests {
         assert!(!state.fetch_allowlist.contains_host("127.0.0.1"));
         assert!(!state.fetch_allowlist.contains_host("internal.example"));
         assert!(state.fetch_allowlist.contains_host("misskey.test"), "トークンのあるアカウントは残る");
+    }
+
+    #[tokio::test]
+    async fn a_new_account_colliding_with_an_orphaned_keyring_token_is_rejected() {
+        let state = state_with_local_account();
+        // settings.json に無いIDのトークンがkeyringに残っている状態(孤立エントリ)。
+        state.secrets.set("ghost", "tok").unwrap();
+        let bytes = file_bytes(data_with(vec![account("ghost", "127.0.0.1", "u9")], vec![]));
+
+        let err = import_settings_bytes(&state, &bytes).await.err().expect("拒否されるはず").to_string();
+        assert!(err.contains("保存済みトークンと衝突"), "{err}");
+        let err = inspect_settings_bytes(&state, &bytes).err().expect("プレビューも同じ結果").to_string();
+        assert!(err.contains("保存済みトークンと衝突"), "{err}");
+
+        assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c");
+        assert_eq!(state.settings.snapshot().accounts.len(), 1);
+        assert_eq!(state.accounts.lock().unwrap().list().len(), 1);
+        assert!(!state.fetch_allowlist.contains_host("127.0.0.1"));
     }
 
     #[tokio::test]
