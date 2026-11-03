@@ -886,9 +886,27 @@ async fn open_stream_and_fetch<R: Runtime>(
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    let boundaries = backfill_cache_eligible(&resolved).then(|| plan_boundary_initial(&fetch.source_outcomes));
-    // 書き込みと、ストリームを開く処理を、同じロックの中で行う。取得中に update_column / close_column が
-    // 走っていた(世代が古い)なら、何も書かず、ストリームも開かず、Err を返す(Issue #446)。
+    let notes = commit_initial_fetch(app, state, column, &resolved, host, token, epoch, fetch).await?;
+    Ok((notes, vec![]))
+}
+
+/// 取得済みの初回ページを、カラムのキャッシュ・境界へ書き、ストリームを開き、画面へ返すノートを返す。
+/// `open_stream_and_fetch`(新規・更新・キャッシュが空の復元)と、`reestablish_boundary`(キャッシュ有りで
+/// 境界が無い復元, Issue #555)が共有する。書き込みと、ストリームを開く処理を、同じロックの中で行う。
+/// 取得中に update_column / close_column が走っていた(世代が古い)なら、何も書かず、ストリームも開かず、
+/// Err を返す(Issue #446)。Err のときストリームは開かれていない。
+#[allow(clippy::too_many_arguments)]
+async fn commit_initial_fetch<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    column: &Column,
+    resolved: &ResolvedSources,
+    host: String,
+    token: String,
+    epoch: &Epoch,
+    fetch: FilteredFetch,
+) -> Result<Vec<Note>> {
+    let boundaries = backfill_cache_eligible(resolved).then(|| plan_boundary_initial(&fetch.source_outcomes));
     commit_initial_writes(
         &state.column_fence,
         &state.cache,
@@ -896,13 +914,13 @@ async fn open_stream_and_fetch<R: Runtime>(
         epoch,
         &fetch,
         boundaries.as_deref(),
-        || open_streams_only(app, state, column, &resolved, host, token),
+        || open_streams_only(app, state, column, resolved, host, token),
     )
     .await?;
     // キャッシュには元の返信先を残し(上で書き終えている)、UI に返すコピーだけ除去する(Issue #486)。
     let mut notes = fetch.notes;
     state.strip_muted_replies(&column.account_id, &mut notes);
-    Ok((notes, vec![]))
+    Ok(notes)
 }
 
 /// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
