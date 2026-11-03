@@ -1765,6 +1765,15 @@ fn should_try_backfill_cache(cache_eligible: bool, bypass_cache: bool) -> bool {
     cache_eligible && !bypass_cache
 }
 
+/// 起動時の復元で、キャッシュが有っても初回取得をやり直して境界を再確定するか(Issue #555)。
+/// キャッシュ優先の対象カラム(`backfill_cache_eligible`)なのに、全ソース分そろった有効境界が無いとき真。
+/// 境界が無いと `fetch_backfill` は常にAPIへ落ち、境界を新規に作る経路は初回取得だけなので、
+/// キャッシュが有るカラムでは放っておくと二度と確定しない。`effective` は `restore_boundary` の戻り値で、
+/// 全ソース枯渇済みの `Some("")` は確定済みとして扱う。
+fn needs_boundary_refetch(cache_eligible: bool, effective: Option<&str>) -> bool {
+    cache_eligible && effective.is_none()
+}
+
 /// 重複除去・created_at降順ソート済みのフィルタ通過ノートから、画面へ返す分と
 /// キャッシュする分を決める。詳細は `FilteredFetch::cacheable` を参照。
 /// `watermark`(Some)のときは、画面へ返す分を `id >= watermark` のノートだけに限る
@@ -2456,6 +2465,15 @@ mod tests {
         let result = finalize_gap_fill(collected, true, 100);
 
         assert_eq!(result.notes.len(), 1);
+    }
+
+    #[test]
+    fn needs_boundary_refetch_is_true_only_for_an_eligible_column_without_an_effective_boundary() {
+        assert!(needs_boundary_refetch(true, None), "対象 + 境界なし");
+        assert!(!needs_boundary_refetch(true, Some("n100")), "境界が確定済み");
+        assert!(!needs_boundary_refetch(true, Some("")), "全ソース枯渇済み(\"\")も確定済み");
+        assert!(!needs_boundary_refetch(false, None), "対象外(from cache / Streaming なしのソース)は境界を持たない");
+        assert!(!needs_boundary_refetch(false, Some("n100")));
     }
 
     #[test]
