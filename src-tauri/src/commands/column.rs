@@ -50,6 +50,7 @@ pub struct DebugMetrics {
     pub backfill_cache_fallback_other: i32,
     pub resume_cache_hit: i32,
     pub resume_cache_fallback: i32,
+    pub resume_boundary_refetch: i32,
 }
 
 /// デバッグ用メトリクスのスナップショットを返す。Backstageの「メトリクス」タブがポーリングする。
@@ -62,6 +63,7 @@ pub async fn get_debug_metrics(state: State<'_, AppState>) -> Result<DebugMetric
         backfill_cache_fallback_other: state.cache_metrics.backfill_fallback_other(),
         resume_cache_hit: state.cache_metrics.resume_hit(),
         resume_cache_fallback: state.cache_metrics.resume_fallback(),
+        resume_boundary_refetch: state.cache_metrics.resume_boundary_refetch(),
     })
 }
 
