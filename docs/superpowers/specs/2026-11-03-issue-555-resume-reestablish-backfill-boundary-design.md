@@ -117,5 +117,8 @@ A' と同じ理由(表示と境界の食い違い)で採用しない。境界を
 
 1. 再起動後、`resumeBoundaryRefetch` が、境界の無い対象カラムの数だけ増える。
 2. `column_source_boundary` に、対象の全カラムの行がそろう。
-3. 2 回目の起動で `resumeBoundaryRefetch` が 0 のまま。
-4. Hybrid タブを上へスクロールして、`backfillCacheHit` が増え、`notes/hybrid-timeline` が記録されない。
+3. 再確定した起動で Hybrid タブを上へスクロールすると、`backfillCacheFallbackOther` が増え(`FallbackBoundaryUnset` は増えない)、境界が古い側へ延びる。再確定の直後は、表示中の最古のノートが境界の位置にあり、境界より古い側は未検証なので、キャッシュでは賄えずAPIへ行く。
+4. 2 回目の起動で `resumeBoundaryRefetch` が 0、`resumeCacheHit` が対象カラム数になる(再確定が一巡した)。
+5. 2 回目の起動で Hybrid タブを上へスクロールして、境界に届くまで `backfillCacheHit` が増え、`backfillCacheFallbackOther` が増えず、`notes/hybrid-timeline` が記録されない。
+
+実機での結果(2026-11-05): 1 は 7(キャッシュ空の `me` は初回取得で 1 を別に数えた)、2 は 8 カラム全てで行がそろい(`from home, local` は欠けていた `source_idx = 0` も補われた)、3 は `FallbackOther` が 7 で `FallbackBoundaryUnset` は 0、4 は 0 と 7、5 は `Hit` が 3 で `FallbackOther` は 0、境界は動かなかった。
