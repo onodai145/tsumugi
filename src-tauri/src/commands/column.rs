@@ -22,6 +22,8 @@ use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_specta::Event as _;
 
 const INITIAL_LIMIT: u32 = 20;
+/// 起動時の境界の再確定(Issue #555)で、取得を待つ上限。超えたら失敗として、キャッシュ表示にフォールバックする。
+const REESTABLISH_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_WIDTH: i32 = 300;
 const GAP_FILL_PAGE_SIZE: u32 = 100;
 const GAP_FILL_MAX_PAGES: u32 = 10;
@@ -379,12 +381,28 @@ async fn resume_column_core<R: Runtime>(
     // 場合は、古い定義のストリームを開かないよう、フォールバックせず Err を返す。
     if !notes.is_empty() && boundary_unset {
         let eligible = resolved.as_ref().expect("非通知カラムは resolve_sources 済み");
-        match reestablish_boundary(app, state, &column, eligible, host.clone(), token.clone(), &epoch).await {
+        match reestablish_boundary(
+            app,
+            state,
+            &column,
+            eligible,
+            host.clone(),
+            token.clone(),
+            &epoch,
+            REESTABLISH_FETCH_TIMEOUT,
+        )
+        .await
+        {
             Ok(Some(fresh)) => {
                 state.cache_metrics.record_resume_boundary_refetch();
                 return Ok(OpenedColumn { column, group, notes: fresh, notifications: vec![] });
             }
-            Ok(None) => {}
+            Ok(None) => {
+                // 取得に失敗したときも、取得中に世代が変わっていたら、古い定義のストリームを開かない。
+                if !state.column_fence.is_current(&column.id, &epoch) {
+                    return Err(Error::Invalid(format!("column {} was modified while it was being opened", column.id)));
+                }
+            }
             Err(e) => {
                 if !state.column_fence.is_current(&column.id, &epoch) {
                     return Err(e);
@@ -962,7 +980,8 @@ async fn commit_initial_fetch<R: Runtime>(
 /// 起動時の復元で、キャッシュ有り・境界なしのカラムの初回取得をやり直し、境界を再確定する(Issue #555)。
 ///
 /// 全ソースの取得が成功したときだけ、キャッシュ・境界・ストリームを反映して `Some(新しいページ)` を返す。
-/// 1ソースでも失敗(`SourceOutcome::Failed`)したら、何も書かずに `None` を返す。`fetch_and_filter_multi` は
+/// 1ソースでも失敗(`SourceOutcome::Failed`)したり、`fetch_timeout` を超えたり、フィルタを通るノートが
+/// 0件だったりしたら、何も書かずに `None` を返す。`fetch_and_filter_multi` は
 /// ソース単位の失敗を握りつぶして空の成功を返すので、`Err` だけを見ても、オフラインや一部のソースの
 /// 失敗を見分けられない。部分的な結果で、キャッシュの表示を置き換えないためのガード。
 /// `Err` は、クライアントを作れない、キャッシュ書き込みに失敗した、世代が古かった、のいずれか。
@@ -976,9 +995,22 @@ async fn reestablish_boundary<R: Runtime>(
     host: String,
     token: String,
     epoch: &Epoch,
+    fetch_timeout: std::time::Duration,
 ) -> Result<Option<Vec<Note>>> {
-    let fetch = fetch_and_filter_multi(state, &column.account_id, resolved, None).await?;
+    // 応答しないサーバーで、これまで即時に表示できていたカラムの復元(と、直列に待つ後続のカラム)を
+    // 止めない。取得だけを区切る(書き込みの前なので、中断しても何も残らない)。時間切れは、失敗と同じ扱い。
+    let Ok(fetch) = tokio::time::timeout(fetch_timeout, fetch_and_filter_multi(state, &column.account_id, resolved, None)).await
+    else {
+        return Ok(None);
+    };
+    let fetch = fetch?;
     if fetch.source_outcomes.iter().any(|o| matches!(o, SourceOutcome::Failed)) {
+        return Ok(None);
+    }
+    // フィルタを通るノートが0件(強いフィルタで、取得範囲に該当が無い)なら、確定しない。確定すると、
+    // 空の一覧と深い境界が残り、見えていたキャッシュ履歴が隠れ、画面が空のままスクロールバックもできなくなる。
+    // 該当が無い間は、起動のたびに再確定を試みる。
+    if fetch.notes.is_empty() {
         return Ok(None);
     }
     commit_initial_fetch(app, state, column, resolved, host, token, epoch, fetch).await.map(Some)
@@ -4053,6 +4085,89 @@ mod tests {
         assert_eq!(mock.received_requests().await.unwrap().len(), 0, "起動時にRESTを叩かない");
         assert_eq!(state.cache_metrics.resume_hit(), 1);
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_returns_an_error_when_the_column_changes_during_a_failing_refetch() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500).set_delay(std::time::Duration::from_millis(300)))
+            .mount(&mock)
+            .await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        let app = tauri::test::mock_app();
+
+        let (result, _) = tokio::join!(resume_column_core(app.handle(), &state, "c1"), async {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            state.column_fence.invalidate("c1", || async {}).await; // 取得中に update_column / close_column が走った
+        });
+
+        assert!(matches!(result, Err(Error::Invalid(_))), "取得が失敗した場合でも、古ければ Err を返す");
+        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_keeps_the_cache_when_the_refetch_yields_no_notes() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await; // 全ソース成功だが、フィルタを通るノートが0件
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n1"], "空のページで、見えていたキャッシュを消さない");
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
+        assert_eq!(state.cache_metrics.resume_hit(), 1);
+        assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
+        assert_eq!(state.connections.open_count(), 1, "ストリームはフォールバック側で1回だけ開く");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reestablish_boundary_gives_up_without_writing_when_the_fetch_times_out() {
+        let mock = MockServer::start().await;
+        let page = serde_json::json!([{
+            "id": "n9",
+            "createdAt": "2026-07-05T12:00:00.000Z",
+            "text": "hello",
+            "user": { "id": "u1", "username": "alice", "host": null },
+            "visibility": "home"
+        }]);
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page).set_delay(std::time::Duration::from_millis(1500)))
+            .mount(&mock)
+            .await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        let app = tauri::test::mock_app();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let (host, token) = state.host_token("acc1").unwrap();
+        let epoch = state.column_fence.begin("c1");
+
+        let started = std::time::Instant::now();
+        let result = reestablish_boundary(
+            app.handle(),
+            &state,
+            &column,
+            &resolved,
+            host,
+            token,
+            &epoch,
+            std::time::Duration::from_millis(100),
+        )
+        .await;
+
+        assert!(matches!(result, Ok(None)), "応答しないサーバーは、失敗として扱う");
+        assert!(started.elapsed() < std::time::Duration::from_millis(1000), "応答を待ち続けない");
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
+        assert_eq!(state.connections.open_count(), 0, "ストリームは呼び出し側が開く");
     }
 
     #[tokio::test(flavor = "multi_thread")]
