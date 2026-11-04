@@ -356,8 +356,8 @@ async fn resume_column_core<R: Runtime>(
     };
 
     // 通知以外はキャッシュ優先で即時表示（空なら REST）
-    let notes = if is_notif {
-        vec![]
+    let (mut notes, boundary_unset) = if is_notif {
+        (vec![], false)
     } else {
         let cached = state.cache.load_cached(&column.id, INITIAL_LIMIT).await?;
         // ギャップ埋めが打ち切られて境界が引き上げられていると、境界より古い側には穴がありうる。
@@ -367,11 +367,37 @@ async fn resume_column_core<R: Runtime>(
             Some(r) => restore_boundary(state, &column.id, r).await,
             None => None,
         };
-        let mut notes = restrict_to_boundary(cached, restore_e.as_deref());
+        let cache_eligible = resolved.as_ref().is_some_and(backfill_cache_eligible);
+        let boundary_unset = needs_boundary_refetch(cache_eligible, restore_e.as_deref());
+        (restrict_to_boundary(cached, restore_e.as_deref()), boundary_unset)
+    };
+
+    // キャッシュが有っても、境界が確定していないキャッシュ優先対象のカラムは、初回取得をやり直して
+    // 境界を再確定する(Issue #555)。境界を新規に作る経路は初回取得だけなので、放っておくと、
+    // スクロールバックが常にAPIへ落ちる。取得が全ソース成功にならなければ、従来のキャッシュ優先経路へ戻る
+    // (オフラインでも起動できる)。ただし、取得中に update_column / close_column が走った(世代が古い)
+    // 場合は、古い定義のストリームを開かないよう、フォールバックせず Err を返す。
+    if !notes.is_empty() && boundary_unset {
+        let eligible = resolved.as_ref().expect("非通知カラムは resolve_sources 済み");
+        match reestablish_boundary(app, state, &column, eligible, host.clone(), token.clone(), &epoch).await {
+            Ok(Some(fresh)) => {
+                state.cache_metrics.record_resume_boundary_refetch();
+                return Ok(OpenedColumn { column, group, notes: fresh, notifications: vec![] });
+            }
+            Ok(None) => {}
+            Err(e) => {
+                if !state.column_fence.is_current(&column.id, &epoch) {
+                    return Err(e);
+                }
+                log::warn!("failed to re-establish the backfill boundary of column {}: {e}", column.id);
+            }
+        }
+    }
+
+    if !is_notif {
         state.cache_metrics.record_resume(!notes.is_empty());
         state.strip_muted_replies(&column.account_id, &mut notes);
-        notes
-    };
+    }
 
     let (fresh_notes, notifications) = if notes.is_empty() {
         open_stream_and_fetch(app, state, &column, resolved, host, token, &epoch).await?
@@ -931,6 +957,31 @@ async fn commit_initial_fetch<R: Runtime>(
     let mut notes = fetch.notes;
     state.strip_muted_replies(&column.account_id, &mut notes);
     Ok(notes)
+}
+
+/// 起動時の復元で、キャッシュ有り・境界なしのカラムの初回取得をやり直し、境界を再確定する(Issue #555)。
+///
+/// 全ソースの取得が成功したときだけ、キャッシュ・境界・ストリームを反映して `Some(新しいページ)` を返す。
+/// 1ソースでも失敗(`SourceOutcome::Failed`)したら、何も書かずに `None` を返す。`fetch_and_filter_multi` は
+/// ソース単位の失敗を握りつぶして空の成功を返すので、`Err` だけを見ても、オフラインや一部のソースの
+/// 失敗を見分けられない。部分的な結果で、キャッシュの表示を置き換えないためのガード。
+/// `Err` は、クライアントを作れない、キャッシュ書き込みに失敗した、世代が古かった、のいずれか。
+/// どれもストリームを開く前に失敗するので、呼び出し側はフォールバックしてよい(世代が古い場合を除く)。
+#[allow(clippy::too_many_arguments)]
+async fn reestablish_boundary<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    column: &Column,
+    resolved: &ResolvedSources,
+    host: String,
+    token: String,
+    epoch: &Epoch,
+) -> Result<Option<Vec<Note>>> {
+    let fetch = fetch_and_filter_multi(state, &column.account_id, resolved, None).await?;
+    if fetch.source_outcomes.iter().any(|o| matches!(o, SourceOutcome::Failed)) {
+        return Ok(None);
+    }
+    commit_initial_fetch(app, state, column, resolved, host, token, epoch, fetch).await.map(Some)
 }
 
 /// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
@@ -3839,6 +3890,169 @@ mod tests {
             vec![(0, "n9".to_string())],
             "初回取得で境界が確定する"
         );
+    }
+
+    /// ホームとローカルの2ソースを持つTQLカラム。
+    fn tql_two_source_column(id: &str) -> Column {
+        let mut column = command_column(id, ColumnKind::Tql);
+        column.filter = FilterQuery::Tql("from home, local".into());
+        column
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_re_establishes_the_boundary_for_a_cached_column_without_one() {
+        let mock = MockServer::start().await;
+        mount_one_note_page(&mock).await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap(); // キャッシュ有り、境界なし
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n9"], "取得した新しいページを返す");
+        assert_eq!(
+            state.cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![(0, "n9".to_string())],
+            "境界が確定する"
+        );
+        let mut cached: Vec<String> =
+            state.cache.load_cached("c1", 10).await.unwrap().into_iter().map(|n| n.id).collect();
+        cached.sort();
+        assert_eq!(cached, ["n1", "n9"], "既存のキャッシュ行は消えない");
+        assert_eq!(state.cache_metrics.resume_boundary_refetch(), 1);
+        assert_eq!(state.cache_metrics.resume_hit(), 0, "キャッシュ表示ではない");
+        assert_eq!(state.cache_metrics.resume_fallback(), 0, "キャッシュが空だったわけでもない");
+        assert_eq!(state.connections.open_count(), 1, "ストリームを開く");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_re_establishes_when_only_some_sources_have_a_boundary() {
+        let mock = MockServer::start().await;
+        mount_one_note_page(&mock).await;
+        let state = command_state(&mock);
+        let column = tql_two_source_column("c1");
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state.cache.replace_fetch_boundaries("c1", &[(1, "n0".to_string())]).await.unwrap(); // source 0 の行が欠ける
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n9"]);
+        let mut boundaries = state.cache.get_fetch_boundaries("c1").await.unwrap();
+        boundaries.sort();
+        assert_eq!(boundaries, vec![(0, "n9".to_string()), (1, "n9".to_string())], "全ソース分そろう");
+        assert_eq!(state.cache_metrics.resume_boundary_refetch(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_keeps_the_cache_when_the_refetch_fails() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(500)).mount(&mock).await; // オフライン相当
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n1"], "空表示にせず、キャッシュを返す");
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界は未確定のまま");
+        assert_eq!(state.cache_metrics.resume_hit(), 1, "キャッシュ表示として数える");
+        assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
+        assert!(!mock.received_requests().await.unwrap().is_empty(), "取得は試みた");
+        assert_eq!(state.connections.open_count(), 1, "ストリームはフォールバック側で1回だけ開く");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_keeps_the_cache_when_one_of_several_sources_fails() {
+        let mock = MockServer::start().await;
+        let page = serde_json::json!([{
+            "id": "n9",
+            "createdAt": "2026-07-05T12:00:00.000Z",
+            "text": "hello",
+            "user": { "id": "u1", "username": "alice", "host": null },
+            "visibility": "home"
+        }]);
+        Mock::given(method("POST"))
+            .and(wiremock::matchers::path("/notes/timeline"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(wiremock::matchers::path("/notes/local-timeline"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock)
+            .await;
+        let state = command_state(&mock);
+        let column = tql_two_source_column("c1");
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n1"], "部分的な結果で、キャッシュの表示を置き換えない");
+        let cached: Vec<String> =
+            state.cache.load_cached("c1", 10).await.unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(cached, ["n1"], "取得できた分も書かない");
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+        assert_eq!(state.cache_metrics.resume_hit(), 1);
+        assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_returns_an_error_when_the_column_changes_during_the_refetch() {
+        let mock = MockServer::start().await;
+        let page = serde_json::json!([{
+            "id": "n9",
+            "createdAt": "2026-07-05T12:00:00.000Z",
+            "text": "hello",
+            "user": { "id": "u1", "username": "alice", "host": null },
+            "visibility": "home"
+        }]);
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(page).set_delay(std::time::Duration::from_millis(300)),
+            )
+            .mount(&mock)
+            .await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Local);
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        let app = tauri::test::mock_app();
+
+        let (result, _) = tokio::join!(resume_column_core(app.handle(), &state, "c1"), async {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            state.column_fence.invalidate("c1", || async {}).await; // 取得中に update_column / close_column が走った
+        });
+
+        assert!(matches!(result, Err(Error::Invalid(_))), "古ければ、フォールバックせず Err を返す");
+        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
+        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
+        assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_column_core_leaves_a_non_eligible_column_alone() {
+        let mock = MockServer::start().await;
+        mount_one_note_page(&mock).await;
+        let state = command_state(&mock);
+        let column = command_column("c1", ColumnKind::Tag { tag: "foo".into() }); // Streaming を持たないソース
+        state.settings.upsert_column(&column).unwrap();
+        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        let app = tauri::test::mock_app();
+
+        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(opened_ids(&opened), ["n1"], "対象外のカラムは従来どおりキャッシュを返す");
+        assert_eq!(mock.received_requests().await.unwrap().len(), 0, "起動時にRESTを叩かない");
+        assert_eq!(state.cache_metrics.resume_hit(), 1);
+        assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
