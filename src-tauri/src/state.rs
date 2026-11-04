@@ -46,6 +46,8 @@ pub struct CacheMetrics {
     backfill_fallback_other: AtomicU64,
     resume_hit: AtomicU64,
     resume_fallback: AtomicU64,
+    /// 起動時の復元で、境界の無いカラムの初回取得をやり直して境界を再確定した回数(Issue #555)。
+    resume_boundary_refetch: AtomicU64,
 }
 
 impl CacheMetrics {
@@ -61,6 +63,12 @@ impl CacheMetrics {
     pub fn record_resume(&self, hit: bool) {
         let counter = if hit { &self.resume_hit } else { &self.resume_fallback };
         counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 起動時の復元で、境界の無いカラムの初回取得をやり直し、その結果を反映して画面に返した。
+    /// 取得に失敗してキャッシュ表示にフォールバックしたときは数えない(そちらは `record_resume(true)`)。
+    pub fn record_resume_boundary_refetch(&self) {
+        self.resume_boundary_refetch.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn backfill_hit(&self) -> i32 {
@@ -93,6 +101,13 @@ impl CacheMetrics {
 
     pub fn resume_fallback(&self) -> i32 {
         self.resume_fallback
+            .load(Ordering::Relaxed)
+            .try_into()
+            .unwrap_or(i32::MAX)
+    }
+
+    pub fn resume_boundary_refetch(&self) -> i32 {
+        self.resume_boundary_refetch
             .load(Ordering::Relaxed)
             .try_into()
             .unwrap_or(i32::MAX)
@@ -693,6 +708,19 @@ mod tests {
 
         assert_eq!(m.resume_hit(), 2);
         assert_eq!(m.resume_fallback(), 1);
+    }
+
+    #[test]
+    fn cache_metrics_record_resume_boundary_refetch_increments_its_own_counter() {
+        let m = CacheMetrics::default();
+        assert_eq!(m.resume_boundary_refetch(), 0);
+
+        m.record_resume_boundary_refetch();
+        m.record_resume_boundary_refetch();
+
+        assert_eq!(m.resume_boundary_refetch(), 2);
+        assert_eq!(m.resume_hit(), 0, "resume hit / fallback とは別のカウンタ");
+        assert_eq!(m.resume_fallback(), 0);
     }
 
     #[test]

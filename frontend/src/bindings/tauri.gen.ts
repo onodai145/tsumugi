@@ -607,6 +607,7 @@ export type DebugMetrics = {
 	backfillCacheFallbackOther: number,
 	resumeCacheHit: number,
 	resumeCacheFallback: number,
+	resumeBoundaryRefetch: number,
 };
 
 /**  ディレイ(Issue #499)。`level` は送る量(1〜100 %)、`time_ms` は間隔(50〜1000 ミリ秒)、`feedback` は繰り返し(0〜90 %)。 */

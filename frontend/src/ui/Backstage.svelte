@@ -121,6 +121,7 @@
           <div>backfill fallback(その他): {metrics.backfillCacheFallbackOther}</div>
           <div>resume hit: {metrics.resumeCacheHit}</div>
           <div>resume fallback: {metrics.resumeCacheFallback}</div>
+          <div>resume 境界再確定: {metrics.resumeBoundaryRefetch}</div>
         </div>
       {/if}
     </div>
