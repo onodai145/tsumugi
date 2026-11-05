@@ -122,6 +122,13 @@ pub struct AppState {
     /// `fetch_http` が例外として許可するホスト(登録アカウントのホスト)。`accounts` が変わったら
     /// `refresh_fetch_allowlist` で差し替える。
     pub fetch_allowlist: crate::net_guard::FetchAllowlist,
+    /// URLプレビュー(`fetch_url_preview`)専用の取得クライアント(Issue #549)。`fetch_http` と同じく
+    /// 禁止IPへの接続を `net_guard` が拒否するが、許可リストは `preview_allowlist` を使う。
+    pub preview_http: reqwest::Client,
+    /// `preview_http` が例外として許可するホスト: 登録アカウントのホスト(取得先が空のときの
+    /// `https://{host}/url` に必要)と、利用者が設定した取得先。メディア取得の `fetch_allowlist` には
+    /// 取得先を入れない(手入力した取得先のホストで、他の取得の保護まで弱めないため)。
+    pub preview_allowlist: crate::net_guard::FetchAllowlist,
     pub accounts: Mutex<AccountManager>,
     pub secrets: Box<dyn SecretStore>,
     pub pending: Mutex<HashMap<String, PendingMiAuth>>,
@@ -209,7 +216,9 @@ impl AppState {
         });
         let mute = settings.load_mute().unwrap_or_default();
         let fetch_allowlist = crate::net_guard::FetchAllowlist::default();
-        fetch_allowlist.replace(allowlist_hosts(&accounts, secrets.as_ref(), &settings));
+        fetch_allowlist.replace(hosts_with_token(&accounts, secrets.as_ref()));
+        let preview_allowlist = crate::net_guard::FetchAllowlist::default();
+        preview_allowlist.replace(preview_allowlist_hosts(&accounts, secrets.as_ref(), &settings));
         Self {
             http: reqwest::Client::builder()
                 .user_agent(USER_AGENT)
@@ -218,6 +227,9 @@ impl AppState {
             fetch_http: crate::net_guard::build_fetch_client(USER_AGENT, fetch_allowlist.clone())
                 .expect("failed to build fetch client"),
             fetch_allowlist,
+            preview_http: crate::net_guard::build_fetch_client(USER_AGENT, preview_allowlist.clone())
+                .expect("failed to build preview client"),
+            preview_allowlist,
             accounts: Mutex::new(AccountManager::with_accounts(accounts)),
             secrets,
             pending: Mutex::new(HashMap::new()),
@@ -391,13 +403,14 @@ impl AppState {
         )
     }
 
-    /// `accounts` のうちトークンを持つものの全ホストと、利用者が設定したURLプレビューの取得先で、
-    /// 取得先の許可リストを差し替える。アカウントの追加・削除・再認証の直後と、取得先を変えた・
-    /// 信頼した・インポートした直後に呼ぶ。
+    /// 取得先の許可リストを差し替える。`fetch_allowlist` は、トークンを持つアカウントの全ホスト。
+    /// `preview_allowlist` は、それに加えて利用者が設定したURLプレビューの取得先(Issue #549)。
+    /// アカウントの追加・削除・再認証の直後と、取得先を変えた・信頼した・インポートした直後に呼ぶ。
     pub fn refresh_fetch_allowlist(&self) {
         let accounts = self.accounts.lock().unwrap().list();
-        self.fetch_allowlist
-            .replace(allowlist_hosts(&accounts, self.secrets.as_ref(), &self.settings));
+        self.fetch_allowlist.replace(hosts_with_token(&accounts, self.secrets.as_ref()));
+        self.preview_allowlist
+            .replace(preview_allowlist_hosts(&accounts, self.secrets.as_ref(), &self.settings));
     }
 
     /// そのアカウントのトークンがキーリングにあるか。読み取りに失敗したら `false`。
@@ -481,9 +494,9 @@ impl AppState {
     }
 }
 
-/// 許可リストに入れるホストの全体: トークンを持つアカウントのホストと、利用者が設定した
-/// URLプレビューの取得先(Issue #549。インポート由来の取得先は入れない)。
-fn allowlist_hosts(accounts: &[Account], secrets: &dyn SecretStore, settings: &SettingsStore) -> Vec<String> {
+/// URLプレビュー専用の許可リストに入れるホストの全体: トークンを持つアカウントのホストと、利用者が設定した
+/// 取得先(Issue #549。インポート由来の取得先は入れない)。
+fn preview_allowlist_hosts(accounts: &[Account], secrets: &dyn SecretStore, settings: &SettingsStore) -> Vec<String> {
     let mut hosts = hosts_with_token(accounts, secrets);
     hosts.extend(settings.trusted_summaly_allowlist_entry());
     hosts
@@ -544,32 +557,68 @@ mod tests {
     }
 
     #[test]
-    fn fetch_allowlist_includes_the_summaly_host_only_when_the_user_saved_it() {
+    fn preview_allowlist_includes_the_summaly_host_only_when_the_user_saved_it() {
         let settings = SettingsStore::new_in_memory();
         let mut ui = crate::domain::UiPrefs::default();
         ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
         settings.save_ui(&ui).unwrap();
         let state = AppState::new_for_test(settings);
-        assert!(state.fetch_allowlist.allows("192.168.1.10", 3030), "起動時の初期値に入る");
-        assert!(!state.fetch_allowlist.allows("192.168.1.10", 80), "ポートは明示されたものだけ");
+        assert!(state.preview_allowlist.allows("192.168.1.10", 3030), "起動時の初期値に入る");
+        assert!(!state.preview_allowlist.allows("192.168.1.10", 80), "ポートは明示されたものだけ");
 
         // インポート直後相当: 許可リストから外れる
         let mut data = state.settings.snapshot();
         data.summaly_proxy_imported = true;
         state.settings.replace(data).unwrap();
         state.refresh_fetch_allowlist();
-        assert!(!state.fetch_allowlist.contains_host("192.168.1.10"));
+        assert!(!state.preview_allowlist.contains_host("192.168.1.10"));
 
         // 設定画面で保存し直す(信頼する)と入る
         state.settings.trust_summaly_proxy("http://192.168.1.10:3030/url").unwrap();
         state.refresh_fetch_allowlist();
-        assert!(state.fetch_allowlist.allows("192.168.1.10", 3030));
+        assert!(state.preview_allowlist.allows("192.168.1.10", 3030));
     }
 
     #[test]
-    fn fetch_allowlist_has_no_summaly_host_when_the_url_is_empty() {
+    fn the_summaly_host_never_enters_the_media_fetch_allowlist() {
+        let settings = SettingsStore::new_in_memory();
+        let mut ui = crate::domain::UiPrefs::default();
+        ui.summaly_proxy_url = "http://proxy.example.com:3030/url".into();
+        settings.save_ui(&ui).unwrap();
+        let state = AppState::new_for_test(settings);
+        assert!(state.preview_allowlist.contains_host("proxy.example.com"));
+        assert!(!state.fetch_allowlist.contains_host("proxy.example.com"), "起動時");
+
+        state.refresh_fetch_allowlist();
+        assert!(!state.fetch_allowlist.contains_host("proxy.example.com"), "更新後");
+
+        state.settings.trust_summaly_proxy("http://proxy.example.com:3030/url").unwrap();
+        state.refresh_fetch_allowlist();
+        assert!(!state.fetch_allowlist.contains_host("proxy.example.com"), "信頼後");
+    }
+
+    #[test]
+    fn preview_allowlist_keeps_account_hosts_with_token_and_skips_those_without() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.register_test_account("acc1"); // host=misskey.test、トークンあり
+        state.accounts.lock().unwrap().upsert(test_account("acc2", "internal.example")); // トークンなし
+        state.refresh_fetch_allowlist();
+
+        // 取得先が空のときの既定経路(`https://{host}/url`)に必要
+        assert!(state.preview_allowlist.contains_host("misskey.test"));
+        assert!(!state.preview_allowlist.contains_host("internal.example"));
+
+        state.accounts.lock().unwrap().remove("acc1").unwrap();
+        state.refresh_fetch_allowlist();
+        assert!(!state.preview_allowlist.contains_host("misskey.test"), "削除したら、2つとも外れる");
+        assert!(!state.fetch_allowlist.contains_host("misskey.test"));
+    }
+
+    #[test]
+    fn allowlists_have_no_summaly_host_when_the_url_is_empty() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
         state.refresh_fetch_allowlist();
+        assert!(!state.preview_allowlist.contains_host(""));
         assert!(!state.fetch_allowlist.contains_host(""));
     }
 

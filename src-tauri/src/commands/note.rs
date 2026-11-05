@@ -618,8 +618,8 @@ pub async fn search_hashtags(
 /// 投稿本文中のURLのリンクプレビュー(OGP相当)を取得する（Issue #9）。
 /// `UiPrefs.summaly_proxy_url` が設定されていればそれを、空ならアカウントの接続先インスタンスの
 /// `/url` を使う。いずれも認証不要（トークンは送らない）。
-/// 取得は `fetch_http`(`net_guard` 付き)で行い、利用者が設定画面で保存した取得先のホストだけが
-/// 許可リストに入る(Issue #549)。
+/// 取得は `preview_http`(`net_guard` 付き)で行い、利用者が設定画面で保存した取得先のホストだけが
+/// `preview_allowlist` に入る。メディア取得の許可リスト(`fetch_allowlist`)には入らない(Issue #549)。
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_url_preview(
@@ -643,7 +643,7 @@ pub(crate) async fn fetch_url_preview_core(
     } else {
         configured.to_string()
     };
-    let result = fetch_url_preview_api(&state.fetch_http, &state.fetch_allowlist, &proxy_base, url).await;
+    let result = fetch_url_preview_api(&state.preview_http, &state.preview_allowlist, &proxy_base, url).await;
     match result {
         // インポート由来の取得先だけ、保存し直すと使えることを案内する(手入力の取得先は直らない)。
         Err(Error::Invalid(m)) if m == crate::api::url_preview::BLOCKED_MESSAGE && state.settings.summaly_proxy_imported() => {
@@ -769,6 +769,22 @@ mod tests {
         let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", server.address().port()), false);
         let preview = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap();
         assert_eq!(preview.title.as_deref(), Some("T"));
+    }
+
+    #[tokio::test]
+    async fn a_user_saved_proxy_host_is_not_reachable_by_the_media_fetch() {
+        let server = preview_server().await;
+        let proxy = format!("http://127.0.0.1:{}/url", server.address().port());
+        let state = state_with_summaly(&proxy, false);
+
+        // URLプレビューでは届く
+        assert!(fetch_url_preview_core(&state, "acc", "https://example.com/").await.is_ok());
+
+        // メディア取得(`save_url_to_file` / `fetch_url_bytes` が使うクライアントと許可リスト)では、同じホストでも拒否される
+        let before = server.received_requests().await.unwrap().len();
+        let err = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &proxy).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert_eq!(server.received_requests().await.unwrap().len(), before, "メディア取得ではリクエストが出ない");
     }
 
     #[tokio::test]
