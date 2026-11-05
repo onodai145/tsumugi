@@ -643,7 +643,16 @@ pub(crate) async fn fetch_url_preview_core(
     } else {
         configured.to_string()
     };
-    fetch_url_preview_api(&state.fetch_http, &state.fetch_allowlist, &proxy_base, url).await
+    let result = fetch_url_preview_api(&state.fetch_http, &state.fetch_allowlist, &proxy_base, url).await;
+    match result {
+        // インポート由来の取得先だけ、保存し直すと使えることを案内する(手入力の取得先は直らない)。
+        Err(Error::Invalid(m)) if m == crate::api::url_preview::BLOCKED_MESSAGE && state.settings.summaly_proxy_imported() => {
+            Err(Error::Invalid(format!(
+                "{m}。インポートした設定の取得先は、設定の外部連携で保存し直すと使えます"
+            )))
+        }
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -768,6 +777,10 @@ mod tests {
         let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", server.address().port()), true);
         let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
         assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("保存し直")),
+            "インポート由来の取得先には、保存し直す案内を付ける: {err:?}"
+        );
         assert!(server.received_requests().await.unwrap().is_empty());
     }
 
@@ -795,6 +808,10 @@ mod tests {
         let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", proxy.address().port()), false);
         let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
         assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(
+            matches!(err, Error::Invalid(ref m) if !m.contains("保存し直")),
+            "手入力の取得先では、保存し直しても直らないので案内しない: {err:?}"
+        );
         assert!(target.received_requests().await.unwrap().is_empty());
     }
 

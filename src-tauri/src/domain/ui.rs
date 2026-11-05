@@ -300,6 +300,11 @@ fn parse_http_url(raw: &str) -> Result<url::Url> {
     if raw.chars().count() > MAX_EXTERNAL_URL_LEN {
         return Err(invalid_url("URLが長すぎます(2048文字まで)"));
     }
+    // `url::Url::parse` は前後の空白や途中のタブ・改行を黙って取り除くので、検証した形と実際に
+    // 使う(保存・OSに渡す)文字列が食い違う。前後の空白と制御文字を含む値は拒否する。
+    if raw != raw.trim() || raw.chars().any(char::is_control) {
+        return Err(invalid_url("URLの前後の空白や制御文字(改行・タブなど)は含められません"));
+    }
     let parsed = url::Url::parse(raw).map_err(|_| invalid_url("URLの形式が正しくありません"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(invalid_url("URLのスキームはhttpまたはhttpsにしてください"));
@@ -353,6 +358,11 @@ impl UiPrefs {
         validate_search_engine_url(&self.search_engine_url).map_err(|e| with_label("検索エンジンのURL", e))?;
         validate_summaly_proxy_url(&self.summaly_proxy_url).map_err(|e| with_label("URLプレビューの取得先", e))?;
         Ok(())
+    }
+
+    /// URLプレビューの取得先が(空欄を含めて)有効な形か。検証を通らない経路で入った値の判定用。
+    pub fn summaly_proxy_url_is_valid(&self) -> bool {
+        validate_summaly_proxy_url(&self.summaly_proxy_url).is_ok()
     }
 
     /// 不正な値を既定値に戻す(読み込み時用)。戻したら `true`。値そのものはログに出さない。
@@ -767,8 +777,13 @@ mod tests {
             "https://example.com:{query}/",
             "https://example.com{query}",
             "not a url {query}",
+            "ht\ntps://good.example/?q={query}",
+            "https://good.example/?q={query}\n",
+            " https://good.example/?q={query}",
+            "https://exa\tmple.com/?q={query}",
+            "https://example.com/\u{0}?q={query}",
         ] {
-            assert!(validate_search_engine_url(bad).is_err(), "{bad}");
+            assert!(validate_search_engine_url(bad).is_err(), "{bad:?}");
         }
         let too_long = format!("https://example.com/?q={{query}}{}", "a".repeat(MAX_EXTERNAL_URL_LEN));
         assert!(validate_search_engine_url(&too_long).is_err());
@@ -799,9 +814,25 @@ mod tests {
             "example.com/url",
             "http://",
             "//example.com",
+            " https://example.com/",
+            "https://example.com/\n",
+            "ht\ntps://example.com/",
+            "https://exa\tmple.com/",
         ] {
             assert!(validate_summaly_proxy_url(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn summaly_proxy_url_is_valid_reflects_only_the_summaly_field() {
+        let mut p = UiPrefs::default();
+        p.search_engine_url = "javascript:alert({query})".into(); // 検索URL側が不正でも関係しない
+        p.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
+        assert!(p.summaly_proxy_url_is_valid());
+        p.summaly_proxy_url = "ftp://192.168.1.10/".into();
+        assert!(!p.summaly_proxy_url_is_valid());
+        p.summaly_proxy_url = String::new();
+        assert!(p.summaly_proxy_url_is_valid());
     }
 
     #[test]

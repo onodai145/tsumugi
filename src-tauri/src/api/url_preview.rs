@@ -64,8 +64,7 @@ fn normalize(raw: RawUrlPreview, target_url: &str) -> UrlPreview {
 }
 
 /// 取得先が `net_guard` に拒否されたときのメッセージ(Issue #549)。
-pub(crate) const BLOCKED_MESSAGE: &str = "取得先が許可されていません(ローカル/社内ネットワークのアドレス)。\
-インポートした設定の取得先は、設定の外部連携で保存し直すと使えます";
+pub(crate) const BLOCKED_MESSAGE: &str = "取得先が許可されていません(ローカル/社内ネットワークのアドレス)";
 
 /// `proxy_base`（例: `"https://misskey.io/url"` またはユーザ設定のカスタムプロキシURL）に
 /// `?url=<target_url>` を付与してGETし、応答を [`UrlPreview`] へ正規化する。

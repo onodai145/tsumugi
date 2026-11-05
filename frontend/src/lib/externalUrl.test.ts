@@ -28,7 +28,12 @@ describe("validateSearchEngineUrl", () => {
     "https://example.com:{query}/",
     "https://example.com{query}",
     "not a url {query}",
-  ])("rejects %s", (bad) => {
+    "ht\ntps://good.example/?q={query}",
+    "https://good.example/?q={query}\n",
+    " https://good.example/?q={query}",
+    "https://exa\tmple.com/?q={query}",
+    "https://example.com/\u0000?q={query}",
+  ])("rejects %j", (bad) => {
     expect(validateSearchEngineUrl(bad)).not.toBeNull();
   });
 
@@ -45,7 +50,7 @@ describe("validateSummalyProxyUrl", () => {
     },
   );
 
-  it.each(["javascript:alert(1)", "data:,x", "ftp://example.com", "file:///x", "https://u:p@example.com/", "example.com/url", "http://", "//example.com"])(
+  it.each(["javascript:alert(1)", "data:,x", "ftp://example.com", "file:///x", "https://u:p@example.com/", "example.com/url", "http://", "//example.com", " https://example.com/", "https://example.com/\n", "ht\ntps://example.com/", "https://exa\tmple.com/"])(
     "rejects %j",
     (bad) => {
       expect(validateSummalyProxyUrl(bad)).not.toBeNull();

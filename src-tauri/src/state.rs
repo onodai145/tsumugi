@@ -561,7 +561,7 @@ mod tests {
         assert!(!state.fetch_allowlist.contains_host("192.168.1.10"));
 
         // 設定画面で保存し直す(信頼する)と入る
-        state.settings.trust_summaly_proxy().unwrap();
+        state.settings.trust_summaly_proxy("http://192.168.1.10:3030/url").unwrap();
         state.refresh_fetch_allowlist();
         assert!(state.fetch_allowlist.allows("192.168.1.10", 3030));
     }

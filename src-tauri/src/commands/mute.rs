@@ -282,10 +282,11 @@ pub async fn get_summaly_proxy_imported(state: State<'_, AppState>) -> Result<bo
 }
 
 /// インポートした取得先を、利用者が設定した値として扱う(プライベートアドレスへの接続を許可する)。
+/// `expected_url` は設定画面が保存した取得先で、いま保存されている値と違えば拒否する。
 #[tauri::command]
 #[specta::specta]
-pub async fn trust_summaly_proxy(state: State<'_, AppState>) -> Result<()> {
-    state.settings.trust_summaly_proxy()?;
+pub async fn trust_summaly_proxy(state: State<'_, AppState>, expected_url: String) -> Result<()> {
+    state.settings.trust_summaly_proxy(&expected_url)?;
     state.refresh_fetch_allowlist();
     Ok(())
 }

@@ -60,7 +60,7 @@
       });
       // インポート由来の取得先は、この保存で利用者が設定した値として扱う。
       if (summalyImported) {
-        await unwrap(commands.trustSummalyProxy());
+        await unwrap(commands.trustSummalyProxy(proxyUrl));
         summalyImported = false;
       }
       saved = true;

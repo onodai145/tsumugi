@@ -339,9 +339,15 @@ impl SettingsStore {
         g.summaly_proxy_imported && !g.ui.summaly_proxy_url.trim().is_empty()
     }
 
-    /// インポート由来の取得先を、利用者が設定した値として扱う。
-    pub fn trust_summaly_proxy(&self) -> Result<()> {
+    /// インポート由来の取得先を、利用者が設定した値として扱う。`expected_url` は呼び出し側(設定画面)が
+    /// 保存した取得先で、いま保存されている値と違うときは信頼しない(古い画面が、別の値を信頼してしまうのを防ぐ)。
+    pub fn trust_summaly_proxy(&self, expected_url: &str) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
+        if guard.ui.summaly_proxy_url != expected_url {
+            return Err(crate::error::Error::Invalid(
+                "取得先が変更されています。設定画面を開き直してください".to_string(),
+            ));
+        }
         if !guard.summaly_proxy_imported {
             return Ok(());
         }
@@ -353,7 +359,8 @@ impl SettingsStore {
     /// 取得先が空、インポート由来、またはURLとして読めないときは `None`。
     pub fn trusted_summaly_allowlist_entry(&self) -> Option<String> {
         let g = self.data.lock().unwrap();
-        if g.summaly_proxy_imported {
+        // 検証を通らない経路(旧SQLiteからの移行など)で入った値は、許可リストに入れない。
+        if g.summaly_proxy_imported || !g.ui.summaly_proxy_url_is_valid() {
             return None;
         }
         let raw = g.ui.summaly_proxy_url.trim();
@@ -1347,9 +1354,34 @@ mod tests {
         s.replace(data).unwrap();
         assert_eq!(s.trusted_summaly_allowlist_entry(), None, "インポート由来は許可リストに入れない");
 
-        s.trust_summaly_proxy().unwrap();
+        s.trust_summaly_proxy("http://192.168.1.10:3030/url").unwrap();
         assert!(!s.summaly_proxy_imported());
         assert_eq!(s.trusted_summaly_allowlist_entry().as_deref(), Some("192.168.1.10:3030"));
+    }
+
+    #[test]
+    fn trust_summaly_proxy_refuses_when_the_stored_url_is_not_the_one_the_caller_saw() {
+        let s = store();
+        let mut data = SettingsData::default();
+        data.ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
+        data.summaly_proxy_imported = true;
+        s.replace(data).unwrap();
+
+        // 古い画面が見ていた別の値では、信頼されない。
+        assert!(s.trust_summaly_proxy("http://other.example/url").is_err());
+        assert!(s.summaly_proxy_imported(), "拒否したら、インポート由来のまま");
+        assert_eq!(s.trusted_summaly_allowlist_entry(), None);
+    }
+
+    #[test]
+    fn the_allowlist_entry_is_none_for_a_summaly_url_that_is_not_http_or_https() {
+        // 検証を通らない経路(旧SQLiteからの移行など)で入った値でも、許可リストには入れない。
+        let s = store();
+        let mut data = SettingsData::default();
+        data.ui.summaly_proxy_url = "ftp://192.168.1.1/".into();
+        data.summaly_proxy_imported = false;
+        s.replace(data).unwrap();
+        assert_eq!(s.trusted_summaly_allowlist_entry(), None);
     }
 
     #[test]

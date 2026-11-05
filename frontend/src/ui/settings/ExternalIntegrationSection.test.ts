@@ -106,16 +106,19 @@ describe("ExternalIntegrationSection 外部サービスのURL", () => {
     expect(spy.mock.calls[0][0].summalyProxyUrl).toBe("http://192.168.1.10:3030/url");
   });
 
-  it("インポート由来の取得先では注意文が出て、保存すると信頼のコマンドが呼ばれて注意文が消える", async () => {
+  it("インポート由来の取得先では注意文が出て、保存すると保存した取得先を渡して信頼し、注意文が消える", async () => {
     mockImported(true);
     vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
     const trust = vi.spyOn(commands, "trustSummalyProxy").mockResolvedValue({ status: "ok", data: null });
-    const { getByTestId, queryByTestId, getByText } = render(ExternalIntegrationSection);
+    const { getByPlaceholderText, getByTestId, queryByTestId, getByText } = render(ExternalIntegrationSection);
 
     await vi.waitFor(() => expect(getByTestId("summaly-imported-notice")).toBeTruthy());
+    await fireEvent.input(getByPlaceholderText(SUMMALY_PLACEHOLDER), { target: { value: "  http://192.168.1.10:3030/url  " } });
     getByText("保存").click();
 
     await vi.waitFor(() => expect(trust).toHaveBeenCalledTimes(1));
+    // 古い画面が別の取得先を信頼しないよう、保存した(trim済みの)取得先を渡す。
+    expect(trust).toHaveBeenCalledWith("http://192.168.1.10:3030/url");
     await vi.waitFor(() => expect(queryByTestId("summaly-imported-notice")).toBeNull());
   });
 
