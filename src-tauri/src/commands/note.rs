@@ -452,12 +452,15 @@ async fn fetch_guarded_bytes(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn save_url_to_file(state: State<'_, AppState>, url: String, path: String) -> Result<()> {
+pub async fn save_url_to_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    path: String,
+) -> Result<()> {
     let bytes = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &url).await?;
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|e| Error::Invalid(format!("cannot write file {path}: {e}")))?;
-    Ok(())
+    // Android の保存ダイアログは `content://` URI を返すため、`tokio::fs` ではなく共通処理で書く(Issue #551)。
+    crate::commands::mute::write_file_bytes(&app, &path, &bytes).await
 }
 
 /// 添付ファイルの生バイト列を取得する（音声波形のデコード用）。
