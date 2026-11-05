@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
@@ -282,6 +283,93 @@ fn default_mfm_animation_enabled() -> bool {
 
 fn default_search_engine_url() -> String {
     "https://www.google.com/search?q={query}".into()
+}
+
+/// 外部サービスのURL(検索エンジン、URLプレビューの取得先)の最大長(文字数)。
+pub const MAX_EXTERNAL_URL_LEN: usize = 2048;
+
+/// 検索エンジンURLの、クエリを差し込む位置を表すプレースホルダ。
+const QUERY_PLACEHOLDER: &str = "{query}";
+
+fn invalid_url(msg: &str) -> Error {
+    Error::Invalid(msg.to_string())
+}
+
+/// `http` / `https` で、ホストがあり、認証情報を含まないURLだけ通す(Issue #549)。
+fn parse_http_url(raw: &str) -> Result<url::Url> {
+    if raw.chars().count() > MAX_EXTERNAL_URL_LEN {
+        return Err(invalid_url("URLが長すぎます(2048文字まで)"));
+    }
+    let parsed = url::Url::parse(raw).map_err(|_| invalid_url("URLの形式が正しくありません"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(invalid_url("URLのスキームはhttpまたはhttpsにしてください"));
+    }
+    if parsed.host().is_none() {
+        return Err(invalid_url("URLにホストがありません"));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(invalid_url("URLにユーザー名やパスワードは含められません"));
+    }
+    Ok(parsed)
+}
+
+/// 検索エンジンURLのテンプレートを検証する。`{query}` を含み、`{query}` を置換したURLが
+/// `http` / `https` として正しく、かつ `{query}` が宛先(ホスト・ポート)の位置に入っていないこと。
+/// ノート本文のテキストが宛先を決められないようにするため、`{query}` を `x` と `y` に置換した
+/// 2つのURLのスキーム・ホスト・ポートが一致することで確かめる。
+pub fn validate_search_engine_url(template: &str) -> Result<()> {
+    if !template.contains(QUERY_PLACEHOLDER) {
+        return Err(invalid_url("検索URLには{query}を含めてください"));
+    }
+    let with_x = parse_http_url(&template.replacen(QUERY_PLACEHOLDER, "x", 1))?;
+    let with_y = parse_http_url(&template.replacen(QUERY_PLACEHOLDER, "y", 1))?;
+    if with_x.scheme() != with_y.scheme()
+        || with_x.host_str() != with_y.host_str()
+        || with_x.port() != with_y.port()
+    {
+        return Err(invalid_url("{query}はホストやポートの位置には置けません"));
+    }
+    Ok(())
+}
+
+/// URLプレビューの取得先を検証する。空欄(空白のみを含む)は「接続先インスタンスの `/url`」で有効。
+pub fn validate_summaly_proxy_url(raw: &str) -> Result<()> {
+    if raw.trim().is_empty() {
+        return Ok(());
+    }
+    parse_http_url(raw).map(|_| ())
+}
+
+fn with_label(label: &str, e: Error) -> Error {
+    match e {
+        Error::Invalid(m) => Error::Invalid(format!("{label}: {m}")),
+        other => other,
+    }
+}
+
+impl UiPrefs {
+    /// 外部サービスの2つのURLを検証する(保存・インポートの入口で使う)。
+    pub fn validate_external_urls(&self) -> Result<()> {
+        validate_search_engine_url(&self.search_engine_url).map_err(|e| with_label("検索エンジンのURL", e))?;
+        validate_summaly_proxy_url(&self.summaly_proxy_url).map_err(|e| with_label("URLプレビューの取得先", e))?;
+        Ok(())
+    }
+
+    /// 不正な値を既定値に戻す(読み込み時用)。戻したら `true`。値そのものはログに出さない。
+    pub fn reset_invalid_external_urls(&mut self) -> bool {
+        let mut changed = false;
+        if validate_search_engine_url(&self.search_engine_url).is_err() {
+            log::warn!("検索エンジンのURLが不正だったため既定値に戻しました");
+            self.search_engine_url = default_search_engine_url();
+            changed = true;
+        }
+        if validate_summaly_proxy_url(&self.summaly_proxy_url).is_err() {
+            log::warn!("URLプレビューの取得先が不正だったため空欄に戻しました");
+            self.summaly_proxy_url = String::new();
+            changed = true;
+        }
+        changed
+    }
 }
 
 fn default_translate_target_lang() -> String {
@@ -647,5 +735,105 @@ mod tests {
         assert!(s.contains("\"uiScale\":130"));
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
         assert_eq!(back.ui_scale, 130);
+    }
+
+    #[test]
+    fn search_engine_url_accepts_http_and_https_templates() {
+        for ok in [
+            "https://www.google.com/search?q={query}",
+            "http://localhost:8080/s?q={query}",
+            "https://example.com/{query}/x",
+            "HTTPS://Example.com/?q={query}",
+        ] {
+            assert!(validate_search_engine_url(ok).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn search_engine_url_rejects_dangerous_or_malformed_templates() {
+        for bad in [
+            "javascript:alert({query})",
+            "JavaScript:alert({query})",
+            " javascript:alert({query})",
+            "data:text/html,{query}",
+            "file:///etc/passwd?{query}",
+            "ftp://example.com/{query}",
+            "https://example.com/",
+            "",
+            "https://user:pass@example.com/?q={query}",
+            "https://{query}@example.com/",
+            "https://{query}.example.com/",
+            "https://{query}/",
+            "https://example.com:{query}/",
+            "https://example.com{query}",
+            "not a url {query}",
+        ] {
+            assert!(validate_search_engine_url(bad).is_err(), "{bad}");
+        }
+        let too_long = format!("https://example.com/?q={{query}}{}", "a".repeat(MAX_EXTERNAL_URL_LEN));
+        assert!(validate_search_engine_url(&too_long).is_err());
+    }
+
+    #[test]
+    fn summaly_proxy_url_accepts_empty_and_http_urls() {
+        for ok in [
+            "",
+            "   ",
+            "https://summaly.example.com/",
+            "http://192.168.1.10:3030/url",
+            "http://localhost:3030",
+            "http://[::1]:3030/url",
+        ] {
+            assert!(validate_summaly_proxy_url(ok).is_ok(), "{ok:?}");
+        }
+    }
+
+    #[test]
+    fn summaly_proxy_url_rejects_other_schemes_and_malformed_urls() {
+        for bad in [
+            "javascript:alert(1)",
+            "data:,x",
+            "ftp://example.com",
+            "file:///x",
+            "https://u:p@example.com/",
+            "example.com/url",
+            "http://",
+            "//example.com",
+        ] {
+            assert!(validate_summaly_proxy_url(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn ui_prefs_default_passes_external_url_validation() {
+        assert!(UiPrefs::default().validate_external_urls().is_ok());
+    }
+
+    #[test]
+    fn validate_external_urls_names_the_offending_field() {
+        let mut p = UiPrefs::default();
+        p.search_engine_url = "javascript:alert({query})".into();
+        assert!(p.validate_external_urls().unwrap_err().to_string().contains("検索エンジンのURL"));
+
+        let mut p = UiPrefs::default();
+        p.summaly_proxy_url = "ftp://example.com".into();
+        assert!(p.validate_external_urls().unwrap_err().to_string().contains("URLプレビューの取得先"));
+    }
+
+    #[test]
+    fn reset_invalid_external_urls_restores_defaults_only_for_invalid_fields() {
+        let mut p = UiPrefs::default();
+        p.search_engine_url = "javascript:alert({query})".into();
+        p.summaly_proxy_url = "data:text/plain,x".into();
+        assert!(p.reset_invalid_external_urls());
+        assert_eq!(p.search_engine_url, UiPrefs::default().search_engine_url);
+        assert_eq!(p.summaly_proxy_url, "");
+
+        let mut ok = UiPrefs::default();
+        ok.search_engine_url = "https://duckduckgo.com/?q={query}".into();
+        ok.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
+        assert!(!ok.reset_invalid_external_urls());
+        assert_eq!(ok.search_engine_url, "https://duckduckgo.com/?q={query}");
+        assert_eq!(ok.summaly_proxy_url, "http://192.168.1.10:3030/url");
     }
 }
