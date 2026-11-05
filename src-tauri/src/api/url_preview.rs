@@ -63,19 +63,40 @@ fn normalize(raw: RawUrlPreview, target_url: &str) -> UrlPreview {
     }
 }
 
+/// 取得先が `net_guard` に拒否されたときのメッセージ(Issue #549)。
+pub(crate) const BLOCKED_MESSAGE: &str = "取得先が許可されていません(ローカル/社内ネットワークのアドレス)。\
+インポートした設定の取得先は、設定の外部連携で保存し直すと使えます";
+
 /// `proxy_base`（例: `"https://misskey.io/url"` またはユーザ設定のカスタムプロキシURL）に
 /// `?url=<target_url>` を付与してGETし、応答を [`UrlPreview`] へ正規化する。
 /// 認証不要（トークンは付与しない）。
+///
+/// `http` は `net_guard::build_fetch_client` で作った取得専用クライアントを渡す。IPリテラルの
+/// 取得先はDNSリゾルバを通らないため、ここで送信前に `validate_url` で検査する。ホスト名は
+/// 接続時(DNS解決後)と、リダイレクトの各ホップで検査される。
 pub async fn fetch_url_preview(
     http: &reqwest::Client,
+    allow: &crate::net_guard::FetchAllowlist,
     proxy_base: &str,
     target_url: &str,
 ) -> Result<UrlPreview> {
+    let base = url::Url::parse(proxy_base).map_err(|e| Error::Invalid(format!("invalid url: {e}")))?;
+    if let Err(blocked) = crate::net_guard::validate_url(&base, allow) {
+        log::warn!("url preview blocked before request: {blocked}");
+        return Err(Error::Invalid(BLOCKED_MESSAGE.to_string()));
+    }
     let resp = http
-        .get(proxy_base)
+        .get(base)
         .query(&[("url", target_url)])
         .send()
-        .await?;
+        .await
+        .map_err(|e| {
+            if crate::net_guard::is_blocked_error(&e) {
+                Error::Invalid(BLOCKED_MESSAGE.to_string())
+            } else {
+                Error::from(e)
+            }
+        })?;
     let status = resp.status();
     if !status.is_success() {
         return Err(Error::Api(format!("url preview: HTTP {status}")));
@@ -142,7 +163,8 @@ mod tests {
     #[tokio::test]
     async fn real_url_preview_from_misskey_io() {
         let http = reqwest::Client::new();
-        let preview = fetch_url_preview(&http, "https://misskey.io/url", "https://misskey.io/")
+        let allow = crate::net_guard::FetchAllowlist::default();
+        let preview = fetch_url_preview(&http, &allow, "https://misskey.io/url", "https://misskey.io/")
             .await
             .expect("fetch_url_preview should succeed against misskey.io");
         assert!(
