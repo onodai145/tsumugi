@@ -301,8 +301,8 @@ export const commands = {
 	 *  投稿本文中のURLのリンクプレビュー(OGP相当)を取得する（Issue #9）。
 	 *  `UiPrefs.summaly_proxy_url` が設定されていればそれを、空ならアカウントの接続先インスタンスの
 	 *  `/url` を使う。いずれも認証不要（トークンは送らない）。
-	 *  取得は `fetch_http`(`net_guard` 付き)で行い、利用者が設定画面で保存した取得先のホストだけが
-	 *  許可リストに入る(Issue #549)。
+	 *  取得は `preview_http`(`net_guard` 付き)で行い、利用者が設定画面で保存した取得先のホストだけが
+	 *  `preview_allowlist` に入る。メディア取得の許可リスト(`fetch_allowlist`)には入らない(Issue #549)。
 	 */
 	fetchUrlPreview: (accountId: string, url: string) => typedError<UrlPreview, Error>(__TAURI_INVOKE("fetch_url_preview", { accountId, url })),
 	/**  単一ドライブファイルのメタ情報取得(下書き復元時の添付再構成用)。 */
