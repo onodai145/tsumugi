@@ -264,11 +264,31 @@ pub async fn get_ui_prefs(state: State<'_, AppState>) -> Result<UiPrefs> {
     state.settings.load_ui()
 }
 
-/// 表示設定を更新（永続化）。
+/// 表示設定を更新（永続化）。外部サービスのURLが不正なら `Error::Invalid` で何も変えない(Issue #549)。
 #[tauri::command]
 #[specta::specta]
 pub async fn set_ui_prefs(state: State<'_, AppState>, prefs: UiPrefs) -> Result<()> {
-    state.settings.save_ui(&prefs)
+    state.settings.save_ui(&prefs)?;
+    // URLプレビューの取得先が変わると、許可リストに入れる項目も変わる。
+    state.refresh_fetch_allowlist();
+    Ok(())
+}
+
+/// URLプレビューの取得先が、設定ファイルのインポートで入った値のままか。設定画面の注意文に使う。
+#[tauri::command]
+#[specta::specta]
+pub async fn get_summaly_proxy_imported(state: State<'_, AppState>) -> Result<bool> {
+    Ok(state.settings.summaly_proxy_imported())
+}
+
+/// インポートした取得先を、利用者が設定した値として扱う(プライベートアドレスへの接続を許可する)。
+/// `expected_url` は設定画面が保存した取得先で、いま保存されている値と違えば拒否する。
+#[tauri::command]
+#[specta::specta]
+pub async fn trust_summaly_proxy(state: State<'_, AppState>, expected_url: String) -> Result<()> {
+    state.settings.trust_summaly_proxy(&expected_url)?;
+    state.refresh_fetch_allowlist();
+    Ok(())
 }
 
 /// ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。

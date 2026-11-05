@@ -65,6 +65,11 @@ pub(crate) struct SettingsData {
     /// アカウントID -> サーバー側ミュートの前回の同期時点の集合(Issue #454)。
     #[serde(default)]
     pub(crate) server_mute_snapshots: HashMap<String, ServerMuteSnapshot>,
+    /// `ui.summaly_proxy_url` が設定ファイルのインポートで入った値か(Issue #549)。真の間は、取得先を
+    /// `fetch_http` の許可リストに入れない(プライベート宛へ接続できない)。偽は「利用者が設定画面で
+    /// 保存した値」か、取得先が空であること。エクスポートには含めない。
+    #[serde(default)]
+    pub(crate) summaly_proxy_imported: bool,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -315,10 +320,55 @@ impl SettingsStore {
         Ok(self.data.lock().unwrap().ui.clone())
     }
 
+    /// 表示設定を保存する。外部サービスのURLが不正なら `Error::Invalid` で何も変えない(Issue #549)。
+    /// URLプレビューの取得先が保存済みの値と違うときは、利用者が入力した値として扱う
+    /// (`summaly_proxy_imported` を偽にする)。
     pub fn save_ui(&self, prefs: &UiPrefs) -> Result<()> {
+        prefs.validate_external_urls()?;
         let mut guard = self.data.lock().unwrap();
+        if prefs.summaly_proxy_url != guard.ui.summaly_proxy_url {
+            guard.summaly_proxy_imported = false;
+        }
         guard.ui = prefs.clone();
         self.save(&guard)
+    }
+
+    /// 取得先が設定されていて、かつインポート由来(まだ利用者が保存し直していない)か。
+    pub fn summaly_proxy_imported(&self) -> bool {
+        let g = self.data.lock().unwrap();
+        g.summaly_proxy_imported && !g.ui.summaly_proxy_url.trim().is_empty()
+    }
+
+    /// インポート由来の取得先を、利用者が設定した値として扱う。`expected_url` は呼び出し側(設定画面)が
+    /// 保存した取得先で、いま保存されている値と違うときは信頼しない(古い画面が、別の値を信頼してしまうのを防ぐ)。
+    pub fn trust_summaly_proxy(&self, expected_url: &str) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        if guard.ui.summaly_proxy_url != expected_url {
+            return Err(crate::error::Error::Invalid(
+                "取得先が変更されています。設定画面を開き直してください".to_string(),
+            ));
+        }
+        if !guard.summaly_proxy_imported {
+            return Ok(());
+        }
+        guard.summaly_proxy_imported = false;
+        self.save(&guard)
+    }
+
+    /// `fetch_http` の許可リストに入れる、利用者が設定した取得先の `host[:port]`。
+    /// 取得先が空、インポート由来、またはURLとして読めないときは `None`。
+    pub fn trusted_summaly_allowlist_entry(&self) -> Option<String> {
+        let g = self.data.lock().unwrap();
+        // 検証を通らない経路(旧SQLiteからの移行など)で入った値は、許可リストに入れない。
+        if g.summaly_proxy_imported || !g.ui.summaly_proxy_url_is_valid() {
+            return None;
+        }
+        let raw = g.ui.summaly_proxy_url.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        let parsed = url::Url::parse(raw).ok()?;
+        crate::net_guard::allowlist_entry_for_url(&parsed)
     }
 
     // ---- PaneNode（ペイン分割ツリー） ----
@@ -445,7 +495,9 @@ fn load_json_or_default(path: &Path, backgrounds_dir: &Path) -> Result<SettingsD
     } else {
         false
     };
-    let data: SettingsData = serde_json::from_value(value)?;
+    let mut data: SettingsData = serde_json::from_value(value)?;
+    // 不正な外部サービスURLは既定値に戻す(Issue #549)。ファイルは書き換えない(次の保存で反映される)。
+    data.ui.reset_invalid_external_urls();
     if migrated {
         let tmp_path = path.with_extension("json.tmp");
         std::fs::write(&tmp_path, serde_json::to_string_pretty(&data)?)?;
@@ -653,6 +705,7 @@ pub fn migrate_from_legacy_sqlite(
             pane_layout: None,
             cache_backend: CacheBackendConfig::default(),
             server_mute_snapshots: HashMap::new(),
+            summaly_proxy_imported: false,
         }),
     };
     store.save(&store.data.lock().unwrap())?;
@@ -1257,5 +1310,109 @@ mod tests {
 
         assert!(s.replace(new).is_err());
         assert_eq!(s.snapshot().accounts, vec![account("old")], "保存に失敗したら、メモリ上の状態は変わらない");
+    }
+
+    #[test]
+    fn save_ui_rejects_dangerous_external_urls_and_keeps_the_old_value() {
+        let s = store();
+        let mut ui = UiPrefs::default();
+        ui.search_engine_url = "javascript:alert({query})".into();
+        assert!(s.save_ui(&ui).is_err());
+        assert_eq!(s.load_ui().unwrap().search_engine_url, UiPrefs::default().search_engine_url);
+
+        let mut ui = UiPrefs::default();
+        ui.summaly_proxy_url = "ftp://example.com/".into();
+        assert!(s.save_ui(&ui).is_err());
+        assert_eq!(s.load_ui().unwrap().summaly_proxy_url, "");
+    }
+
+    #[test]
+    fn changing_the_summaly_url_clears_the_imported_flag_but_other_changes_do_not() {
+        let s = store();
+        let mut data = SettingsData::default();
+        data.ui.summaly_proxy_url = "https://a.example/url".into();
+        data.summaly_proxy_imported = true;
+        s.replace(data).unwrap();
+        assert!(s.summaly_proxy_imported());
+
+        let mut ui = s.load_ui().unwrap();
+        ui.theme = "dark".into();
+        s.save_ui(&ui).unwrap();
+        assert!(s.summaly_proxy_imported(), "他の項目の保存では、インポート由来のまま");
+
+        ui.summaly_proxy_url = "https://b.example/url".into();
+        s.save_ui(&ui).unwrap();
+        assert!(!s.summaly_proxy_imported(), "取得先を変えたら手入力扱い");
+    }
+
+    #[test]
+    fn trust_summaly_proxy_clears_the_flag_and_exposes_the_allowlist_entry() {
+        let s = store();
+        let mut data = SettingsData::default();
+        data.ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
+        data.summaly_proxy_imported = true;
+        s.replace(data).unwrap();
+        assert_eq!(s.trusted_summaly_allowlist_entry(), None, "インポート由来は許可リストに入れない");
+
+        s.trust_summaly_proxy("http://192.168.1.10:3030/url").unwrap();
+        assert!(!s.summaly_proxy_imported());
+        assert_eq!(s.trusted_summaly_allowlist_entry().as_deref(), Some("192.168.1.10:3030"));
+    }
+
+    #[test]
+    fn trust_summaly_proxy_refuses_when_the_stored_url_is_not_the_one_the_caller_saw() {
+        let s = store();
+        let mut data = SettingsData::default();
+        data.ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
+        data.summaly_proxy_imported = true;
+        s.replace(data).unwrap();
+
+        // 古い画面が見ていた別の値では、信頼されない。
+        assert!(s.trust_summaly_proxy("http://other.example/url").is_err());
+        assert!(s.summaly_proxy_imported(), "拒否したら、インポート由来のまま");
+        assert_eq!(s.trusted_summaly_allowlist_entry(), None);
+    }
+
+    #[test]
+    fn the_allowlist_entry_is_none_for_a_summaly_url_that_is_not_http_or_https() {
+        // 検証を通らない経路(旧SQLiteからの移行など)で入った値でも、許可リストには入れない。
+        let s = store();
+        let mut data = SettingsData::default();
+        data.ui.summaly_proxy_url = "ftp://192.168.1.1/".into();
+        data.summaly_proxy_imported = false;
+        s.replace(data).unwrap();
+        assert_eq!(s.trusted_summaly_allowlist_entry(), None);
+    }
+
+    #[test]
+    fn imported_flag_is_false_and_no_entry_when_no_summaly_url_is_set() {
+        let s = store();
+        let mut data = SettingsData::default();
+        data.summaly_proxy_imported = true; // 取得先が空
+        s.replace(data).unwrap();
+        assert!(!s.summaly_proxy_imported());
+        assert_eq!(s.trusted_summaly_allowlist_entry(), None);
+    }
+
+    #[test]
+    fn invalid_external_urls_in_the_file_are_reset_on_load_without_rewriting_the_file() {
+        let path = std::env::temp_dir().join(format!("tsumugi-bad-urls-{}.json", uuid::Uuid::new_v4()));
+        let json = r#"{"ui":{"theme":"dark","defaultColumnWidth":300,"searchEngineUrl":"javascript:alert({query})","summalyProxyUrl":"data:text/plain,x"}}"#;
+        std::fs::write(&path, json).unwrap();
+
+        let s = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
+        let ui = s.load_ui().unwrap();
+        assert_eq!(ui.search_engine_url, UiPrefs::default().search_engine_url);
+        assert_eq!(ui.summaly_proxy_url, "");
+        assert_eq!(ui.theme, "dark", "他の項目はそのまま");
+        // 読み込みだけではファイルを書き換えない(次の保存で反映される)。
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), json);
+
+        // 無効な値が残っていないので、他の項目の保存は失敗しない。
+        let mut ui = s.load_ui().unwrap();
+        ui.theme = "light".into();
+        s.save_ui(&ui).unwrap();
+
+        std::fs::remove_file(&path).ok();
     }
 }

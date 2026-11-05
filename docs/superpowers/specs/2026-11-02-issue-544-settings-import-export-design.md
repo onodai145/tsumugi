@@ -98,7 +98,7 @@ PC間の移行、バックアップ、設定の共有のために、アカウン
 
 `ImportPreview`: カラム数、アカウント数、うち要ログインの数、カスタムCSSの有無、カスタムテーマの有無、外部サービスのURL設定の有無。
 
-外部サービスのURL設定の有無(`hasCustomEndpoints`)は、`ui.searchEngineUrl` または `ui.summalyProxyUrl` が `UiPrefs::default()` の値と異なるときに真になる。共有されたファイルで、URLプレビューや検索の送信先を他人のサーバーに向けられるため、確認ダイアログで知らせる。取り込み自体は拒否しない。
+外部サービスのURL設定の有無(`hasCustomEndpoints`)は、`ui.searchEngineUrl` または `ui.summalyProxyUrl` が `UiPrefs::default()` の値と異なるときに真になる。共有されたファイルで、URLプレビューや検索の送信先を他人のサーバーに向けられるため、確認ダイアログで知らせる。形式が不正な値(`http`/`https` 以外のスキームなど)を含むファイルは取り込みを拒否する(Issue #549)。形式が正しければ取り込み自体は拒否しない。インポートした取得先は、設定画面で保存し直すまでプライベートアドレスに接続できない。
 `ImportResult`: 取り込んだカラム数、要ログインのアカウントID一覧。
 
 ## インポートの規則(`plan_import`)

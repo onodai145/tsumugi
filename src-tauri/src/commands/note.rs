@@ -618,6 +618,8 @@ pub async fn search_hashtags(
 /// 投稿本文中のURLのリンクプレビュー(OGP相当)を取得する（Issue #9）。
 /// `UiPrefs.summaly_proxy_url` が設定されていればそれを、空ならアカウントの接続先インスタンスの
 /// `/url` を使う。いずれも認証不要（トークンは送らない）。
+/// 取得は `preview_http`(`net_guard` 付き)で行い、利用者が設定画面で保存した取得先のホストだけが
+/// `preview_allowlist` に入る。メディア取得の許可リスト(`fetch_allowlist`)には入らない(Issue #549)。
 #[tauri::command]
 #[specta::specta]
 pub async fn fetch_url_preview(
@@ -625,14 +627,32 @@ pub async fn fetch_url_preview(
     account_id: String,
     url: String,
 ) -> Result<UrlPreview> {
+    fetch_url_preview_core(&state, &account_id, &url).await
+}
+
+pub(crate) async fn fetch_url_preview_core(
+    state: &AppState,
+    account_id: &str,
+    url: &str,
+) -> Result<UrlPreview> {
     let prefs = state.settings.load_ui()?;
-    let proxy_base = if prefs.summaly_proxy_url.trim().is_empty() {
-        let client = state.client_for(&account_id)?;
+    let configured = prefs.summaly_proxy_url.trim();
+    let proxy_base = if configured.is_empty() {
+        let client = state.client_for(account_id)?;
         format!("https://{}/url", client.host())
     } else {
-        prefs.summaly_proxy_url.clone()
+        configured.to_string()
     };
-    fetch_url_preview_api(&state.http, &proxy_base, &url).await
+    let result = fetch_url_preview_api(&state.preview_http, &state.preview_allowlist, &proxy_base, url).await;
+    match result {
+        // インポート由来の取得先だけ、保存し直すと使えることを案内する(手入力の取得先は直らない)。
+        Err(Error::Invalid(m)) if m == crate::api::url_preview::BLOCKED_MESSAGE && state.settings.summaly_proxy_imported() => {
+            Err(Error::Invalid(format!(
+                "{m}。インポートした設定の取得先は、設定の外部連携で保存し直すと使えます"
+            )))
+        }
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -722,6 +742,93 @@ mod tests {
         let url = format!("http://localhost:{}/big", server.address().port());
         let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
         assert!(matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")), "unexpected: {err:?}");
+    }
+
+    fn state_with_summaly(url: &str, imported: bool) -> AppState {
+        let settings = crate::store::settings::SettingsStore::new_in_memory();
+        let mut data = crate::store::settings::SettingsData::default();
+        data.ui.summaly_proxy_url = url.into();
+        data.summaly_proxy_imported = imported;
+        settings.replace(data).unwrap();
+        AppState::new_for_test(settings)
+    }
+
+    async fn preview_server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/url"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "title": "T" })))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn fetch_url_preview_reaches_a_user_saved_loopback_proxy() {
+        let server = preview_server().await;
+        let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", server.address().port()), false);
+        let preview = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap();
+        assert_eq!(preview.title.as_deref(), Some("T"));
+    }
+
+    #[tokio::test]
+    async fn a_user_saved_proxy_host_is_not_reachable_by_the_media_fetch() {
+        let server = preview_server().await;
+        let proxy = format!("http://127.0.0.1:{}/url", server.address().port());
+        let state = state_with_summaly(&proxy, false);
+
+        // URLプレビューでは届く
+        assert!(fetch_url_preview_core(&state, "acc", "https://example.com/").await.is_ok());
+
+        // メディア取得(`save_url_to_file` / `fetch_url_bytes` が使うクライアントと許可リスト)では、同じホストでも拒否される
+        let before = server.received_requests().await.unwrap().len();
+        let err = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &proxy).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert_eq!(server.received_requests().await.unwrap().len(), before, "メディア取得ではリクエストが出ない");
+    }
+
+    #[tokio::test]
+    async fn fetch_url_preview_rejects_an_imported_ip_literal_without_connecting() {
+        let server = preview_server().await;
+        let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", server.address().port()), true);
+        let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("保存し直")),
+            "インポート由来の取得先には、保存し直す案内を付ける: {err:?}"
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_url_preview_rejects_an_imported_hostname_resolving_to_loopback() {
+        let server = preview_server().await;
+        let state = state_with_summaly(&format!("http://localhost:{}/url", server.address().port()), true);
+        let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_url_preview_rejects_a_redirect_from_a_saved_proxy_to_another_private_host() {
+        let target = preview_server().await;
+        let proxy = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/url"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", format!("http://127.0.0.1:{}/url", target.address().port())),
+            )
+            .mount(&proxy)
+            .await;
+        let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", proxy.address().port()), false);
+        let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        assert!(
+            matches!(err, Error::Invalid(ref m) if !m.contains("保存し直")),
+            "手入力の取得先では、保存し直しても直らないので案内しない: {err:?}"
+        );
+        assert!(target.received_requests().await.unwrap().is_empty());
     }
 
     #[test]

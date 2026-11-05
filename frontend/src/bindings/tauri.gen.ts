@@ -301,6 +301,8 @@ export const commands = {
 	 *  投稿本文中のURLのリンクプレビュー(OGP相当)を取得する（Issue #9）。
 	 *  `UiPrefs.summaly_proxy_url` が設定されていればそれを、空ならアカウントの接続先インスタンスの
 	 *  `/url` を使う。いずれも認証不要（トークンは送らない）。
+	 *  取得は `preview_http`(`net_guard` 付き)で行い、利用者が設定画面で保存した取得先のホストだけが
+	 *  `preview_allowlist` に入る。メディア取得の許可リスト(`fetch_allowlist`)には入らない(Issue #549)。
 	 */
 	fetchUrlPreview: (accountId: string, url: string) => typedError<UrlPreview, Error>(__TAURI_INVOKE("fetch_url_preview", { accountId, url })),
 	/**  単一ドライブファイルのメタ情報取得(下書き復元時の添付再構成用)。 */
@@ -345,8 +347,15 @@ export const commands = {
 	setNotify: (config: NotifyConfig) => typedError<null, Error>(__TAURI_INVOKE("set_notify", { config })),
 	/**  表示設定（テーマ・既定カラム幅）を取得。 */
 	getUiPrefs: () => typedError<UiPrefs, Error>(__TAURI_INVOKE("get_ui_prefs")),
-	/**  表示設定を更新（永続化）。 */
+	/**  表示設定を更新（永続化）。外部サービスのURLが不正なら `Error::Invalid` で何も変えない(Issue #549)。 */
 	setUiPrefs: (prefs: UiPrefs) => typedError<null, Error>(__TAURI_INVOKE("set_ui_prefs", { prefs })),
+	/**  URLプレビューの取得先が、設定ファイルのインポートで入った値のままか。設定画面の注意文に使う。 */
+	getSummalyProxyImported: () => typedError<boolean, Error>(__TAURI_INVOKE("get_summaly_proxy_imported")),
+	/**
+	 *  インポートした取得先を、利用者が設定した値として扱う(プライベートアドレスへの接続を許可する)。
+	 *  `expected_url` は設定画面が保存した取得先で、いま保存されている値と違えば拒否する。
+	 */
+	trustSummalyProxy: (expectedUrl: string) => typedError<null, Error>(__TAURI_INVOKE("trust_summaly_proxy", { expectedUrl })),
 	/**  ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。 */
 	readAudioDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_audio_data_url", { path })),
 	/**

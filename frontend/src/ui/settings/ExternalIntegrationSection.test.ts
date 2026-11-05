@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { app } from "../../lib/store.svelte";
+import { commands } from "../../lib/ipc";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -58,5 +59,93 @@ describe("ExternalIntegrationSection 翻訳先言語", () => {
     getByText("保存").click();
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
     expect(spy.mock.calls[0][0].translateTargetLang).toBe("pt-BR");
+  });
+});
+
+describe("ExternalIntegrationSection 外部サービスのURL", () => {
+  const SEARCH_PLACEHOLDER = "検索URLテンプレート（{query} をクエリ文字列に置換）";
+  const SUMMALY_PLACEHOLDER = "空欄なら接続先インスタンスの /url を使用";
+
+  function mockImported(value: boolean) {
+    return vi.spyOn(commands, "getSummalyProxyImported").mockResolvedValue({ status: "ok", data: value });
+  }
+
+  it("javascript: の検索URLは保存できず、エラーが出る", async () => {
+    mockImported(false);
+    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const { getByPlaceholderText, getByText } = render(ExternalIntegrationSection);
+
+    await fireEvent.input(getByPlaceholderText(SEARCH_PLACEHOLDER), { target: { value: "javascript:alert({query})" } });
+    getByText("保存").click();
+
+    await vi.waitFor(() => expect(getByText(/検索エンジンのURL/)).toBeTruthy());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("http/https 以外のURLプレビュー取得先は保存できず、エラーが出る", async () => {
+    mockImported(false);
+    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const { getByPlaceholderText, getByText } = render(ExternalIntegrationSection);
+
+    await fireEvent.input(getByPlaceholderText(SUMMALY_PLACEHOLDER), { target: { value: "ftp://example.com/url" } });
+    getByText("保存").click();
+
+    await vi.waitFor(() => expect(getByText(/URLプレビューの取得先/)).toBeTruthy());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("手入力のLANの取得先は保存できる", async () => {
+    mockImported(false);
+    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const { getByPlaceholderText, getByText } = render(ExternalIntegrationSection);
+
+    await fireEvent.input(getByPlaceholderText(SUMMALY_PLACEHOLDER), { target: { value: "http://192.168.1.10:3030/url" } });
+    getByText("保存").click();
+
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(spy.mock.calls[0][0].summalyProxyUrl).toBe("http://192.168.1.10:3030/url");
+  });
+
+  it("インポート由来の取得先では注意文が出て、保存すると保存した取得先を渡して信頼し、注意文が消える", async () => {
+    mockImported(true);
+    vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const trust = vi.spyOn(commands, "trustSummalyProxy").mockResolvedValue({ status: "ok", data: null });
+    const { getByPlaceholderText, getByTestId, queryByTestId, getByText } = render(ExternalIntegrationSection);
+
+    await vi.waitFor(() => expect(getByTestId("summaly-imported-notice")).toBeTruthy());
+    await fireEvent.input(getByPlaceholderText(SUMMALY_PLACEHOLDER), { target: { value: "  http://192.168.1.10:3030/url  " } });
+    getByText("保存").click();
+
+    await vi.waitFor(() => expect(trust).toHaveBeenCalledTimes(1));
+    // 古い画面が別の取得先を信頼しないよう、保存した(trim済みの)取得先を渡す。
+    expect(trust).toHaveBeenCalledWith("http://192.168.1.10:3030/url");
+    await vi.waitFor(() => expect(queryByTestId("summaly-imported-notice")).toBeNull());
+  });
+
+  it("インポート由来でなければ注意文は出ず、信頼のコマンドも呼ばれない", async () => {
+    mockImported(false);
+    vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const trust = vi.spyOn(commands, "trustSummalyProxy").mockResolvedValue({ status: "ok", data: null });
+    const { queryByTestId, getByText } = render(ExternalIntegrationSection);
+
+    getByText("保存").click();
+
+    await vi.waitFor(() => expect(getByText("保存しました")).toBeTruthy());
+    expect(queryByTestId("summaly-imported-notice")).toBeNull();
+    expect(trust).not.toHaveBeenCalled();
+  });
+
+  it("検証に落ちて保存しなかったときは、信頼のコマンドを呼ばない", async () => {
+    mockImported(true);
+    vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const trust = vi.spyOn(commands, "trustSummalyProxy").mockResolvedValue({ status: "ok", data: null });
+    const { getByPlaceholderText, getByTestId, getByText } = render(ExternalIntegrationSection);
+
+    await vi.waitFor(() => expect(getByTestId("summaly-imported-notice")).toBeTruthy());
+    await fireEvent.input(getByPlaceholderText(SUMMALY_PLACEHOLDER), { target: { value: "ftp://example.com/url" } });
+    getByText("保存").click();
+
+    await vi.waitFor(() => expect(getByText(/URLプレビューの取得先/)).toBeTruthy());
+    expect(trust).not.toHaveBeenCalled();
   });
 });

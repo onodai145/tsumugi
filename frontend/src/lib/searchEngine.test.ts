@@ -23,6 +23,12 @@ describe("buildSearchUrl", () => {
       DEFAULT_SEARCH_ENGINE_URL.replace("{query}", "cat"),
     );
   });
+
+  it("falls back to Google when the template uses a dangerous scheme or puts {query} in the host", () => {
+    for (const bad of ["javascript:alert({query})", "data:text/html,{query}", "https://{query}.evil.example/"]) {
+      expect(buildSearchUrl(bad, "cat")).toBe(DEFAULT_SEARCH_ENGINE_URL.replace("{query}", "cat"));
+    }
+  });
 });
 
 describe("SEARCH_ENGINE_PRESETS", () => {

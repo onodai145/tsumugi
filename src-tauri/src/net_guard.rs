@@ -101,11 +101,36 @@ pub(crate) fn host_key(host: &str) -> String {
 /// ポートが数値として解釈できない(u16に収まらない)エントリは `None`(許可しない側に倒す)。
 fn parse_entry(raw: &str) -> Option<(String, Vec<u16>)> {
     let h = raw.trim();
+    // `[IPv6]` / `[IPv6]:port`。キーは `validate_ip_literal` が使う括弧なしの正規形に合わせる。
+    if let Some(rest) = h.strip_prefix('[') {
+        let (inner, after) = rest.split_once(']')?;
+        let ip: Ipv6Addr = inner.parse().ok()?;
+        let ports = if after.is_empty() {
+            vec![80, 443]
+        } else {
+            vec![after.strip_prefix(':')?.parse::<u16>().ok()?]
+        };
+        return Some((ip.to_string(), ports));
+    }
     let ports = match split_port(h).1 {
         Some(p) => vec![p.parse::<u16>().ok()?],
         None => vec![80, 443],
     };
     Some((host_key(h), ports))
+}
+
+/// URLの宛先を `FetchAllowlist::replace` に渡せる文字列にする。ポートはURLに明示されているときだけ付ける
+/// (付けないと80と443を許可する)。ホストが無いURLは `None`。
+pub(crate) fn allowlist_entry_for_url(url: &url::Url) -> Option<String> {
+    let host = match url.host()? {
+        url::Host::Domain(d) => d.to_string(),
+        url::Host::Ipv4(v4) => v4.to_string(),
+        url::Host::Ipv6(v6) => format!("[{v6}]"),
+    };
+    Some(match url.port() {
+        Some(p) => format!("{host}:{p}"),
+        None => host,
+    })
 }
 
 /// 例外として取得を許可するホスト(登録アカウントのホスト)と、そのホストで許可するポートの集合。
@@ -524,6 +549,43 @@ mod tests {
     #[test]
     fn validate_url_allows_public_ip_literal() {
         assert!(validate_url(&url("http://8.8.8.8/"), &FetchAllowlist::default()).is_ok());
+    }
+
+    #[test]
+    fn allowlist_accepts_bracketed_ipv6_with_and_without_port() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["[::1]:8080", "[2001:db8::1]"]);
+        assert!(allow.allows("::1", 8080));
+        assert!(!allow.allows("::1", 80));
+        assert!(allow.allows("2001:db8::1", 443));
+        assert!(allow.allows("2001:db8::1", 80));
+    }
+
+    #[test]
+    fn allowlist_drops_malformed_bracketed_entries() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["[::1", "[::1]x", "[::1]:99999", "[notip]:80"]);
+        assert!(!allow.contains_host("::1"));
+    }
+
+    #[test]
+    fn validate_url_allows_ipv6_literal_on_exact_allowlist_match() {
+        let allow = FetchAllowlist::default();
+        allow.replace(["[::1]:8080"]);
+        assert!(validate_url(&url("http://[::1]:8080/x"), &allow).is_ok());
+        assert!(validate_url(&url("http://[::1]:9090/x"), &allow).is_err());
+        assert!(validate_url(&url("http://[::1]/x"), &FetchAllowlist::default()).is_err());
+    }
+
+    #[test]
+    fn allowlist_entry_for_url_keeps_the_explicit_port_only() {
+        let e = |s: &str| allowlist_entry_for_url(&url(s));
+        assert_eq!(e("https://proxy.example.com/url").as_deref(), Some("proxy.example.com"));
+        assert_eq!(e("http://192.168.1.10:3030/url").as_deref(), Some("192.168.1.10:3030"));
+        assert_eq!(e("http://[::1]:3030/url").as_deref(), Some("[::1]:3030"));
+        assert_eq!(e("http://[::1]/url").as_deref(), Some("[::1]"));
+        // 既定ポートは `url` クレートが落とすので、ホストだけ(80と443を許可)になる。
+        assert_eq!(e("https://proxy.example.com:443/url").as_deref(), Some("proxy.example.com"));
     }
 
     #[test]
