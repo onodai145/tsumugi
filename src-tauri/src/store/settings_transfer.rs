@@ -177,6 +177,9 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
     }
     let d = file.data;
 
+    // 他人が作ったファイルの外部サービスURLは、形式を確かめる(Issue #549)。
+    d.ui.validate_external_urls()?;
+
     ensure_unique(d.accounts.iter().map(|a| a.id.as_str()), "アカウント")?;
     ensure_unique(d.groups.iter().map(|g| g.id.as_str()), "グループ")?;
     ensure_unique(d.columns.iter().map(|c| c.id.as_str()), "カラム")?;
@@ -252,7 +255,14 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
     ui.note_cache_max_size_mb = ui.note_cache_max_size_mb.clamp(0, 10_000);
     ui.gap_fill_limit = ui.gap_fill_limit.clamp(0, 1_000);
 
-    let summaly_proxy_set = !ui.summaly_proxy_url.trim().is_empty();
+    // 取得先の由来: 空なら対象外、現在の値と違えばインポート由来、同じなら現在の状態を引き継ぐ。
+    let summaly_proxy_imported = if ui.summaly_proxy_url.trim().is_empty() {
+        false
+    } else if ui.summaly_proxy_url != current.ui.summaly_proxy_url {
+        true
+    } else {
+        current.summaly_proxy_imported
+    };
     let preview = ImportPreview {
         column_count: columns.len() as i32,
         account_count: d.accounts.len() as i32,
@@ -274,8 +284,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         pane_layout: d.pane_layout,
         cache_backend: current.cache_backend.clone(),
         server_mute_snapshots: current.server_mute_snapshots.clone(),
-        // 暫定(Task 7 で現在の値との比較に置き換える): 取得先があればインポート由来として扱い、許可リストに入れない。
-        summaly_proxy_imported: summaly_proxy_set,
+        summaly_proxy_imported,
     };
     Ok(ImportPlan { data, preview, accounts_needing_login })
 }
@@ -609,6 +618,63 @@ mod tests {
         let mut data = empty_data();
         data.ui.search_engine_url = format!("{}x", defaults.search_engine_url);
         assert!(plan_import(&SettingsData::default(), file_with(data)).unwrap().preview.has_custom_endpoints);
+    }
+
+    #[test]
+    fn a_file_with_a_dangerous_search_engine_url_is_rejected_as_a_whole() {
+        let mut data = empty_data();
+        data.ui.search_engine_url = "javascript:alert({query})".into();
+        let err = plan_err(&SettingsData::default(), file_with(data));
+        assert!(err.contains("検索エンジンのURL"), "{err}");
+    }
+
+    #[test]
+    fn a_file_with_a_non_http_summaly_proxy_is_rejected_as_a_whole() {
+        let mut data = empty_data();
+        data.ui.summaly_proxy_url = "ftp://example.com/url".into();
+        let err = plan_err(&SettingsData::default(), file_with(data));
+        assert!(err.contains("URLプレビューの取得先"), "{err}");
+    }
+
+    #[test]
+    fn a_new_summaly_proxy_from_the_file_is_marked_as_imported() {
+        let mut data = empty_data();
+        data.ui.summaly_proxy_url = "https://p.example/url".into();
+        let plan = plan_import(&SettingsData::default(), file_with(data)).unwrap();
+        assert!(plan.data.summaly_proxy_imported);
+    }
+
+    #[test]
+    fn an_empty_summaly_proxy_in_the_file_is_not_marked_as_imported() {
+        let mut current = SettingsData::default();
+        current.ui.summaly_proxy_url = "https://p.example/url".into();
+        current.summaly_proxy_imported = true;
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert!(!plan.data.summaly_proxy_imported);
+        assert_eq!(plan.data.ui.summaly_proxy_url, "");
+    }
+
+    #[test]
+    fn the_same_summaly_proxy_keeps_the_current_imported_flag() {
+        let mut data = empty_data();
+        data.ui.summaly_proxy_url = "https://p.example/url".into();
+
+        let mut trusted = SettingsData::default();
+        trusted.ui.summaly_proxy_url = "https://p.example/url".into();
+        assert!(!plan_import(&trusted, file_with(data.clone())).unwrap().data.summaly_proxy_imported);
+
+        let mut untrusted = trusted.clone();
+        untrusted.summaly_proxy_imported = true;
+        assert!(plan_import(&untrusted, file_with(data)).unwrap().data.summaly_proxy_imported);
+    }
+
+    #[test]
+    fn a_different_summaly_proxy_is_marked_as_imported_even_if_the_current_one_was_trusted() {
+        let mut current = SettingsData::default();
+        current.ui.summaly_proxy_url = "https://a.example/url".into();
+        let mut data = empty_data();
+        data.ui.summaly_proxy_url = "https://b.example/url".into();
+        assert!(plan_import(&current, file_with(data)).unwrap().data.summaly_proxy_imported);
     }
 
     #[test]
