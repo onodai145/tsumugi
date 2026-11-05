@@ -273,6 +273,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         pane_layout: d.pane_layout,
         cache_backend: current.cache_backend.clone(),
         server_mute_snapshots: current.server_mute_snapshots.clone(),
+        summaly_proxy_imported: false,
     };
     Ok(ImportPlan { data, preview, accounts_needing_login })
 }
