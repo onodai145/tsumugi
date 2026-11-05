@@ -125,6 +125,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mute::set_notify,
             commands::mute::get_ui_prefs,
             commands::mute::set_ui_prefs,
+            commands::mute::get_summaly_proxy_imported,
+            commands::mute::trust_summaly_proxy,
             commands::mute::read_audio_data_url,
             commands::mute::import_background_media,
             commands::sound::play_notify_sound,

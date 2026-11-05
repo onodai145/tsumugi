@@ -209,7 +209,7 @@ impl AppState {
         });
         let mute = settings.load_mute().unwrap_or_default();
         let fetch_allowlist = crate::net_guard::FetchAllowlist::default();
-        fetch_allowlist.replace(hosts_with_token(&accounts, secrets.as_ref()));
+        fetch_allowlist.replace(allowlist_hosts(&accounts, secrets.as_ref(), &settings));
         Self {
             http: reqwest::Client::builder()
                 .user_agent(USER_AGENT)
@@ -391,11 +391,13 @@ impl AppState {
         )
     }
 
-    /// `accounts` のうちトークンを持つものの全ホストで、取得先の許可リストを差し替える。
-    /// アカウントの追加・削除・再認証の直後に呼ぶ。
+    /// `accounts` のうちトークンを持つものの全ホストと、利用者が設定したURLプレビューの取得先で、
+    /// 取得先の許可リストを差し替える。アカウントの追加・削除・再認証の直後と、取得先を変えた・
+    /// 信頼した・インポートした直後に呼ぶ。
     pub fn refresh_fetch_allowlist(&self) {
         let accounts = self.accounts.lock().unwrap().list();
-        self.fetch_allowlist.replace(hosts_with_token(&accounts, self.secrets.as_ref()));
+        self.fetch_allowlist
+            .replace(allowlist_hosts(&accounts, self.secrets.as_ref(), &self.settings));
     }
 
     /// そのアカウントのトークンがキーリングにあるか。読み取りに失敗したら `false`。
@@ -479,6 +481,14 @@ impl AppState {
     }
 }
 
+/// 許可リストに入れるホストの全体: トークンを持つアカウントのホストと、利用者が設定した
+/// URLプレビューの取得先(Issue #549。インポート由来の取得先は入れない)。
+fn allowlist_hosts(accounts: &[Account], secrets: &dyn SecretStore, settings: &SettingsStore) -> Vec<String> {
+    let mut hosts = hosts_with_token(accounts, secrets);
+    hosts.extend(settings.trusted_summaly_allowlist_entry());
+    hosts
+}
+
 /// 許可リストに入れるホスト。**トークンを持つアカウントのものだけ**(Issue #544)。
 /// トークンなしのアカウント(設定インポート直後など)のホストを入れると、細工した設定ファイルで
 /// `127.0.0.1` などをSSRFガード(Issue #377)の除外対象にできてしまう。キーリングの読み取り失敗は
@@ -531,6 +541,36 @@ mod tests {
         state.forget_translator_available("a1");
         assert_eq!(state.translator_available("a1"), None);
         assert_eq!(state.translator_available("a2"), Some(false));
+    }
+
+    #[test]
+    fn fetch_allowlist_includes_the_summaly_host_only_when_the_user_saved_it() {
+        let settings = SettingsStore::new_in_memory();
+        let mut ui = crate::domain::UiPrefs::default();
+        ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
+        settings.save_ui(&ui).unwrap();
+        let state = AppState::new_for_test(settings);
+        assert!(state.fetch_allowlist.allows("192.168.1.10", 3030), "起動時の初期値に入る");
+        assert!(!state.fetch_allowlist.allows("192.168.1.10", 80), "ポートは明示されたものだけ");
+
+        // インポート直後相当: 許可リストから外れる
+        let mut data = state.settings.snapshot();
+        data.summaly_proxy_imported = true;
+        state.settings.replace(data).unwrap();
+        state.refresh_fetch_allowlist();
+        assert!(!state.fetch_allowlist.contains_host("192.168.1.10"));
+
+        // 設定画面で保存し直す(信頼する)と入る
+        state.settings.trust_summaly_proxy().unwrap();
+        state.refresh_fetch_allowlist();
+        assert!(state.fetch_allowlist.allows("192.168.1.10", 3030));
+    }
+
+    #[test]
+    fn fetch_allowlist_has_no_summaly_host_when_the_url_is_empty() {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.refresh_fetch_allowlist();
+        assert!(!state.fetch_allowlist.contains_host(""));
     }
 
     #[test]

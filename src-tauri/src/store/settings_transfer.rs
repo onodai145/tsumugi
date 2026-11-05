@@ -252,6 +252,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
     ui.note_cache_max_size_mb = ui.note_cache_max_size_mb.clamp(0, 10_000);
     ui.gap_fill_limit = ui.gap_fill_limit.clamp(0, 1_000);
 
+    let summaly_proxy_set = !ui.summaly_proxy_url.trim().is_empty();
     let preview = ImportPreview {
         column_count: columns.len() as i32,
         account_count: d.accounts.len() as i32,
@@ -273,7 +274,8 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         pane_layout: d.pane_layout,
         cache_backend: current.cache_backend.clone(),
         server_mute_snapshots: current.server_mute_snapshots.clone(),
-        summaly_proxy_imported: false,
+        // 暫定(Task 7 で現在の値との比較に置き換える): 取得先があればインポート由来として扱い、許可リストに入れない。
+        summaly_proxy_imported: summaly_proxy_set,
     };
     Ok(ImportPlan { data, preview, accounts_needing_login })
 }

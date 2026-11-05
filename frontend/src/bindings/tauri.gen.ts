@@ -345,8 +345,12 @@ export const commands = {
 	setNotify: (config: NotifyConfig) => typedError<null, Error>(__TAURI_INVOKE("set_notify", { config })),
 	/**  表示設定（テーマ・既定カラム幅）を取得。 */
 	getUiPrefs: () => typedError<UiPrefs, Error>(__TAURI_INVOKE("get_ui_prefs")),
-	/**  表示設定を更新（永続化）。 */
+	/**  表示設定を更新（永続化）。外部サービスのURLが不正なら `Error::Invalid` で何も変えない(Issue #549)。 */
 	setUiPrefs: (prefs: UiPrefs) => typedError<null, Error>(__TAURI_INVOKE("set_ui_prefs", { prefs })),
+	/**  URLプレビューの取得先が、設定ファイルのインポートで入った値のままか。設定画面の注意文に使う。 */
+	getSummalyProxyImported: () => typedError<boolean, Error>(__TAURI_INVOKE("get_summaly_proxy_imported")),
+	/**  インポートした取得先を、利用者が設定した値として扱う(プライベートアドレスへの接続を許可する)。 */
+	trustSummalyProxy: () => typedError<null, Error>(__TAURI_INVOKE("trust_summaly_proxy")),
 	/**  ローカル音声ファイルを data URL(base64)へ変換する（通知音設定用）。 */
 	readAudioDataUrl: (path: string) => typedError<string, Error>(__TAURI_INVOKE("read_audio_data_url", { path })),
 	/**
