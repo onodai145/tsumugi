@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import SaveBar from "./SaveBar.svelte";
   import { app } from "../../lib/store.svelte";
+  import { commands, unwrap } from "../../lib/ipc";
+  import { validateSearchEngineUrl, validateSummalyProxyUrl } from "../../lib/externalUrl";
   import { SEARCH_ENGINE_PRESETS, DEFAULT_SEARCH_ENGINE_URL } from "../../lib/searchEngine";
   import { TRANSLATE_LANG_PRESETS, normalizeTranslateLang } from "../../lib/translateLang";
   import Dropdown from "../Dropdown.svelte";
@@ -19,21 +22,47 @@
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
+  // 取得先が設定ファイルのインポートで入った値のままか。真のとき注意文を出し、保存すると利用者の設定として扱う。
+  let summalyImported = $state(false);
+  onMount(async () => {
+    try {
+      summalyImported = (await unwrap(commands.getSummalyProxyImported())) === true;
+    } catch {
+      summalyImported = false;
+    }
+  });
 
   async function save() {
     err = null;
     saved = false;
+    const searchUrl = searchEngineUrl.trim() || DEFAULT_SEARCH_ENGINE_URL;
+    const proxyUrl = summalyProxyUrl.trim();
+    const searchErr = validateSearchEngineUrl(searchUrl);
+    if (searchErr) {
+      err = `検索エンジンのURL: ${searchErr}`;
+      return;
+    }
+    const proxyErr = validateSummalyProxyUrl(proxyUrl);
+    if (proxyErr) {
+      err = `URLプレビューの取得先: ${proxyErr}`;
+      return;
+    }
     busy = true;
     try {
       // このセクションが編集しないフィールド(外観・データ等)を保存で消さないよう、
       // 現在の app.ui をベースに編集項目だけ上書きする。
       await app.setUiPrefs({
         ...app.ui,
-        searchEngineUrl: searchEngineUrl.trim() || DEFAULT_SEARCH_ENGINE_URL,
+        searchEngineUrl: searchUrl,
         urlPreviewEnabled,
-        summalyProxyUrl: summalyProxyUrl.trim(),
+        summalyProxyUrl: proxyUrl,
         translateTargetLang: normalizeTranslateLang(translateTargetLang),
       });
+      // インポート由来の取得先は、この保存で利用者が設定した値として扱う。
+      if (summalyImported) {
+        await unwrap(commands.trustSummalyProxy());
+        summalyImported = false;
+      }
       saved = true;
     } catch (e) {
       err = String(e);
@@ -68,7 +97,8 @@
   />
   <p class="mb-4 mt-0 text-xs text-muted-foreground">
     プレースホルダ<code class="mfm-code">{"{query}"}</code>を含むURLを指定すると好きな検索エンジンを使えます。
-    空欄や<code class="mfm-code">{"{query}"}</code>を含まない値を保存した場合はGoogle検索に戻ります。
+    <code class="mfm-code">http</code>か<code class="mfm-code">https</code>のURLのみ指定できます。
+    空欄のまま保存した場合はGoogle検索に戻ります。
   </p>
 </div>
 
@@ -87,6 +117,13 @@
     設定すると、リンクプレビュー対象のURLは接続先インスタンスではなく指定したプロキシへ直接送信されます。
     信頼できるプロキシのみを指定してください。
   </p>
+  {#if summalyImported}
+    <p class="mb-0 mt-0 text-xs text-destructive" data-testid="summaly-imported-notice">
+      この取得先はインポートした値です。プライベートアドレス(LANやループバック)には接続できません。
+      保存すると自分で設定した値として扱い、そうしたアドレスにも接続します。
+      心当たりのない値なら保存せずに変更してください。
+    </p>
+  {/if}
 </div>
 
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
