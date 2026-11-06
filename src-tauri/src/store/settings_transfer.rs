@@ -49,7 +49,9 @@ pub struct ExportData {
 pub struct ImportPreview {
     pub column_count: i32,
     pub account_count: i32,
-    /// ファイルにだけあり、トークンなしで追加されるアカウントの数。
+    /// 取り込み後にトークンを持たないアカウントの数。ファイルにだけあって新しく追加されるものに加え、
+    /// 端末側にすでにあるアカウント(ファイルと一致したものも、端末にだけ残るものも)のうちトークンが
+    /// 無いものも含む(コマンド層で数える。`plan_import` が返す値は、前者だけ)。
     pub accounts_needing_login: i32,
     pub has_custom_css: bool,
     pub has_custom_themes: bool,
@@ -62,7 +64,7 @@ pub struct ImportPreview {
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub column_count: i32,
-    /// トークンなしで追加したアカウントのID。再認証が必要。
+    /// 取り込み後にトークンを持たないアカウントのID。再認証が必要。
     pub accounts_needing_login: Vec<String>,
 }
 
@@ -113,6 +115,7 @@ pub struct ImportPlan {
     pub data: SettingsData,
     pub preview: ImportPreview,
     /// ファイルにだけあり、トークンなしで追加するアカウントのID。
+    /// コマンド層の `plan_checked` は、これを「取り込み後にトークンを持たない全アカウントのID」で上書きする。
     pub accounts_needing_login: Vec<String>,
 }
 

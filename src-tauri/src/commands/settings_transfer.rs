@@ -31,10 +31,23 @@ pub(crate) fn export_settings_bytes(state: &AppState) -> Result<Vec<u8>> {
 /// 孤立して残っているトークン(settings.jsonに無いID)と一致すると、そのトークンが許可リスト
 /// 入りのホストに送られかねない。ファイルは信頼しないので、衝突したらファイルごと拒否する。
 fn plan_checked(state: &AppState, current: &SettingsData, file: ExportFile) -> Result<ImportPlan> {
-    let plan = plan_import(current, file)?;
+    let mut plan = plan_import(current, file)?;
     if plan.accounts_needing_login.iter().any(|id| state.has_token(id)) {
         return Err(Error::Invalid("アカウントのIDがこの端末の保存済みトークンと衝突しています".into()));
     }
+    // 取り込み後にトークンを持たないアカウント全体。ファイルにだけあって新しく追加されるものに加え、
+    // 端末側にすでにあるアカウント(ファイルと一致したものも、端末にだけ残るものも)のうち、トークンが無い
+    // ものも含める(Issue #553)。
+    // 確認ダイアログの件数と、取り込み結果(ImportResult)の両方に使う。
+    let tokenless: Vec<String> = plan
+        .data
+        .accounts
+        .iter()
+        .filter(|a| !state.has_token(&a.id))
+        .map(|a| a.id.clone())
+        .collect();
+    plan.preview.accounts_needing_login = tokenless.len() as i32;
+    plan.accounts_needing_login = tokenless;
     Ok(plan)
 }
 
@@ -168,6 +181,14 @@ mod tests {
         state
     }
 
+    /// 端末側にあるが、トークンを持たないアカウント(以前のインポートの取り込み直後など)。
+    fn state_with_tokenless_local_account() -> AppState {
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.accounts.lock().unwrap().upsert(account("local1", "misskey.test", "u1"));
+        state.settings.upsert_account(&account("local1", "misskey.test", "u1")).unwrap();
+        state
+    }
+
     fn file_bytes(data: ExportData) -> Vec<u8> {
         serde_json::to_vec(&ExportFile {
             format: EXPORT_FORMAT.into(),
@@ -278,5 +299,60 @@ mod tests {
 
         assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c");
         assert_eq!(state.accounts.lock().unwrap().list().len(), 1);
+    }
+
+    #[test]
+    fn inspect_counts_a_matched_local_account_that_has_no_token() {
+        let state = state_with_tokenless_local_account();
+        // ファイル側の file1 は、端末側の local1(host+userIdが同じ)に付け替わる。
+        let bytes = file_bytes(data_with(vec![account("file1", "misskey.test", "u1")], vec![]));
+
+        let preview = inspect_settings_bytes(&state, &bytes).unwrap();
+
+        assert_eq!(preview.accounts_needing_login, 1, "端末側でトークンが無いアカウントも数える");
+    }
+
+    #[test]
+    fn inspect_counts_a_local_only_account_that_has_no_token() {
+        let state = state_with_tokenless_local_account(); // local1(misskey.test / u1)
+        // ファイルには別ホストのアカウントだけがある。local1 はファイルに無いまま、端末に残る。
+        let bytes = file_bytes(data_with(vec![account("file1", "other.example", "u9")], vec![]));
+
+        let preview = inspect_settings_bytes(&state, &bytes).unwrap();
+
+        assert_eq!(
+            preview.accounts_needing_login, 2,
+            "端末にだけ残るトークンなしのアカウント(local1)と、新しく追加されるアカウント(file1)の両方を数える"
+        );
+    }
+
+    #[test]
+    fn inspect_does_not_count_a_matched_local_account_that_has_a_token() {
+        let state = state_with_local_account(); // local1 はトークンあり
+        let bytes = file_bytes(data_with(vec![account("file1", "misskey.test", "u1")], vec![]));
+
+        let preview = inspect_settings_bytes(&state, &bytes).unwrap();
+
+        assert_eq!(preview.accounts_needing_login, 0);
+    }
+
+    #[tokio::test]
+    async fn import_reports_every_account_left_without_a_token() {
+        let state = state_with_tokenless_local_account();
+        let bytes = file_bytes(data_with(
+            vec![account("file1", "misskey.test", "u1"), account("file2", "other.example", "u9")],
+            vec![],
+        ));
+
+        let preview = inspect_settings_bytes(&state, &bytes).unwrap();
+        let result = import_settings_bytes(&state, &bytes).await.unwrap();
+
+        assert_eq!(preview.accounts_needing_login, 2);
+        let mut ids = result.accounts_needing_login.clone();
+        ids.sort();
+        assert_eq!(ids, vec!["file2".to_string(), "local1".to_string()]);
+        let mut actual = accounts_without_token_ids(&state);
+        actual.sort();
+        assert_eq!(actual, ids, "取り込み結果は、実際にトークンの無いアカウントと一致する");
     }
 }
