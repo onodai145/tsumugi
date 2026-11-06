@@ -90,14 +90,19 @@ pub(crate) async fn import_settings_bytes(state: &AppState, bytes: &[u8]) -> Res
 }
 
 /// トークンを持たないアカウントのID。
-pub(crate) fn accounts_without_token_ids(state: &AppState) -> Vec<String> {
+/// keyring を読めなかったアカウントがあれば、「トークンなし」にはせずエラーにする。フロントは、この結果で
+/// 通信のスキップと再認証の案内を決める。読み取りの失敗(keyring のロック、D-Bus の不通など)を「トークンなし」に
+/// すると、障害のたびに全アカウントが再認証へ誘導され、通信もスキップされてしまう(Issue #553)。
+pub(crate) fn accounts_without_token_ids(state: &AppState) -> Result<Vec<String>> {
     // keyring(D-Bus)の問い合わせ中にアカウント一覧のロックを持たない。
     let accounts = state.accounts.lock().unwrap().list();
-    accounts
-        .into_iter()
-        .filter(|a| !state.has_token(&a.id))
-        .map(|a| a.id)
-        .collect()
+    let mut ids = Vec::new();
+    for account in accounts {
+        if state.secrets.get(&account.id)?.is_none() {
+            ids.push(account.id);
+        }
+    }
+    Ok(ids)
 }
 
 /// 設定を `path` に書き出す。Androidでは `path` は `content://` URI でもよい。
@@ -128,7 +133,7 @@ pub async fn import_settings(app: AppHandle, state: State<'_, AppState>, path: S
 #[tauri::command]
 #[specta::specta]
 pub async fn accounts_without_token(state: State<'_, AppState>) -> Result<Vec<String>> {
-    Ok(accounts_without_token_ids(&state))
+    accounts_without_token_ids(&state)
 }
 
 #[cfg(test)]
@@ -254,7 +259,7 @@ mod tests {
         assert_eq!(by_id("c2"), "file2");
         assert!(columns.iter().all(|c| c.id != "old-c"), "端末側のカラムは置き換わる");
         assert_eq!(state.accounts.lock().unwrap().list().len(), 2, "実行中のアカウント一覧も更新される");
-        assert_eq!(accounts_without_token_ids(&state), vec!["file2".to_string()]);
+        assert_eq!(accounts_without_token_ids(&state).unwrap(), vec!["file2".to_string()]);
     }
 
     #[tokio::test]
@@ -299,6 +304,32 @@ mod tests {
 
         assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c");
         assert_eq!(state.accounts.lock().unwrap().list().len(), 1);
+    }
+
+    /// 読み出しがいつも失敗するシークレットストア(keyring/Secret Service の障害を模す)。
+    struct FailingStore;
+    impl crate::session::SecretStore for FailingStore {
+        fn set(&self, _: &str, _: &str) -> Result<()> {
+            Err(Error::Secret("locked".into()))
+        }
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Err(Error::Secret("locked".into()))
+        }
+        fn delete(&self, _: &str) -> Result<()> {
+            Err(Error::Secret("locked".into()))
+        }
+    }
+
+    #[test]
+    fn accounts_without_token_fails_when_the_secret_store_cannot_be_read() {
+        // keyring を読めないのを「トークンなし」にすると、障害のたびに全アカウントが再認証へ誘導され、
+        // 通信もスキップされる。読み取りの失敗は、トークンなしとは区別してエラーにする(Issue #553)。
+        let mut state = state_with_local_account();
+        state.secrets = Box::new(FailingStore);
+
+        let err = accounts_without_token_ids(&state).err().expect("keyringを読めなければ失敗する");
+
+        assert!(matches!(err, Error::Secret(_)), "{err}");
     }
 
     #[test]
@@ -351,7 +382,7 @@ mod tests {
         let mut ids = result.accounts_needing_login.clone();
         ids.sort();
         assert_eq!(ids, vec!["file2".to_string(), "local1".to_string()]);
-        let mut actual = accounts_without_token_ids(&state);
+        let mut actual = accounts_without_token_ids(&state).unwrap();
         actual.sort();
         assert_eq!(actual, ids, "取り込み結果は、実際にトークンの無いアカウントと一致する");
     }
