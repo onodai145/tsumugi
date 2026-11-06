@@ -169,6 +169,30 @@ describe("トークンなしアカウントの扱い(Issue #553)", () => {
     expect(callsOf("resume_column").map((a) => a.columnId)).toEqual(["c2"]);
   });
 
+  it("再認証が完了したら、そのアカウントのインスタンス情報を取り直す(他のアカウントは取り直さない)", async () => {
+    app.accounts = [account("acc1"), account("acc2")];
+    app.groups = [{ id: "g1", width: 300, auto: false, tabs: [], activeTabId: "" }];
+    app.needsLogin = new Set(["acc2"]);
+    invokeMock.mockImplementation(async (cmd: string, args?: Record<string, string>) => {
+      switch (cmd) {
+        case "complete_miauth":
+          return account("acc2");
+        case "sync_server_mutes":
+          return { blockedUsers: 0, wordRules: 0 };
+        case "refresh_instance_meta":
+          return account(args!.accountId);
+        case "list_columns":
+          return [];
+        default:
+          return { status: "ok", data: null };
+      }
+    });
+
+    await app.completeAccount("session1");
+
+    await vi.waitFor(() => expect(callsOf("refresh_instance_meta").map((a) => a.accountId)).toEqual(["acc2"]));
+  });
+
   it("アカウントを削除したら needsLogin から外す", async () => {
     app.accounts = [account("acc1"), account("acc2")];
     app.needsLogin = new Set(["acc2"]);

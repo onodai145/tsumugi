@@ -1243,6 +1243,8 @@ class AppStore {
       this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
     this.#clearNeedsLogin(account.id); // 認証が通ったので、通信の対象に戻す
+    // 起動時に取らなかった(トークンなしだった)インスタンス情報を取る。再認証自体は待たせない。
+    void this.#refreshInstanceMeta([account]);
     await this.#syncServerMutes(account.id);
     await this.#resumeAccountColumns(account.id);
   }
@@ -1278,9 +1280,11 @@ class AppStore {
   /// ものだけまとめて app.accounts へ反映する（Instance Ticker「常に表示」モード用、
   /// Issue #103）。起動をブロックしないよう boot() からは await せずに呼ぶ。
   /// 個別の失敗はログのみ（次回起動で再試行される）。
-  async #refreshInstanceMeta() {
+  /// `targets` を渡すと、そのアカウントだけ取り直す(再認証の完了後に、そのアカウントだけ取る)。
+  /// 省略時は、トークンを持つ全アカウント。
+  async #refreshInstanceMeta(targets: Account[] = this.#loggedInAccounts()) {
     const results = await Promise.allSettled(
-      this.#loggedInAccounts().map((a) => unwrapAcc(a.id, commands.refreshInstanceMeta(a.id))),
+      targets.map((a) => unwrapAcc(a.id, commands.refreshInstanceMeta(a.id))),
     );
     for (const r of results) {
       if (r.status === "fulfilled") {
