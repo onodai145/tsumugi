@@ -33,42 +33,48 @@ function account(id: string, username: string): Account {
 
 beforeEach(() => {
   app.accounts = [account("a1", "alice"), account("a2", "bob")];
+  app.needsLogin = new Set();
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   app.accounts = [];
+  app.needsLogin = new Set();
 });
 
-describe("AccountsSection: 要ログイン(Issue #544)", () => {
-  it("トークンを持たないアカウントの行にだけ「要ログイン」を出す", async () => {
-    vi.spyOn(commands, "accountsWithoutToken").mockResolvedValue({ status: "ok", data: ["a2"] } as never);
+describe("AccountsSection: 要ログイン(Issue #544/#553)", () => {
+  it("トークンを持たないアカウント(app.needsLogin)の行にだけ「要ログイン」を出す", () => {
+    app.needsLogin = new Set(["a2"]);
     const { container } = render(AccountsSection, { props: { onAddAccount: vi.fn(), onReauth: vi.fn() } });
 
-    await vi.waitFor(() => expect(screen.getAllByText("要ログイン")).toHaveLength(1));
+    expect(screen.getAllByText("要ログイン")).toHaveLength(1);
     const row = (id: string) => container.querySelector(`[data-account-row-id="${id}"]`)!;
     expect(row("a2").textContent).toContain("要ログイン");
     expect(row("a1").textContent).not.toContain("要ログイン");
   });
 
-  it("全員がトークンを持っていれば、バッジは出ない", async () => {
-    vi.spyOn(commands, "accountsWithoutToken").mockResolvedValue({ status: "ok", data: [] } as never);
+  it("全員がトークンを持っていれば、バッジは出ない", () => {
     render(AccountsSection, { props: { onAddAccount: vi.fn(), onReauth: vi.fn() } });
 
-    await vi.waitFor(() => expect(commands.accountsWithoutToken).toHaveBeenCalled());
+    expect(screen.getByText("@alice@misskey.test")).toBeTruthy();
     expect(screen.queryByText("要ログイン")).toBeNull();
   });
 
-  it("取得に失敗してもアカウント一覧は表示する", async () => {
-    vi.spyOn(commands, "accountsWithoutToken").mockResolvedValue({
-      status: "error",
-      error: { kind: "invalid", message: "boom" },
-    } as never);
+  it("再認証が済んで app.needsLogin から外れたら、バッジが消える(バナーと食い違わない)", async () => {
+    app.needsLogin = new Set(["a2"]);
+    render(AccountsSection, { props: { onAddAccount: vi.fn(), onReauth: vi.fn() } });
+    expect(screen.getAllByText("要ログイン")).toHaveLength(1);
+
+    app.needsLogin = new Set();
+
+    await vi.waitFor(() => expect(screen.queryByText("要ログイン")).toBeNull());
+  });
+
+  it("要ログインの情報源は app.needsLogin だけで、自分では取り直さない", () => {
+    const spy = vi.spyOn(commands, "accountsWithoutToken");
     render(AccountsSection, { props: { onAddAccount: vi.fn(), onReauth: vi.fn() } });
 
-    await vi.waitFor(() => expect(commands.accountsWithoutToken).toHaveBeenCalled());
-    expect(screen.getByText("@alice@misskey.test")).toBeTruthy();
-    expect(screen.queryByText("要ログイン")).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
   });
 });
