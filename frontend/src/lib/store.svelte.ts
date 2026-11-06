@@ -145,6 +145,9 @@ export interface LogEntry {
 
 class AppStore {
   accounts = $state<Account[]>([]);
+  /// トークンを持たないアカウントのID(設定のインポート直後など。Issue #544/#553)。起動時に取得し、
+  /// 再認証・削除で更新する。Set は $state の深い追跡の対象ではないため、更新は必ず新しい Set に差し替える。
+  needsLogin = $state<Set<string>>(new Set());
   groups = $state<GroupView[]>([]);
   paneRoot = $state<PaneNode>({ type: "split", id: "boot", direction: "row", children: [] });
   booting = $state(true);
@@ -289,6 +292,7 @@ class AppStore {
     this.bootedAt = Date.now();
     try {
       this.accounts = await unwrap(commands.listAccounts());
+      await this.#loadNeedsLogin();
       void this.#refreshInstanceMeta();
       this.mute = await unwrap(commands.getMute());
       const notify = await unwrap(commands.getNotify());
@@ -331,13 +335,15 @@ class AppStore {
       this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
       this.#applyCustomCss();
       // サーバ側ミュート/ブロックを同期（カラム復元前に済ませ、初期取得へ反映）
-      await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id)));
+      await Promise.all(this.#loggedInAccounts().map((a) => this.#syncServerMutes(a.id)));
       await this.#subscribe();
       const groupDefs = await unwrap(commands.listGroups());
       this.groups = groupDefs.map((g) => ({ id: g.id, width: g.width, auto: g.auto, tabs: [], activeTabId: "" }));
       this.paneRoot = await unwrap(commands.loadPaneLayout());
       const tabDefs = await unwrap(commands.listColumns());
       for (const tab of tabDefs) {
+        // トークンなしのアカウントのカラムは開かない(再認証の完了後に #resumeAccountColumns が開く)。
+        if (this.needsLogin.has(tab.accountId)) continue;
         try {
           const opened = await unwrap(commands.resumeColumn(tab.id));
           this.#insertTab(opened);
@@ -1168,6 +1174,26 @@ class AppStore {
     }
   }
 
+  /// トークンを持たないアカウントのIDを取り直す。取れなければ空にする(従来どおり全アカウントを対象にする)。
+  /// 失敗してもログは出さない(AccountsSection の「要ログイン」バッジと同じ扱いで、補助情報のため)。
+  async #loadNeedsLogin() {
+    try {
+      this.needsLogin = new Set(await unwrap(commands.accountsWithoutToken()));
+    } catch {
+      this.needsLogin = new Set();
+    }
+  }
+
+  #clearNeedsLogin(accountId: string) {
+    if (!this.needsLogin.has(accountId)) return;
+    this.needsLogin = new Set([...this.needsLogin].filter((id) => id !== accountId));
+  }
+
+  /// 通信してよいアカウント(トークンを持つもの)。
+  #loggedInAccounts(): Account[] {
+    return this.accounts.filter((a) => !this.needsLogin.has(a.id));
+  }
+
   #myUserIds(): Set<string> {
     return new Set(this.accounts.map((a) => a.userId));
   }
@@ -1216,6 +1242,9 @@ class AppStore {
       this.accounts = this.accounts.map((a, i) => (i === existingIdx ? account : a));
       this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
+    this.#clearNeedsLogin(account.id); // 認証が通ったので、通信の対象に戻す
+    // 起動時に取らなかった(トークンなしだった)インスタンス情報を取る。再認証自体は待たせない。
+    void this.#refreshInstanceMeta([account]);
     await this.#syncServerMutes(account.id);
     await this.#resumeAccountColumns(account.id);
   }
@@ -1223,7 +1252,7 @@ class AppStore {
   /// 定期同期の1回分。発火時点の全アカウントを同期する(アカウントの追加・削除に追従する)。
   /// 成功のログは出さない(quiet)。失敗の警告は、`#syncServerMutes` が出す。
   async #syncAllServerMutes() {
-    await Promise.all(this.accounts.map((a) => this.#syncServerMutes(a.id, { quiet: true })));
+    await Promise.all(this.#loggedInAccounts().map((a) => this.#syncServerMutes(a.id, { quiet: true })));
   }
 
   /// サーバ側ミュート/ブロック・ワードミュート(mutedWords)を同期（失敗しても致命的でないのでログのみ）。
@@ -1251,9 +1280,11 @@ class AppStore {
   /// ものだけまとめて app.accounts へ反映する（Instance Ticker「常に表示」モード用、
   /// Issue #103）。起動をブロックしないよう boot() からは await せずに呼ぶ。
   /// 個別の失敗はログのみ（次回起動で再試行される）。
-  async #refreshInstanceMeta() {
+  /// `targets` を渡すと、そのアカウントだけ取り直す(再認証の完了後に、そのアカウントだけ取る)。
+  /// 省略時は、トークンを持つ全アカウント。
+  async #refreshInstanceMeta(targets: Account[] = this.#loggedInAccounts()) {
     const results = await Promise.allSettled(
-      this.accounts.map((a) => unwrapAcc(a.id, commands.refreshInstanceMeta(a.id))),
+      targets.map((a) => unwrapAcc(a.id, commands.refreshInstanceMeta(a.id))),
     );
     for (const r of results) {
       if (r.status === "fulfilled") {
@@ -1269,6 +1300,7 @@ class AppStore {
     const acc = this.accounts.find((a) => a.id === accountId);
     await unwrap(commands.removeAccount(accountId));
     this.accounts = this.accounts.filter((a) => a.id !== accountId);
+    this.#clearNeedsLogin(accountId);
     for (const t of this.#allTabs().filter((t) => t.accountId === accountId)) {
       await this.closeTab(t.id);
     }

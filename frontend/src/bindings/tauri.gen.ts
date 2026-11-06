@@ -759,7 +759,11 @@ export type HapticPattern = "light" | "medium" | "success" | "warning" | "error"
 export type ImportPreview = {
 	columnCount: number,
 	accountCount: number,
-	/**  ファイルにだけあり、トークンなしで追加されるアカウントの数。 */
+	/**
+	 *  取り込み後にトークンを持たないアカウントの数。ファイルにだけあって新しく追加されるものに加え、
+	 *  端末側にすでにあるアカウント(ファイルと一致したものも、端末にだけ残るものも)のうちトークンが
+	 *  無いものも含む(コマンド層で数える。`plan_import` が返す値は、前者だけ)。
+	 */
 	accountsNeedingLogin: number,
 	hasCustomCss: boolean,
 	hasCustomThemes: boolean,
@@ -772,7 +776,7 @@ export type ImportPreview = {
 
 export type ImportResult = {
 	columnCount: number,
-	/**  トークンなしで追加したアカウントのID。再認証が必要。 */
+	/**  取り込み後にトークンを持たないアカウントのID。再認証が必要。 */
 	accountsNeedingLogin: string[],
 };
 

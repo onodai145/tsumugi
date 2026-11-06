@@ -53,6 +53,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.mocked(dialog.open).mockReset();
   app.accounts = [];
+  app.needsLogin = new Set();
 });
 
 describe("AddAccount: 設定のインポート導線(Issue #544)", () => {
@@ -109,5 +110,29 @@ describe("AddAccount: 設定のインポート導線(Issue #544)", () => {
 
     await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(importSpy).toHaveBeenCalledWith("/tmp/in.json");
+  });
+});
+
+describe("AddAccount: 再認証画面の文言(Issue #553)", () => {
+  const reauth = { id: "a1", host: "misskey.test", username: "alice" };
+
+  it("トークンなしのアカウントでは、インポート後の文脈の文言を出す", async () => {
+    vi.spyOn(app, "addAccount").mockResolvedValue("session");
+    app.needsLogin = new Set(["a1"]);
+
+    render(AddAccount, { props: { reauthAccount: reauth } });
+
+    await vi.waitFor(() => expect(screen.getByText(/まだログインしていません/)).toBeTruthy());
+    expect(screen.queryByText(/スコープが更新/)).toBeNull();
+  });
+
+  it("トークンがあるアカウントの再認証では、スコープ更新の文言を出す", async () => {
+    vi.spyOn(app, "addAccount").mockResolvedValue("session");
+    app.needsLogin = new Set();
+
+    render(AddAccount, { props: { reauthAccount: reauth } });
+
+    await vi.waitFor(() => expect(screen.getByText(/スコープが更新されたトークンを取得します/)).toBeTruthy());
+    expect(screen.queryByText(/まだログインしていません/)).toBeNull();
   });
 });

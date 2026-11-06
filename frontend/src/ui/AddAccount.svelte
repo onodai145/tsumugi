@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { app } from "../lib/store.svelte";
+  import { reauthMessage } from "../lib/reauthMessage";
   import { X } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import SettingsImport from "./settings/SettingsImport.svelte";
@@ -103,7 +104,7 @@
   {:else}
     <p class="mb-3.5 text-sm text-muted-foreground">
       {reauthAccount
-        ? "スコープが更新されたトークンを取得します。ブラウザで認可を完了したら、下のボタンを押してください。"
+        ? reauthMessage(app.needsLogin.has(reauthAccount.id))
         : "ブラウザで認可を完了したら、下のボタンを押してください。"}
     </p>
     <Button type="button" variant="default" size="default" class="mt-1.5" disabled={busy} onclick={complete} data-testid="add-account-complete">

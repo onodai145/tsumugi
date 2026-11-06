@@ -1,6 +1,5 @@
 <script lang="ts">
   import { app } from "../../lib/store.svelte";
-  import { commands, unwrap } from "../../lib/ipc";
   import type { Account } from "../../bindings/tauri.gen";
   import { Button } from "$lib/components/ui/button";
   import Avatar from "../Avatar.svelte";
@@ -10,24 +9,9 @@
     onReauth,
   }: { onAddAccount: () => void; onReauth: (account: Account) => void } = $props();
 
-  // トークンを持たないアカウントのID(設定のインポート直後など。Issue #544)。
-  // app.accounts が変わる(再認証・追加・削除)たびに取り直す。取得に失敗してもバッジが出ないだけ。
-  let needsLogin = $state<Set<string>>(new Set());
-  // 古い応答が新しい結果を上書きしないよう、最後に発行した取得だけを反映する。
-  let fetchSeq = 0;
-  $effect(() => {
-    void app.accounts;
-    const seq = ++fetchSeq;
-    void (async () => {
-      let ids: Set<string>;
-      try {
-        ids = new Set(await unwrap(commands.accountsWithoutToken()));
-      } catch {
-        ids = new Set();
-      }
-      if (seq === fetchSeq) needsLogin = ids;
-    })();
-  });
+  // トークンを持たないアカウントのID(設定のインポート直後など。Issue #544/#553)は、store の
+  // app.needsLogin を使う(メイン画面のバナーと同じ情報源。再認証・削除で store が更新する)。
+  const needsLogin = $derived(app.needsLogin);
 
   let busyId = $state<string | null>(null);
   let confirmId = $state<string | null>(null);
