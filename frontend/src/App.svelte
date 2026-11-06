@@ -5,6 +5,7 @@
   import type { Account } from "./bindings/tauri.gen";
   import Pane from "./ui/Pane.svelte";
   import AddAccount from "./ui/AddAccount.svelte";
+  import ReauthBanner from "./ui/ReauthBanner.svelte";
   import AddColumnModal from "./ui/AddColumnModal.svelte";
   import SearchModal from "./ui/SearchModal.svelte";
   import ColumnSettings from "./ui/ColumnSettings.svelte";
@@ -62,6 +63,10 @@
   let addTabGroupId = $state<string | null>(null);
   let columnSettingsGroupId = $state<string | null>(null);
   let reauthAccount = $state<Account | null>(null);
+  // 再認証が必要なアカウントの案内。アカウント追加/再認証の画面では出さない(その画面が案内そのもの)。
+  const showReauthBanner = $derived(
+    !app.booting && app.accounts.length > 0 && app.needsLogin.size > 0 && !showAdd && !reauthAccount,
+  );
 
   function openSettings(section: SettingsSection) {
     settingsInitial = section;
@@ -165,9 +170,18 @@
     </header>
   {/if}
 
+  <!-- 再認証の案内(Issue #553)。スマホUIでは、バナーが出ている間はバナー自身がステータスバー分の
+       セーフエリアを確保し、下の main は確保しない(二重に空かないようにする)。 -->
+  {#if showReauthBanner}
+    <div class="flex-none" class:pt-[var(--safe-top)]={useMobileUi}>
+      <ReauthBanner onOpenAccounts={() => openSettings("accounts")} />
+    </div>
+  {/if}
+
   <!-- スマホUIではheaderが無いため、main自身がステータスバー分のセーフエリアを確保しないと
-       カラムのタブバーがステータスバーに被る(Issue #257)。PC版はheaderが既に確保している。 -->
-  <main class="min-h-0 min-w-0 flex-1" class:pt-[var(--safe-top)]={useMobileUi}>
+       カラムのタブバーがステータスバーに被る(Issue #257)。PC版はheaderが既に確保している。
+       ただし、上のバナーが出ている間は、バナーが確保する。 -->
+  <main class="min-h-0 min-w-0 flex-1" class:pt-[var(--safe-top)]={useMobileUi && !showReauthBanner}>
     {#if app.booting}
       <div class="grid h-full place-items-center p-6 text-center text-muted-foreground">起動中…</div>
     {:else if showAdd || reauthAccount || app.accounts.length === 0}
