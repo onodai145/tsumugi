@@ -8,15 +8,28 @@ export * from "../bindings/tauri.gen";
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: ApiError };
 
+/// IPC(Rust 側の型付きエラー)から作るエラー。`String(e)` が `Error: ` を付けず、message だけを返す
+/// (各画面は `String(e)` をそのまま表示するため。Issue #553)。
+/// IPC を経由しない通常の JS 例外は従来どおり `Error: …` で出るので、バグと見分けられる。
+export class AppError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AppError";
+  }
+  override toString(): string {
+    return this.message;
+  }
+}
+
 export async function unwrap<T>(p: Promise<Result<T>>): Promise<T> {
   const r = await p;
   if (r.status === "ok") return r.data;
-  throw new Error(formatError(r.error));
+  throw new AppError(formatError(r.error));
 }
 
 /// 403 (kind: "forbidden") を ForbiddenError として throw する unwrap。
 /// 呼び出し元は accountId を渡し、store 側で「再認証」アクションをログに出せるようにする。
-export class ForbiddenError extends Error {
+export class ForbiddenError extends AppError {
   accountId: string;
   constructor(accountId: string, message: string) {
     super(message);
@@ -29,11 +42,17 @@ export async function unwrapAcc<T>(accountId: string, p: Promise<Result<T>>): Pr
   const r = await p;
   if (r.status === "ok") return r.data;
   if (r.error.kind === "forbidden") throw new ForbiddenError(accountId, formatError(r.error));
-  throw new Error(formatError(r.error));
+  throw new AppError(formatError(r.error));
 }
 
+/// 利用者に見せるエラー文。`kind` の接頭辞は付けず、message だけを返す。
+/// message を持たない種別は日本語の文にする。
 export function formatError(e: ApiError): string {
-  return "message" in e ? `${e.kind}: ${e.message}` : e.kind;
+  if ("message" in e) return e.message;
+  switch (e.kind) {
+    case "rateLimited":
+      return "リクエストが多すぎます。しばらく待ってからやり直してください";
+  }
 }
 
 export interface PlayNotifySoundOptions {
