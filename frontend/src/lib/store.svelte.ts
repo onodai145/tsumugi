@@ -61,6 +61,11 @@ const SERVER_MUTE_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // サーバー側ミ�
 const MUTE_EXPIRY_SYNC_SLACK_MS = 1_000;
 /// 再同期までの待ちの下限(ms)。期限が過去・直近のとき、同期の連打にならないようにする。
 const MUTE_EXPIRY_SYNC_MIN_DELAY_MS = 5_000;
+/// 期限後の再同期が失敗したときの再試行(Issue #545)。1分から倍々で、最大5回(約31分)。
+/// スリープ復帰直後でネットワークが戻っていない、などの一時的な失敗で、期限切れの反映が
+/// 次の定期同期(6時間)まで遅れないようにする。それでも駄目なら、定期同期に任せる。
+const MUTE_EXPIRY_RETRY_BASE_MS = 60_000;
+const MUTE_EXPIRY_RETRY_MAX = 5;
 
 /// タブ = 1タイムライン。
 export interface TabView {
@@ -1267,7 +1272,9 @@ class AppStore {
 
   /// サーバ側ミュート/ブロック・ワードミュート(mutedWords)を同期（失敗しても致命的でないのでログのみ）。
   /// `quiet` のときは、成功時のログを出さない(定期実行で、Backstage のログが埋まるのを避ける)。
-  async #syncServerMutes(accountId: string, options: { quiet?: boolean } = {}) {
+  /// 戻り値は、同期の結果(期限切れの再同期タイマーが、再試行するかどうかを決めるのに使う)。
+  /// "forbidden" は再認証が要るので、再試行しても無駄。
+  async #syncServerMutes(accountId: string, options: { quiet?: boolean } = {}): Promise<"ok" | "forbidden" | "failed"> {
     try {
       const result = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
       if (!options.quiet && (result.blockedUsers > 0 || result.wordRules > 0)) {
@@ -1277,12 +1284,14 @@ class AppStore {
         );
       }
       this.#scheduleMuteExpirySync(accountId, result.nextExpiryAt);
+      return "ok";
     } catch (e) {
       if (e instanceof ForbiddenError) {
         this.#log("warn", "サーバミュート同期: 権限不足。再認証してください", e.accountId);
-      } else {
-        this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
+        return "forbidden";
       }
+      this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
+      return "failed";
     }
   }
 
@@ -1300,11 +1309,21 @@ class AppStore {
     if (nextExpiryAt == null || !Number.isFinite(nextExpiryAt)) return;
     const delay = nextExpiryAt - Date.now() + MUTE_EXPIRY_SYNC_SLACK_MS;
     if (delay >= SERVER_MUTE_SYNC_INTERVAL_MS) return;
-    const timer = setTimeout(() => {
+    this.#armMuteExpiryTimer(accountId, Math.max(delay, MUTE_EXPIRY_SYNC_MIN_DELAY_MS), 0);
+  }
+
+  /// `delayMs` 後に、そのアカウントを再同期するタイマーを1本張る。失敗(権限不足以外)したら、
+  /// `attempt` を増やして倍々の間隔で再試行する(上限 `MUTE_EXPIRY_RETRY_MAX` 回)。成功すれば、
+  /// 結果の次の期限で `#scheduleMuteExpirySync` が張り直す。
+  #armMuteExpiryTimer(accountId: string, delayMs: number, attempt: number) {
+    const timer = setTimeout(async () => {
       this.#muteExpiryTimers.delete(accountId);
       if (!this.#loggedInAccounts().some((a) => a.id === accountId)) return;
-      void this.#syncServerMutes(accountId, { quiet: true });
-    }, Math.max(delay, MUTE_EXPIRY_SYNC_MIN_DELAY_MS));
+      const outcome = await this.#syncServerMutes(accountId, { quiet: true });
+      // 同期の間に別のタイマーが張られていたら(ミュートの追加など)、そちらに任せる
+      if (outcome !== "failed" || attempt >= MUTE_EXPIRY_RETRY_MAX || this.#muteExpiryTimers.has(accountId)) return;
+      this.#armMuteExpiryTimer(accountId, MUTE_EXPIRY_RETRY_BASE_MS * 2 ** attempt, attempt + 1);
+    }, delayMs);
     this.#muteExpiryTimers.set(accountId, timer);
   }
 
