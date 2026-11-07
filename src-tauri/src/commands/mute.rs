@@ -1,7 +1,7 @@
 //! NG（ミュート）・通知設定の取得・更新。
 
-use crate::api::mutes::{fetch_muted_and_blocked, fetch_muted_words};
-use crate::domain::{BackgroundKind, MuteConfig, NotifyConfig, UiPrefs};
+use crate::api::mutes::{self as mutes_api, fetch_muted_and_blocked, fetch_muted_words};
+use crate::domain::{BackgroundKind, MuteConfig, MutePeriod, NotifyConfig, UiPrefs};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use crate::store::settings::ServerMuteSnapshot;
@@ -412,6 +412,10 @@ fn extension_lower(path: &str) -> String {
 pub struct SyncMuteResult {
     pub blocked_users: u32,
     pub word_rules: u32,
+    /// 有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+    /// フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+    #[specta(type = Option<specta_typescript::Number>)]
+    pub next_expiry_at: Option<i64>,
 }
 
 /// サーバ側のミュート/ブロック・ワードミュート(mutedWords)を取得して AppState に反映する。
@@ -424,6 +428,79 @@ pub async fn sync_server_mutes(
 ) -> Result<SyncMuteResult> {
     let client = state.client_for(&account_id)?;
     sync_server_mutes_core(&state, &account_id, &client).await
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// ユーザーをミュートする(期間指定。Issue #545)。成功したら、ミュート集合を再取得して反映する。
+/// 戻り値は再取得の結果。再取得に失敗したときは `None`(ミュート自体は成功しており、次回の同期で追いつく)。
+#[tauri::command]
+#[specta::specta]
+pub async fn mute_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+    period: MutePeriod,
+) -> Result<Option<SyncMuteResult>> {
+    let client = state.client_for(&account_id)?;
+    mute_user_core(&state, &account_id, &client, &user_id, period, now_ms()).await
+}
+
+/// ユーザーのミュートを解除する。戻り値は `mute_user` と同じ。
+#[tauri::command]
+#[specta::specta]
+pub async fn unmute_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<Option<SyncMuteResult>> {
+    let client = state.client_for(&account_id)?;
+    unmute_user_core(&state, &account_id, &client, &user_id).await
+}
+
+/// `mute_user` の中核。`AppState` / `client` / 現在時刻を引数で受け、`State` と keyring なしでテストできる
+/// (`sync_server_mutes_core` と同じ狙い)。期限は `now_ms` + 期間をここで計算する。
+async fn mute_user_core(
+    state: &AppState,
+    account_id: &str,
+    client: &crate::api::MisskeyClient,
+    user_id: &str,
+    period: MutePeriod,
+    now_ms: i64,
+) -> Result<Option<SyncMuteResult>> {
+    mutes_api::mute_user(client, user_id, period.expires_at_ms(now_ms)).await?;
+    Ok(resync_after_mute_change(state, account_id, client).await)
+}
+
+async fn unmute_user_core(
+    state: &AppState,
+    account_id: &str,
+    client: &crate::api::MisskeyClient,
+    user_id: &str,
+) -> Result<Option<SyncMuteResult>> {
+    mutes_api::unmute_user(client, user_id).await?;
+    Ok(resync_after_mute_change(state, account_id, client).await)
+}
+
+/// ミュートの作成・解除の後に、集合を丸ごと再取得する。差分で足さないのは、同期が持つ境界・ロックの
+/// 前提(#452 / #454 / #456)にそのまま乗るため。失敗しても作成・解除は成功済みなので、ログだけ残す。
+async fn resync_after_mute_change(
+    state: &AppState,
+    account_id: &str,
+    client: &crate::api::MisskeyClient,
+) -> Option<SyncMuteResult> {
+    match sync_server_mutes_core(state, account_id, client).await {
+        Ok(result) => Some(result),
+        Err(e) => {
+            log::warn!("failed to sync server mutes after a mute change ({account_id}): {e}");
+            None
+        }
+    }
 }
 
 /// `sync_server_mutes` の中核ロジック。`AppState` を `State<'_, _>` ではなく `&AppState` で
@@ -442,16 +519,17 @@ async fn sync_server_mutes_core(
 ) -> Result<SyncMuteResult> {
     let sync_lock = state.server_mute_sync_lock(account_id);
     let _serialized = sync_lock.lock().await;
-    let ids = fetch_muted_and_blocked(client).await?;
+    let server = fetch_muted_and_blocked(client, now_ms()).await?;
     let words = fetch_muted_words(client).await?;
     let result = SyncMuteResult {
-        blocked_users: ids.len() as u32,
+        blocked_users: server.ids.len() as u32,
         word_rules: words.rules.len() as u32,
+        next_expiry_at: server.next_expiry_at_ms,
     };
-    let snapshot = ServerMuteSnapshot::new(ids.iter().cloned(), words.keys);
+    let snapshot = ServerMuteSnapshot::new(server.ids.iter().cloned(), words.keys);
     // メモリ上の集合の差し替えは、境界を捨てる前に行う。書き込み側は、ミュート設定を読む前に世代を
     // 控えるので、境界の世代が進んだ時点で、新しい集合がすでに反映されている(Issue #454, #452)。
-    state.set_server_mutes(account_id, ids);
+    state.set_server_mutes(account_id, server.ids);
     state.set_server_word_mutes(account_id, words.rules);
     reflect_server_mute_change(state, account_id, snapshot).await;
     Ok(result)
@@ -1004,6 +1082,179 @@ mod tests {
         assert_eq!(result.blocked_users, 1);
         assert_eq!(result.word_rules, 1);
         assert!(app.state::<AppState>().is_server_muted("acc1", "u1"));
+    }
+
+    // --- 時限ミュート(Issue #545) ---
+
+    /// 2099-01-01T00:00:00Z のエポックミリ秒(実行時刻に依存せず「未来」になる)。
+    const FAR_FUTURE_MS: i64 = 4_070_908_800_000;
+
+    /// `mute/list` を、期限付きの1件だけ返すモックにする。他は `mount_server_mutes` と同じ。
+    async fn mount_mute_list_with_expiry(mock: &MockServer, user: &str, expires_at: &str) {
+        mock.reset().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                { "id": "r1", "muteeId": user, "expiresAt": expires_at },
+            ])))
+            .mount(mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/i"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })))
+            .mount(mock)
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_reports_the_earliest_expiry_and_hides_expired_mutes() {
+        let mock = MockServer::start().await;
+        mount_mute_list_with_expiry(&mock, "u1", "2099-01-01T00:00:00.000Z").await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let result = sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert_eq!(result.next_expiry_at, Some(FAR_FUTURE_MS));
+        assert!(state.is_server_muted("acc1", "u1"));
+
+        // 期限が過ぎたミュートは、サーバーの mute/list に残っていても、集合から外れる
+        mount_mute_list_with_expiry(&mock, "u1", "2000-01-01T00:00:00.000Z").await;
+        let result = sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert_eq!(result.next_expiry_at, None);
+        assert!(!state.is_server_muted("acc1", "u1"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sync_clears_boundaries_when_a_timed_mute_expires() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = state_with_three_columns_and_boundaries().await;
+        mount_mute_list_with_expiry(&mock, "u1", "2099-01-01T00:00:00.000Z").await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        mount_mute_list_with_expiry(&mock, "u1", "2000-01-01T00:00:00.000Z").await; // 期限が過ぎた=解除
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+
+        assert!(boundaries_of(&state, "c1").await.is_empty());
+        assert_eq!(boundaries_of(&state, "c3").await, kept(), "他のアカウントのカラムは、そのまま");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mute_user_core_creates_the_mute_with_an_expiry_and_resyncs() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &[], serde_json::json!([])).await;
+        Mock::given(method("POST"))
+            .and(path("/mute/create"))
+            .and(wiremock::matchers::body_partial_json(
+                serde_json::json!({ "userId": "u1", "expiresAt": 1_700_003_600_000_i64 }),
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let result = mute_user_core(&state, "acc1", &client, "u1", MutePeriod::OneHour, 1_700_000_000_000)
+            .await
+            .unwrap();
+
+        assert!(result.is_some(), "同期が成功したので、結果を返す");
+        // 再同期で mute/list を読んだ(モックは mount_server_mutes のもの。期限なしの空)
+        assert!(!state.is_server_muted("acc1", "u1"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mute_user_core_applies_the_new_mute_to_the_server_mute_set() {
+        let mock = MockServer::start().await;
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await; // 作成後の mute/list は u1 を含む
+        Mock::given(method("POST"))
+            .and(path("/mute/create"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock)
+            .await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        mute_user_core(&state, "acc1", &client, "u1", MutePeriod::Indefinitely, 0).await.unwrap();
+
+        assert!(state.is_server_muted("acc1", "u1"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mute_user_core_fails_without_syncing_when_the_create_fails() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/create"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": { "code": "ALREADY_MUTING", "message": "You are already muting that user.", "id": "x" }
+            })))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(0)
+            .mount(&mock)
+            .await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let result = mute_user_core(&state, "acc1", &client, "u1", MutePeriod::OneDay, 0).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mute_user_core_succeeds_even_when_the_follow_up_sync_fails() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/create"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock)
+            .await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let result = mute_user_core(&state, "acc1", &client, "u1", MutePeriod::OneDay, 0).await;
+
+        assert!(matches!(result, Ok(None)), "作成は成功。同期の失敗は None で伝える: {result:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unmute_user_core_deletes_the_mute_and_resyncs() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        assert!(state.is_server_muted("acc1", "u1"));
+
+        mount_server_mutes(&mock, &[], serde_json::json!([])).await; // 解除後は空
+        Mock::given(method("POST"))
+            .and(path("/mute/delete"))
+            .and(wiremock::matchers::body_partial_json(serde_json::json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let result = unmute_user_core(&state, "acc1", &client, "u1").await.unwrap();
+
+        assert!(result.is_some());
+        assert!(!state.is_server_muted("acc1", "u1"));
     }
 }
 

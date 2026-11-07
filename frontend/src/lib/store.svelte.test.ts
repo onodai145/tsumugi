@@ -1368,17 +1368,25 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
   const syncedAccounts = () =>
     invokeMock.mock.calls.filter(([cmd]) => cmd === "sync_server_mutes").map(([, args]) => (args as { accountId: string }).accountId);
   const syncLogs = () => app.logs.filter((l) => l.text.includes("サーバのミュート/ブロックを同期"));
-  let syncResult: { blockedUsers: number; wordRules: number } | Error;
+  type SyncResultShape = { blockedUsers: number; wordRules: number; nextExpiryAt: number | null };
+  /// kind を持つ値は、Rust 側のエラー(`{ kind, message }`)。非 Error を throw すると、生成コードの
+  /// typedError がエラー結果に変換する(unwrapAcc が kind: "forbidden" を ForbiddenError にする)。
+  type SyncErrorShape = { kind: "forbidden"; message: string };
+  let syncResult: SyncResultShape | SyncErrorShape | Error;
+  /// mute_user / unmute_user の戻り値(再同期の結果。同期に失敗したときは null)。
+  let muteCommandResult: SyncResultShape | null;
 
   beforeEach(() => {
-    syncResult = { blockedUsers: 3, wordRules: 1 };
+    syncResult = { blockedUsers: 3, wordRules: 1, nextExpiryAt: null };
+    muteCommandResult = null;
     invokeMock.mockClear();
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "list_accounts") return [];
       if (cmd === "sync_server_mutes") {
-        if (syncResult instanceof Error) throw syncResult;
+        if (syncResult instanceof Error || "kind" in syncResult) throw syncResult;
         return syncResult;
       }
+      if (cmd === "mute_user" || cmd === "unmute_user") return muteCommandResult;
       return { status: "ok", data: null };
     });
     app.logs = [];
@@ -1495,6 +1503,194 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
     await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000);
 
     expect(syncedAccounts()).toEqual([]);
+  });
+
+  describe("時限ミュートの期限切れ再同期(Issue #545)", () => {
+    const callsOf = (cmd: string) => invokeMock.mock.calls.filter(([c]) => c === cmd);
+
+    it("muteUserは、mute_userを呼ぶ", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+
+      await app.muteUser("acc1", "u1", "oneHour");
+
+      expect(callsOf("mute_user")).toHaveLength(1);
+      expect(callsOf("mute_user")[0][1]).toEqual({ accountId: "acc1", userId: "u1", period: "oneHour" });
+    });
+
+    it("unmuteUserは、unmute_userを呼ぶ", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+
+      await app.unmuteUser("acc1", "u1");
+
+      expect(callsOf("unmute_user")[0][1]).toEqual({ accountId: "acc1", userId: "u1" });
+    });
+
+    it("次の期限が近ければ、その少し後に1回だけ再同期する", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 60_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      invokeMock.mockClear();
+
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(syncedAccounts()).toEqual([]); // まだ
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(syncedAccounts()).toEqual(["acc1"]); // 期限の後に1回
+    });
+
+    it("次の期限が6時間より先なら、タイマーは張らない(定期同期に任せる)", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + SIX_HOURS + 60_000 };
+      await app.muteUser("acc1", "u1", "oneWeek");
+      invokeMock.mockClear();
+
+      await vi.advanceTimersByTimeAsync(SIX_HOURS - 1_000);
+
+      expect(syncedAccounts()).toEqual([]);
+    });
+
+    it("期限がなければ(null)、前に張ったタイマーも消す", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 60_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      muteCommandResult = { blockedUsers: 0, wordRules: 0, nextExpiryAt: null }; // 解除した
+      await app.unmuteUser("acc1", "u1");
+      invokeMock.mockClear();
+
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(syncedAccounts()).toEqual([]);
+    });
+
+    it("同期に失敗した(null)ときは、タイマーを張らず、操作は成功として返す", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = null;
+
+      await expect(app.muteUser("acc1", "u1", "oneDay")).resolves.toBeUndefined();
+      invokeMock.mockClear();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(syncedAccounts()).toEqual([]);
+    });
+
+    it("同じアカウントで続けて期限を更新しても、タイマーは1本(再同期は1回)", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      muteCommandResult = { blockedUsers: 2, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
+      await app.muteUser("acc1", "u2", "tenMinutes");
+      invokeMock.mockClear();
+
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      expect(syncedAccounts()).toEqual(["acc1"]);
+    });
+
+    it("発火時にそのアカウントが削除されていたら、同期を呼ばない(警告も出さない)", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      app.accounts = []; // 期限の前に削除された
+      invokeMock.mockClear();
+      app.logs = [];
+
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      expect(syncedAccounts()).toEqual([]);
+      expect(app.logs.filter((l) => l.level === "warn")).toEqual([]);
+    });
+
+    it("teardownでタイマーを消す", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      app.teardown();
+      invokeMock.mockClear();
+
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      expect(syncedAccounts()).toEqual([]);
+    });
+
+    it("期限後の再同期が失敗したら、間隔を空けて再試行し、成功したら止める", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      invokeMock.mockClear();
+      syncResult = new Error("offline"); // 復帰直後でネットワークがまだ戻っていない
+
+      await vi.advanceTimersByTimeAsync(32_000);
+      expect(syncedAccounts()).toEqual(["acc1"]); // 期限後の1回目は失敗
+
+      syncResult = { blockedUsers: 0, wordRules: 0, nextExpiryAt: null }; // 回復
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(syncedAccounts()).toEqual(["acc1", "acc1"]); // 1分後の再試行で成功
+
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      expect(syncedAccounts()).toEqual(["acc1", "acc1"]); // 成功したので、もう呼ばない
+    });
+
+    it("失敗が続いても、再試行は回数に上限がある(その後は定期同期に任せる)", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      invokeMock.mockClear();
+      syncResult = new Error("offline");
+
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+
+      expect(syncedAccounts()).toHaveLength(6); // 期限後の1回 + 再試行5回
+    });
+
+    it("権限不足(403)の失敗では、再試行しない(再認証が必要なため)", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
+      await app.muteUser("acc1", "u1", "tenMinutes");
+      invokeMock.mockClear();
+      syncResult = { kind: "forbidden", message: "no permission" };
+
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+
+      expect(syncedAccounts()).toEqual(["acc1"]);
+    });
+
+    it("次の期限が欠けていても(undefined)、再同期のタイマーを張らず、同期を連打しない", async () => {
+      await bootAndForgetCalls();
+      app.accounts = [account("acc1")];
+      // 古いバックエンド/モックのように、nextExpiryAt を返さない結果
+      syncResult = { blockedUsers: 1, wordRules: 0 } as unknown as SyncResultShape;
+
+      await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000); // 定期同期が1回走る
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(syncedAccounts()).toEqual(["acc1"]);
+    });
+
+    it("定期同期の結果の次の期限でも、再同期のタイマーを張る(他クライアントで作った時限ミュート)", async () => {
+      await bootAndForgetCalls();
+      app.accounts = [account("acc1")];
+      syncResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + SIX_HOURS + 30_000 };
+
+      await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000); // 定期同期が1回走る
+      expect(syncedAccounts()).toEqual(["acc1"]);
+
+      // 期限が過ぎれば、サーバーはそのミュートを返さなくなる(次の期限は無い)
+      syncResult = { blockedUsers: 0, wordRules: 0, nextExpiryAt: null };
+      await vi.advanceTimersByTimeAsync(40_000); // 期限(定期同期の30秒後)の後の再同期が1回だけ走る
+      expect(syncedAccounts()).toEqual(["acc1", "acc1"]);
+    });
   });
 });
 

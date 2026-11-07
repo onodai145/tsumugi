@@ -7,13 +7,23 @@ use crate::state::AppState;
 use specta::Type;
 use tauri::State;
 
-/// プロフィールモーダル用のレスポンス。`is_following` は自分自身の場合 `None`。
+/// プロフィールモーダル用のレスポンス。`is_following` / `is_muted` は自分自身の場合 `None`。
 #[derive(Debug, Clone, serde::Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UserProfile {
     pub user: User,
     pub is_following: Option<bool>,
+    pub is_muted: Option<bool>,
     pub is_self: bool,
+}
+
+/// 自分自身のプロフィールでは、関係フラグ(フォロー・ミュート)を出さない(純粋関数、テスト用に分離)。
+pub(crate) fn relation_flag(is_self: bool, flag: Option<bool>) -> Option<bool> {
+    if is_self {
+        None
+    } else {
+        flag
+    }
 }
 
 /// フォロワー/フォロー中一覧の1件。`cursor` は次ページ取得時の `until_id` に使うFollowingレコード
@@ -48,7 +58,8 @@ pub async fn get_user_profile(
     let is_self = is_self_user(&accounts, &account_id, &user_id);
     Ok(UserProfile {
         user: raw.user.into(),
-        is_following: if is_self { None } else { raw.is_following },
+        is_following: relation_flag(is_self, raw.is_following),
+        is_muted: relation_flag(is_self, raw.is_muted),
         is_self,
     })
 }
@@ -147,5 +158,13 @@ mod tests {
     fn is_self_user_false_when_account_id_unknown() {
         let accounts = vec![make_account("acc1", "u1")];
         assert!(!is_self_user(&accounts, "unknown", "u1"));
+    }
+
+    #[test]
+    fn relation_flag_is_hidden_for_the_own_profile() {
+        assert_eq!(relation_flag(true, Some(true)), None);
+        assert_eq!(relation_flag(false, Some(true)), Some(true));
+        assert_eq!(relation_flag(false, Some(false)), Some(false));
+        assert_eq!(relation_flag(false, None), None);
     }
 }

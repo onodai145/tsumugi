@@ -40,6 +40,8 @@ pub struct RawUserShow {
     pub user: RawUser,
     #[serde(default)]
     pub is_following: Option<bool>,
+    #[serde(default)]
+    pub is_muted: Option<bool>,
 }
 
 /// ユーザーIDからプロフィール詳細（フォロー関係フラグ込み）を取得する。
@@ -193,5 +195,23 @@ mod tests {
         ]));
         let entries = build_follow_list_entries(raw, |f| f.follower.clone());
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn raw_user_show_reads_is_muted() {
+        let raw: RawUserShow = serde_json::from_value(serde_json::json!({
+            "id": "u1", "username": "alice", "host": null, "isMuted": true, "isFollowing": false
+        }))
+        .unwrap();
+        assert_eq!(raw.is_muted, Some(true));
+    }
+
+    #[test]
+    fn raw_user_show_without_is_muted_is_none() {
+        let raw: RawUserShow = serde_json::from_value(serde_json::json!({
+            "id": "u1", "username": "alice", "host": null
+        }))
+        .unwrap();
+        assert_eq!(raw.is_muted, None);
     }
 }

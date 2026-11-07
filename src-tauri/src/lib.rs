@@ -132,6 +132,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sound::play_notify_sound,
             commands::sound::parse_mml,
             commands::mute::sync_server_mutes,
+            commands::mute::mute_user,
+            commands::mute::unmute_user,
             commands::settings_transfer::export_settings,
             commands::settings_transfer::inspect_settings_file,
             commands::settings_transfer::import_settings,

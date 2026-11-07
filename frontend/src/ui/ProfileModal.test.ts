@@ -91,6 +91,7 @@ function profileResponse(overrides: Record<string, unknown> = {}) {
       bannerUrl: null,
     },
     isFollowing: false,
+    isMuted: false,
     isSelf: false,
     ...overrides,
   };
@@ -217,6 +218,132 @@ describe("ProfileModal", () => {
       props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
     });
     await waitFor(() => expect(document.querySelector(".ears")).not.toBeNull());
+  });
+
+  describe("ミュート(Issue #545)", () => {
+    function mockProfile(overrides: Record<string, unknown> = {}, onCommand?: (cmd: string) => unknown) {
+      invokeMock.mockImplementation((cmd: string) => {
+        const custom = onCommand?.(cmd);
+        if (custom !== undefined) return custom;
+        if (cmd === "get_user_profile") return Promise.resolve(profileResponse(overrides));
+        if (cmd === "get_user_notes") return Promise.resolve([]);
+        return Promise.resolve(null);
+      });
+    }
+    const renderModal = () =>
+      render(ProfileModal, { props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} } });
+    const menuButton = (r: ReturnType<typeof renderModal>) =>
+      r.findByRole("button", { name: "ユーザーメニュー" });
+
+    it("自分自身のプロフィールでは「…」メニューを出さない", async () => {
+      mockProfile({ isSelf: true, isFollowing: null, isMuted: null });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("Alice")).toBeTruthy());
+
+      expect(r.queryByRole("button", { name: "ユーザーメニュー" })).toBeNull();
+    });
+
+    it("isMutedを取得できないとき(null)は「…」メニューを出さない", async () => {
+      mockProfile({ isMuted: null });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("Alice")).toBeTruthy());
+
+      expect(r.queryByRole("button", { name: "ユーザーメニュー" })).toBeNull();
+    });
+
+    it("期間を選ぶとmute_userを呼び、「ミュート中」バッジが出る", async () => {
+      mockProfile();
+      const r = renderModal();
+      await fireEvent.click(await menuButton(r));
+      await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
+
+      await fireEvent.click(r.getByRole("button", { name: "1時間" }));
+
+      await waitFor(() =>
+        expect(invokeMock).toHaveBeenCalledWith(
+          "mute_user",
+          expect.objectContaining({ accountId: "acc1", userId: "u1", period: "oneHour" }),
+        ),
+      );
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      expect(r.queryByTestId("user-menu")).toBeNull(); // メニューは閉じる
+    });
+
+    it("無期限を選ぶとperiodにindefinitelyを渡す", async () => {
+      mockProfile();
+      const r = renderModal();
+      await fireEvent.click(await menuButton(r));
+      await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
+
+      await fireEvent.click(r.getByRole("button", { name: "無期限" }));
+
+      await waitFor(() =>
+        expect(invokeMock).toHaveBeenCalledWith(
+          "mute_user",
+          expect.objectContaining({ period: "indefinitely" }),
+        ),
+      );
+    });
+
+    it("ミュート中のプロフィールでは、バッジが出て、「ミュート解除」でunmute_userを呼びバッジが消える", async () => {
+      mockProfile({ isMuted: true });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      await fireEvent.click(await menuButton(r));
+
+      await fireEvent.click(r.getByRole("button", { name: "ミュート解除" }));
+
+      await waitFor(() =>
+        expect(invokeMock).toHaveBeenCalledWith(
+          "unmute_user",
+          expect.objectContaining({ accountId: "acc1", userId: "u1" }),
+        ),
+      );
+      await waitFor(() => expect(r.queryByText("ミュート中")).toBeNull());
+    });
+
+    it("mute_userが失敗したら、エラーを表示し、バッジは出さない", async () => {
+      mockProfile({}, (cmd) => (cmd === "mute_user" ? Promise.reject(new Error("ALREADY_MUTING")) : undefined));
+      const r = renderModal();
+      await fireEvent.click(await menuButton(r));
+      await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
+
+      await fireEvent.click(r.getByRole("button", { name: "1日" }));
+
+      await waitFor(() => expect(r.getByText(/ALREADY_MUTING/)).toBeTruthy());
+      expect(r.queryByText("ミュート中")).toBeNull();
+    });
+
+    it("mute_userの完了前に別ユーザーへ切り替わったら、新しいプロフィールのバッジを書き換えない", async () => {
+      let resolveMute: (v: unknown) => void = () => {};
+      const mutePending = new Promise((resolve) => (resolveMute = resolve));
+      invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "mute_user") return mutePending;
+        if (cmd === "get_user_profile") {
+          const userId = args?.userId as string;
+          return Promise.resolve(
+            profileResponse({ user: { ...profileResponse().user, id: userId, username: userId } }),
+          );
+        }
+        if (cmd === "get_user_notes") return Promise.resolve([]);
+        return Promise.resolve(null);
+      });
+      const r = render(ProfileModal, {
+        props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} },
+      });
+      await fireEvent.click(await menuButton(r));
+      await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
+      await fireEvent.click(r.getByRole("button", { name: "1時間" }));
+      await r.rerender({ target: { userId: "u2" }, accountId: "acc1", onclose: () => {} });
+      await waitFor(() => expect(r.getByText("@u2")).toBeTruthy());
+
+      resolveMute(null);
+      // 古い呼び出しの続き(app.muteUser の解決 → ProfileModal の後処理)が流れ切るまで待つ
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "mute_user")).toHaveLength(1);
+      expect(r.queryByText("ミュート中")).toBeNull();
+    });
   });
 });
 

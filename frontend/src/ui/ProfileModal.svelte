@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Note } from "../bindings/tauri.gen";
+  import type { MutePeriod, Note } from "../bindings/tauri.gen";
   import type { ProfileTarget } from "../lib/profileModal.svelte";
   import { app } from "../lib/store.svelte";
   import { acct, displayName } from "../lib/userDisplay";
@@ -9,6 +9,9 @@
   import NoteCard from "./NoteCard.svelte";
   import FollowListModal from "./FollowListModal.svelte";
   import Avatar from "./Avatar.svelte";
+  import UserMenu from "./UserMenu.svelte";
+  import { portal } from "../lib/portal";
+  import { MoreHorizontal } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
 
   let { target, accountId, onclose }: { target: ProfileTarget; accountId: string; onclose: () => void } =
@@ -31,6 +34,20 @@
   let followBusy = $state(false);
   let followErr = $state<string | null>(null);
   let followListKind = $state<"followers" | "following" | null>(null);
+
+  // 「…」メニュー(ミュート。Issue #545)。NoteCard のノートメニューと同じ portal + 固定配置。
+  let userMenuOpen = $state(false);
+  let userMenuAnchor = $state<HTMLElement | null>(null);
+  let userMenuPos = $state<{ left: number; top: number } | null>(null);
+  let muteBusy = $state(false);
+  let muteErr = $state<string | null>(null);
+  const USER_MENU_W = 200;
+  $effect(() => {
+    if (!userMenuOpen || !userMenuAnchor) return;
+    const r = userMenuAnchor.getBoundingClientRect();
+    const left = Math.min(Math.max(8, r.right - USER_MENU_W), window.innerWidth - USER_MENU_W - 8);
+    userMenuPos = { left, top: r.bottom + 6 };
+  });
 
   // target が変わるたびに load() が再実行されるが、直前のユーザー向けに投げた
   // getUserProfile/getUserNotes が新しい load() 開始後に解決するレースがあり得る
@@ -57,6 +74,9 @@
     notesErr = null;
     followErr = null;
     followListKind = null;
+    muteErr = null;
+    muteBusy = false;
+    userMenuOpen = false;
     try {
       const userId = await resolveUserId();
       if (myGen !== requestGen) return;
@@ -105,6 +125,40 @@
       followErr = String(e);
     } finally {
       followBusy = false;
+    }
+  }
+
+  async function mute(period: MutePeriod) {
+    if (profileState.status !== "ready" || muteBusy) return;
+    const gen = requestGen;
+    const userId = profileState.profile.user.id;
+    userMenuOpen = false;
+    muteBusy = true;
+    muteErr = null;
+    try {
+      await app.muteUser(accountId, userId, period);
+      if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = true;
+    } catch (e) {
+      if (gen === requestGen) muteErr = String(e);
+    } finally {
+      if (gen === requestGen) muteBusy = false; // 切り替え後の新しいプロフィールの busy を、古い呼び出しが触らない
+    }
+  }
+
+  async function unmute() {
+    if (profileState.status !== "ready" || muteBusy) return;
+    const gen = requestGen;
+    const userId = profileState.profile.user.id;
+    userMenuOpen = false;
+    muteBusy = true;
+    muteErr = null;
+    try {
+      await app.unmuteUser(accountId, userId);
+      if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = false;
+    } catch (e) {
+      if (gen === requestGen) muteErr = String(e);
+    } finally {
+      if (gen === requestGen) muteBusy = false;
     }
   }
 
@@ -176,6 +230,9 @@
             /></span
           >
           <span class="text-sm text-muted-foreground">{acct(profile.user)}</span>
+          {#if profile.isMuted}
+            <span class="inline-flex w-fit items-center rounded-sm border border-border px-1 text-xs text-muted-foreground">ミュート中</span>
+          {/if}
         </div>
         {#if !profile.isSelf}
           <Button
@@ -187,9 +244,39 @@
           >
             {profile.isFollowing ? "フォロー解除" : "フォロー"}
           </Button>
+          {#if profile.isMuted !== null}
+            <span class="flex-none" bind:this={userMenuAnchor}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="ユーザーメニュー"
+                disabled={muteBusy}
+                onclick={() => (userMenuOpen = !userMenuOpen)}
+              >
+                <MoreHorizontal size={16} />
+              </Button>
+            </span>
+            {#if userMenuOpen && userMenuPos}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (userMenuOpen = false)} role="presentation">
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="fixed"
+                  style={`left:${userMenuPos.left}px;top:${userMenuPos.top}px`}
+                  onclick={(e) => e.stopPropagation()}
+                  role="presentation"
+                >
+                  <UserMenu muted={profile.isMuted} onmute={mute} onunmute={unmute} />
+                </div>
+              </div>
+            {/if}
+          {/if}
         {/if}
       </div>
       {#if followErr}<p class="my-2 text-sm text-destructive">{followErr}</p>{/if}
+      {#if muteErr}<p class="my-2 text-sm text-destructive">{muteErr}</p>{/if}
       {#if profile.user.bio}
         <p class="mt-2.5 mb-0 whitespace-pre-wrap break-words text-sm leading-normal"
           ><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p

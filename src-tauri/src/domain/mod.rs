@@ -34,7 +34,7 @@ pub use mml::{
     DelayParams, EnvelopeParams, Glide, MmlError, MmlParseResult, MmlScore, NoteEvent,
     ReverbParams, Timbre, TimbreParams, VibratoParams,
 };
-pub use mute::MuteConfig;
+pub use mute::{MuteConfig, MutePeriod};
 pub use note::{DriveFile, Note, Poll, PollChoice, Translation, Visibility};
 pub use notification::Notification;
 pub use notify::NotifyConfig;
