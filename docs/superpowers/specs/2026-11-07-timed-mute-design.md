@@ -36,7 +36,7 @@ Misskey の `POST /mute/create` は `expiresAt`(ミリ秒の Unix 時刻。`null
 
 1. **ドメイン型** `domain/mute.rs`: `MutePeriod { Indefinitely, TenMinutes, OneHour, OneDay, OneWeek }`(`specta::Type`、`camelCase`)。`fn expires_at_ms(self, now_ms: i64) -> Option<i64>` を純粋関数として持つ。
 2. **API ラッパ** `api/mutes.rs`: `mute_user(client, user_id, expires_at_ms: Option<i64>)` と `unmute_user(client, user_id)`。`expiresAt` は `null` または数値で送る。
-3. **コマンド** `commands/user.rs`: `mute_user(account_id, user_id, period: MutePeriod)` と `unmute_user(account_id, user_id)`。`specta_builder()` に登録する。
+3. **コマンド** `commands/mute.rs`(`sync_server_mutes_core` が同ファイルの非公開関数のため、ここに置く): `mute_user(account_id, user_id, period: MutePeriod)` と `unmute_user(account_id, user_id)`。`specta_builder()` に登録する。戻り値は `Option<SyncMuteResult>` で、操作後の再同期の結果(再同期に失敗したときは `None`)。フロントはこの `nextExpiryAt` で期限切れの再同期タイマーを張る。
    - 現在時刻 + 期間は Rust 側で計算する。サーバーは過去の `expiresAt` を黙って無視するため、フロントの時計ずれに依存しない。
    - 成功後に `sync_server_mutes_core` を呼び、ミュート集合を丸ごと再取得する。集合への差分追加はしない(#452 / #454 / #456 の境界とロックの前提にそのまま乗るため)。解除の検出と境界の破棄も既存経路で動く。
    - 同期が失敗してもミュート操作自体は成功として返し、同期失敗はログに残す(次回の定期同期で追いつく)。

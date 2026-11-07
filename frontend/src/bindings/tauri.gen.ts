@@ -379,6 +379,29 @@ export const commands = {
 	 *  起動時とアカウント追加時にフロントから呼ぶ（Krile MuteBlockManager 相当。Issue #11）。
 	 */
 	syncServerMutes: (accountId: string) => typedError<SyncMuteResult, Error>(__TAURI_INVOKE("sync_server_mutes", { accountId })),
+	/**
+	 *  ユーザーをミュートする(期間指定。Issue #545)。成功したら、ミュート集合を再取得して反映する。
+	 *  戻り値は再取得の結果。再取得に失敗したときは `None`(ミュート自体は成功しており、次回の同期で追いつく)。
+	 */
+	muteUser: (accountId: string, userId: string, period: MutePeriod) => typedError<{
+	blockedUsers: number,
+	wordRules: number,
+	/**
+	 *  有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+	 *  フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+	 */
+	nextExpiryAt: number | null,
+} | null, Error>(__TAURI_INVOKE("mute_user", { accountId, userId, period })),
+	/**  ユーザーのミュートを解除する。戻り値は `mute_user` と同じ。 */
+	unmuteUser: (accountId: string, userId: string) => typedError<{
+	blockedUsers: number,
+	wordRules: number,
+	/**
+	 *  有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+	 *  フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+	 */
+	nextExpiryAt: number | null,
+} | null, Error>(__TAURI_INVOKE("unmute_user", { accountId, userId })),
 	/**  設定を `path` に書き出す。Androidでは `path` は `content://` URI でもよい。 */
 	exportSettings: (path: string) => typedError<null, Error>(__TAURI_INVOKE("export_settings", { path })),
 	/**  設定ファイルを検証して概要を返す。何も書き込まない。 */
@@ -849,6 +872,13 @@ export type MuteConfig = {
 	ngInstances: string[],
 };
 
+/**
+ *  ユーザーミュートの期間(Misskey Web の選択肢に合わせる)。Misskey に送る期限(`expiresAt`)は
+ *  この値から Rust 側で計算する。フロントの時計に依存せず、過去の `expiresAt`(サーバーは黙って無視する)
+ *  を送らないため。
+ */
+export type MutePeriod = "indefinitely" | "tenMinutes" | "oneHour" | "oneDay" | "oneWeek";
+
 /**  docs/design/filter-dsl-design.md §7 / 設計書§5.1。フィルタ評価の対象そのもの。 */
 export type Note = {
 	/**  aid/aidx。数値比較しない */
@@ -1122,6 +1152,11 @@ export type SplitDirection = "row" | "column";
 export type SyncMuteResult = {
 	blockedUsers: number,
 	wordRules: number,
+	/**
+	 *  有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+	 *  フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+	 */
+	nextExpiryAt: number | null,
 };
 
 /**  テーマ1個分の配色（app.css の CSS変数11個に対応）。 */
