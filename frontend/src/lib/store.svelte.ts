@@ -36,6 +36,7 @@ import type {
   TqlCompletionItem,
   ScheduleCapabilities,
   DraftInput,
+  MutePeriod,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -55,6 +56,11 @@ const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1ク�
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // ノートキャッシュ間引きの間隔（6時間）
 const SERVER_MUTE_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // サーバー側ミュートの定期同期の間隔（6時間。Issue #456）
+/// 時限ミュートの期限の後、再同期するまでの余裕(ms)。サーバーとの時計のずれで、期限の直前に同期して
+/// まだ有効に見えるのを避ける(Rust 側は `expiresAt <= 現在時刻` を期限切れとして除外する)。
+const MUTE_EXPIRY_SYNC_SLACK_MS = 1_000;
+/// 再同期までの待ちの下限(ms)。期限が過去・直近のとき、同期の連打にならないようにする。
+const MUTE_EXPIRY_SYNC_MIN_DELAY_MS = 5_000;
 
 /// タブ = 1タイムライン。
 export interface TabView {
@@ -214,6 +220,8 @@ class AppStore {
   // サーバー側ミュート/ブロック・ワードミュートの定期同期（Issue #456）。Web側での変更を、次の起動や
   // 再認証を待たずに反映する。ミュートはめったに変えないので、間隔は数時間。
   #serverMuteSyncTimer: ReturnType<typeof setInterval> | null = null;
+  /// アカウントごとの、時限ミュートの期限切れ再同期のタイマー(Issue #545)。
+  #muteExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // theme="auto"時、OSのprefers-color-scheme変化にライブ追従するためのmatchMediaリスナー解除関数。
   // #applyTheme が呼ばれるたびに前回分を解除してから張り直すことで、リスナーの多重登録を防ぐ。
   #themeMediaCleanup: (() => void) | null = null;
@@ -269,6 +277,8 @@ class AppStore {
       clearInterval(this.#serverMuteSyncTimer);
       this.#serverMuteSyncTimer = null;
     }
+    for (const timer of this.#muteExpiryTimers.values()) clearTimeout(timer);
+    this.#muteExpiryTimers.clear();
     // devのHMRで古いインスタンスが破棄される際、背景動画用のblob: URLを解放する
     // (#loadBackgroundVideoBlob参照)。放置するとリロードごとにメモリが積み上がる。
     if (this.#bgVideoBlobUrl) {
@@ -1266,6 +1276,7 @@ class AppStore {
           `サーバのミュート/ブロックを同期: ユーザ${result.blockedUsers}件・ワード${result.wordRules}件`,
         );
       }
+      this.#scheduleMuteExpirySync(accountId, result.nextExpiryAt);
     } catch (e) {
       if (e instanceof ForbiddenError) {
         this.#log("warn", "サーバミュート同期: 権限不足。再認証してください", e.accountId);
@@ -1273,6 +1284,26 @@ class AppStore {
         this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
       }
     }
+  }
+
+  /// 時限ミュートの最短の期限の後に、そのアカウントを1回だけ再同期するタイマーを張り直す(Issue #545)。
+  /// 6時間以内に切れるものだけ張る(それより先は定期同期に任せる。長い setTimeout の上限も避けられる)。
+  /// 発火時にそのアカウントが居なければ(削除された)、何もしない。
+  #scheduleMuteExpirySync(accountId: string, nextExpiryAt: number | null) {
+    const previous = this.#muteExpiryTimers.get(accountId);
+    if (previous !== undefined) {
+      clearTimeout(previous);
+      this.#muteExpiryTimers.delete(accountId);
+    }
+    if (nextExpiryAt === null) return;
+    const delay = nextExpiryAt - Date.now() + MUTE_EXPIRY_SYNC_SLACK_MS;
+    if (delay >= SERVER_MUTE_SYNC_INTERVAL_MS) return;
+    const timer = setTimeout(() => {
+      this.#muteExpiryTimers.delete(accountId);
+      if (!this.#loggedInAccounts().some((a) => a.id === accountId)) return;
+      void this.#syncServerMutes(accountId, { quiet: true });
+    }, Math.max(delay, MUTE_EXPIRY_SYNC_MIN_DELAY_MS));
+    this.#muteExpiryTimers.set(accountId, timer);
   }
 
   /// 全アカウント分の接続先インスタンス情報（アイコン・名前・テーマカラー）を
@@ -1464,6 +1495,29 @@ class AppStore {
   async unfollowUser(accountId: string, userId: string) {
     try {
       await unwrapAcc(accountId, commands.unfollowUser(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// ユーザーをミュートする(期間指定。Issue #545)。ミュート集合の再取得は Rust 側で済んでいる。
+  /// 再取得の結果に含まれる次の期限で、期限切れの再同期タイマーを張る。
+  async muteUser(accountId: string, userId: string, period: MutePeriod) {
+    try {
+      const result = await unwrapAcc(accountId, commands.muteUser(accountId, userId, period));
+      if (result) this.#scheduleMuteExpirySync(accountId, result.nextExpiryAt);
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// ユーザーのミュートを解除する。`muteUser` と同様に、再取得の結果でタイマーを張り直す。
+  async unmuteUser(accountId: string, userId: string) {
+    try {
+      const result = await unwrapAcc(accountId, commands.unmuteUser(accountId, userId));
+      if (result) this.#scheduleMuteExpirySync(accountId, result.nextExpiryAt);
     } catch (e) {
       this.#logFailure(e);
       throw e;
