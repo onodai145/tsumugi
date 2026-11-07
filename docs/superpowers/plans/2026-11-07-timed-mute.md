@@ -281,8 +281,8 @@ git commit -m "feat(mute): ユーザーミュートの期間 MutePeriod を追�
         let mut ids: Vec<&str> = got.ids.iter().map(String::as_str).collect();
         ids.sort_unstable();
         assert_eq!(ids, vec!["blocked", "forever", "later", "sooner"]);
-        // 22:30:00Z = 1_700_001_800_000
-        assert_eq!(got.next_expiry_at_ms, Some(1_700_001_800_000));
+        // 22:30:00Z = 1_700_001_000_000
+        assert_eq!(got.next_expiry_at_ms, Some(1_700_001_000_000));
     }
 
     #[tokio::test]

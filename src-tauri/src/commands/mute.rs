@@ -442,7 +442,7 @@ async fn sync_server_mutes_core(
 ) -> Result<SyncMuteResult> {
     let sync_lock = state.server_mute_sync_lock(account_id);
     let _serialized = sync_lock.lock().await;
-    let ids = fetch_muted_and_blocked(client).await?;
+    let ids = fetch_muted_and_blocked(client, 0).await?.ids;
     let words = fetch_muted_words(client).await?;
     let result = SyncMuteResult {
         blocked_users: ids.len() as u32,

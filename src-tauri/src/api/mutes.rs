@@ -5,28 +5,55 @@
 use crate::api::MisskeyClient;
 use crate::error::Result;
 use crate::filter::mute::WordMuteRule;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 
 const PAGE: u32 = 100;
 const MAX_PAGES: usize = 20; // 安全弁（最大 2000 件）
 
+/// `mute/list` + `blocking/list` から読んだ、表示を抑制する対象。
+#[derive(Debug, Default)]
+pub struct ServerMutes {
+    /// ミュート+ブロックしているユーザの userId の和集合(期限切れのミュートは除く)。
+    pub ids: HashSet<String>,
+    /// 有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+    pub next_expiry_at_ms: Option<i64>,
+}
+
 /// サーバ側でミュート＋ブロックしているユーザの userId 集合を取得する。
-/// どちらも「表示を抑制する」用途なので和集合で返す。
-pub async fn fetch_muted_and_blocked(client: &MisskeyClient) -> Result<HashSet<String>> {
-    let mut ids = HashSet::new();
-    collect(client, "mute/list", "muteeId", &mut ids).await?;
-    collect(client, "blocking/list", "blockeeId", &mut ids).await?;
-    Ok(ids)
+/// どちらも「表示を抑制する」用途なので和集合で返す。`expiresAt <= now_ms` のミュートは、サーバーが
+/// まだ `mute/list` から消していなくても除外する(時限ミュート。Issue #545)。
+pub async fn fetch_muted_and_blocked(client: &MisskeyClient, now_ms: i64) -> Result<ServerMutes> {
+    let mut out = ServerMutes::default();
+    collect(client, "mute/list", "muteeId", now_ms, &mut out).await?;
+    collect(client, "blocking/list", "blockeeId", now_ms, &mut out).await?;
+    Ok(out)
+}
+
+/// 1レコードを `(対象 userId, 期限ミリ秒)` に読む。対象が無い、または期限切れ(`expiresAt <= now_ms`)なら
+/// `None`。`expiresAt` が無い(ブロックなど)・`null`・パース不能なら、期限なしの有効なレコードとして扱う
+/// (取りこぼして、ミュートが外れるよりは安全側)。
+fn read_row(rec: &Value, id_field: &str, now_ms: i64) -> Option<(String, Option<i64>)> {
+    let user_id = rec.get(id_field)?.as_str()?.to_string();
+    let expires_at = rec.get("expiresAt").and_then(Value::as_str).and_then(rfc3339_millis);
+    match expires_at {
+        Some(t) if t <= now_ms => None,
+        other => Some((user_id, other)),
+    }
+}
+
+fn rfc3339_millis(s: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
 }
 
 /// ページングしながら各レコードの `id_field`（対象 userId）を集める。
-/// レコード自身の `id` を untilId に使って過去方向へ辿る。
+/// レコード自身の `id` を untilId に使って過去方向へ辿る(期限切れで除外したレコードも、ページ送りには使う)。
 async fn collect(
     client: &MisskeyClient,
     endpoint: &str,
     id_field: &str,
-    out: &mut HashSet<String>,
+    now_ms: i64,
+    out: &mut ServerMutes,
 ) -> Result<()> {
     let mut until: Option<String> = None;
     for _ in 0..MAX_PAGES {
@@ -34,13 +61,16 @@ async fn collect(
         if let Some(u) = &until {
             body["untilId"] = json!(u);
         }
-        let page: Vec<serde_json::Value> = client.post(endpoint, &body).await?;
+        let page: Vec<Value> = client.post(endpoint, &body).await?;
         if page.is_empty() {
             break;
         }
         for rec in &page {
-            if let Some(uid) = rec.get(id_field).and_then(|v| v.as_str()) {
-                out.insert(uid.to_string());
+            if let Some((user_id, expires_at)) = read_row(rec, id_field, now_ms) {
+                out.ids.insert(user_id);
+                if let Some(t) = expires_at {
+                    out.next_expiry_at_ms = Some(out.next_expiry_at_ms.map_or(t, |cur| cur.min(t)));
+                }
             }
         }
         // 次ページの until はレコードの id
@@ -52,6 +82,21 @@ async fn collect(
             break;
         }
     }
+    Ok(())
+}
+
+/// ユーザーをミュートする。`mute/create`。`expires_at_ms` は**ミリ秒**のエポック時刻(`None` は無期限)。
+/// すでにミュート中なら `ALREADY_MUTING` で失敗する(期限の変更は、解除してから作り直す)。
+pub async fn mute_user(client: &MisskeyClient, user_id: &str, expires_at_ms: Option<i64>) -> Result<()> {
+    let _: Value = client
+        .post("mute/create", &json!({ "userId": user_id, "expiresAt": expires_at_ms }))
+        .await?;
+    Ok(())
+}
+
+/// ユーザーのミュートを解除する。`mute/delete`。
+pub async fn unmute_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
+    let _: Value = client.post("mute/delete", &json!({ "userId": user_id })).await?;
     Ok(())
 }
 
@@ -355,5 +400,153 @@ mod tests {
         assert!(parse_muted_word_entries(&json!({ "mutedWords": [1, null, { "a": 1 }, true] })).is_empty());
         assert!(parse_muted_word_entries(&json!({ "mutedWords": "spoiler" })).is_empty());
         assert!(parse_muted_word_entries(&json!({ "mutedWords": { "a": 1 } })).is_empty());
+    }
+
+    // --- 時限ミュート(Issue #545) ---
+
+    /// 2023-11-14T22:13:20Z。
+    const NOW_MS: i64 = 1_700_000_000_000;
+
+    #[test]
+    fn read_row_without_expires_at_is_active_and_has_no_expiry() {
+        let row = json!({ "id": "r1", "muteeId": "u1" });
+        assert_eq!(read_row(&row, "muteeId", NOW_MS), Some(("u1".to_string(), None)));
+    }
+
+    #[test]
+    fn read_row_with_null_expires_at_is_active_and_has_no_expiry() {
+        let row = json!({ "id": "r1", "muteeId": "u1", "expiresAt": null });
+        assert_eq!(read_row(&row, "muteeId", NOW_MS), Some(("u1".to_string(), None)));
+    }
+
+    #[test]
+    fn read_row_with_future_expires_at_keeps_the_expiry_in_milliseconds() {
+        let row = json!({ "muteeId": "u1", "expiresAt": "2023-11-14T22:13:21.000Z" });
+        assert_eq!(
+            read_row(&row, "muteeId", NOW_MS),
+            Some(("u1".to_string(), Some(1_700_000_001_000)))
+        );
+    }
+
+    #[test]
+    fn read_row_with_past_expires_at_is_dropped() {
+        let row = json!({ "muteeId": "u1", "expiresAt": "2023-11-14T22:13:19.000Z" });
+        assert_eq!(read_row(&row, "muteeId", NOW_MS), None);
+    }
+
+    #[test]
+    fn read_row_expiring_exactly_now_is_dropped() {
+        let row = json!({ "muteeId": "u1", "expiresAt": "2023-11-14T22:13:20.000Z" });
+        assert_eq!(read_row(&row, "muteeId", NOW_MS), None);
+    }
+
+    #[test]
+    fn read_row_with_unparsable_expires_at_stays_muted_without_an_expiry() {
+        let row = json!({ "muteeId": "u1", "expiresAt": "not a date" });
+        assert_eq!(read_row(&row, "muteeId", NOW_MS), Some(("u1".to_string(), None)));
+    }
+
+    #[test]
+    fn read_row_without_the_id_field_is_dropped() {
+        let row = json!({ "id": "r1", "expiresAt": null });
+        assert_eq!(read_row(&row, "muteeId", NOW_MS), None);
+    }
+
+    use wiremock::matchers::{body_partial_json, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_client(mock: &MockServer) -> crate::api::MisskeyClient {
+        crate::api::MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None)
+    }
+
+    #[tokio::test]
+    async fn mute_user_sends_the_expiry_as_a_number() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/create"))
+            .and(body_partial_json(json!({ "userId": "u1", "expiresAt": 1_700_000_000_000_i64 })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        mute_user(&test_client(&mock), "u1", Some(1_700_000_000_000)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mute_user_sends_null_for_an_indefinite_mute() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/create"))
+            .and(body_partial_json(json!({ "userId": "u1", "expiresAt": null })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        mute_user(&test_client(&mock), "u1", None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unmute_user_posts_the_user_id_to_mute_delete() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/delete"))
+            .and(body_partial_json(json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        unmute_user(&test_client(&mock), "u1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_muted_and_blocked_drops_expired_mutes_and_reports_the_earliest_expiry() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "id": "r1", "muteeId": "expired", "expiresAt": "2023-11-14T22:13:19.000Z" },
+                { "id": "r2", "muteeId": "later", "expiresAt": "2023-11-14T23:00:00.000Z" },
+                { "id": "r3", "muteeId": "sooner", "expiresAt": "2023-11-14T22:30:00.000Z" },
+                { "id": "r4", "muteeId": "forever", "expiresAt": null },
+            ])))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "id": "b1", "blockeeId": "blocked" },
+            ])))
+            .mount(&mock)
+            .await;
+
+        let got = fetch_muted_and_blocked(&test_client(&mock), NOW_MS).await.unwrap();
+
+        let mut ids: Vec<&str> = got.ids.iter().map(String::as_str).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["blocked", "forever", "later", "sooner"]);
+        // 22:30:00Z = 1_700_001_000_000
+        assert_eq!(got.next_expiry_at_ms, Some(1_700_001_000_000));
+    }
+
+    #[tokio::test]
+    async fn fetch_muted_and_blocked_has_no_next_expiry_when_nothing_expires() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{ "id": "r1", "muteeId": "u1" }])))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&mock)
+            .await;
+
+        let got = fetch_muted_and_blocked(&test_client(&mock), NOW_MS).await.unwrap();
+
+        assert_eq!(got.next_expiry_at_ms, None);
     }
 }
