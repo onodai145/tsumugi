@@ -27,25 +27,37 @@ pub(crate) fn export_settings_bytes(state: &AppState) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec_pretty(&file)?)
 }
 
+/// `AppState::has_token` の、取り込み用の呼び出し。keyring の読み取り失敗は、「トークンなし」にせず
+/// 取り込みを拒否するエラーにする。原因(keyring側のメッセージ)はログにだけ残す。
+fn has_token_or_reject(state: &AppState, account_id: &str) -> Result<bool> {
+    state.has_token(account_id).map_err(|e| {
+        log::warn!("failed to read a token from the secret store while importing settings: {e}");
+        Error::Secret("キーリングを読み取れないため取り込めません".into())
+    })
+}
+
 /// `plan_import` に、この端末のkeyringとの照合を足したもの。ファイルにだけあるアカウントのIDが、
 /// 孤立して残っているトークン(settings.jsonに無いID)と一致すると、そのトークンが許可リスト
 /// 入りのホストに送られかねない。ファイルは信頼しないので、衝突したらファイルごと拒否する。
+/// keyring を読めなかったときも拒否する(fail-closed, Issue #552)。「トークンなし」として通すと、
+/// 後から keyring が使えるようになったとき、孤立トークンと細工したファイルのホストが結びつきうる。
 fn plan_checked(state: &AppState, current: &SettingsData, file: ExportFile) -> Result<ImportPlan> {
     let mut plan = plan_import(current, file)?;
-    if plan.accounts_needing_login.iter().any(|id| state.has_token(id)) {
-        return Err(Error::Invalid("アカウントのIDがこの端末の保存済みトークンと衝突しています".into()));
+    for id in &plan.accounts_needing_login {
+        if has_token_or_reject(state, id)? {
+            return Err(Error::Invalid("アカウントのIDがこの端末の保存済みトークンと衝突しています".into()));
+        }
     }
     // 取り込み後にトークンを持たないアカウント全体。ファイルにだけあって新しく追加されるものに加え、
     // 端末側にすでにあるアカウント(ファイルと一致したものも、端末にだけ残るものも)のうち、トークンが無い
     // ものも含める(Issue #553)。
     // 確認ダイアログの件数と、取り込み結果(ImportResult)の両方に使う。
-    let tokenless: Vec<String> = plan
-        .data
-        .accounts
-        .iter()
-        .filter(|a| !state.has_token(&a.id))
-        .map(|a| a.id.clone())
-        .collect();
+    let mut tokenless: Vec<String> = Vec::new();
+    for account in &plan.data.accounts {
+        if !has_token_or_reject(state, &account.id)? {
+            tokenless.push(account.id.clone());
+        }
+    }
     plan.preview.accounts_needing_login = tokenless.len() as i32;
     plan.accounts_needing_login = tokenless;
     Ok(plan)
@@ -318,6 +330,27 @@ mod tests {
         fn delete(&self, _: &str) -> Result<()> {
             Err(Error::Secret("locked".into()))
         }
+    }
+
+    #[tokio::test]
+    async fn import_is_rejected_and_changes_nothing_when_the_secret_store_cannot_be_read() {
+        // 孤立トークンとのID衝突の検査は、keyring を読めないときに素通りさせない(fail-closed, Issue #552)。
+        // 読めないのを「トークンなし」にすると、後でkeyringが使えるようになったとき、孤立トークンと
+        // 細工したファイルのホストが結びつきうる。
+        let mut state = state_with_local_account();
+        state.secrets = Box::new(FailingStore);
+        let bytes = file_bytes(data_with(vec![account("ghost", "127.0.0.1", "u9")], vec![column("c1", "ghost")]));
+
+        let err = import_settings_bytes(&state, &bytes).await.err().expect("拒否されるはず");
+        assert!(matches!(err, Error::Secret(_)), "{err}");
+        assert!(err.to_string().contains("キーリングを読み取れない"), "{err}");
+        let err = inspect_settings_bytes(&state, &bytes).err().expect("プレビューも同じ結果");
+        assert!(matches!(err, Error::Secret(_)), "{err}");
+
+        assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c");
+        assert_eq!(state.settings.snapshot().accounts.len(), 1);
+        assert_eq!(state.accounts.lock().unwrap().list().len(), 1);
+        assert!(!state.fetch_allowlist.contains_host("127.0.0.1"));
     }
 
     #[test]
