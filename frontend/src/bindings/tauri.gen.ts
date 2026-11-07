@@ -1436,10 +1436,11 @@ export type UserList = {
 	name: string,
 };
 
-/**  プロフィールモーダル用のレスポンス。`is_following` は自分自身の場合 `None`。 */
+/**  プロフィールモーダル用のレスポンス。`is_following` / `is_muted` は自分自身の場合 `None`。 */
 export type UserProfile = {
 	user: User,
 	isFollowing: boolean | null,
+	isMuted: boolean | null,
 	isSelf: boolean,
 };
 

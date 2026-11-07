@@ -12,6 +12,7 @@ pub const PERMISSIONS: &[&str] = &[
     "read:notifications",
     "read:following",
     "read:mutes",
+    "write:mutes",
     "read:blocks",
     "read:channels",
     "write:notes",
@@ -98,5 +99,12 @@ mod tests {
         assert!(r.ok);
         assert_eq!(r.token.as_deref(), Some("abc"));
         assert_eq!(r.user.unwrap().username, "me");
+    }
+
+    #[test]
+    fn requests_write_mutes_for_timed_mutes() {
+        assert!(PERMISSIONS.contains(&"write:mutes"));
+        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555");
+        assert!(u.contains("write%3Amutes") || u.contains("write:mutes"));
     }
 }
