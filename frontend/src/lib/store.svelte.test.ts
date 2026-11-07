@@ -1618,6 +1618,18 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
       expect(syncedAccounts()).toEqual([]);
     });
 
+    it("次の期限が欠けていても(undefined)、再同期のタイマーを張らず、同期を連打しない", async () => {
+      await bootAndForgetCalls();
+      app.accounts = [account("acc1")];
+      // 古いバックエンド/モックのように、nextExpiryAt を返さない結果
+      syncResult = { blockedUsers: 1, wordRules: 0 } as unknown as SyncResultShape;
+
+      await vi.advanceTimersByTimeAsync(SIX_HOURS + 1_000); // 定期同期が1回走る
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(syncedAccounts()).toEqual(["acc1"]);
+    });
+
     it("定期同期の結果の次の期限でも、再同期のタイマーを張る(他クライアントで作った時限ミュート)", async () => {
       await bootAndForgetCalls();
       app.accounts = [account("acc1")];

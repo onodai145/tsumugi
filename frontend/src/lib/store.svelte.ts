@@ -1295,7 +1295,9 @@ class AppStore {
       clearTimeout(previous);
       this.#muteExpiryTimers.delete(accountId);
     }
-    if (nextExpiryAt === null) return;
+    // 型は number | null だが、フィールドが欠けた結果(undefined)や NaN では、遅延が NaN になって
+    // タイマーが即時に連打されるので、期限なしとして扱う。
+    if (nextExpiryAt == null || !Number.isFinite(nextExpiryAt)) return;
     const delay = nextExpiryAt - Date.now() + MUTE_EXPIRY_SYNC_SLACK_MS;
     if (delay >= SERVER_MUTE_SYNC_INTERVAL_MS) return;
     const timer = setTimeout(() => {
