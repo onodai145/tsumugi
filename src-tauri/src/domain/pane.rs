@@ -1,3 +1,4 @@
+use super::column::{GROUP_WIDTH_MAX, GROUP_WIDTH_MIN};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -5,6 +6,10 @@ const DEFAULT_ROW_WEIGHT_PX: f32 = 300.0;
 /// Column内でauto(自動調整)の子を作る際、size自体はflex:1 1 0で無視されるが、
 /// 後でauto解除された際の初期値として無難な値を残しておく(50%均等の想定)。
 const DEFAULT_COLUMN_AUTO_FALLBACK_PERCENT: f32 = 50.0;
+/// Column分割の子のsize(重み、`flex:0 0 N%`)の範囲。上限はコンテナ全体(100%)、
+/// 下限はsize 0 やそれ以下でペインが消えるのを防ぐための値。
+const COLUMN_WEIGHT_MIN: f32 = 1.0;
+const COLUMN_WEIGHT_MAX: f32 = 100.0;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -200,6 +205,29 @@ impl PaneNode {
             }
         }
         false
+    }
+
+    /// 信頼できない入力(設定インポート)の子のsizeを、画面操作で取りうる範囲に丸める。
+    /// 単位は親の方向で決まる: Rowはpx(グループ幅と同じ範囲)、Columnは重み(1〜100)。
+    /// 非有限値は方向ごとの既定値にする(serde_jsonは非有限のf32を null で書き出し、
+    /// 次回の読み込みで設定ファイルが壊れるため、autoの子でも置き換える)。
+    /// autoの子のsizeはflexで無視されるので、有限値なら触らない(解除時の初期値として残す)。
+    pub fn clamp_child_sizes(&mut self) {
+        let PaneNode::Split { direction, children, .. } = self else {
+            return;
+        };
+        for child in children.iter_mut() {
+            child.size = match (*direction, child.size.is_finite(), child.auto) {
+                (SplitDirection::Row, false, _) => DEFAULT_ROW_WEIGHT_PX,
+                (SplitDirection::Column, false, _) => DEFAULT_COLUMN_AUTO_FALLBACK_PERCENT,
+                (_, true, true) => child.size,
+                (SplitDirection::Row, true, false) => {
+                    child.size.clamp(GROUP_WIDTH_MIN as f32, GROUP_WIDTH_MAX as f32)
+                }
+                (SplitDirection::Column, true, false) => child.size.clamp(COLUMN_WEIGHT_MIN, COLUMN_WEIGHT_MAX),
+            };
+            child.node.clamp_child_sizes();
+        }
     }
 
     /// node_id(Leaf/Splitどちらのidでも可)を持つノードを親から見たautoを上書きする。

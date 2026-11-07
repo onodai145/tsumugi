@@ -21,6 +21,15 @@ pub struct Column {
     pub title: Option<String>,
 }
 
+/// グループ幅(px)の範囲。画面操作(`set_group_width`)・新規作成・設定インポートで共有する。
+pub const GROUP_WIDTH_MIN: i32 = 220;
+pub const GROUP_WIDTH_MAX: i32 = 720;
+
+/// グループ幅を `GROUP_WIDTH_MIN..=GROUP_WIDTH_MAX` に丸める。
+pub fn clamp_group_width(width: i32) -> i32 {
+    width.clamp(GROUP_WIDTH_MIN, GROUP_WIDTH_MAX)
+}
+
 /// 視覚的なカラム（タブの集合）。幅と並び順を持つ。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
