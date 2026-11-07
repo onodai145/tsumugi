@@ -2,7 +2,7 @@
 //! 設計書: docs/superpowers/specs/2026-11-02-issue-544-settings-import-export-design.md
 //! トークンはキーリング管轄でここには現れない。入力ファイルは信頼できない外部データとして扱う。
 
-use crate::domain::{Account, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
+use crate::domain::{clamp_group_width, Account, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
 use crate::error::{Error, Result};
 use crate::store::settings::SettingsData;
 use serde::{Deserialize, Serialize};
@@ -169,6 +169,19 @@ fn collect_leaf_group_ids<'a>(node: &'a PaneNode, out: &mut Vec<&'a str>) {
     }
 }
 
+/// グループの幅を画面操作と同じ範囲に丸め、`order` をファイル内の相対順(同値は出現順)を
+/// 保ったまま0始まりの連番に振り直す。拒否はせず丸める(`ui` の数値と同じ方針)。
+fn normalize_groups(groups: &mut [ColumnGroup]) {
+    let mut ranked: Vec<usize> = (0..groups.len()).collect();
+    ranked.sort_by_key(|&i| groups[i].order); // 安定ソートなので、同じorderは出現順のまま
+    for (rank, i) in ranked.into_iter().enumerate() {
+        groups[i].order = rank as i32;
+    }
+    for g in groups.iter_mut() {
+        g.width = clamp_group_width(g.width);
+    }
+}
+
 /// ファイルの内容と現在の設定から、インポート後の設定を組み立てる。ファイルは信頼しない。
 /// 1つでも検証に落ちたらファイル全体を拒否する(部分的に取り込まない)。
 pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPlan> {
@@ -226,6 +239,8 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
     }
 
     let group_ids: HashSet<&str> = d.groups.iter().map(|g| g.id.as_str()).collect();
+    let mut groups = d.groups.clone();
+    normalize_groups(&mut groups);
     let mut columns = Vec::with_capacity(d.columns.len());
     for c in &d.columns {
         let Some(local_id) = id_map.get(&c.account_id) else {
@@ -240,12 +255,14 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         columns.push(c);
     }
 
-    if let Some(root) = &d.pane_layout {
+    let mut pane_layout = d.pane_layout;
+    if let Some(root) = &mut pane_layout {
         let mut leaves = Vec::new();
         collect_leaf_group_ids(root, &mut leaves);
         if leaves.iter().any(|g| !group_ids.contains(g)) {
             return Err(invalid("ペイン配置が存在しないグループを参照しています"));
         }
+        root.clamp_child_sizes();
     }
     crate::mml::validate_sound_choice(&d.notify.sound_choice)?;
 
@@ -279,12 +296,12 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
     };
     let data = SettingsData {
         accounts,
-        groups: d.groups,
+        groups,
         columns,
         mute: d.mute,
         notify: d.notify,
         ui,
-        pane_layout: d.pane_layout,
+        pane_layout,
         cache_backend: current.cache_backend.clone(),
         server_mute_snapshots: current.server_mute_snapshots.clone(),
         summaly_proxy_imported,
@@ -864,6 +881,164 @@ mod tests {
         let plan = plan_import(&SettingsData::default(), file_with(data)).unwrap();
 
         assert_eq!(plan.data.pane_layout, Some(layout));
+    }
+
+    fn sized_group(id: &str, order: i32, width: i32) -> ColumnGroup {
+        ColumnGroup { id: id.into(), order, width, auto: false }
+    }
+
+    fn leaf_child(group_id: &str, size: f32, auto: bool) -> PaneChild {
+        PaneChild { node: PaneNode::new_leaf(group_id), size, auto }
+    }
+
+    fn split_of(direction: SplitDirection, children: Vec<PaneChild>) -> PaneNode {
+        PaneNode::Split { id: "s".into(), direction, children }
+    }
+
+    fn imported_sizes(root: &PaneNode) -> Vec<f32> {
+        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
+        children.iter().map(|c| c.size).collect()
+    }
+
+    fn import_pane_layout(layout: PaneNode) -> PaneNode {
+        let mut data = empty_data();
+        data.groups = vec![group("g1", 0), group("g2", 1), group("g3", 2)];
+        data.pane_layout = Some(layout);
+        plan_import(&SettingsData::default(), file_with(data)).unwrap().data.pane_layout.unwrap()
+    }
+
+    #[test]
+    fn group_widths_are_clamped_to_the_range_the_ui_allows() {
+        let mut data = empty_data();
+        data.groups = vec![
+            sized_group("tiny", 0, -5),
+            sized_group("zero", 1, 0),
+            sized_group("ok", 2, 400),
+            sized_group("huge", 3, i32::MAX),
+        ];
+
+        let plan = plan_import(&SettingsData::default(), file_with(data)).unwrap();
+
+        let width = |id: &str| plan.data.groups.iter().find(|g| g.id == id).unwrap().width;
+        assert_eq!(width("tiny"), 220);
+        assert_eq!(width("zero"), 220);
+        assert_eq!(width("ok"), 400);
+        assert_eq!(width("huge"), 720);
+    }
+
+    #[test]
+    fn group_order_is_renumbered_from_zero_keeping_the_relative_order() {
+        let mut data = empty_data();
+        // 負数・重複・飛び番。同じorderはファイル内の出現順(a, c)を保つ。
+        data.groups = vec![
+            sized_group("a", 5, 300),
+            sized_group("b", -3, 300),
+            sized_group("c", 5, 300),
+            sized_group("d", 100, 300),
+        ];
+
+        let plan = plan_import(&SettingsData::default(), file_with(data)).unwrap();
+
+        let order = |id: &str| plan.data.groups.iter().find(|g| g.id == id).unwrap().order;
+        assert_eq!(order("b"), 0);
+        assert_eq!(order("a"), 1);
+        assert_eq!(order("c"), 2);
+        assert_eq!(order("d"), 3);
+    }
+
+    #[test]
+    fn row_split_sizes_are_clamped_to_the_pixel_range() {
+        let layout = split_of(
+            SplitDirection::Row,
+            vec![leaf_child("g1", 5.0, false), leaf_child("g2", 400.0, false), leaf_child("g3", 99_999.0, false)],
+        );
+
+        let imported = import_pane_layout(layout);
+
+        assert_eq!(imported_sizes(&imported), vec![220.0, 400.0, 720.0]);
+    }
+
+    #[test]
+    fn column_split_sizes_are_clamped_to_one_to_hundred_percent() {
+        let layout = split_of(
+            SplitDirection::Column,
+            vec![leaf_child("g1", 0.0, false), leaf_child("g2", 50.0, false), leaf_child("g3", 5_000.0, false)],
+        );
+
+        let imported = import_pane_layout(layout);
+
+        assert_eq!(imported_sizes(&imported), vec![1.0, 50.0, 100.0]);
+    }
+
+    #[test]
+    fn a_negative_pane_size_is_clamped_up() {
+        let row = split_of(SplitDirection::Row, vec![leaf_child("g1", -10.0, false)]);
+        let column = split_of(SplitDirection::Column, vec![leaf_child("g1", -10.0, false)]);
+
+        assert_eq!(imported_sizes(&import_pane_layout(row)), vec![220.0]);
+        assert_eq!(imported_sizes(&import_pane_layout(column)), vec![1.0]);
+    }
+
+    #[test]
+    fn non_finite_pane_sizes_fall_back_to_the_default_for_their_direction() {
+        let row = split_of(
+            SplitDirection::Row,
+            vec![leaf_child("g1", f32::INFINITY, false), leaf_child("g2", f32::NAN, false)],
+        );
+        let column = split_of(
+            SplitDirection::Column,
+            vec![leaf_child("g1", f32::NEG_INFINITY, false), leaf_child("g2", f32::NAN, false)],
+        );
+
+        assert_eq!(imported_sizes(&import_pane_layout(row)), vec![300.0, 300.0]);
+        assert_eq!(imported_sizes(&import_pane_layout(column)), vec![50.0, 50.0]);
+    }
+
+    #[test]
+    fn nested_splits_use_the_direction_of_their_own_parent() {
+        // Row(px)の中のColumn(%)。内側のSplit自身のsizeは親(Row)の単位=pxで丸める。
+        let inner = PaneChild {
+            node: PaneNode::Split {
+                id: "inner".into(),
+                direction: SplitDirection::Column,
+                children: vec![leaf_child("g2", 0.0, false), leaf_child("g3", 500.0, false)],
+            },
+            size: 99_999.0,
+            auto: false,
+        };
+        let layout = split_of(SplitDirection::Row, vec![leaf_child("g1", 5.0, false), inner]);
+
+        let imported = import_pane_layout(layout);
+
+        assert_eq!(imported_sizes(&imported), vec![220.0, 720.0]);
+        let PaneNode::Split { children, .. } = &imported else { unreachable!() };
+        assert_eq!(imported_sizes(&children[1].node), vec![1.0, 100.0]);
+    }
+
+    #[test]
+    fn a_non_finite_size_on_an_auto_child_is_replaced_too() {
+        // serde_jsonは非有限のf32を null として書き出すため、残すと次回の読み込みで設定ファイルが壊れる。
+        let layout = split_of(
+            SplitDirection::Column,
+            vec![leaf_child("g1", f32::INFINITY, true), leaf_child("g2", f32::NAN, true)],
+        );
+
+        let imported = import_pane_layout(layout);
+
+        assert_eq!(imported_sizes(&imported), vec![50.0, 50.0]);
+    }
+
+    #[test]
+    fn auto_children_and_in_range_sizes_are_left_alone() {
+        // autoの子のsizeはflexで無視されるので触らない(解除時の初期値として残る)。
+        let layout = split_of(
+            SplitDirection::Column,
+            vec![leaf_child("g1", 0.0, true), leaf_child("g2", 33.5, false), leaf_child("g3", 66.5, false)],
+        );
+
+        let imported = import_pane_layout(layout);
+
+        assert_eq!(imported_sizes(&imported), vec![0.0, 33.5, 66.5]);
     }
 
     #[test]

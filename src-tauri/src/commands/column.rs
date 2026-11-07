@@ -8,8 +8,9 @@ use crate::api::meta::{
 use crate::api::notes::{fetch_notes, search_notes, SearchParams};
 use crate::api::notifications::fetch_notifications;
 use crate::domain::{
-    search_capabilities, Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note,
-    Notification, PaneNode, SearchCapabilities, SourceItem, SplitDirection, User, UserList,
+    clamp_group_width, search_capabilities, Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note,
+    Notification, PaneNode, SearchCapabilities, SourceItem, SplitDirection, User, UserList, GROUP_WIDTH_MAX,
+    GROUP_WIDTH_MIN,
 };
 use crate::error::{Error, Result};
 use crate::fence::{ColumnFence, Epoch};
@@ -108,7 +109,7 @@ pub async fn add_column(
                 .load_ui()
                 .map(|p| p.default_column_width)
                 .unwrap_or(DEFAULT_WIDTH)
-                .clamp(220, 720);
+                .clamp(GROUP_WIDTH_MIN, GROUP_WIDTH_MAX);
             let group = ColumnGroup {
                 id: uuid::Uuid::new_v4().to_string(),
                 order,
@@ -172,7 +173,7 @@ pub async fn split_pane(
         .load_ui()
         .map(|p| p.default_column_width)
         .unwrap_or(DEFAULT_WIDTH)
-        .clamp(220, 720);
+        .clamp(GROUP_WIDTH_MIN, GROUP_WIDTH_MAX);
     let group = ColumnGroup { id: uuid::Uuid::new_v4().to_string(), order, width, auto: false };
     // upsert_groupより先にload_pane_layoutする(add_columnと同じ理由: 自己修復ロジックとの
     // 二重挿入を避けるため。Issue #31)。
@@ -625,7 +626,7 @@ pub async fn fetch_notifications_backfill(
 #[tauri::command]
 #[specta::specta]
 pub async fn set_group_width(state: State<'_, AppState>, group_id: String, width: i32) -> Result<()> {
-    state.settings.set_group_width(&group_id, width.clamp(220, 720))
+    state.settings.set_group_width(&group_id, clamp_group_width(width))
 }
 
 /// グループの幅モード（固定/自動調整）を更新。
