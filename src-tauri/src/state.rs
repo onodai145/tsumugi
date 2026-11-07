@@ -413,9 +413,11 @@ impl AppState {
             .replace(preview_allowlist_hosts(&accounts, self.secrets.as_ref(), &self.settings));
     }
 
-    /// そのアカウントのトークンがキーリングにあるか。読み取りに失敗したら `false`。
-    pub fn has_token(&self, account_id: &str) -> bool {
-        token_present(self.secrets.as_ref(), account_id)
+    /// そのアカウントのトークンがキーリングにあるか。読み取りの失敗は、「トークンなし」とは区別してエラーにする。
+    /// 呼び出し側が、失敗を安全側(拒否・ホストを入れない)と危険側(素通り)のどちらに倒すかを決める。
+    /// 許可リストの構築は、失敗を「トークンなし」として扱う(`token_present`)。
+    pub fn has_token(&self, account_id: &str) -> crate::error::Result<bool> {
+        Ok(self.secrets.get(account_id)?.is_some())
     }
 
     /// account_id から (host, token) を引く。未登録なら Invalid、token 欠落なら Unauthorized。
@@ -712,8 +714,46 @@ mod tests {
     fn has_token_reflects_the_secret_store() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
         state.register_test_account("acc1");
-        assert!(state.has_token("acc1"));
-        assert!(!state.has_token("nobody"));
+        assert!(state.has_token("acc1").unwrap());
+        assert!(!state.has_token("nobody").unwrap());
+    }
+
+    /// 読み出しがいつも失敗するシークレットストア(keyring/Secret Service の障害を模す)。
+    struct FailingStore;
+    impl SecretStore for FailingStore {
+        fn set(&self, _: &str, _: &str) -> crate::error::Result<()> {
+            Err(crate::error::Error::Secret("locked".into()))
+        }
+        fn get(&self, _: &str) -> crate::error::Result<Option<String>> {
+            Err(crate::error::Error::Secret("locked".into()))
+        }
+        fn delete(&self, _: &str) -> crate::error::Result<()> {
+            Err(crate::error::Error::Secret("locked".into()))
+        }
+    }
+
+    #[test]
+    fn has_token_surfaces_a_read_failure_instead_of_reporting_no_token() {
+        // 衝突検査(Issue #552)は、読めなかったことを「トークンなし」と区別できなければならない。
+        let mut state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.register_test_account("acc1");
+        state.secrets = Box::new(FailingStore);
+
+        assert!(matches!(state.has_token("acc1"), Err(crate::error::Error::Secret(_))));
+    }
+
+    #[test]
+    fn allowlists_exclude_accounts_whose_token_cannot_be_read() {
+        // 許可リスト側は安全側(Issue #544): 読み取り失敗はトークンなしとして、ホストを入れない。
+        let mut state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.register_test_account("acc1"); // host=misskey.test
+        assert!(state.fetch_allowlist.contains_host("misskey.test"));
+        state.secrets = Box::new(FailingStore);
+
+        state.refresh_fetch_allowlist();
+
+        assert!(!state.fetch_allowlist.contains_host("misskey.test"));
+        assert!(!state.preview_allowlist.contains_host("misskey.test"));
     }
 
     #[test]
