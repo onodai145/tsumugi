@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { MutePeriod, Note } from "../bindings/tauri.gen";
   import type { ProfileTarget } from "../lib/profileModal.svelte";
   import { app } from "../lib/store.svelte";
@@ -139,7 +140,15 @@
       await app.muteUser(accountId, userId, period);
       if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = true;
     } catch (e) {
-      if (gen === requestGen) muteErr = String(e);
+      if (gen === requestGen) {
+        // 表示が古かっただけ(すでにミュート中)なら、表示を直す。メニューで解除できるようになる。
+        if (String(e).includes("ALREADY_MUTING") && profileState.status === "ready") {
+          profileState.profile.isMuted = true;
+          muteErr = "すでにミュート中です。表示を更新しました";
+        } else {
+          muteErr = String(e);
+        }
+      }
     } finally {
       if (gen === requestGen) muteBusy = false; // 切り替え後の新しいプロフィールの busy を、古い呼び出しが触らない
     }
@@ -156,10 +165,50 @@
       await app.unmuteUser(accountId, userId);
       if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = false;
     } catch (e) {
-      if (gen === requestGen) muteErr = String(e);
+      if (gen === requestGen) {
+        // 期限切れなどで、すでにミュート中でなかったなら、表示を直す。
+        if (String(e).includes("NOT_MUTING") && profileState.status === "ready") {
+          profileState.profile.isMuted = false;
+          muteErr = "すでにミュート中ではありません。表示を更新しました";
+        } else {
+          muteErr = String(e);
+        }
+      }
     } finally {
       if (gen === requestGen) muteBusy = false;
     }
+  }
+
+  // 期限切れの再同期が成功したら(ストアの合図)、開いたままのプロフィールの「ミュート中」を取り直す。
+  // ミュート中の表示だけを更新し、読み込み直し(ノート一覧のリセット)はしない。
+  let seenResyncs = app.muteExpiryResyncs;
+  $effect(() => {
+    const n = app.muteExpiryResyncs;
+    if (n === seenResyncs) return;
+    seenResyncs = n;
+    untrack(() => void refreshMuted());
+  });
+
+  async function refreshMuted() {
+    if (profileState.status !== "ready" || profileState.profile.isMuted !== true || muteBusy) return;
+    const gen = requestGen;
+    const userId = profileState.profile.user.id;
+    try {
+      const latest = await app.getUserProfile(accountId, userId);
+      // 取得の間に切り替わった・操作中になった・自分で変えた場合は、書き換えない
+      if (gen !== requestGen || muteBusy || profileState.status !== "ready") return;
+      profileState.profile.isMuted = latest.isMuted;
+    } catch {
+      // 取れなければ、そのまま(次に開き直したときに直る)
+    }
+  }
+
+  // メニューを開いているときの Escape は、メニューだけ閉じる(モーダルまで閉じない)。メニューは portal で
+  // モーダルの外にあるので、フォーカスがどちらにあっても効くよう window の捕捉で受ける。
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key !== "Escape" || !userMenuOpen) return;
+    userMenuOpen = false;
+    e.stopPropagation();
   }
 
   function addAsColumn() {
@@ -191,6 +240,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydowncapture={onWindowKeydown} />
 
 <Modal title="プロフィール" {onclose} maxHeight={mobileUi ? "100%" : undefined}>
   <!-- モバイルは全画面ページ。プロフィール全体を1つのスクロール領域にし(ノート一覧の自前スクロールは

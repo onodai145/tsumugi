@@ -303,15 +303,149 @@ describe("ProfileModal", () => {
     });
 
     it("mute_userが失敗したら、エラーを表示し、バッジは出さない", async () => {
-      mockProfile({}, (cmd) => (cmd === "mute_user" ? Promise.reject(new Error("ALREADY_MUTING")) : undefined));
+      mockProfile({}, (cmd) => (cmd === "mute_user" ? Promise.reject(new Error("RATE_LIMIT")) : undefined));
       const r = renderModal();
       await fireEvent.click(await menuButton(r));
       await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
 
       await fireEvent.click(r.getByRole("button", { name: "1日" }));
 
-      await waitFor(() => expect(r.getByText(/ALREADY_MUTING/)).toBeTruthy());
+      await waitFor(() => expect(r.getByText(/RATE_LIMIT/)).toBeTruthy());
       expect(r.queryByText("ミュート中")).toBeNull();
+    });
+
+    it("ALREADY_MUTINGで失敗したら、表示を「ミュート中」に直し、メニューで解除できる", async () => {
+      mockProfile({}, (cmd) =>
+        cmd === "mute_user"
+          ? Promise.reject(new Error("mute/create: ALREADY_MUTING You are already muting that user."))
+          : undefined,
+      );
+      const r = renderModal();
+      await fireEvent.click(await menuButton(r));
+      await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
+
+      await fireEvent.click(r.getByRole("button", { name: "1日" }));
+
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      await fireEvent.click(await menuButton(r));
+      expect(r.getByRole("button", { name: "ミュート解除" })).toBeTruthy();
+    });
+
+    it("NOT_MUTINGで解除に失敗したら、表示を「ミュート中でない」に直す", async () => {
+      mockProfile({ isMuted: true }, (cmd) =>
+        cmd === "unmute_user" ? Promise.reject(new Error("mute/delete: NOT_MUTING You are not muting that user.")) : undefined,
+      );
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      await fireEvent.click(await menuButton(r));
+
+      await fireEvent.click(r.getByRole("button", { name: "ミュート解除" }));
+
+      await waitFor(() => expect(r.queryByText("ミュート中")).toBeNull());
+      await fireEvent.click(await menuButton(r));
+      expect(r.getByRole("button", { name: "ミュート" })).toBeTruthy();
+    });
+
+    it("メニューを開いているときのEscapeは、メニューだけ閉じ、モーダルは閉じない", async () => {
+      mockProfile();
+      const onclose = vi.fn();
+      const r = render(ProfileModal, { props: { target: { userId: "u1" }, accountId: "acc1", onclose } });
+      const trigger = await menuButton(r);
+      await fireEvent.click(trigger);
+
+      await fireEvent.keyDown(trigger, { key: "Escape" }); // フォーカスがモーダルの中にあるとき
+
+      expect(r.queryByTestId("user-menu")).toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+    });
+
+    it("フォーカスがメニューの中にあるときのEscapeも、メニューだけ閉じる。メニューが閉じた後のEscapeはモーダルを閉じる", async () => {
+      mockProfile();
+      const onclose = vi.fn();
+      const r = render(ProfileModal, { props: { target: { userId: "u1" }, accountId: "acc1", onclose } });
+      const trigger = await menuButton(r);
+      await fireEvent.click(trigger);
+
+      await fireEvent.keyDown(r.getByRole("button", { name: "ミュート" }), { key: "Escape" });
+      expect(r.queryByTestId("user-menu")).toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+
+      await fireEvent.keyDown(trigger, { key: "Escape" });
+      expect(onclose).toHaveBeenCalledTimes(1);
+    });
+
+    it("期限切れの再同期が成功したら、開いたままのプロフィールのミュート表示を取り直す", async () => {
+      let muted = true;
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "get_user_profile") return Promise.resolve(profileResponse({ isMuted: muted }));
+        if (cmd === "get_user_notes") return Promise.resolve([]);
+        return Promise.resolve(null);
+      });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      const notesCalls = () => invokeMock.mock.calls.filter(([cmd]) => cmd === "get_user_notes").length;
+      const notesBefore = notesCalls();
+
+      muted = false; // 期限が切れた
+      app.muteExpiryResyncs += 1;
+
+      await waitFor(() => expect(r.queryByText("ミュート中")).toBeNull());
+      expect(r.getByText("Alice")).toBeTruthy(); // 読み込み直しではなく、その場で更新
+      expect(notesCalls()).toBe(notesBefore); // ノート一覧は取り直さない
+    });
+
+    it("まだミュート中と返ってきたら、表示はそのまま", async () => {
+      mockProfile({ isMuted: true });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      const profileCalls = () => invokeMock.mock.calls.filter(([cmd]) => cmd === "get_user_profile").length;
+      const before = profileCalls();
+
+      app.muteExpiryResyncs += 1;
+      await waitFor(() => expect(profileCalls()).toBe(before + 1));
+
+      expect(r.getByText("ミュート中")).toBeTruthy();
+    });
+
+    it("取り直しの完了前に別ユーザーへ切り替わったら、古い結果で新しいプロフィールの表示を書き換えない", async () => {
+      let resolveStale: (v: unknown) => void = () => {};
+      let u1Calls = 0;
+      invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "get_user_profile") {
+          const userId = args?.userId as string;
+          const user = { ...profileResponse().user, id: userId, username: userId };
+          if (userId === "u1" && ++u1Calls === 2) {
+            return new Promise((resolve) => (resolveStale = () => resolve(profileResponse({ user, isMuted: false }))));
+          }
+          return Promise.resolve(profileResponse({ user, isMuted: true }));
+        }
+        if (cmd === "get_user_notes") return Promise.resolve([]);
+        return Promise.resolve(null);
+      });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      app.muteExpiryResyncs += 1; // u1 の取り直しが始まる(保留)
+      await waitFor(() => expect(u1Calls).toBe(2));
+      await r.rerender({ target: { userId: "u2" }, accountId: "acc1", onclose: () => {} });
+      await waitFor(() => expect(r.getByText("@u2")).toBeTruthy());
+
+      resolveStale(null);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(r.getByText("ミュート中")).toBeTruthy(); // u2 のバッジはそのまま
+    });
+
+    it("ミュート中でないプロフィールは、再同期の合図でプロフィールを取り直さない", async () => {
+      mockProfile({ isMuted: false });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("Alice")).toBeTruthy());
+      const profileCalls = () => invokeMock.mock.calls.filter(([cmd]) => cmd === "get_user_profile").length;
+      const before = profileCalls();
+
+      app.muteExpiryResyncs += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(profileCalls()).toBe(before);
     });
 
     it("mute_userの完了前に別ユーザーへ切り替わったら、新しいプロフィールのバッジを書き換えない", async () => {
