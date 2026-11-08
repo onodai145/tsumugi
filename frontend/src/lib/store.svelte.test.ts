@@ -1703,22 +1703,6 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
       expect(syncedAccounts()).toEqual(["acc1"]); // 新しい方のタイマーが残っている
     });
 
-    it("期限後の再同期が成功したら、muteExpiryResyncsを増やす(失敗では増やさない)", async () => {
-      vi.useFakeTimers();
-      app.accounts = [account("acc1")];
-      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 30_000 };
-      await app.muteUser("acc1", "u1", "tenMinutes");
-      const before = app.muteExpiryResyncs;
-      syncResult = new Error("offline");
-
-      await vi.advanceTimersByTimeAsync(32_000);
-      expect(app.muteExpiryResyncs).toBe(before); // 失敗
-
-      syncResult = { blockedUsers: 0, wordRules: 0, nextExpiryAt: null };
-      await vi.advanceTimersByTimeAsync(61_000);
-      expect(app.muteExpiryResyncs).toBe(before + 1); // 再試行で成功
-    });
-
     it("定期同期の結果の次の期限でも、再同期のタイマーを張る(他クライアントで作った時限ミュート)", async () => {
       await bootAndForgetCalls();
       app.accounts = [account("acc1")];

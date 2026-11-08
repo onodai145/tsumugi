@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import type { MutePeriod, Note } from "../bindings/tauri.gen";
   import type { ProfileTarget } from "../lib/profileModal.svelte";
   import { app } from "../lib/store.svelte";
@@ -176,30 +175,6 @@
       }
     } finally {
       if (gen === requestGen) muteBusy = false;
-    }
-  }
-
-  // 期限切れの再同期が成功したら(ストアの合図)、開いたままのプロフィールの「ミュート中」を取り直す。
-  // ミュート中の表示だけを更新し、読み込み直し(ノート一覧のリセット)はしない。
-  let seenResyncs = app.muteExpiryResyncs;
-  $effect(() => {
-    const n = app.muteExpiryResyncs;
-    if (n === seenResyncs) return;
-    seenResyncs = n;
-    untrack(() => void refreshMuted());
-  });
-
-  async function refreshMuted() {
-    if (profileState.status !== "ready" || profileState.profile.isMuted !== true || muteBusy) return;
-    const gen = requestGen;
-    const userId = profileState.profile.user.id;
-    try {
-      const latest = await app.getUserProfile(accountId, userId);
-      // 取得の間に切り替わった・操作中になった・自分で変えた場合は、書き換えない
-      if (gen !== requestGen || muteBusy || profileState.status !== "ready") return;
-      profileState.profile.isMuted = latest.isMuted;
-    } catch {
-      // 取れなければ、そのまま(次に開き直したときに直る)
     }
   }
 

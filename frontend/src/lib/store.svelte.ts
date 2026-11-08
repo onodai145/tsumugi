@@ -230,8 +230,6 @@ class AppStore {
   /// アカウントごとの、ミュート集合の再取得を始めた順の番号と、結果を反映した最新の番号。結果が前後して
   /// 届いたとき、先に始めた古い結果で、後に始めた操作のタイマーを消さないために使う。
   #muteSyncSeq = new Map<string, { started: number; applied: number }>();
-  /// 期限切れの再同期が成功した回数。開いたままのプロフィールが、ミュート中の表示を取り直す合図に使う。
-  muteExpiryResyncs = $state(0);
   // theme="auto"時、OSのprefers-color-scheme変化にライブ追従するためのmatchMediaリスナー解除関数。
   // #applyTheme が呼ばれるたびに前回分を解除してから張り直すことで、リスナーの多重登録を防ぐ。
   #themeMediaCleanup: (() => void) | null = null;
@@ -1346,7 +1344,6 @@ class AppStore {
       this.#muteExpiryTimers.delete(accountId);
       if (!this.#loggedInAccounts().some((a) => a.id === accountId)) return;
       const outcome = await this.#syncServerMutes(accountId, { quiet: true });
-      if (outcome === "ok") this.muteExpiryResyncs += 1;
       // 同期の間に別のタイマーが張られていたら(ミュートの追加など)、そちらに任せる
       if (outcome !== "failed" || attempt >= MUTE_EXPIRY_RETRY_MAX || this.#muteExpiryTimers.has(accountId)) return;
       this.#armMuteExpiryTimer(accountId, MUTE_EXPIRY_RETRY_BASE_MS * 2 ** attempt, attempt + 1);
