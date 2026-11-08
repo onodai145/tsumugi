@@ -227,6 +227,11 @@ class AppStore {
   #serverMuteSyncTimer: ReturnType<typeof setInterval> | null = null;
   /// アカウントごとの、時限ミュートの期限切れ再同期のタイマー(Issue #545)。
   #muteExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /// アカウントごとの、ミュート集合の再取得を始めた順の番号と、結果を反映した最新の番号。結果が前後して
+  /// 届いたとき、先に始めた古い結果で、後に始めた操作のタイマーを消さないために使う。
+  #muteSyncSeq = new Map<string, { started: number; applied: number }>();
+  /// 期限切れの再同期が成功した回数。開いたままのプロフィールが、ミュート中の表示を取り直す合図に使う。
+  muteExpiryResyncs = $state(0);
   // theme="auto"時、OSのprefers-color-scheme変化にライブ追従するためのmatchMediaリスナー解除関数。
   // #applyTheme が呼ばれるたびに前回分を解除してから張り直すことで、リスナーの多重登録を防ぐ。
   #themeMediaCleanup: (() => void) | null = null;
@@ -284,6 +289,7 @@ class AppStore {
     }
     for (const timer of this.#muteExpiryTimers.values()) clearTimeout(timer);
     this.#muteExpiryTimers.clear();
+    this.#muteSyncSeq.clear();
     // devのHMRで古いインスタンスが破棄される際、背景動画用のblob: URLを解放する
     // (#loadBackgroundVideoBlob参照)。放置するとリロードごとにメモリが積み上がる。
     if (this.#bgVideoBlobUrl) {
@@ -1275,6 +1281,7 @@ class AppStore {
   /// 戻り値は、同期の結果(期限切れの再同期タイマーが、再試行するかどうかを決めるのに使う)。
   /// "forbidden" は再認証が要るので、再試行しても無駄。
   async #syncServerMutes(accountId: string, options: { quiet?: boolean } = {}): Promise<"ok" | "forbidden" | "failed"> {
+    const seq = this.#beginMuteSync(accountId);
     try {
       const result = await unwrapAcc(accountId, commands.syncServerMutes(accountId));
       if (!options.quiet && (result.blockedUsers > 0 || result.wordRules > 0)) {
@@ -1283,7 +1290,7 @@ class AppStore {
           `サーバのミュート/ブロックを同期: ユーザ${result.blockedUsers}件・ワード${result.wordRules}件`,
         );
       }
-      this.#scheduleMuteExpirySync(accountId, result.nextExpiryAt);
+      this.#applyMuteSync(accountId, seq, result.nextExpiryAt);
       return "ok";
     } catch (e) {
       if (e instanceof ForbiddenError) {
@@ -1293,6 +1300,25 @@ class AppStore {
       this.#log("warn", `サーバミュート同期に失敗: ${String(e)}`);
       return "failed";
     }
+  }
+
+  /// ミュート集合の再取得を始めるときに呼び、始めた順の番号を返す。
+  #beginMuteSync(accountId: string): number {
+    const state = this.#muteSyncSeq.get(accountId) ?? { started: 0, applied: 0 };
+    state.started += 1;
+    this.#muteSyncSeq.set(accountId, state);
+    return state.started;
+  }
+
+  /// 再取得の結果で、期限切れのタイマーを張り直す。これより後に始めた再取得の結果が、すでに
+  /// 反映済みなら、この結果は古いので何もしない。
+  #applyMuteSync(accountId: string, seq: number, nextExpiryAt: number | null) {
+    const state = this.#muteSyncSeq.get(accountId);
+    if (state) {
+      if (seq < state.applied) return;
+      state.applied = seq;
+    }
+    this.#scheduleMuteExpirySync(accountId, nextExpiryAt);
   }
 
   /// 時限ミュートの最短の期限の後に、そのアカウントを1回だけ再同期するタイマーを張り直す(Issue #545)。
@@ -1320,6 +1346,7 @@ class AppStore {
       this.#muteExpiryTimers.delete(accountId);
       if (!this.#loggedInAccounts().some((a) => a.id === accountId)) return;
       const outcome = await this.#syncServerMutes(accountId, { quiet: true });
+      if (outcome === "ok") this.muteExpiryResyncs += 1;
       // 同期の間に別のタイマーが張られていたら(ミュートの追加など)、そちらに任せる
       if (outcome !== "failed" || attempt >= MUTE_EXPIRY_RETRY_MAX || this.#muteExpiryTimers.has(accountId)) return;
       this.#armMuteExpiryTimer(accountId, MUTE_EXPIRY_RETRY_BASE_MS * 2 ** attempt, attempt + 1);
@@ -1525,9 +1552,10 @@ class AppStore {
   /// ユーザーをミュートする(期間指定。Issue #545)。ミュート集合の再取得は Rust 側で済んでいる。
   /// 再取得の結果に含まれる次の期限で、期限切れの再同期タイマーを張る。
   async muteUser(accountId: string, userId: string, period: MutePeriod) {
+    const seq = this.#beginMuteSync(accountId);
     try {
       const result = await unwrapAcc(accountId, commands.muteUser(accountId, userId, period));
-      if (result) this.#scheduleMuteExpirySync(accountId, result.nextExpiryAt);
+      if (result) this.#applyMuteSync(accountId, seq, result.nextExpiryAt);
     } catch (e) {
       this.#logFailure(e);
       throw e;
@@ -1536,9 +1564,10 @@ class AppStore {
 
   /// ユーザーのミュートを解除する。`muteUser` と同様に、再取得の結果でタイマーを張り直す。
   async unmuteUser(accountId: string, userId: string) {
+    const seq = this.#beginMuteSync(accountId);
     try {
       const result = await unwrapAcc(accountId, commands.unmuteUser(accountId, userId));
-      if (result) this.#scheduleMuteExpirySync(accountId, result.nextExpiryAt);
+      if (result) this.#applyMuteSync(accountId, seq, result.nextExpiryAt);
     } catch (e) {
       this.#logFailure(e);
       throw e;
