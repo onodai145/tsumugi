@@ -406,6 +406,14 @@ pub fn run() {
             );
             scheduler::spawn(app.handle().clone());
 
+            // 既存の column_note から、アカウントの帰属を埋め直す(Issue #557)。冪等なので毎起動で実行する。
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(state) = handle.try_state::<AppState>() {
+                    attribution::backfill_all(&state.settings, &state.cache).await;
+                }
+            });
+
             // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の
             // 未確定文字列インライン表示)を無効化しているため、明示的に再度有効化する。
             // 無効化されたままだと fcitx5 等が候補ウィンドウをカーソル位置にアンカー

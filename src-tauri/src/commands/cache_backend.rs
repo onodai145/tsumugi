@@ -65,5 +65,7 @@ pub async fn set_cache_backend(
     // 不整合window(再起動すると旧バックエンドに戻ってしまう)が生じるため。
     state.settings.save_cache_backend(&config).map_err(|e| e.to_string())?;
     state.cache.swap_backend(new_backend);
+    // 切り替え先に既存のキャッシュがある場合に備えて、帰属を埋め直す(Issue #557)。
+    crate::attribution::backfill_all(&state.settings, &state.cache).await;
     Ok(())
 }

@@ -73,7 +73,9 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
     async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()>;
     /// アカウント削除時に、そのアカウントの帰属を全て消す。
     async fn forget_account_notes(&self, account_id: &str) -> Result<()>;
-    /// このノートがそのアカウントに帰属しているか。
+    /// このノートがそのアカウントに帰属しているか。後続の MCP(Issue #557)が使う読み取り口で、
+    /// 現時点ではテストからのみ呼ばれる。
+    #[cfg_attr(not(test), allow(dead_code))]
     async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool>;
 }
 
@@ -226,7 +228,9 @@ impl NoteCacheStore {
         self.backend().forget_account_notes(account_id).await
     }
 
-    /// このノートがそのアカウントに帰属しているか。
+    /// このノートがそのアカウントに帰属しているか。後続の MCP(Issue #557)が使う読み取り口で、
+    /// 現時点ではテストからのみ呼ばれる。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool> {
         self.backend().account_has_note(account_id, note_id).await
     }

@@ -37,6 +37,14 @@ pub(crate) async fn record(cache: &NoteCacheStore, account_id: &str, notes: &[No
     }
 }
 
+/// アカウント削除時に、そのアカウントの帰属を消す。失敗してもアカウント削除は止めない
+/// (残っても、そのアカウント ID が再び使われない限り外部には出ない)。
+pub(crate) async fn forget(cache: &NoteCacheStore, account_id: &str) {
+    if let Err(e) = cache.forget_account_notes(account_id).await {
+        log::warn!("failed to forget the note attribution of the removed account: {e}");
+    }
+}
+
 /// 既存の `column_note` から、`from cache` を含まないカラムの分を帰属として複写する(冪等)。
 /// 起動時と、キャッシュのバックエンドを切り替えた直後に呼ぶ。
 pub(crate) async fn backfill_all(settings: &SettingsStore, cache: &NoteCacheStore) {
@@ -183,6 +191,30 @@ mod tests {
         conn.lock().unwrap().execute("DROP TABLE note_account", []).unwrap();
 
         record(&cache, "acc1", &[note("n1", 1)]).await; // ここで戻ってくること自体がテスト
+    }
+
+    #[tokio::test]
+    async fn forget_removes_only_the_given_accounts_attribution() {
+        let cache = mem_cache();
+        cache.cache_notes("col1", &[note("n1", 1)]).await.unwrap();
+        record(&cache, "acc1", &[note("n1", 1)]).await;
+        record(&cache, "acc2", &[note("n1", 1)]).await;
+
+        forget(&cache, "acc1").await;
+
+        assert!(!cache.account_has_note("acc1", "n1").await.unwrap());
+        assert!(cache.account_has_note("acc2", "n1").await.unwrap());
+    }
+
+    /// 記録先が壊れていても、アカウント削除を止めない。
+    #[tokio::test]
+    async fn forget_swallows_backend_errors() {
+        let backend = SqliteBackend::new(crate::store::db::open_cache_in_memory().unwrap());
+        let conn = std::sync::Arc::clone(backend.conn());
+        let cache = NoteCacheStore::new(backend);
+        conn.lock().unwrap().execute("DROP TABLE note_account", []).unwrap();
+
+        forget(&cache, "acc1").await; // ここで戻ってくること自体がテスト
     }
 
     #[tokio::test]
