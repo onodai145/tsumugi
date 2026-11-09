@@ -1441,11 +1441,18 @@ export type UserList = {
 	name: string,
 };
 
-/**  プロフィールモーダル用のレスポンス。`is_following` / `is_muted` は自分自身の場合 `None`。 */
+/**
+ *  プロフィールモーダル用のレスポンス。関係フラグ(`is_following` / `is_muted` / `is_blocking` /
+ *  `is_renote_muted`)は自分自身の場合 `None`。`profile_url` はリモートユーザーの元ページ
+ *  (http/https のみ。ローカルユーザーや不正な値では `None`)。
+ */
 export type UserProfile = {
 	user: User,
 	isFollowing: boolean | null,
 	isMuted: boolean | null,
+	isBlocking: boolean | null,
+	isRenoteMuted: boolean | null,
+	profileUrl: string | null,
 	isSelf: boolean,
 };
 

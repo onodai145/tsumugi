@@ -7,13 +7,18 @@ use crate::state::AppState;
 use specta::Type;
 use tauri::State;
 
-/// プロフィールモーダル用のレスポンス。`is_following` / `is_muted` は自分自身の場合 `None`。
+/// プロフィールモーダル用のレスポンス。関係フラグ(`is_following` / `is_muted` / `is_blocking` /
+/// `is_renote_muted`)は自分自身の場合 `None`。`profile_url` はリモートユーザーの元ページ
+/// (http/https のみ。ローカルユーザーや不正な値では `None`)。
 #[derive(Debug, Clone, serde::Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UserProfile {
     pub user: User,
     pub is_following: Option<bool>,
     pub is_muted: Option<bool>,
+    pub is_blocking: Option<bool>,
+    pub is_renote_muted: Option<bool>,
+    pub profile_url: Option<String>,
     pub is_self: bool,
 }
 
@@ -24,6 +29,18 @@ pub(crate) fn relation_flag(is_self: bool, flag: Option<bool>) -> Option<bool> {
     } else {
         flag
     }
+}
+
+/// リモートユーザーの元ページの URL を選ぶ(純粋関数、テスト用に分離)。`url` → `uri` の順で、最初に
+/// ホストを持つ http/https として解釈できるものを返す。ローカルユーザー(`host` が `None`)では `None`。
+/// 値は外部サーバーが返すので信用せず、`javascript:` / `data:` などは読み飛ばす。
+pub(crate) fn sanitize_profile_url(host: Option<&str>, url: Option<&str>, uri: Option<&str>) -> Option<String> {
+    host?;
+    [url, uri].into_iter().flatten().find_map(|candidate| {
+        let parsed = url::Url::parse(candidate).ok()?;
+        let is_web = matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some();
+        is_web.then(|| parsed.to_string())
+    })
 }
 
 /// フォロワー/フォロー中一覧の1件。`cursor` は次ページ取得時の `until_id` に使うFollowingレコード
@@ -57,9 +74,12 @@ pub async fn get_user_profile(
     let accounts = state.accounts.lock().unwrap().list();
     let is_self = is_self_user(&accounts, &account_id, &user_id);
     Ok(UserProfile {
-        user: raw.user.into(),
         is_following: relation_flag(is_self, raw.is_following),
         is_muted: relation_flag(is_self, raw.is_muted),
+        is_blocking: relation_flag(is_self, raw.is_blocking),
+        is_renote_muted: relation_flag(is_self, raw.is_renote_muted),
+        profile_url: sanitize_profile_url(raw.user.host.as_deref(), raw.url.as_deref(), raw.uri.as_deref()),
+        user: raw.user.into(),
         is_self,
     })
 }
@@ -166,5 +186,49 @@ mod tests {
         assert_eq!(relation_flag(false, Some(true)), Some(true));
         assert_eq!(relation_flag(false, Some(false)), Some(false));
         assert_eq!(relation_flag(false, None), None);
+    }
+
+    #[test]
+    fn profile_url_is_none_for_local_users() {
+        assert_eq!(
+            sanitize_profile_url(None, Some("https://misskey.example/@alice"), None),
+            None
+        );
+    }
+
+    #[test]
+    fn profile_url_prefers_url_over_uri() {
+        assert_eq!(
+            sanitize_profile_url(
+                Some("remote.example"),
+                Some("https://remote.example/@alice"),
+                Some("https://remote.example/users/alice")
+            ),
+            Some("https://remote.example/@alice".to_string())
+        );
+    }
+
+    #[test]
+    fn profile_url_falls_back_to_uri_when_url_is_missing_or_unsafe() {
+        let uri = Some("https://remote.example/users/alice");
+        assert_eq!(
+            sanitize_profile_url(Some("remote.example"), None, uri),
+            Some("https://remote.example/users/alice".to_string())
+        );
+        assert_eq!(
+            sanitize_profile_url(Some("remote.example"), Some("javascript:alert(1)"), uri),
+            Some("https://remote.example/users/alice".to_string())
+        );
+    }
+
+    #[test]
+    fn profile_url_rejects_non_http_schemes_and_garbage() {
+        for bad in ["javascript:alert(1)", "data:text/html,<b>x</b>", "file:///etc/passwd", "", "not a url", "https://"] {
+            assert_eq!(
+                sanitize_profile_url(Some("remote.example"), Some(bad), Some(bad)),
+                None,
+                "{bad:?} は採用しない"
+            );
+        }
     }
 }

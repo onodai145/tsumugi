@@ -42,6 +42,16 @@ pub struct RawUserShow {
     pub is_following: Option<bool>,
     #[serde(default)]
     pub is_muted: Option<bool>,
+    #[serde(default)]
+    pub is_blocking: Option<bool>,
+    #[serde(default)]
+    pub is_renote_muted: Option<bool>,
+    /// リモートユーザーのプロフィールページ。ローカルユーザーでは `null`。
+    #[serde(default)]
+    pub url: Option<String>,
+    /// リモートユーザーの ActivityPub ID。`url` が無いときの代替。
+    #[serde(default)]
+    pub uri: Option<String>,
 }
 
 /// ユーザーIDからプロフィール詳細（フォロー関係フラグ込み）を取得する。
@@ -213,5 +223,32 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(raw.is_muted, None);
+    }
+
+    #[test]
+    fn raw_user_show_reads_block_renote_mute_and_profile_urls() {
+        let raw: RawUserShow = serde_json::from_value(serde_json::json!({
+            "id": "u1", "username": "alice", "host": "remote.example",
+            "isBlocking": true, "isRenoteMuted": false,
+            "url": "https://remote.example/@alice",
+            "uri": "https://remote.example/users/alice"
+        }))
+        .unwrap();
+        assert_eq!(raw.is_blocking, Some(true));
+        assert_eq!(raw.is_renote_muted, Some(false));
+        assert_eq!(raw.url.as_deref(), Some("https://remote.example/@alice"));
+        assert_eq!(raw.uri.as_deref(), Some("https://remote.example/users/alice"));
+    }
+
+    #[test]
+    fn raw_user_show_without_the_new_fields_leaves_them_none() {
+        let raw: RawUserShow = serde_json::from_value(serde_json::json!({
+            "id": "u1", "username": "alice", "host": null
+        }))
+        .unwrap();
+        assert_eq!(raw.is_blocking, None);
+        assert_eq!(raw.is_renote_muted, None);
+        assert_eq!(raw.url, None);
+        assert_eq!(raw.uri, None);
     }
 }
