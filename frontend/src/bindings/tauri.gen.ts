@@ -402,6 +402,36 @@ export const commands = {
 	 */
 	nextExpiryAt: number | null,
 } | null, Error>(__TAURI_INVOKE("unmute_user", { accountId, userId })),
+	/**
+	 *  ユーザーをブロックする(Issue #546)。戻り値は `mute_user` と同じ(再同期の結果。失敗時は `None`)。
+	 *  ブロックは `blocking/list` として「表示を抑制する集合」に入るため、ミュートと同じく再同期する。
+	 */
+	blockUser: (accountId: string, userId: string) => typedError<{
+	blockedUsers: number,
+	wordRules: number,
+	/**
+	 *  有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+	 *  フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+	 */
+	nextExpiryAt: number | null,
+} | null, Error>(__TAURI_INVOKE("block_user", { accountId, userId })),
+	/**  ユーザーのブロックを解除する。戻り値は `block_user` と同じ。 */
+	unblockUser: (accountId: string, userId: string) => typedError<{
+	blockedUsers: number,
+	wordRules: number,
+	/**
+	 *  有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+	 *  フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+	 */
+	nextExpiryAt: number | null,
+} | null, Error>(__TAURI_INVOKE("unblock_user", { accountId, userId })),
+	/**
+	 *  ユーザーのリノートをミュートする(Issue #546)。サーバー側でタイムラインから除外されるので、
+	 *  クライアントの集合には入れず、再同期もしない。
+	 */
+	renoteMuteUser: (accountId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("renote_mute_user", { accountId, userId })),
+	/**  ユーザーのリノートミュートを解除する。 */
+	unrenoteMuteUser: (accountId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("unrenote_mute_user", { accountId, userId })),
 	/**  設定を `path` に書き出す。Androidでは `path` は `content://` URI でもよい。 */
 	exportSettings: (path: string) => typedError<null, Error>(__TAURI_INVOKE("export_settings", { path })),
 	/**  設定ファイルを検証して概要を返す。何も書き込まない。 */
@@ -431,6 +461,14 @@ export const commands = {
 	getUserFollowers: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_followers", { accountId, userId, untilId })),
 	/**  フォロー中一覧（ページング）。 */
 	getUserFollowing: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_following", { accountId, userId, untilId })),
+	/**  ユーザーを通報する(Issue #546)。 */
+	reportUser: (accountId: string, userId: string, comment: string) => typedError<null, Error>(__TAURI_INVOKE("report_user", { accountId, userId, comment })),
+	/**  自分のリスト一覧と、`user_id` が各リストに入っているか。 */
+	listUserListsWithMembership: (accountId: string, userId: string) => typedError<UserListMembership[], Error>(__TAURI_INVOKE("list_user_lists_with_membership", { accountId, userId })),
+	/**  リストにユーザーを追加する。 */
+	addUserToList: (accountId: string, listId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("add_user_to_list", { accountId, listId, userId })),
+	/**  リストからユーザーを外す。 */
+	removeUserFromList: (accountId: string, listId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("remove_user_from_list", { accountId, listId, userId })),
 	getCacheBackend: () => typedError<CacheBackendConfig, string>(__TAURI_INVOKE("get_cache_backend")),
 	setCacheBackend: (config: CacheBackendConfig, password: string | null) => typedError<null, string>(__TAURI_INVOKE("set_cache_backend", { config, password })),
 };
@@ -1441,11 +1479,28 @@ export type UserList = {
 	name: string,
 };
 
-/**  プロフィールモーダル用のレスポンス。`is_following` / `is_muted` は自分自身の場合 `None`。 */
+/**
+ *  「リストに追加」メニュー用。自分のリスト1件と、対象ユーザーがそのリストに入っているか。
+ *  `has_user` は Rust 側で `users/lists/list` の `userIds` から計算し、`userIds` 自体は IPC に載せない。
+ */
+export type UserListMembership = {
+	id: string,
+	name: string,
+	hasUser: boolean,
+};
+
+/**
+ *  プロフィールモーダル用のレスポンス。関係フラグ(`is_following` / `is_muted` / `is_blocking` /
+ *  `is_renote_muted`)は自分自身の場合 `None`。`profile_url` はリモートユーザーの元ページ
+ *  (http/https のみ。ローカルユーザーや不正な値では `None`)。
+ */
 export type UserProfile = {
 	user: User,
 	isFollowing: boolean | null,
 	isMuted: boolean | null,
+	isBlocking: boolean | null,
+	isRenoteMuted: boolean | null,
+	profileUrl: string | null,
 	isSelf: boolean,
 };
 

@@ -42,6 +42,16 @@ pub struct RawUserShow {
     pub is_following: Option<bool>,
     #[serde(default)]
     pub is_muted: Option<bool>,
+    #[serde(default)]
+    pub is_blocking: Option<bool>,
+    #[serde(default)]
+    pub is_renote_muted: Option<bool>,
+    /// リモートユーザーのプロフィールページ。ローカルユーザーでは `null`。
+    #[serde(default)]
+    pub url: Option<String>,
+    /// リモートユーザーの ActivityPub ID。`url` が無いときの代替。
+    #[serde(default)]
+    pub uri: Option<String>,
 }
 
 /// ユーザーIDからプロフィール詳細（フォロー関係フラグ込み）を取得する。
@@ -58,6 +68,30 @@ pub async fn follow(client: &MisskeyClient, user_id: &str) -> Result<()> {
 /// フォロー解除する。
 pub async fn unfollow(client: &MisskeyClient, user_id: &str) -> Result<()> {
     let _: serde_json::Value = client.post("following/delete", &json!({ "userId": user_id })).await?;
+    Ok(())
+}
+
+/// ユーザーを通報する。`users/report-abuse`(コメントは1〜2048文字。検証は呼び出し側)。
+pub async fn report_abuse(client: &MisskeyClient, user_id: &str, comment: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("users/report-abuse", &json!({ "userId": user_id, "comment": comment }))
+        .await?;
+    Ok(())
+}
+
+/// 自分のリストにユーザーを追加する。`users/lists/push`。すでに入っていれば `ALREADY_ADDED` で失敗する。
+pub async fn add_to_list(client: &MisskeyClient, list_id: &str, user_id: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("users/lists/push", &json!({ "listId": list_id, "userId": user_id }))
+        .await?;
+    Ok(())
+}
+
+/// 自分のリストからユーザーを外す。`users/lists/pull`。
+pub async fn remove_from_list(client: &MisskeyClient, list_id: &str, user_id: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("users/lists/pull", &json!({ "listId": list_id, "userId": user_id }))
+        .await?;
     Ok(())
 }
 
@@ -213,5 +247,71 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(raw.is_muted, None);
+    }
+
+    #[test]
+    fn raw_user_show_reads_block_renote_mute_and_profile_urls() {
+        let raw: RawUserShow = serde_json::from_value(serde_json::json!({
+            "id": "u1", "username": "alice", "host": "remote.example",
+            "isBlocking": true, "isRenoteMuted": false,
+            "url": "https://remote.example/@alice",
+            "uri": "https://remote.example/users/alice"
+        }))
+        .unwrap();
+        assert_eq!(raw.is_blocking, Some(true));
+        assert_eq!(raw.is_renote_muted, Some(false));
+        assert_eq!(raw.url.as_deref(), Some("https://remote.example/@alice"));
+        assert_eq!(raw.uri.as_deref(), Some("https://remote.example/users/alice"));
+    }
+
+    #[test]
+    fn raw_user_show_without_the_new_fields_leaves_them_none() {
+        let raw: RawUserShow = serde_json::from_value(serde_json::json!({
+            "id": "u1", "username": "alice", "host": null
+        }))
+        .unwrap();
+        assert_eq!(raw.is_blocking, None);
+        assert_eq!(raw.is_renote_muted, None);
+        assert_eq!(raw.url, None);
+        assert_eq!(raw.uri, None);
+    }
+
+    fn test_client(mock: &wiremock::MockServer) -> crate::api::MisskeyClient {
+        crate::api::MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None)
+    }
+
+    #[tokio::test]
+    async fn report_abuse_posts_the_user_id_and_comment() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/users/report-abuse"))
+            .and(body_partial_json(serde_json::json!({ "userId": "u1", "comment": "spam" })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        report_abuse(&test_client(&mock), "u1", "spam").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_to_list_posts_to_lists_push_and_remove_posts_to_lists_pull() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let mock = MockServer::start().await;
+        for endpoint in ["/users/lists/push", "/users/lists/pull"] {
+            Mock::given(method("POST"))
+                .and(path(endpoint))
+                .and(body_partial_json(serde_json::json!({ "listId": "L1", "userId": "u1" })))
+                .respond_with(ResponseTemplate::new(204))
+                .expect(1)
+                .mount(&mock)
+                .await;
+        }
+
+        add_to_list(&test_client(&mock), "L1", "u1").await.unwrap();
+        remove_from_list(&test_client(&mock), "L1", "u1").await.unwrap();
     }
 }

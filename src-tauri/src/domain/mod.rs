@@ -29,7 +29,7 @@ pub use account::Account;
 pub use cache_backend::CacheBackendConfig;
 pub use clip::Clip;
 pub use column::{clamp_group_width, Column, ColumnGroup, ColumnKind, FilterQuery, GROUP_WIDTH_MAX, GROUP_WIDTH_MIN};
-pub use list::{SourceItem, UserList};
+pub use list::{SourceItem, UserList, UserListMembership};
 pub use mml::{
     DelayParams, EnvelopeParams, Glide, MmlError, MmlParseResult, MmlScore, NoteEvent,
     ReverbParams, Timbre, TimbreParams, VibratoParams,

@@ -37,6 +37,7 @@ import type {
   ScheduleCapabilities,
   DraftInput,
   MutePeriod,
+  UserListMembership,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -1566,6 +1567,91 @@ class AppStore {
     try {
       const result = await unwrapAcc(accountId, commands.unmuteUser(accountId, userId));
       if (result) this.#applyMuteSync(accountId, seq, result.nextExpiryAt);
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// ユーザーをブロックする(Issue #546)。ブロックも「表示を抑制する集合」に入るので、`muteUser` と同様に
+  /// 再取得の結果でタイマーを張り直す。
+  async blockUser(accountId: string, userId: string) {
+    const seq = this.#beginMuteSync(accountId);
+    try {
+      const result = await unwrapAcc(accountId, commands.blockUser(accountId, userId));
+      if (result) this.#applyMuteSync(accountId, seq, result.nextExpiryAt);
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// ユーザーのブロックを解除する。`blockUser` と同様。
+  async unblockUser(accountId: string, userId: string) {
+    const seq = this.#beginMuteSync(accountId);
+    try {
+      const result = await unwrapAcc(accountId, commands.unblockUser(accountId, userId));
+      if (result) this.#applyMuteSync(accountId, seq, result.nextExpiryAt);
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// ユーザーのリノートをミュートする(Issue #546)。サーバー側で除外されるので、再同期はしない。
+  async renoteMuteUser(accountId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.renoteMuteUser(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// ユーザーのリノートミュートを解除する。
+  async unrenoteMuteUser(accountId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.unrenoteMuteUser(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// ユーザーを通報する。コメントは必須(Rust 側でも検証する)。
+  async reportUser(accountId: string, userId: string, comment: string) {
+    try {
+      await unwrapAcc(accountId, commands.reportUser(accountId, userId, comment));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// 自分のリスト一覧と、`userId` が各リストに入っているか。
+  async listUserListsWithMembership(accountId: string, userId: string): Promise<UserListMembership[]> {
+    try {
+      return await unwrapAcc(accountId, commands.listUserListsWithMembership(accountId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// リストにユーザーを追加する。
+  async addUserToList(accountId: string, listId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.addUserToList(accountId, listId, userId));
+    } catch (e) {
+      this.#logFailure(e);
+      throw e;
+    }
+  }
+
+  /// リストからユーザーを外す。
+  async removeUserFromList(accountId: string, listId: string, userId: string) {
+    try {
+      await unwrapAcc(accountId, commands.removeUserFromList(accountId, listId, userId));
     } catch (e) {
       this.#logFailure(e);
       throw e;

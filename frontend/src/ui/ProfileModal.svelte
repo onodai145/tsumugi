@@ -10,6 +10,9 @@
   import FollowListModal from "./FollowListModal.svelte";
   import Avatar from "./Avatar.svelte";
   import UserMenu from "./UserMenu.svelte";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
+  import ReportUserDialog from "./ReportUserDialog.svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { portal } from "../lib/portal";
   import { MoreHorizontal } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
@@ -39,9 +42,12 @@
   let userMenuOpen = $state(false);
   let userMenuAnchor = $state<HTMLElement | null>(null);
   let userMenuPos = $state<{ left: number; top: number } | null>(null);
-  let muteBusy = $state(false);
-  let muteErr = $state<string | null>(null);
-  const USER_MENU_W = 200;
+  let actionBusy = $state(false);
+  let actionErr = $state<string | null>(null);
+  let confirmBlock = $state(false);
+  let reportOpen = $state(false);
+  let notice = $state<string | null>(null);
+  const USER_MENU_W = 220;
   $effect(() => {
     if (!userMenuOpen || !userMenuAnchor) return;
     const r = userMenuAnchor.getBoundingClientRect();
@@ -74,8 +80,11 @@
     notesErr = null;
     followErr = null;
     followListKind = null;
-    muteErr = null;
-    muteBusy = false;
+    actionErr = null;
+    actionBusy = false;
+    confirmBlock = false;
+    reportOpen = false;
+    notice = null;
     userMenuOpen = false;
     try {
       const userId = await resolveUserId();
@@ -128,54 +137,137 @@
     }
   }
 
-  async function mute(period: MutePeriod) {
-    if (profileState.status !== "ready" || muteBusy) return;
+  type ReadyProfile = Extract<ProfileState, { status: "ready" }>["profile"];
+
+  // ミュート/ブロック/リノートミュートの共通の流れ。busy 制御、世代番号による古い応答の無視、
+  // 「すでにその状態だった」エラーのときの表示補正をまとめる。`stale` は、そのエラーコードが
+  // 含まれていたときに、表示を直して補正メッセージを出す。
+  async function runUserAction(
+    op: (userId: string) => Promise<unknown>,
+    onDone: (profile: ReadyProfile) => void,
+    stale?: { code: string; message: string; fix: (profile: ReadyProfile) => void },
+  ) {
+    if (profileState.status !== "ready" || actionBusy) return;
     const gen = requestGen;
     const userId = profileState.profile.user.id;
     userMenuOpen = false;
-    muteBusy = true;
-    muteErr = null;
+    actionBusy = true;
+    actionErr = null;
+    notice = null;
     try {
-      await app.muteUser(accountId, userId, period);
-      if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = true;
+      await op(userId);
+      if (gen === requestGen && profileState.status === "ready") onDone(profileState.profile);
     } catch (e) {
       if (gen === requestGen) {
-        // 表示が古かっただけ(すでにミュート中)なら、表示を直す。メニューで解除できるようになる。
-        if (String(e).includes("ALREADY_MUTING") && profileState.status === "ready") {
-          profileState.profile.isMuted = true;
-          muteErr = "すでにミュート中です。表示を更新しました";
+        if (stale && String(e).includes(stale.code) && profileState.status === "ready") {
+          stale.fix(profileState.profile);
+          actionErr = stale.message;
         } else {
-          muteErr = String(e);
+          actionErr = String(e);
         }
       }
     } finally {
-      if (gen === requestGen) muteBusy = false; // 切り替え後の新しいプロフィールの busy を、古い呼び出しが触らない
+      if (gen === requestGen) actionBusy = false; // 切り替え後の新しいプロフィールの busy を、古い呼び出しが触らない
     }
   }
 
-  async function unmute() {
-    if (profileState.status !== "ready" || muteBusy) return;
-    const gen = requestGen;
+  const mute = (period: MutePeriod) =>
+    runUserAction(
+      (userId) => app.muteUser(accountId, userId, period),
+      (p) => (p.isMuted = true),
+      {
+        code: "ALREADY_MUTING",
+        message: "すでにミュート中です。表示を更新しました",
+        fix: (p) => (p.isMuted = true),
+      },
+    );
+
+  const unmute = () =>
+    runUserAction(
+      (userId) => app.unmuteUser(accountId, userId),
+      (p) => (p.isMuted = false),
+      {
+        code: "NOT_MUTING",
+        message: "すでにミュート中ではありません。表示を更新しました",
+        fix: (p) => (p.isMuted = false),
+      },
+    );
+
+  const renoteMute = () =>
+    runUserAction(
+      (userId) => app.renoteMuteUser(accountId, userId),
+      (p) => (p.isRenoteMuted = true),
+      {
+        code: "ALREADY_MUTING",
+        message: "すでにリノートをミュート中です。表示を更新しました",
+        fix: (p) => (p.isRenoteMuted = true),
+      },
+    );
+
+  const unrenoteMute = () =>
+    runUserAction(
+      (userId) => app.unrenoteMuteUser(accountId, userId),
+      (p) => (p.isRenoteMuted = false),
+      {
+        code: "NOT_MUTING",
+        message: "すでにリノートをミュート中ではありません。表示を更新しました",
+        fix: (p) => (p.isRenoteMuted = false),
+      },
+    );
+
+  // ブロックの確認後に呼ぶ。サーバーはブロック時にフォローを外すので、表示も外す。
+  const block = () => {
+    confirmBlock = false;
+    return runUserAction(
+      (userId) => app.blockUser(accountId, userId),
+      (p) => {
+        p.isBlocking = true;
+        if (p.isFollowing !== null) p.isFollowing = false;
+      },
+      {
+        code: "ALREADY_BLOCKING",
+        message: "すでにブロック中です。表示を更新しました",
+        fix: (p) => (p.isBlocking = true),
+      },
+    );
+  };
+
+  const unblock = () =>
+    runUserAction(
+      (userId) => app.unblockUser(accountId, userId),
+      (p) => (p.isBlocking = false),
+      {
+        code: "NOT_BLOCKING",
+        message: "すでにブロック中ではありません。表示を更新しました",
+        fix: (p) => (p.isBlocking = false),
+      },
+    );
+
+  // 「リストに追加」パネルへ渡す(状態とエラー表示はパネルが持つ)。
+  const loadLists = () => {
+    if (profileState.status !== "ready") return Promise.resolve([]);
+    return app.listUserListsWithMembership(accountId, profileState.profile.user.id);
+  };
+  const toggleList = (listId: string, add: boolean) => {
+    if (profileState.status !== "ready") return Promise.resolve();
     const userId = profileState.profile.user.id;
+    return add ? app.addUserToList(accountId, listId, userId) : app.removeUserFromList(accountId, listId, userId);
+  };
+
+  // 通報ダイアログの送信。成功したら閉じて、プロフィール上に通知を出す。失敗は throw してダイアログに出す。
+  async function submitReport(comment: string) {
+    if (profileState.status !== "ready") return;
+    const gen = requestGen;
+    await app.reportUser(accountId, profileState.profile.user.id, comment);
+    if (gen !== requestGen) return; // 送信中にプロフィールが切り替わったら、新しい側を触らない
+    reportOpen = false;
+    notice = "通報しました";
+  }
+
+  function openProfilePage() {
+    if (profileState.status !== "ready" || !profileState.profile.profileUrl) return;
     userMenuOpen = false;
-    muteBusy = true;
-    muteErr = null;
-    try {
-      await app.unmuteUser(accountId, userId);
-      if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = false;
-    } catch (e) {
-      if (gen === requestGen) {
-        // 期限切れなどで、すでにミュート中でなかったなら、表示を直す。
-        if (String(e).includes("NOT_MUTING") && profileState.status === "ready") {
-          profileState.profile.isMuted = false;
-          muteErr = "すでにミュート中ではありません。表示を更新しました";
-        } else {
-          muteErr = String(e);
-        }
-      }
-    } finally {
-      if (gen === requestGen) muteBusy = false;
-    }
+    void openUrl(profileState.profile.profileUrl);
   }
 
   // メニューを開いているときの Escape は、メニューだけ閉じる(モーダルまで閉じない)。メニューは portal で
@@ -259,6 +351,9 @@
           {#if profile.isMuted}
             <span class="inline-flex w-fit items-center rounded-sm border border-border px-1 text-xs text-muted-foreground">ミュート中</span>
           {/if}
+          {#if profile.isBlocking}
+            <span class="inline-flex w-fit items-center rounded-sm border border-border px-1 text-xs text-muted-foreground">ブロック中</span>
+          {/if}
         </div>
         {#if !profile.isSelf}
           <Button
@@ -276,7 +371,7 @@
                 variant="ghost"
                 size="icon-sm"
                 aria-label="ユーザーメニュー"
-                disabled={muteBusy}
+                disabled={actionBusy}
                 onclick={() => (userMenuOpen = !userMenuOpen)}
               >
                 <MoreHorizontal size={16} />
@@ -294,7 +389,28 @@
                   onclick={(e) => e.stopPropagation()}
                   role="presentation"
                 >
-                  <UserMenu muted={profile.isMuted} onmute={mute} onunmute={unmute} />
+                  <UserMenu
+                    muted={profile.isMuted}
+                    onmute={mute}
+                    onunmute={unmute}
+                    renoteMuted={profile.isRenoteMuted}
+                    onrenotemute={renoteMute}
+                    onunrenotemute={unrenoteMute}
+                    blocking={profile.isBlocking}
+                    onblock={() => {
+                      userMenuOpen = false;
+                      confirmBlock = true;
+                    }}
+                    onunblock={unblock}
+                    loadLists={loadLists}
+                    togglelist={toggleList}
+                    profileUrl={profile.profileUrl}
+                    onopen={openProfilePage}
+                    onreport={() => {
+                      userMenuOpen = false;
+                      reportOpen = true;
+                    }}
+                  />
                 </div>
               </div>
             {/if}
@@ -302,7 +418,8 @@
         {/if}
       </div>
       {#if followErr}<p class="my-2 text-sm text-destructive">{followErr}</p>{/if}
-      {#if muteErr}<p class="my-2 text-sm text-destructive">{muteErr}</p>{/if}
+      {#if actionErr}<p class="my-2 text-sm text-destructive">{actionErr}</p>{/if}
+      {#if notice}<p class="my-2 text-sm text-muted-foreground">{notice}</p>{/if}
       {#if profile.user.bio}
         <p class="mt-2.5 mb-0 whitespace-pre-wrap break-words text-sm leading-normal"
           ><Mfm text={profile.user.bio} emojis={proxiedEmojiMap(profile.user.emojis, instanceHost)} /></p
@@ -345,6 +462,20 @@
           {accountId}
           onclose={() => (followListKind = null)}
         />
+      {/if}
+      {#if confirmBlock}
+        <ConfirmDialog
+          title="ブロック"
+          message={`${acct(profile.user)} をブロックしますか?\n相手はあなたをフォローできなくなり、フォロー関係も解除されます。`}
+          confirmLabel="ブロックする"
+          danger
+          z={1020}
+          onConfirm={block}
+          onCancel={() => (confirmBlock = false)}
+        />
+      {/if}
+      {#if reportOpen}
+        <ReportUserDialog acct={acct(profile.user)} onsubmit={submitReport} oncancel={() => (reportOpen = false)} />
       {/if}
     {/if}
   </div>

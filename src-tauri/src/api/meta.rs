@@ -2,7 +2,7 @@
 
 use crate::api::normalize::RawUser;
 use crate::api::MisskeyClient;
-use crate::domain::{EmojiDef, SourceItem, User, UserList};
+use crate::domain::{EmojiDef, SourceItem, User, UserList, UserListMembership};
 use crate::error::Result;
 use serde::Deserialize;
 use serde_json::json;
@@ -36,6 +36,33 @@ pub async fn fetch_user_lists(client: &MisskeyClient) -> Result<Vec<UserList>> {
     Ok(raw
         .into_iter()
         .map(|l| UserList {
+            id: l.id,
+            name: l.name,
+        })
+        .collect())
+}
+
+/// 自分のユーザリスト一覧と、`user_id` が各リストに入っているか(「リストに追加」メニュー用)。
+/// `userId` 引数は使わない(ローカルユーザー専用で、自分のリストではなく相手のリストを返すため)。
+/// 応答の `userIds` は全メンバーを含む(上流の `UserListEntityService.pack`)。
+pub async fn fetch_user_lists_with_membership(
+    client: &MisskeyClient,
+    user_id: &str,
+) -> Result<Vec<UserListMembership>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RawList {
+        id: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        user_ids: Vec<String>,
+    }
+    let raw: Vec<RawList> = client.post("users/lists/list", &json!({})).await?;
+    Ok(raw
+        .into_iter()
+        .map(|l| UserListMembership {
+            has_user: l.user_ids.iter().any(|id| id == user_id),
             id: l.id,
             name: l.name,
         })
@@ -261,5 +288,32 @@ mod meta_info_tests {
         let caps = crate::domain::search_capabilities(version.as_deref());
         assert!(version.is_some(), "version should be present");
         assert!(caps.date_range, "misskey.omhnc.net is 2026.x so date range must be supported");
+    }
+
+    #[tokio::test]
+    async fn fetch_user_lists_with_membership_marks_the_lists_that_contain_the_user() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/users/lists/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                { "id": "L1", "name": "友達", "userIds": ["u1", "u2"], "isPublic": false },
+                { "id": "L2", "name": "仕事", "userIds": ["u3"], "isPublic": false },
+                { "id": "L3", "name": "空", "isPublic": false }
+            ])))
+            .mount(&mock)
+            .await;
+        let client = crate::api::MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+
+        let lists = fetch_user_lists_with_membership(&client, "u1").await.unwrap();
+
+        assert_eq!(
+            lists
+                .iter()
+                .map(|l| (l.id.as_str(), l.name.as_str(), l.has_user))
+                .collect::<Vec<_>>(),
+            vec![("L1", "友達", true), ("L2", "仕事", false), ("L3", "空", false)]
+        );
     }
 }

@@ -14,6 +14,7 @@ pub const PERMISSIONS: &[&str] = &[
     "read:mutes",
     "write:mutes",
     "read:blocks",
+    "write:blocks",
     "read:channels",
     "write:notes",
     "write:reactions",
@@ -23,6 +24,7 @@ pub const PERMISSIONS: &[&str] = &[
     "read:drive",
     "write:favorites",
     "write:account",
+    "write:report-abuse",
 ];
 
 pub const APP_NAME: &str = "tsumugi";
@@ -106,5 +108,15 @@ mod tests {
         assert!(PERMISSIONS.contains(&"write:mutes"));
         let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555");
         assert!(u.contains("write%3Amutes") || u.contains("write:mutes"));
+    }
+
+    #[test]
+    fn requests_write_blocks_and_write_report_abuse() {
+        for permission in ["write:blocks", "write:report-abuse", "write:account", "write:mutes"] {
+            assert!(PERMISSIONS.contains(&permission), "{permission} が無い");
+        }
+        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555");
+        assert!(u.contains("write%3Ablocks") || u.contains("write:blocks"));
+        assert!(u.contains("write%3Areport-abuse") || u.contains("write:report-abuse"));
     }
 }

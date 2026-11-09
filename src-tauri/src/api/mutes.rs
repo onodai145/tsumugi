@@ -100,6 +100,31 @@ pub async fn unmute_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// ユーザーをブロックする。`blocking/create`。サーバーは双方向のフォローも解除する。
+/// すでにブロック中なら `ALREADY_BLOCKING` で失敗する。
+pub async fn block_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
+    let _: Value = client.post("blocking/create", &json!({ "userId": user_id })).await?;
+    Ok(())
+}
+
+/// ユーザーのブロックを解除する。`blocking/delete`。ブロック中でなければ `NOT_BLOCKING` で失敗する。
+pub async fn unblock_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
+    let _: Value = client.post("blocking/delete", &json!({ "userId": user_id })).await?;
+    Ok(())
+}
+
+/// ユーザーのリノートをミュートする。`renote-mute/create`。すでに対象なら `ALREADY_MUTING` で失敗する。
+pub async fn renote_mute_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
+    let _: Value = client.post("renote-mute/create", &json!({ "userId": user_id })).await?;
+    Ok(())
+}
+
+/// ユーザーのリノートミュートを解除する。`renote-mute/delete`。対象でなければ `NOT_MUTING` で失敗する。
+pub async fn unrenote_mute_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
+    let _: Value = client.post("renote-mute/delete", &json!({ "userId": user_id })).await?;
+    Ok(())
+}
+
 /// `mutedWords` の1要素。`rule` は適用するルール(不正な正規表現では `None`)、`key` はサーバー側の
 /// 要素を表す安定した文字列で、`ServerMuteSnapshot::words` の要素になる(Issue #456)。
 /// キーをパース後のルールではなく生の要素から作るので、`i` フラグだけの変更を区別でき、
@@ -499,6 +524,62 @@ mod tests {
             .await;
 
         unmute_user(&test_client(&mock), "u1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn block_user_posts_the_user_id_to_blocking_create() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/create"))
+            .and(body_partial_json(json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "u1" })))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        block_user(&test_client(&mock), "u1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unblock_user_posts_the_user_id_to_blocking_delete() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/delete"))
+            .and(body_partial_json(json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "u1" })))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        unblock_user(&test_client(&mock), "u1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn renote_mute_user_posts_the_user_id_to_renote_mute_create() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/renote-mute/create"))
+            .and(body_partial_json(json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        renote_mute_user(&test_client(&mock), "u1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unrenote_mute_user_posts_the_user_id_to_renote_mute_delete() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/renote-mute/delete"))
+            .and(body_partial_json(json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        unrenote_mute_user(&test_client(&mock), "u1").await.unwrap();
     }
 
     #[tokio::test]
