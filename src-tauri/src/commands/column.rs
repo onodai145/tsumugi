@@ -452,7 +452,17 @@ async fn resume_column_core<R: Runtime>(
                 // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
                 // 残るので、空判定の前に行う(Issue #432)。取得中に update_column / close_column が
                 // 走っていた(世代が古い)なら、何も書かず、イベントも出さない(Issue #446)。
-                if !commit_gap_fill_writes(&state.column_fence, &state.cache, &column_id, &epoch, &gap_result).await {
+                let attribute_to = crate::attribution::attribution_target(&account_id, resolved.use_cache);
+                if !commit_gap_fill_writes(
+                    &state.column_fence,
+                    &state.cache,
+                    &column_id,
+                    &epoch,
+                    &gap_result,
+                    attribute_to.as_deref(),
+                )
+                .await
+                {
                     return;
                 }
                 if gap_result.notes.is_empty() {
@@ -1329,7 +1339,17 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
     // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
     // 残るので、空判定の前に行う(Issue #432)。取得中に update_column / close_column が
     // 走っていた(世代が古い)なら、何も書かず、イベントも出さない(Issue #446)。
-    if !commit_gap_fill_writes(&state.column_fence, &state.cache, &column.id, &epoch, &gap_result).await {
+    let attribute_to = crate::attribution::attribution_target(&column.account_id, resolved.use_cache);
+    if !commit_gap_fill_writes(
+        &state.column_fence,
+        &state.cache,
+        &column.id,
+        &epoch,
+        &gap_result,
+        attribute_to.as_deref(),
+    )
+    .await
+    {
         return;
     }
     if gap_result.notes.is_empty() {
@@ -1492,6 +1512,9 @@ struct FilteredFetch {
     cacheable: Vec<Note>,
     /// `resolved.kinds` と同じ並びの、ソースごとの取得結果。
     source_outcomes: Vec<SourceOutcome>,
+    /// この取得結果を帰属させるアカウント(Issue #557)。`from cache` を含むカラムでは None
+    /// (グローバルなキャッシュ由来のノートが混ざり、そのアカウントが取得した証拠にならないため)。
+    attribute_to: Option<String>,
 }
 
 /// `collect_backfill_pages` が1パス分の取得として受け取る結果(Issue #428)。
@@ -1580,7 +1603,7 @@ where
     all_cacheable.sort_by(order);
     // `from cache` を含むカラムは境界の対象外なので、cacheable は画面用と同じ。
     let cacheable = if use_cache { display_acc.clone() } else { all_cacheable };
-    Ok(FilteredFetch { notes: display_acc, cacheable, source_outcomes: merged_outcomes })
+    Ok(FilteredFetch { notes: display_acc, cacheable, source_outcomes: merged_outcomes, attribute_to: None })
 }
 
 /// 取得結果をキャッシュへ書く。書くのは画面用の `notes`(truncate後)ではなく `cacheable`。
@@ -1588,7 +1611,11 @@ where
 /// 進めるため、`notes` を書くと境界が完全と主張する範囲に欠落が出る。`fetch_backfill` と
 /// `open_stream_and_fetch` の両方がこれを経由することで、書き込み対象を1か所に固定する。
 async fn cache_fetched(cache: &NoteCacheStore, column_id: &str, fetch: &FilteredFetch) -> Result<()> {
-    cache.cache_notes(column_id, &fetch.cacheable).await
+    cache.cache_notes(column_id, &fetch.cacheable).await?;
+    if let Some(account_id) = fetch.attribute_to.as_deref() {
+        crate::attribution::record(cache, account_id, &fetch.cacheable).await;
+    }
+    Ok(())
 }
 
 /// `fetch_backfill` の書き込み: 取得ノートのキャッシュと、ソースごとの境界の延長。
@@ -1682,12 +1709,16 @@ async fn commit_gap_fill_writes(
     column_id: &str,
     epoch: &Epoch,
     gap: &GapFillResult,
+    attribute_to: Option<&str>,
 ) -> bool {
     fence
         .write_if_current(column_id, epoch, |_boundaries_ok| async {
             apply_gap_fill_boundaries(cache, column_id, gap).await;
             if !gap.notes.is_empty() {
                 let _ = cache.cache_notes(column_id, &gap.notes).await;
+                if let Some(account_id) = attribute_to {
+                    crate::attribution::record(cache, account_id, &gap.notes).await;
+                }
             }
         })
         .await
@@ -2193,10 +2224,12 @@ async fn fetch_and_filter_multi(
     resolved: &ResolvedSources,
     until_id: Option<&str>,
 ) -> Result<FilteredFetch> {
-    collect_backfill_pages(until_id, resolved.use_cache, |until| async move {
+    let mut fetch = collect_backfill_pages(until_id, resolved.use_cache, |until| async move {
         fetch_backfill_pass(state, account_id, resolved, until.as_deref()).await
     })
-    .await
+    .await?;
+    fetch.attribute_to = crate::attribution::attribution_target(account_id, resolved.use_cache);
+    Ok(fetch)
 }
 
 /// `fetch_and_filter_multi` の1パス分の取得(Issue #428)。各ソースから `until_id` より古い
@@ -3241,13 +3274,48 @@ mod tests {
         let all: Vec<Note> = (1..=40).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
         let (notes, cacheable) = split_display_and_cacheable(all, false, None);
         assert_eq!((notes.len(), cacheable.len()), (20, 40));
-        let fetch = FilteredFetch { notes, cacheable, source_outcomes: vec![fetched("n02"), fetched("n01")] };
+        let fetch = FilteredFetch {
+            notes,
+            cacheable,
+            source_outcomes: vec![fetched("n02"), fetched("n01")],
+            attribute_to: None,
+        };
 
         let store = cache_with(&[]).await;
         cache_fetched(&store, "col1", &fetch).await.unwrap();
 
         let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
         assert_eq!(got.len(), 40);
+    }
+
+    #[tokio::test]
+    async fn cache_fetched_records_the_attribution_only_when_attribute_to_is_set() {
+        let store = cache_with(&[]).await;
+        let mut fetch = FilteredFetch {
+            notes: vec![note("n01", 1)],
+            cacheable: vec![note("n01", 1)],
+            source_outcomes: vec![],
+            attribute_to: None,
+        };
+
+        cache_fetched(&store, "col1", &fetch).await.unwrap();
+        assert!(!store.account_has_note("acc1", "n01").await.unwrap());
+
+        fetch.attribute_to = Some("acc1".into());
+        cache_fetched(&store, "col1", &fetch).await.unwrap();
+        assert!(store.account_has_note("acc1", "n01").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn commit_gap_fill_writes_records_the_attribution_only_when_attribute_to_is_set() {
+        let (fence, cache) = (ColumnFence::default(), mem_cache());
+        let epoch = fence.begin("c1");
+
+        commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
+        assert!(!cache.account_has_note("acc1", "n600").await.unwrap());
+
+        commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), Some("acc1")).await;
+        assert!(cache.account_has_note("acc1", "n600").await.unwrap());
     }
 
     #[test]
@@ -3410,6 +3478,7 @@ mod tests {
             notes: vec![],
             cacheable: ids.iter().enumerate().map(|(i, id)| note(id, i as i64 + 1)).collect(),
             source_outcomes: vec![],
+            attribute_to: None,
         }
     }
 
@@ -3578,7 +3647,7 @@ mod tests {
         cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
         let epoch = fence.begin("c1");
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
 
         assert!(written);
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
@@ -3591,7 +3660,7 @@ mod tests {
         let epoch = fence.begin("c1");
         simulate_update_column(&fence, &cache, "c1").await;
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
 
         assert!(!written);
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
@@ -3667,7 +3736,7 @@ mod tests {
         let epoch = fence.begin("c1");
         simulate_set_mute(&fence, &cache).await; // 境界は空
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
 
         assert!(written);
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
@@ -3683,7 +3752,7 @@ mod tests {
         // ミュート変更の後に、別の取得が作った行
         cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)])).await;
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
 
         assert!(written);
         // 引き上げを飛ばすと、打ち切られたギャップが境界で覆われないまま残る
