@@ -45,9 +45,22 @@ pub(crate) async fn forget(cache: &NoteCacheStore, account_id: &str) {
     }
 }
 
-/// 既存の `column_note` から、`from cache` を含まないカラムの分を帰属として複写する(冪等)。
+/// 既存の `column_note` から、`from cache` を含まないカラムの分を帰属として複写する。
 /// 起動時と、キャッシュのバックエンドを切り替えた直後に呼ぶ。
+///
+/// 一度きりの移行として、`note_account` が空のときだけ走る。`column_note` は「そのカラムの今の定義で
+/// 取得したもの」とは限らない(設定インポートは `column_note` を消さずにカラム定義を入れ替える)ため、
+/// 毎回走らせると、別アカウント由来のノートを帰属させ直しうる。新しい取得は、すべて取得経路で
+/// 記録される。起動直後にストリーミングが先に記録した場合は、埋め直しを飛ばす(見えない側に倒れる)。
 pub(crate) async fn backfill_all(settings: &SettingsStore, cache: &NoteCacheStore) {
+    match cache.note_account_is_empty().await {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(e) => {
+            log::warn!("skipping the note attribution backfill: failed to check the table: {e}");
+            return;
+        }
+    }
     let columns = match settings.load_columns() {
         Ok(columns) => columns,
         Err(e) => {
@@ -215,6 +228,25 @@ mod tests {
         conn.lock().unwrap().execute("DROP TABLE note_account", []).unwrap();
 
         forget(&cache, "acc1").await; // ここで戻ってくること自体がテスト
+    }
+
+    /// 埋め直しは `note_account` が空のときだけ走る(一度きりの移行)。設定インポートなどで
+    /// `column_note` が現在のカラム定義と食い違っても、毎回の起動で、別アカウント由来のノートを
+    /// 帰属させ直さないため。
+    #[tokio::test]
+    async fn backfill_all_runs_only_while_note_account_is_empty() {
+        let settings = SettingsStore::new_in_memory();
+        settings.upsert_column(&column("plain", "acc1", ColumnKind::Home, FilterQuery::Keywords(vec![]))).unwrap();
+        let cache = mem_cache();
+        cache.cache_notes("plain", &[note("n1", 1)]).await.unwrap();
+
+        backfill_all(&settings, &cache).await;
+        assert!(cache.account_has_note("acc1", "n1").await.unwrap());
+
+        // 後から column_note にだけ入ったノート(例: 設定インポートでカラム定義が入れ替わった後の残骸)。
+        cache.cache_notes("plain", &[note("n2", 2)]).await.unwrap();
+        backfill_all(&settings, &cache).await;
+        assert!(!cache.account_has_note("acc1", "n2").await.unwrap());
     }
 
     #[tokio::test]

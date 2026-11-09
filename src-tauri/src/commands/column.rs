@@ -3318,6 +3318,22 @@ mod tests {
         assert!(cache.account_has_note("acc1", "n600").await.unwrap());
     }
 
+    /// 帰属先の決定そのもの(`ResolvedSources.use_cache` から `attribute_to` への配線)を固定する。
+    /// `from cache` を含むカラムの取得結果は、どのアカウントの帰属にもしない(Issue #557)。
+    #[tokio::test]
+    async fn fetch_and_filter_multi_attributes_only_columns_that_do_not_use_the_cache() {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory());
+
+        // `kinds` が空なら、ネットワークは使わない(cache のみ / ソースなし)。
+        let uses_cache = ResolvedSources { kinds: vec![], use_cache: true, filter: CompiledFilter::PassAll };
+        let fetch = fetch_and_filter_multi(&state, "acc1", &uses_cache, None).await.unwrap();
+        assert_eq!(fetch.attribute_to, None);
+
+        let no_cache = ResolvedSources { kinds: vec![], use_cache: false, filter: CompiledFilter::PassAll };
+        let fetch = fetch_and_filter_multi(&state, "acc1", &no_cache, None).await.unwrap();
+        assert_eq!(fetch.attribute_to.as_deref(), Some("acc1"));
+    }
+
     #[test]
     fn normalize_search_host_maps_own_host_and_dot_to_local() {
         assert_eq!(normalize_search_host(None, "misskey.io"), None);

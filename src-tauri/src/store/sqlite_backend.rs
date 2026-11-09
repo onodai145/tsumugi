@@ -229,6 +229,17 @@ impl NoteCacheBackend for SqliteBackend {
         .map_err(map_join_error)?
     }
 
+    async fn note_account_is_empty(&self) -> Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        tauri::async_runtime::spawn_blocking(move || -> Result<bool> {
+            let guard = conn.lock().unwrap();
+            let any: bool = guard.query_row("SELECT EXISTS(SELECT 1 FROM note_account)", [], |r| r.get(0))?;
+            Ok(!any)
+        })
+        .await
+        .map_err(map_join_error)?
+    }
+
     async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
         let conn = Arc::clone(&self.conn);
         let column_id = column_id.to_string();
@@ -1351,6 +1362,17 @@ mod tests {
         assert!(s.account_has_note("acc1", "n1").await.unwrap());
         assert!(s.account_has_note("acc1", "n2").await.unwrap());
         assert!(!s.account_has_note("acc1", "n3").await.unwrap()); // 別カラムは複写しない
+    }
+
+    #[tokio::test]
+    async fn note_account_is_empty_reports_whether_any_attribution_exists() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        assert!(s.note_account_is_empty().await.unwrap());
+
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+
+        assert!(!s.note_account_is_empty().await.unwrap());
     }
 
     #[tokio::test]

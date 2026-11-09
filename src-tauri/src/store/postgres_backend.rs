@@ -962,6 +962,12 @@ impl NoteCacheBackend for PostgresBackend {
         Ok(found)
     }
 
+    async fn note_account_is_empty(&self) -> Result<bool> {
+        let (any,): (bool,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account)").fetch_one(&self.pool).await?;
+        Ok(!any)
+    }
+
     async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
         let rows: Vec<(i32, String)> = sqlx::query_as(
             "SELECT source_idx, oldest_fetched_id FROM column_source_boundary
@@ -1775,6 +1781,18 @@ mod tests {
 
         assert!(!s.account_has_note("acc1", "n1").await.unwrap());
         assert!(s.account_has_note("acc1", "n3").await.unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_is_empty_reports_whether_any_attribution_exists() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        assert!(s.note_account_is_empty().await.unwrap());
+
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+
+        assert!(!s.note_account_is_empty().await.unwrap());
     }
 
     #[tokio::test]

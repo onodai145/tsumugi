@@ -57,6 +57,8 @@ async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Res
 async fn forget_account_notes(&self, account_id: &str) -> Result<()>;
 /// このノートがそのアカウントに帰属しているか(テストと、後続の MCP の `get_note` が使う読み取り口)。
 async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool>;
+/// 帰属が1件もないか(埋め直しを一度きりの移行にするための判定)。
+async fn note_account_is_empty(&self) -> Result<bool>;
 ```
 
 `NoteCacheStore` にも同名の委譲メソッドを足す。
@@ -85,8 +87,10 @@ async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool
 
 起動時と、キャッシュのバックエンドを切り替えた直後に、アプリ層で、各アカウントのカラムのうち `from cache` を含まないものについて `backfill_note_accounts(account_id, column_id)` を呼ぶ。`from cache` を含むかの判定は、ネットワークを使わない純粋な関数(TQL のパースのみ。パース失敗は「含む」として除外)で行う。`INSERT … SELECT note_id FROM column_note WHERE column_id = ?` を `ON CONFLICT DO NOTHING`(MySQL は `INSERT IGNORE`)で行い、冪等にする(既存のマイグレーション方針と同じ: マーカー用テーブルを持たない)。
 
-- 過去に `from cache` へ設定変更されたカラムは、当時の状態が分からない。現在 `from cache` を含むカラムは除外する(安全側)。過去に `from cache` だった後で通常に戻したカラムの `column_note` は区別できないが、その分は混入しうる(既知の限界。spec に明記して受け入れる)。
-- 毎起動で全カラム分を走らせると、キャッシュが大きい場合に起動が遅くなりうる(要確認)。問題があれば「`note_account` が空のときだけ実行する」に限定する。
+**一度きりの移行として、`note_account` が空のときだけ実行する。** `column_note` は「そのカラムの今の定義で取得したもの」とは限らない。たとえば設定のインポートは、`column_note` を消さずにカラム定義(同じカラム ID のまま `from cache` の有無や、アカウント)を入れ替えるため、毎回の起動で埋め直すと、別アカウント由来のノートを帰属させ直しうる(フェイルオープン)。新しい取得はすべて取得経路で記録されるので、埋め直しは移行の1回で足りる。起動直後にストリーミングが先に記録した場合は、埋め直しを飛ばす(見えない側に倒れる)。
+
+- 過去に `from cache` へ設定変更されたカラムは、当時の状態が分からない。現在 `from cache` を含むカラムは除外する(安全側)。
+- 既知の限界: 移行の1回目に限り、`column_note` がカラム定義と食い違っていると(設定インポートで定義が入れ替わった後の残骸など)、別アカウント由来のノートが帰属しうる。通常のカラム編集(`update_column`)は `column_note` を消すので、この食い違いは設定インポートや、同じ DB を共有する複数端末の定義のずれからだけ生じる。
 
 ## 安全性の性質
 
@@ -106,7 +110,6 @@ async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool
 
 ## 要確認事項(plan で解消する)
 
-- 起動時の埋め直しのコスト(毎起動で全カラム分を実行する。大きなキャッシュで起動後の負荷が問題になる場合は、`note_account` が空のときだけに限定する)。
 - PostgreSQL / MySQL の DDL は実 DB テスト(`#[ignore]`)で確認する。MySQL の ID 列は既存の `column_note` と同じ `string_len(64)` を使う(`text` は主キーにできないため)。
 
 解消済み: `account_id` と `use_cache` の渡し方(上記「書き込み経路」)、3 backend の prune 対象テーブル一覧(それぞれに `note_account` を追加する)。

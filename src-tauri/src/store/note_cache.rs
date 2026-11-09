@@ -77,6 +77,8 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
     /// 現時点ではテストからのみ呼ばれる。
     #[cfg_attr(not(test), allow(dead_code))]
     async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool>;
+    /// 帰属が1件もないか。埋め直しを一度きりの移行にするための判定に使う。
+    async fn note_account_is_empty(&self) -> Result<bool>;
 }
 
 /// note cacheの公開API。内部の`NoteCacheBackend`実装(`SqliteBackend`、将来的な
@@ -233,6 +235,11 @@ impl NoteCacheStore {
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool> {
         self.backend().account_has_note(account_id, note_id).await
+    }
+
+    /// 帰属が1件もないか。埋め直しを一度きりの移行にするための判定に使う。
+    pub async fn note_account_is_empty(&self) -> Result<bool> {
+        self.backend().note_account_is_empty().await
     }
 }
 
