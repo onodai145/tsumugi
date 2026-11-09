@@ -65,24 +65,30 @@ Issue の本文は「ミュート / ブロック / リノートをミュート /
 2. **`ui/UserMenu.svelte`**
    - ビューは `root` / `period` / `lists`。props は状態(`muted` / `renoteMuted` / `blocking` / `profileUrl`)と、操作ごとのコールバック。
    - `root` の項目の順: ミュート(または解除。期間サブメニュー)、リノートをミュート(または解除)、ブロック(または解除)、リストに追加(サブメニュー)、ブラウザで開く(`profileUrl` がある時だけ。`ExternalLink` アイコン)、区切り線、通報(destructive 色)。
-   - `lists` ビューに切り替えた時に初めて `listUserListsWithMembership` を呼ぶ。取得中は「読み込み中…」、失敗時はエラーと再試行、0 件は「リストがありません」を出す。各行は入っていればチェックを表示し、押すとトグルする。トグルは楽観更新せず、完了後にチェックを反映する。`max-height` と内部スクロールで、リストが多くてもはみ出さないようにする。
+   - `lists` ビューは、独立コンポーネント `ui/UserListsPanel.svelte` に分ける(取得・エラー・トグルの状態を持つ。`UserMenu` は「表示と選択だけ」という既存の方針を保つ)。パネルは、開いた時に初めて `load` を呼ぶ。取得中は「読み込み中…」、失敗時はエラーと再試行、0 件は「リストがありません」を出す。各行は入っていればチェックを表示し、押すとトグルする。トグルは楽観更新せず、完了後にチェックを反映する。失敗はパネル内にエラーを出し、メニューは開いたままにする。`max-height` と内部スクロールで、リストが多くてもはみ出さないようにする。`load` / `toggle` は `ProfileModal` が渡す。
 3. **確認と入力のダイアログ**
    - ブロックは既存の `ConfirmDialog`(`danger`、`z=1020`)。文面は「@acct をブロックしますか? 相手はあなたをフォローできなくなり、フォロー関係も解除されます」。ブロック解除・リノートミュート・リストのトグルは確認なしで即実行する。
    - 通報は新規 `ui/ReportUserDialog.svelte`。`ConfirmDialog` と同じ portal と z の作法で、コメントの `textarea`(必須。空の間は送信ボタンを無効)、送信、キャンセルを持つ。送信中は二重送信を防ぐ。失敗したらダイアログ内にエラーを出して開いたままにし、入力を失わない。成功したらダイアログを閉じ、プロフィール上に「通報しました」と表示する。
 4. **`ui/ProfileModal.svelte`**
    - `isBlocking` / `isRenoteMuted` / `profileUrl` を受ける。「ブロック中」バッジを、「ミュート中」バッジと同じ書式で並べる。
-   - 「…」ボタンの表示条件を、自分自身でなく、かつ関係フラグを取得できたとき(いずれかが `null` でない)に広げる。
+   - 「…」ボタンの表示条件は今のまま(`isMuted !== null`)にする。4つのフラグは同じ `users/show` から来るので、自分自身では全部 `None` になる。ブロックとリノートミュートの項目は、それぞれのフラグが `null` でないときだけ `UserMenu` に出す(サーバーが返さないとき、効かない項目を出さないため)。
    - ミュート/解除・ブロック/解除・リノートミュート/解除のハンドラは、busy 制御、世代番号による古い応答の無視、`ALREADY_*` / `NOT_*` の表示補正が共通なので、ローカルのヘルパ `runUserAction` にまとめ、既存の `mute` / `unmute` も同じヘルパに移す(挙動は変えない)。
    - ブロック成功時は `isFollowing = false` にする(Misskey はブロック時にフォローを外す。実インスタンスで確認する)。
    - 「ブラウザで開く」は、ストアを介さず `openUrl(profileUrl)` を呼ぶ(`note.open` と同様)。capability は `http(s)://*` に限定済みで、Rust 側の `sanitize_profile_url` と二重に守る。
 5. 見た目の値は `docs/design/style-guide.md` の既存スケールだけを使い、1回限りの値は作らない。
 
-## 未確認事項(plan で確認し、結果を spec に追記する)
+## 上流ソースで確認した事項(misskey-dev/misskey の `packages/backend`)
 
-- リノートミュートの二重作成・未作成の解除時のエラーコード(`ALREADY_*` / `NOT_*` の名前)。上流 `renote-mute/create.ts` などで確認する。
-- 大きなリストで `users/lists/list` の `userIds` が切り詰められないか。切り詰められるなら、メンバーシップの取得方法を変える(例: 各リストごとの確認)。実インスタンスで検証する。
-- ブロック成功時にサーバーがフォローを外すこと、ブロック中のユーザーに対する `users/show` の `isBlocking` の値。
-- `users/show` の `url` / `uri` が、リモートユーザーで実際に埋まっているか(Misskey 以外の実装を含む)。
+- リノートミュートのエラーコードは、作成が `ALREADY_MUTING`、解除が `NOT_MUTING`(通常のミュートと同名)。ブロックは `ALREADY_BLOCKING` / `NOT_BLOCKING`。いずれも `NO_SUCH_USER` と、自分自身を対象にしたときの `MUTEE_IS_YOURSELF` / `BLOCKEE_IS_YOURSELF` を返す。
+- `users/lists/list` を `userId` なしで呼ぶと、自分のリストだけが返る(`userId` を渡すのはローカルユーザー専用で、使わない)。応答の `userIds` は `UserListEntityService.pack` が全メンバーを詰めるため、切り詰めは無い。
+- `blocking/create` は `UserBlockingService.block` で、双方向のフォローを解除する。
+- `users/lists/push` のエラーは `NO_SUCH_LIST` / `NO_SUCH_USER` / `ALREADY_ADDED` / `YOU_HAVE_BEEN_BLOCKED` / `TOO_MANY_USERS`。`pull` は `NO_SUCH_LIST` / `NO_SUCH_USER`。
+- `users/report-abuse` の `comment` は 1〜2048 文字。エラーは `NO_SUCH_USER` / `CANNOT_REPORT_YOURSELF` / `CANNOT_REPORT_THE_ADMIN`。
+- 権限は `blocking/*` が `write:blocks`、`renote-mute/*` が `write:mutes`、`users/lists/push|pull` が `write:account`、`users/report-abuse` が `write:report-abuse`。
+
+## 実インスタンスで確認する事項(手動確認の段階)
+
+- `users/show` の `url` / `uri` が、リモートユーザー(Misskey 以外の実装を含む)で実際に埋まっているか。埋まっていなければ「ブラウザで開く」が出ないだけで、他に影響しない。
 
 ## テスト
 
