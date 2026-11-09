@@ -20,8 +20,20 @@
 
   let comment = $state("");
   let busy = $state(false);
+  let textarea = $state<HTMLTextAreaElement>();
   let err = $state<string | null>(null);
   const canSend = $derived(!busy && comment.trim().length > 0);
+
+  // 開いた時に入力欄へフォーカスする。「…」メニューが消えるとフォーカスは body に落ち、そのまま打つと
+  // App のグローバルショートカット(t=リノート等)が走り、Escape もダイアログに届かないため。
+  $effect(() => {
+    textarea?.focus();
+  });
+
+  // 送信中は閉じさせない(サーバーに届いたか不明なうえ、長い入力を誤クリックで失わないように)。
+  function cancel() {
+    if (!busy) oncancel();
+  }
 
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
@@ -46,8 +58,8 @@
   class="fixed inset-0 grid items-start justify-items-center bg-black/45 pt-[max(8vh,var(--safe-top))]"
   style={`z-index:${z}`}
   use:portal
-  onclick={oncancel}
-  onkeydown={(e) => e.key === "Escape" && oncancel()}
+  onclick={cancel}
+  onkeydown={(e) => e.key === "Escape" && cancel()}
   role="presentation"
 >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -66,12 +78,13 @@
         class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground"
         rows="4"
         maxlength={MAX_LENGTH}
+        bind:this={textarea}
         bind:value={comment}
       ></textarea>
     </label>
     {#if err}<p class="mb-2.5 mt-0 text-sm text-destructive">{err}</p>{/if}
     <div class="flex justify-end gap-2">
-      <Button variant="secondary" size="sm" onclick={oncancel}>キャンセル</Button>
+      <Button variant="secondary" size="sm" disabled={busy} onclick={cancel}>キャンセル</Button>
       <Button variant="destructive" size="sm" disabled={!canSend} onclick={send}>通報する</Button>
     </div>
   </div>

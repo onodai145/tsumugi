@@ -73,6 +73,45 @@ describe("ReportUserDialog", () => {
     expect((getByLabelText("通報の内容") as HTMLTextAreaElement).maxLength).toBe(2048);
   });
 
+  it("開いた時に入力欄へフォーカスする(キー入力がタイムラインのショートカットに流れない)", async () => {
+    const { getByLabelText } = mount();
+    await waitFor(() => expect(document.activeElement).toBe(getByLabelText("通報の内容")));
+  });
+
+  describe("送信中は閉じられない", () => {
+    async function startSubmit(onsubmit: () => Promise<void>) {
+      const m = mount(onsubmit as never);
+      await fireEvent.input(m.getByLabelText("通報の内容"), { target: { value: "スパムです" } });
+      await fireEvent.click(m.getByRole("button", { name: "通報する" }));
+      return m;
+    }
+
+    it("送信中はキャンセルボタン・Escape・背景クリックでoncancelを呼ばず、キャンセルボタンはdisabled", async () => {
+      const { getByRole, getByLabelText, oncancel } = await startSubmit(() => new Promise<void>(() => {}));
+      const cancel = getByRole("button", { name: "キャンセル" }) as HTMLButtonElement;
+      expect(cancel.disabled).toBe(true);
+
+      await fireEvent.click(cancel);
+      await fireEvent.keyDown(getByLabelText("通報の内容"), { key: "Escape" });
+      await fireEvent.click(getByRole("dialog").parentElement as HTMLElement);
+
+      expect(oncancel).not.toHaveBeenCalled();
+    });
+
+    it("送信に失敗したら、キャンセルできるように戻る", async () => {
+      const { getByRole, getByLabelText, findByText, oncancel } = await startSubmit(() =>
+        Promise.reject(new Error("users/report-abuse: FAILED")),
+      );
+      expect(await findByText(/FAILED/)).toBeTruthy();
+      await waitFor(() => expect((getByRole("button", { name: "キャンセル" }) as HTMLButtonElement).disabled).toBe(false));
+
+      await fireEvent.click(getByRole("button", { name: "キャンセル" }));
+      expect(oncancel).toHaveBeenCalledTimes(1);
+      await fireEvent.keyDown(getByLabelText("通報の内容"), { key: "Escape" });
+      expect(oncancel).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("キャンセルでoncancelを呼ぶ", async () => {
     const { getByRole, oncancel } = mount();
     await fireEvent.click(getByRole("button", { name: "キャンセル" }));

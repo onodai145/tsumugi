@@ -577,6 +577,7 @@ describe("ProfileModal", () => {
         mockProfile({ isRenoteMuted: null });
         const r = renderModal();
         await fireEvent.click(await menuButton(r));
+        await r.findByRole("button", { name: "ブロック" }); // メニューが描画されたことを確かめてから、不在を見る
         expect(r.queryByRole("button", { name: "リノートをミュート" })).toBeNull();
       });
     });
@@ -699,6 +700,7 @@ describe("ProfileModal", () => {
         mockProfile({ profileUrl: null });
         const r = renderModal();
         await fireEvent.click(await menuButton(r));
+        await r.findByRole("button", { name: "ブロック" }); // メニューが描画されたことを確かめてから、不在を見る
         expect(r.queryByRole("button", { name: "ブラウザで開く" })).toBeNull();
       });
     });
