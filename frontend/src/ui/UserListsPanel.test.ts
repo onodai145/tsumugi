@@ -55,14 +55,26 @@ describe("UserListsPanel", () => {
   });
 
   it("toggleが失敗したら、チェックは変えず、エラーを出し、パネルは開いたまま", async () => {
-    const toggle = vi.fn().mockRejectedValue(new Error("users/lists/push: ALREADY_ADDED"));
+    const toggle = vi.fn().mockRejectedValue(new Error("boom"));
     const { findByRole, getByText } = mount({ toggle });
     const row = await findByRole("checkbox", { name: "仕事" });
 
     await fireEvent.click(row);
 
-    await waitFor(() => expect(getByText(/ALREADY_ADDED/)).toBeTruthy());
+    await waitFor(() => expect(getByText(/boom/)).toBeTruthy());
     expect(row.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("他のクライアントで追加済みでALREADY_ADDEDになったら、チェックを付けて補正メッセージを出す", async () => {
+    const toggle = vi.fn().mockRejectedValue(new Error("users/lists/push: ALREADY_ADDED"));
+    const { findByRole, getByText, queryByText } = mount({ toggle });
+    const row = await findByRole("checkbox", { name: "仕事" });
+
+    await fireEvent.click(row);
+
+    await waitFor(() => expect(row.getAttribute("aria-checked")).toBe("true"));
+    expect(getByText("すでにリストに入っています。表示を更新しました")).toBeTruthy();
+    expect(queryByText(/ALREADY_ADDED/)).toBeNull();
   });
 
   it("トグルの完了を待つ間は、同じ行を二重に押してもtoggleは1回だけ", async () => {
