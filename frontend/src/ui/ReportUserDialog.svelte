@@ -2,6 +2,8 @@
   // ユーザー通報ダイアログ(Issue #546)。ConfirmDialog と同じ portal + z の作法。送信の成否の扱いは
   // 呼び出し側の onsubmit(成功=resolve で呼び出し側が閉じる、失敗=reject でここにエラーを出して開いたまま)。
   import { Button } from "$lib/components/ui/button";
+  import { app } from "../lib/store.svelte";
+  import { pushModalHistory } from "../lib/modalHistory";
 
   let {
     acct,
@@ -34,6 +36,14 @@
   function cancel() {
     if (!busy) oncancel();
   }
+
+  // モバイルUIでは戻るボタンで、親のモーダルごとではなくこのダイアログだけを閉じる(Issue #573)。
+  // 詳細は ConfirmDialog.svelte 参照。送信中の戻る操作は cancel() が無視する(履歴だけが戻り、
+  // ダイアログは残る)。
+  $effect(() => {
+    if (!app.useMobileUi()) return;
+    return pushModalHistory(() => cancel());
+  });
 
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
