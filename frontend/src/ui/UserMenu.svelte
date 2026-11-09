@@ -17,9 +17,9 @@
   import UserListsPanel from "./UserListsPanel.svelte";
 
   let {
-    muted,
-    onmute,
-    onunmute,
+    muted = null,
+    onmute = () => {},
+    onunmute = () => {},
     renoteMuted = null,
     onrenotemute = () => {},
     onunrenotemute = () => {},
@@ -32,9 +32,10 @@
     onopen = () => {},
     onreport,
   }: {
-    muted: boolean;
-    onmute: (period: MutePeriod) => void;
-    onunmute: () => void;
+    /// null は「サーバーが返さなかった」。ミュート項目は出さない(以下の各フラグも同じ)。
+    muted?: boolean | null;
+    onmute?: (period: MutePeriod) => void;
+    onunmute?: () => void;
     /// null は「サーバーが返さなかった」。その項目は出さない。
     renoteMuted?: boolean | null;
     onrenotemute?: () => void;
@@ -76,12 +77,12 @@
   data-testid="user-menu"
 >
   {#if view === "root"}
-    {#if muted}
+    {#if muted === true}
       <button type="button" class={ITEM} onclick={onunmute}>
         <Eye size={16} />
         ミュート解除
       </button>
-    {:else}
+    {:else if muted === false}
       <button type="button" class={ITEM} onclick={() => (view = "period")}>
         <EyeOff size={16} />
         ミュート

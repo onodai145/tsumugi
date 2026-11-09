@@ -173,4 +173,14 @@ describe("UserMenu のその他の項目(Issue #546)", () => {
     await fireEvent.click(getByRole("button", { name: "通報" }));
     expect(onreport).toHaveBeenCalledTimes(1);
   });
+
+  it("mutedがnull(サーバーが返さない)なら、ミュート関連の項目は出さず、他の項目は出す", () => {
+    const { queryByRole, getByRole } = render(UserMenu, {
+      props: { muted: null, onmute: vi.fn(), onunmute: vi.fn(), blocking: false, onreport: vi.fn() },
+    });
+    expect(queryByRole("button", { name: "ミュート" })).toBeNull();
+    expect(queryByRole("button", { name: "ミュート解除" })).toBeNull();
+    expect(getByRole("button", { name: "ブロック" })).toBeTruthy();
+    expect(getByRole("button", { name: "通報" })).toBeTruthy();
+  });
 });

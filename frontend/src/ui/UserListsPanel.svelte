@@ -57,7 +57,16 @@
         };
       }
     } catch (e) {
-      toggleErr = String(e);
+      // 他のクライアントで追加済みだった場合。サーバーの状態に合わせて表示を直す(ミュート・ブロックの補正と同じ作法)。
+      if (add && String(e).includes("ALREADY_ADDED") && panel.status === "ready") {
+        panel = {
+          status: "ready",
+          lists: panel.lists.map((l) => (l.id === list.id ? { ...l, hasUser: true } : l)),
+        };
+        toggleErr = "すでにリストに入っています。表示を更新しました";
+      } else {
+        toggleErr = String(e);
+      }
     } finally {
       busyIds = busyIds.filter((id) => id !== list.id);
     }

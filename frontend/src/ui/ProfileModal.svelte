@@ -360,60 +360,59 @@
             size="sm"
             variant={profile.isFollowing ? "outline" : "default"}
             class="flex-none rounded-full {profile.isFollowing ? 'hover:border-destructive hover:text-destructive' : ''}"
-            disabled={followBusy}
+            disabled={followBusy || profile.isBlocking === true}
+            title={profile.isBlocking === true ? "ブロック中はフォローできません" : undefined}
             onclick={toggleFollow}
           >
             {profile.isFollowing ? "フォロー解除" : "フォロー"}
           </Button>
-          {#if profile.isMuted !== null}
-            <span class="flex-none" bind:this={userMenuAnchor}>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="ユーザーメニュー"
-                disabled={actionBusy}
-                onclick={() => (userMenuOpen = !userMenuOpen)}
-              >
-                <MoreHorizontal size={16} />
-              </Button>
-            </span>
-            {#if userMenuOpen && userMenuPos}
+          <span class="flex-none" bind:this={userMenuAnchor}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="ユーザーメニュー"
+              disabled={actionBusy}
+              onclick={() => (userMenuOpen = !userMenuOpen)}
+            >
+              <MoreHorizontal size={16} />
+            </Button>
+          </span>
+          {#if userMenuOpen && userMenuPos}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (userMenuOpen = false)} role="presentation">
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="fixed inset-0 z-[1010]" use:portal onclick={() => (userMenuOpen = false)} role="presentation">
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="fixed"
-                  style={`left:${userMenuPos.left}px;top:${userMenuPos.top}px`}
-                  onclick={(e) => e.stopPropagation()}
-                  role="presentation"
-                >
-                  <UserMenu
-                    muted={profile.isMuted}
-                    onmute={mute}
-                    onunmute={unmute}
-                    renoteMuted={profile.isRenoteMuted}
-                    onrenotemute={renoteMute}
-                    onunrenotemute={unrenoteMute}
-                    blocking={profile.isBlocking}
-                    onblock={() => {
-                      userMenuOpen = false;
-                      confirmBlock = true;
-                    }}
-                    onunblock={unblock}
-                    loadLists={loadLists}
-                    togglelist={toggleList}
-                    profileUrl={profile.profileUrl}
-                    onopen={openProfilePage}
-                    onreport={() => {
-                      userMenuOpen = false;
-                      reportOpen = true;
-                    }}
-                  />
-                </div>
+              <div
+                class="fixed"
+                style={`left:${userMenuPos.left}px;top:${userMenuPos.top}px`}
+                onclick={(e) => e.stopPropagation()}
+                role="presentation"
+              >
+                <UserMenu
+                  muted={profile.isMuted}
+                  onmute={mute}
+                  onunmute={unmute}
+                  renoteMuted={profile.isRenoteMuted}
+                  onrenotemute={renoteMute}
+                  onunrenotemute={unrenoteMute}
+                  blocking={profile.isBlocking}
+                  onblock={() => {
+                    userMenuOpen = false;
+                    confirmBlock = true;
+                  }}
+                  onunblock={unblock}
+                  loadLists={loadLists}
+                  togglelist={toggleList}
+                  profileUrl={profile.profileUrl}
+                  onopen={openProfilePage}
+                  onreport={() => {
+                    userMenuOpen = false;
+                    reportOpen = true;
+                  }}
+                />
               </div>
-            {/if}
+            </div>
           {/if}
         {/if}
       </div>

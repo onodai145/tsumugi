@@ -248,12 +248,34 @@ describe("ProfileModal", () => {
       expect(r.queryByRole("button", { name: "ユーザーメニュー" })).toBeNull();
     });
 
-    it("isMutedを取得できないとき(null)は「…」メニューを出さない", async () => {
+    it("isMutedを取得できないとき(null)でも「…」メニューを出し、ミュート以外の項目は使える", async () => {
       mockProfile({ isMuted: null });
+      const r = renderModal();
+      await fireEvent.click(await menuButton(r));
+
+      expect(await r.findByRole("button", { name: "ブロック" })).toBeTruthy();
+      expect(r.getByRole("button", { name: "リストに追加" })).toBeTruthy();
+      expect(r.getByRole("button", { name: "通報" })).toBeTruthy();
+      expect(r.queryByRole("button", { name: "ミュート" })).toBeNull();
+      expect(r.queryByRole("button", { name: "ミュート解除" })).toBeNull();
+    });
+
+    it("ブロック中は「フォロー」ボタンを押せない", async () => {
+      mockProfile({ isBlocking: true, isFollowing: false });
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("ブロック中")).toBeTruthy());
+
+      const follow = r.getByRole("button", { name: "フォロー" }) as HTMLButtonElement;
+      expect(follow.disabled).toBe(true);
+    });
+
+    it("ブロック中でなければ「フォロー」ボタンを押せる", async () => {
+      mockProfile({ isBlocking: false, isFollowing: false });
       const r = renderModal();
       await waitFor(() => expect(r.getByText("Alice")).toBeTruthy());
 
-      expect(r.queryByRole("button", { name: "ユーザーメニュー" })).toBeNull();
+      const follow = r.getByRole("button", { name: "フォロー" }) as HTMLButtonElement;
+      expect(follow.disabled).toBe(false);
     });
 
     it("期間を選ぶとmute_userを呼び、「ミュート中」バッジが出る", async () => {
@@ -629,7 +651,7 @@ describe("ProfileModal", () => {
         );
       });
 
-      it("ALREADY_ADDEDで失敗したら、パネルにエラーを出し、メニューは開いたまま", async () => {
+      it("ALREADY_ADDEDで失敗したら、チェックを付けて補正メッセージを出し、メニューは開いたまま", async () => {
         mockProfile({}, (cmd) => {
           if (cmd === "list_user_lists_with_membership")
             return Promise.resolve([{ id: "L1", name: "友達", hasUser: false }]);
@@ -640,9 +662,11 @@ describe("ProfileModal", () => {
         await fireEvent.click(await menuButton(r));
         await fireEvent.click(r.getByRole("button", { name: "リストに追加" }));
 
-        await fireEvent.click(await r.findByRole("checkbox", { name: "友達" }));
+        const row = await r.findByRole("checkbox", { name: "友達" });
+        await fireEvent.click(row);
 
-        await waitFor(() => expect(r.getByText(/ALREADY_ADDED/)).toBeTruthy());
+        await waitFor(() => expect(row.getAttribute("aria-checked")).toBe("true"));
+        expect(r.getByText("すでにリストに入っています。表示を更新しました")).toBeTruthy();
         expect(r.getByTestId("user-menu")).toBeTruthy();
       });
     });
