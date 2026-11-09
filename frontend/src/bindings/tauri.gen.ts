@@ -402,6 +402,36 @@ export const commands = {
 	 */
 	nextExpiryAt: number | null,
 } | null, Error>(__TAURI_INVOKE("unmute_user", { accountId, userId })),
+	/**
+	 *  ユーザーをブロックする(Issue #546)。戻り値は `mute_user` と同じ(再同期の結果。失敗時は `None`)。
+	 *  ブロックは `blocking/list` として「表示を抑制する集合」に入るため、ミュートと同じく再同期する。
+	 */
+	blockUser: (accountId: string, userId: string) => typedError<{
+	blockedUsers: number,
+	wordRules: number,
+	/**
+	 *  有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+	 *  フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+	 */
+	nextExpiryAt: number | null,
+} | null, Error>(__TAURI_INVOKE("block_user", { accountId, userId })),
+	/**  ユーザーのブロックを解除する。戻り値は `block_user` と同じ。 */
+	unblockUser: (accountId: string, userId: string) => typedError<{
+	blockedUsers: number,
+	wordRules: number,
+	/**
+	 *  有効なミュートのうち最も早い期限(エポックミリ秒)。期限付きのミュートが無ければ `None`。
+	 *  フロントはこの時刻に1回だけ再同期して、期限切れを反映する(Issue #545)。
+	 */
+	nextExpiryAt: number | null,
+} | null, Error>(__TAURI_INVOKE("unblock_user", { accountId, userId })),
+	/**
+	 *  ユーザーのリノートをミュートする(Issue #546)。サーバー側でタイムラインから除外されるので、
+	 *  クライアントの集合には入れず、再同期もしない。
+	 */
+	renoteMuteUser: (accountId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("renote_mute_user", { accountId, userId })),
+	/**  ユーザーのリノートミュートを解除する。 */
+	unrenoteMuteUser: (accountId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("unrenote_mute_user", { accountId, userId })),
 	/**  設定を `path` に書き出す。Androidでは `path` は `content://` URI でもよい。 */
 	exportSettings: (path: string) => typedError<null, Error>(__TAURI_INVOKE("export_settings", { path })),
 	/**  設定ファイルを検証して概要を返す。何も書き込まない。 */

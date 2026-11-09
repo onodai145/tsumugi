@@ -487,6 +487,76 @@ async fn unmute_user_core(
     Ok(resync_after_mute_change(state, account_id, client).await)
 }
 
+/// ユーザーをブロックする(Issue #546)。戻り値は `mute_user` と同じ(再同期の結果。失敗時は `None`)。
+/// ブロックは `blocking/list` として「表示を抑制する集合」に入るため、ミュートと同じく再同期する。
+#[tauri::command]
+#[specta::specta]
+pub async fn block_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<Option<SyncMuteResult>> {
+    let client = state.client_for(&account_id)?;
+    block_user_core(&state, &account_id, &client, &user_id).await
+}
+
+/// ユーザーのブロックを解除する。戻り値は `block_user` と同じ。
+#[tauri::command]
+#[specta::specta]
+pub async fn unblock_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<Option<SyncMuteResult>> {
+    let client = state.client_for(&account_id)?;
+    unblock_user_core(&state, &account_id, &client, &user_id).await
+}
+
+/// ユーザーのリノートをミュートする(Issue #546)。サーバー側でタイムラインから除外されるので、
+/// クライアントの集合には入れず、再同期もしない。
+#[tauri::command]
+#[specta::specta]
+pub async fn renote_mute_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    mutes_api::renote_mute_user(&client, &user_id).await
+}
+
+/// ユーザーのリノートミュートを解除する。
+#[tauri::command]
+#[specta::specta]
+pub async fn unrenote_mute_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    mutes_api::unrenote_mute_user(&client, &user_id).await
+}
+
+async fn block_user_core(
+    state: &AppState,
+    account_id: &str,
+    client: &crate::api::MisskeyClient,
+    user_id: &str,
+) -> Result<Option<SyncMuteResult>> {
+    mutes_api::block_user(client, user_id).await?;
+    Ok(resync_after_mute_change(state, account_id, client).await)
+}
+
+async fn unblock_user_core(
+    state: &AppState,
+    account_id: &str,
+    client: &crate::api::MisskeyClient,
+    user_id: &str,
+) -> Result<Option<SyncMuteResult>> {
+    mutes_api::unblock_user(client, user_id).await?;
+    Ok(resync_after_mute_change(state, account_id, client).await)
+}
+
 /// ミュートの作成・解除の後に、集合を丸ごと再取得する。差分で足さないのは、同期が持つ境界・ロックの
 /// 前提(#452 / #454 / #456)にそのまま乗るため。失敗しても作成・解除は成功済みなので、ログだけ残す。
 async fn resync_after_mute_change(
@@ -1252,6 +1322,138 @@ mod tests {
             .await;
 
         let result = unmute_user_core(&state, "acc1", &client, "u1").await.unwrap();
+
+        assert!(result.is_some());
+        assert!(!state.is_server_muted("acc1", "u1"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_user_core_creates_the_block_and_resyncs_the_hidden_set() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        // ブロック後の blocking/list は u1 を含む(mute/list は空、mutedWords も空)
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([{ "id": "b1", "blockeeId": "u1" }])),
+            )
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/i"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/create"))
+            .and(wiremock::matchers::body_partial_json(serde_json::json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let result = block_user_core(&state, "acc1", &client, "u1").await.unwrap();
+
+        assert!(result.is_some(), "同期が成功したので、結果を返す");
+        assert!(state.is_server_muted("acc1", "u1"), "ブロックしたユーザーは表示を抑制する集合に入る");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_user_core_fails_without_syncing_when_the_create_fails() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/create"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": { "code": "ALREADY_BLOCKING", "message": "You are already blocking that user.", "id": "x" }
+            })))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(0)
+            .mount(&mock)
+            .await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let result = block_user_core(&state, "acc1", &client, "u1").await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_user_core_succeeds_even_when_the_follow_up_sync_fails() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/create"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock)
+            .await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+
+        let result = block_user_core(&state, "acc1", &client, "u1").await;
+
+        assert!(matches!(result, Ok(None)), "ブロックは成功。同期の失敗は None で伝える: {result:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unblock_user_core_deletes_the_block_and_resyncs() {
+        let mock = MockServer::start().await;
+        let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        mock.reset().await;
+        // 解除前: blocking/list に u1
+        Mock::given(method("POST"))
+            .and(path("/mute/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/i"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })))
+            .mount(&mock)
+            .await;
+        let before = Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([{ "id": "b1", "blockeeId": "u1" }])),
+            )
+            .mount_as_scoped(&mock)
+            .await;
+        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        assert!(state.is_server_muted("acc1", "u1"));
+        drop(before);
+
+        // 解除後は空
+        Mock::given(method("POST"))
+            .and(path("/blocking/list"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/blocking/delete"))
+            .and(wiremock::matchers::body_partial_json(serde_json::json!({ "userId": "u1" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let result = unblock_user_core(&state, "acc1", &client, "u1").await.unwrap();
 
         assert!(result.is_some());
         assert!(!state.is_server_muted("acc1", "u1"));
