@@ -1309,6 +1309,11 @@ export type UiPrefs = {
 	 *  モバイル版UI(FAB+モーダル)では参照されない。
 	 */
 	composePosition?: string,
+	/**
+	 *  カラムのタブバーの位置（Issue #577）。"top"(カラム上部) | "bottom"(カラム下部)。
+	 *  全カラム共通。"bottom" 以外の値はフロント側で "top" として扱う。
+	 */
+	tabBarPosition?: string,
 	/**  既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。 */
 	defaultAccountId?: string,
 	/**  Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。 */

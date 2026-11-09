@@ -5,6 +5,7 @@
   let width = $state(app.ui.defaultColumnWidth);
   let uiMode = $state(app.ui.uiMode ?? "auto");
   let composePosition = $state(app.ui.composePosition ?? "top");
+  let tabBarPosition = $state(app.ui.tabBarPosition ?? "top");
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -19,6 +20,12 @@
 
   // PC版UIでの投稿欄の位置(Issue #548)。
   const composePositions: { id: string; label: string }[] = [
+    { id: "top", label: "上" },
+    { id: "bottom", label: "下" },
+  ];
+
+  // カラムのタブバーの位置(Issue #577)。PC版・モバイル版の両方に効く。
+  const tabBarPositions: { id: string; label: string }[] = [
     { id: "top", label: "上" },
     { id: "bottom", label: "下" },
   ];
@@ -39,6 +46,7 @@
         defaultColumnWidth: w,
         uiMode,
         composePosition,
+        tabBarPosition,
         mediaThumbnailHeight: thumbHeight,
       });
       saved = true;
@@ -70,7 +78,7 @@
 
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">投稿欄の位置</span>
-  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
+  <div role="group" aria-label="投稿欄の位置" class="inline-flex w-fit overflow-hidden rounded-md border border-border">
     {#each composePositions as p (p.id)}
       <button
         type="button"
@@ -83,6 +91,23 @@
     {/each}
   </div>
   <p class="mb-4 mt-0 text-xs text-muted-foreground">PC版の投稿欄を画面上部とカラムの下のどちらに置くかを選びます。モバイル版では使われません。</p>
+</div>
+
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
+  <span class="text-muted-foreground">タブバーの位置</span>
+  <div role="group" aria-label="タブバーの位置" class="inline-flex w-fit overflow-hidden rounded-md border border-border">
+    {#each tabBarPositions as p (p.id)}
+      <button
+        type="button"
+        aria-pressed={tabBarPosition === p.id}
+        class={tabBarPosition === p.id
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
+        onclick={() => (tabBarPosition = p.id)}
+      >{p.label}</button>
+    {/each}
+  </div>
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">各カラムのタブバーをカラムの上と下のどちらに置くかを選びます。PC版・モバイル版の両方に適用されます。</p>
 </div>
 
 <label class="mb-2.5 flex flex-col gap-1 text-sm">

@@ -138,6 +138,10 @@ pub struct UiPrefs {
     /// モバイル版UI(FAB+モーダル)では参照されない。
     #[serde(default = "default_compose_position")]
     pub compose_position: String,
+    /// カラムのタブバーの位置（Issue #577）。"top"(カラム上部) | "bottom"(カラム下部)。
+    /// 全カラム共通。"bottom" 以外の値はフロント側で "top" として扱う。
+    #[serde(default = "default_tab_bar_position")]
+    pub tab_bar_position: String,
     /// 既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。
     #[serde(default)]
     pub default_account_id: String,
@@ -262,6 +266,10 @@ fn default_ui_mode() -> String {
 }
 
 fn default_compose_position() -> String {
+    "top".into()
+}
+
+fn default_tab_bar_position() -> String {
     "top".into()
 }
 
@@ -436,6 +444,7 @@ impl Default for UiPrefs {
             recent_emojis: Vec::new(),
             ui_mode: default_ui_mode(),
             compose_position: default_compose_position(),
+            tab_bar_position: default_tab_bar_position(),
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
@@ -498,6 +507,8 @@ mod tests {
         assert_eq!(v.ui_mode, "auto");
         // compose_position も同様に既定値(top, 追加前の上部固定)へフォールバックすること(Issue #548)。
         assert_eq!(v.compose_position, "top");
+        // tab_bar_position も同様に既定値(top, 追加前の上部固定)へフォールバックすること(Issue #577)。
+        assert_eq!(v.tab_bar_position, "top");
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
         assert_eq!(v.emoji_style, "twemoji");
         assert_eq!(v.gap_fill_limit, 200);
@@ -572,6 +583,7 @@ mod tests {
             recent_emojis: vec![":blob_cat@misskey.io:".into(), "😆".into()],
             ui_mode: "mobile".into(),
             compose_position: "bottom".into(),
+            tab_bar_position: "bottom".into(),
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),
             gap_fill_limit: 500,
