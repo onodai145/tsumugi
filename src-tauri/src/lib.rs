@@ -1,4 +1,5 @@
 mod api;
+mod attribution;
 mod commands;
 #[cfg(all(debug_assertions, desktop))]
 mod debug_bridge;
