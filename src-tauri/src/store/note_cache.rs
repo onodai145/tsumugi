@@ -65,25 +65,16 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
     ) -> Result<Vec<Note>>;
 
     // --- アカウント帰属(Issue #557、docs/superpowers/specs/2026-11-09-note-account-attribution-design.md) ---
-    // 一時的なデフォルト実装(何もしない)。PostgreSQL / MySQL の実装が揃ったら削除する。
 
     /// アカウントがこれらのノートを自分の取得経路で得たことを記録する(冪等)。
     /// `note` に存在しない ID は無視する(孤児行を作らない)。
-    async fn record_note_accounts(&self, _account_id: &str, _note_ids: &[String]) -> Result<()> {
-        Ok(())
-    }
+    async fn record_note_accounts(&self, account_id: &str, note_ids: &[String]) -> Result<()>;
     /// `column_note` のあるカラムのノートを、アカウントの帰属として複写する(埋め直し用、冪等)。
-    async fn backfill_note_accounts(&self, _account_id: &str, _column_id: &str) -> Result<()> {
-        Ok(())
-    }
+    async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()>;
     /// アカウント削除時に、そのアカウントの帰属を全て消す。
-    async fn forget_account_notes(&self, _account_id: &str) -> Result<()> {
-        Ok(())
-    }
+    async fn forget_account_notes(&self, account_id: &str) -> Result<()>;
     /// このノートがそのアカウントに帰属しているか。
-    async fn account_has_note(&self, _account_id: &str, _note_id: &str) -> Result<bool> {
-        Ok(false)
-    }
+    async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool>;
 }
 
 /// note cacheの公開API。内部の`NoteCacheBackend`実装(`SqliteBackend`、将来的な
