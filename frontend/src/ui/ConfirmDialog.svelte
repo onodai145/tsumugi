@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
+  import { app } from "../lib/store.svelte";
+  import { pushModalHistory } from "../lib/modalHistory";
   // 汎用の確認モーダル。深くネストされたコンポーネント(NoteCard等)から呼ばれても
   // content-visibility/containの包含ブロックを脱出できるよう portal で body 直下に置く。
   let {
@@ -39,6 +41,14 @@
   let cancelButton = $state<HTMLButtonElement | null>(null);
   $effect(() => {
     cancelButton?.focus();
+  });
+
+  // モバイルUIでは戻るボタンで、親のモーダルごとではなくこのダイアログだけを閉じる(Issue #573)。
+  // Modal と同じく全画面(モバイルUI)のときだけ履歴を積む。PCは戻るボタンが無いので積まない。
+  // 積んだ順に上から閉じるため、親の Modal より後に開いたこのダイアログから先に閉じる。
+  $effect(() => {
+    if (!app.useMobileUi()) return;
+    return pushModalHistory(() => onCancel());
   });
 </script>
 
