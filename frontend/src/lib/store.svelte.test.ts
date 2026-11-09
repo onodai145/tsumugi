@@ -1678,6 +1678,31 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
       expect(syncedAccounts()).toEqual(["acc1"]);
     });
 
+    it("結果が前後して届いても、後から始めた操作のタイマーを、先に始めた古い結果で消さない", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      const base = invokeMock.getMockImplementation()!;
+      const pending: Array<(v: SyncResultShape | null) => void> = [];
+      invokeMock.mockImplementation((cmd: string, args?: unknown) =>
+        cmd === "mute_user" ? new Promise((resolve) => pending.push(resolve)) : base(cmd, args),
+      );
+      const first = app.muteUser("acc1", "u1", "tenMinutes");
+      const second = app.muteUser("acc1", "u2", "tenMinutes");
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 後から始めた方が先に返り(期限あり)、先に始めた方が古い状態(期限なし)で後から返る
+      pending[1]({ blockedUsers: 2, wordRules: 0, nextExpiryAt: Date.now() + 30_000 });
+      await second;
+      pending[0]({ blockedUsers: 1, wordRules: 0, nextExpiryAt: null });
+      await first;
+      invokeMock.mockClear();
+      invokeMock.mockImplementation(base);
+
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      expect(syncedAccounts()).toEqual(["acc1"]); // 新しい方のタイマーが残っている
+    });
+
     it("定期同期の結果の次の期限でも、再同期のタイマーを張る(他クライアントで作った時限ミュート)", async () => {
       await bootAndForgetCalls();
       app.accounts = [account("acc1")];

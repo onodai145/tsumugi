@@ -139,7 +139,15 @@
       await app.muteUser(accountId, userId, period);
       if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = true;
     } catch (e) {
-      if (gen === requestGen) muteErr = String(e);
+      if (gen === requestGen) {
+        // 表示が古かっただけ(すでにミュート中)なら、表示を直す。メニューで解除できるようになる。
+        if (String(e).includes("ALREADY_MUTING") && profileState.status === "ready") {
+          profileState.profile.isMuted = true;
+          muteErr = "すでにミュート中です。表示を更新しました";
+        } else {
+          muteErr = String(e);
+        }
+      }
     } finally {
       if (gen === requestGen) muteBusy = false; // 切り替え後の新しいプロフィールの busy を、古い呼び出しが触らない
     }
@@ -156,10 +164,26 @@
       await app.unmuteUser(accountId, userId);
       if (gen === requestGen && profileState.status === "ready") profileState.profile.isMuted = false;
     } catch (e) {
-      if (gen === requestGen) muteErr = String(e);
+      if (gen === requestGen) {
+        // 期限切れなどで、すでにミュート中でなかったなら、表示を直す。
+        if (String(e).includes("NOT_MUTING") && profileState.status === "ready") {
+          profileState.profile.isMuted = false;
+          muteErr = "すでにミュート中ではありません。表示を更新しました";
+        } else {
+          muteErr = String(e);
+        }
+      }
     } finally {
       if (gen === requestGen) muteBusy = false;
     }
+  }
+
+  // メニューを開いているときの Escape は、メニューだけ閉じる(モーダルまで閉じない)。メニューは portal で
+  // モーダルの外にあるので、フォーカスがどちらにあっても効くよう window の捕捉で受ける。
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key !== "Escape" || !userMenuOpen) return;
+    userMenuOpen = false;
+    e.stopPropagation();
   }
 
   function addAsColumn() {
@@ -191,6 +215,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydowncapture={onWindowKeydown} />
 
 <Modal title="プロフィール" {onclose} maxHeight={mobileUi ? "100%" : undefined}>
   <!-- モバイルは全画面ページ。プロフィール全体を1つのスクロール領域にし(ノート一覧の自前スクロールは

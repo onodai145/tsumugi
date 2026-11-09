@@ -303,15 +303,75 @@ describe("ProfileModal", () => {
     });
 
     it("mute_userが失敗したら、エラーを表示し、バッジは出さない", async () => {
-      mockProfile({}, (cmd) => (cmd === "mute_user" ? Promise.reject(new Error("ALREADY_MUTING")) : undefined));
+      mockProfile({}, (cmd) => (cmd === "mute_user" ? Promise.reject(new Error("RATE_LIMIT")) : undefined));
       const r = renderModal();
       await fireEvent.click(await menuButton(r));
       await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
 
       await fireEvent.click(r.getByRole("button", { name: "1日" }));
 
-      await waitFor(() => expect(r.getByText(/ALREADY_MUTING/)).toBeTruthy());
+      await waitFor(() => expect(r.getByText(/RATE_LIMIT/)).toBeTruthy());
       expect(r.queryByText("ミュート中")).toBeNull();
+    });
+
+    it("ALREADY_MUTINGで失敗したら、表示を「ミュート中」に直し、メニューで解除できる", async () => {
+      mockProfile({}, (cmd) =>
+        cmd === "mute_user"
+          ? Promise.reject(new Error("mute/create: ALREADY_MUTING You are already muting that user."))
+          : undefined,
+      );
+      const r = renderModal();
+      await fireEvent.click(await menuButton(r));
+      await fireEvent.click(r.getByRole("button", { name: "ミュート" }));
+
+      await fireEvent.click(r.getByRole("button", { name: "1日" }));
+
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      await fireEvent.click(await menuButton(r));
+      expect(r.getByRole("button", { name: "ミュート解除" })).toBeTruthy();
+    });
+
+    it("NOT_MUTINGで解除に失敗したら、表示を「ミュート中でない」に直す", async () => {
+      mockProfile({ isMuted: true }, (cmd) =>
+        cmd === "unmute_user" ? Promise.reject(new Error("mute/delete: NOT_MUTING You are not muting that user.")) : undefined,
+      );
+      const r = renderModal();
+      await waitFor(() => expect(r.getByText("ミュート中")).toBeTruthy());
+      await fireEvent.click(await menuButton(r));
+
+      await fireEvent.click(r.getByRole("button", { name: "ミュート解除" }));
+
+      await waitFor(() => expect(r.queryByText("ミュート中")).toBeNull());
+      await fireEvent.click(await menuButton(r));
+      expect(r.getByRole("button", { name: "ミュート" })).toBeTruthy();
+    });
+
+    it("メニューを開いているときのEscapeは、メニューだけ閉じ、モーダルは閉じない", async () => {
+      mockProfile();
+      const onclose = vi.fn();
+      const r = render(ProfileModal, { props: { target: { userId: "u1" }, accountId: "acc1", onclose } });
+      const trigger = await menuButton(r);
+      await fireEvent.click(trigger);
+
+      await fireEvent.keyDown(trigger, { key: "Escape" }); // フォーカスがモーダルの中にあるとき
+
+      expect(r.queryByTestId("user-menu")).toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+    });
+
+    it("フォーカスがメニューの中にあるときのEscapeも、メニューだけ閉じる。メニューが閉じた後のEscapeはモーダルを閉じる", async () => {
+      mockProfile();
+      const onclose = vi.fn();
+      const r = render(ProfileModal, { props: { target: { userId: "u1" }, accountId: "acc1", onclose } });
+      const trigger = await menuButton(r);
+      await fireEvent.click(trigger);
+
+      await fireEvent.keyDown(r.getByRole("button", { name: "ミュート" }), { key: "Escape" });
+      expect(r.queryByTestId("user-menu")).toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+
+      await fireEvent.keyDown(trigger, { key: "Escape" });
+      expect(onclose).toHaveBeenCalledTimes(1);
     });
 
     it("mute_userの完了前に別ユーザーへ切り替わったら、新しいプロフィールのバッジを書き換えない", async () => {
