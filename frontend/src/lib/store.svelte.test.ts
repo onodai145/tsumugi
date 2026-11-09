@@ -1717,6 +1717,79 @@ describe("定期的なサーバー側ミュート同期(Issue #456)", () => {
       expect(syncedAccounts()).toEqual(["acc1", "acc1"]);
     });
   });
+
+  describe("ブロック・リノートミュート・通報・リスト(Issue #546)", () => {
+    const callsOf = (cmd: string) => invokeMock.mock.calls.filter(([c]) => c === cmd);
+
+    it("blockUserはblock_userを呼び、再同期の結果の期限でタイマーを張る", async () => {
+      vi.useFakeTimers();
+      app.accounts = [account("acc1")];
+      muteCommandResult = { blockedUsers: 1, wordRules: 0, nextExpiryAt: Date.now() + 60_000 };
+      invokeMock.mockImplementation(async (cmd: string) => {
+        if (cmd === "list_accounts") return [];
+        if (cmd === "block_user") return muteCommandResult;
+        if (cmd === "sync_server_mutes") return syncResult;
+        return null;
+      });
+
+      await app.blockUser("acc1", "u1");
+      expect(callsOf("block_user")[0][1]).toEqual({ accountId: "acc1", userId: "u1" });
+      invokeMock.mockClear();
+
+      await vi.advanceTimersByTimeAsync(63_000);
+      expect(syncedAccounts()).toEqual(["acc1"]);
+    });
+
+    it("unblockUserはunblock_userを呼ぶ", async () => {
+      app.accounts = [account("acc1")];
+      await app.unblockUser("acc1", "u1");
+      expect(callsOf("unblock_user")[0][1]).toEqual({ accountId: "acc1", userId: "u1" });
+    });
+
+    it("renoteMuteUser / unrenoteMuteUserは、対応するコマンドを呼ぶ", async () => {
+      app.accounts = [account("acc1")];
+      await app.renoteMuteUser("acc1", "u1");
+      await app.unrenoteMuteUser("acc1", "u1");
+      expect(callsOf("renote_mute_user")[0][1]).toEqual({ accountId: "acc1", userId: "u1" });
+      expect(callsOf("unrenote_mute_user")[0][1]).toEqual({ accountId: "acc1", userId: "u1" });
+    });
+
+    it("blockUserが失敗したら、エラーを投げ、ログに残す", async () => {
+      app.accounts = [account("acc1")];
+      invokeMock.mockImplementation(async (cmd: string) => {
+        if (cmd === "block_user") throw new Error("blocking/create: ALREADY_BLOCKING");
+        return null;
+      });
+      await expect(app.blockUser("acc1", "u1")).rejects.toThrow(/ALREADY_BLOCKING/);
+      expect(app.logs.some((l) => l.text.includes("ALREADY_BLOCKING"))).toBe(true);
+    });
+
+    it("reportUserはreport_userにコメントを渡す", async () => {
+      app.accounts = [account("acc1")];
+      await app.reportUser("acc1", "u1", "スパムです");
+      expect(callsOf("report_user")[0][1]).toEqual({ accountId: "acc1", userId: "u1", comment: "スパムです" });
+    });
+
+    it("listUserListsWithMembershipは、リストの一覧を返す", async () => {
+      app.accounts = [account("acc1")];
+      invokeMock.mockImplementation(async (cmd: string) => {
+        if (cmd === "list_user_lists_with_membership") return [{ id: "L1", name: "友達", hasUser: true }];
+        return null;
+      });
+      await expect(app.listUserListsWithMembership("acc1", "u1")).resolves.toEqual([
+        { id: "L1", name: "友達", hasUser: true },
+      ]);
+      expect(callsOf("list_user_lists_with_membership")[0][1]).toEqual({ accountId: "acc1", userId: "u1" });
+    });
+
+    it("addUserToList / removeUserFromListは、リストIDとユーザーIDを渡す", async () => {
+      app.accounts = [account("acc1")];
+      await app.addUserToList("acc1", "L1", "u1");
+      await app.removeUserFromList("acc1", "L1", "u1");
+      expect(callsOf("add_user_to_list")[0][1]).toEqual({ accountId: "acc1", listId: "L1", userId: "u1" });
+      expect(callsOf("remove_user_from_list")[0][1]).toEqual({ accountId: "acc1", listId: "L1", userId: "u1" });
+    });
+  });
 });
 
 // 起動時に、閉じている間に期限切れ・失敗になったローカル予約を一度だけ通知する(Issue #60 B)。
