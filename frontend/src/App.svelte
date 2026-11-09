@@ -26,6 +26,12 @@
   const keymap = $derived(buildKeymap(app.ui.keymap ?? {}));
   // モバイル版UIかPC版UIか(設定→表示で上書き可能、既定はOS判定。Issue #51)
   const useMobileUi = $derived(app.useMobileUi());
+  // PC版で投稿欄をカラム領域の下に置くか(設定→レイアウトの「投稿欄の位置」。Issue #548)。
+  // モバイル版は投稿欄自体を出さないため常にfalse。
+  const composeAtBottom = $derived(!useMobileUi && app.ui.composePosition === "bottom");
+  // 画面最上端のステータスバー分のセーフエリアを、headerではなく下の要素(バナー/main)が確保するか。
+  // スマホUIではheaderが無く、PC版でも投稿欄が下にあるとheaderが最上端に来ない。
+  const contentOwnsTopInset = $derived(useMobileUi || composeAtBottom);
 
   // モバイル版: カラム間の横スワイプをCSS Scroll Snapで実現する(Issue #296)。
   // 実際にスクロールするDOM要素は、カラムが2つ以上ある場合はPane.svelteのrow描画内側div
@@ -155,33 +161,41 @@
   });
 </script>
 
+{#snippet composeHeader()}
+  <!-- 投稿バー。上置きのときはステータスバー分のセーフエリアを自身が確保する。
+       下置きのときは直下のAppMenuが下端のセーフエリアを確保するため、上下とも6pxでよい。 -->
+  <header
+    class={composeAtBottom
+      ? "flex flex-none items-start gap-2.5 border-t border-border bg-muted p-[6px_max(10px,var(--safe-right))_6px_max(10px,var(--safe-left))]"
+      : "flex flex-none items-start gap-2.5 border-b border-border bg-muted p-[max(6px,var(--safe-top))_max(10px,var(--safe-right))_6px_max(10px,var(--safe-left))]"}
+  >
+    {#if app.accounts.length > 0}
+      <ComposeBar />
+    {:else}
+      <div class="flex-1"></div>
+    {/if}
+  </header>
+{/snippet}
+
 <div class="flex h-screen flex-col overflow-hidden">
-  <!-- 上部: 投稿バー(スマホでは非表示)。「＋カラム」「設定」は下部バー左端のAppMenuへ移設(Issue #96)。
+  <!-- 上部: 投稿バー(スマホでは非表示、設定で下置きも可)。「＋カラム」「設定」は下部バー左端のAppMenuへ移設(Issue #96)。
        スマホUIでは投稿欄自体を表示しないため、headerはPC版でのみ表示する。 -->
-  {#if !useMobileUi}
-    <header
-      class="flex flex-none items-start gap-2.5 border-b border-border bg-muted p-[max(6px,var(--safe-top))_max(10px,var(--safe-right))_6px_max(10px,var(--safe-left))]"
-    >
-      {#if app.accounts.length > 0}
-        <ComposeBar />
-      {:else}
-        <div class="flex-1"></div>
-      {/if}
-    </header>
+  {#if !useMobileUi && !composeAtBottom}
+    {@render composeHeader()}
   {/if}
 
-  <!-- 再認証の案内(Issue #553)。スマホUIでは、バナーが出ている間はバナー自身がステータスバー分の
-       セーフエリアを確保し、下の main は確保しない(二重に空かないようにする)。 -->
+  <!-- 再認証の案内(Issue #553)。最上端のセーフエリアをheaderが確保しない場合(スマホUI/投稿欄が下)は、
+       バナーが出ている間はバナー自身がステータスバー分を確保し、下の main は確保しない(二重に空かないようにする)。 -->
   {#if showReauthBanner}
-    <div class="flex-none" class:pt-[var(--safe-top)]={useMobileUi}>
+    <div class="flex-none" class:pt-[var(--safe-top)]={contentOwnsTopInset}>
       <ReauthBanner onOpenAccounts={() => openSettings("accounts")} />
     </div>
   {/if}
 
   <!-- スマホUIではheaderが無いため、main自身がステータスバー分のセーフエリアを確保しないと
-       カラムのタブバーがステータスバーに被る(Issue #257)。PC版はheaderが既に確保している。
-       ただし、上のバナーが出ている間は、バナーが確保する。 -->
-  <main class="min-h-0 min-w-0 flex-1" class:pt-[var(--safe-top)]={useMobileUi && !showReauthBanner}>
+       カラムのタブバーがステータスバーに被る(Issue #257)。PC版でも投稿欄が下(Issue #548)なら同様。
+       上置きのPC版はheaderが既に確保している。ただし、上のバナーが出ている間は、バナーが確保する。 -->
+  <main class="min-h-0 min-w-0 flex-1" class:pt-[var(--safe-top)]={contentOwnsTopInset && !showReauthBanner}>
     {#if app.booting}
       <div class="grid h-full place-items-center p-6 text-center text-muted-foreground">起動中…</div>
     {:else if showAdd || reauthAccount || app.accounts.length === 0}
@@ -220,6 +234,10 @@
       </div>
     {/if}
   </main>
+
+  {#if composeAtBottom}
+    {@render composeHeader()}
+  {/if}
 
   {#if app.accounts.length > 0 && !app.booting}
     <!-- AppMenu(＋カラム/設定)はBackstageバー左端に並べるが、Backstage.svelte自体はログ専用の
