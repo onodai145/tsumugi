@@ -134,6 +134,10 @@ pub struct UiPrefs {
     /// "auto"(OS判定に従う) | "desktop"(強制PC版) | "mobile"(強制モバイル版)。
     #[serde(default = "default_ui_mode")]
     pub ui_mode: String,
+    /// PC版UIでの投稿欄の位置（Issue #548）。"top"(画面上部) | "bottom"(カラム領域の下)。
+    /// モバイル版UI(FAB+モーダル)では参照されない。
+    #[serde(default = "default_compose_position")]
+    pub compose_position: String,
     /// 既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。
     #[serde(default)]
     pub default_account_id: String,
@@ -255,6 +259,10 @@ fn default_pinned_emojis() -> Vec<String> {
 
 fn default_ui_mode() -> String {
     "auto".into()
+}
+
+fn default_compose_position() -> String {
+    "top".into()
 }
 
 fn default_emoji_style() -> String {
@@ -427,6 +435,7 @@ impl Default for UiPrefs {
             pinned_emojis: default_pinned_emojis(),
             recent_emojis: Vec::new(),
             ui_mode: default_ui_mode(),
+            compose_position: default_compose_position(),
             default_account_id: String::new(),
             emoji_style: default_emoji_style(),
             gap_fill_limit: default_gap_fill_limit(),
@@ -487,6 +496,8 @@ mod tests {
         assert!(v.recent_emojis.is_empty());
         // ui_mode も同様に既定値(auto, 追加前のOS判定のみの挙動)へフォールバックすること。
         assert_eq!(v.ui_mode, "auto");
+        // compose_position も同様に既定値(top, 追加前の上部固定)へフォールバックすること(Issue #548)。
+        assert_eq!(v.compose_position, "top");
         // emoji_style も同様に既定値(twemoji, 本家準拠)へフォールバックすること。
         assert_eq!(v.emoji_style, "twemoji");
         assert_eq!(v.gap_fill_limit, 200);
@@ -560,6 +571,7 @@ mod tests {
             pinned_emojis: vec!["👍".into(), ":blob_cat:".into()],
             recent_emojis: vec![":blob_cat@misskey.io:".into(), "😆".into()],
             ui_mode: "mobile".into(),
+            compose_position: "bottom".into(),
             default_account_id: "a1".into(),
             emoji_style: "fluentEmoji".into(),
             gap_fill_limit: 500,

@@ -4,6 +4,7 @@
 
   let width = $state(app.ui.defaultColumnWidth);
   let uiMode = $state(app.ui.uiMode ?? "auto");
+  let composePosition = $state(app.ui.composePosition ?? "top");
   let mediaThumbnailHeight = $state(app.ui.mediaThumbnailHeight ?? 200);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -14,6 +15,12 @@
     { id: "auto", label: "OSに合わせる" },
     { id: "desktop", label: "PC版" },
     { id: "mobile", label: "モバイル版" },
+  ];
+
+  // PC版UIでの投稿欄の位置(Issue #548)。
+  const composePositions: { id: string; label: string }[] = [
+    { id: "top", label: "上" },
+    { id: "bottom", label: "下" },
   ];
 
   async function save() {
@@ -31,6 +38,7 @@
         ...app.ui,
         defaultColumnWidth: w,
         uiMode,
+        composePosition,
         mediaThumbnailHeight: thumbHeight,
       });
       saved = true;
@@ -58,6 +66,23 @@
     {/each}
   </div>
   <p class="mb-4 mt-0 text-xs text-muted-foreground">モバイル版は投稿欄がFAB+モーダルに、PC版は投稿欄が常時表示になります。</p>
+</div>
+
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
+  <span class="text-muted-foreground">投稿欄の位置</span>
+  <div class="inline-flex w-fit overflow-hidden rounded-md border border-border">
+    {#each composePositions as p (p.id)}
+      <button
+        type="button"
+        aria-pressed={composePosition === p.id}
+        class={composePosition === p.id
+          ? "border-r border-border bg-primary px-3.5 py-1.5 text-sm text-primary-foreground last:border-r-0"
+          : "border-r border-border bg-muted px-3.5 py-1.5 text-sm text-foreground last:border-r-0"}
+        onclick={() => (composePosition = p.id)}
+      >{p.label}</button>
+    {/each}
+  </div>
+  <p class="mb-4 mt-0 text-xs text-muted-foreground">PC版の投稿欄を画面上部とカラムの下のどちらに置くかを選びます。モバイル版では使われません。</p>
 </div>
 
 <label class="mb-2.5 flex flex-col gap-1 text-sm">

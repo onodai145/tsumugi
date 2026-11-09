@@ -190,6 +190,7 @@ class AppStore {
     pinnedEmojis: DEFAULT_PINNED_EMOJIS,
     recentEmojis: [],
     uiMode: "auto",
+    composePosition: "top",
     defaultAccountId: "",
     emojiStyle: "twemoji",
     gapFillLimit: 200,

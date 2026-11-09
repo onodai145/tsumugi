@@ -1266,6 +1266,11 @@ export type UiPrefs = {
 	 *  "auto"(OS判定に従う) | "desktop"(強制PC版) | "mobile"(強制モバイル版)。
 	 */
 	uiMode?: string,
+	/**
+	 *  PC版UIでの投稿欄の位置（Issue #548）。"top"(画面上部) | "bottom"(カラム領域の下)。
+	 *  モバイル版UI(FAB+モーダル)では参照されない。
+	 */
+	composePosition?: string,
 	/**  既定アカウントの id。空文字なら未設定（アカウント一覧の先頭を使う）。 */
 	defaultAccountId?: string,
 	/**  Unicode絵文字の表示スタイル。"native" | "twemoji" | "fluentEmoji"（本家 emojiStyle 準拠）。 */
