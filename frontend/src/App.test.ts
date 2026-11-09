@@ -44,7 +44,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   app.accounts = [];
   app.booting = true;
-  app.ui = { ...app.ui, uiMode: "auto", composePosition: "top" };
+  app.ui = { ...app.ui, uiMode: "auto", composePosition: "top", tabBarPosition: "top" };
 });
 
 function layout(container: HTMLElement) {
@@ -88,6 +88,20 @@ describe("App 投稿欄の位置(Issue #548)", () => {
     app.ui = { ...app.ui, uiMode: "mobile", composePosition: "bottom" };
     const { container } = render(App);
     expect(layout(container).header).toBeNull();
+  });
+});
+
+describe("App モバイル版の投稿ボタンとタブバーの位置(Issue #577)", () => {
+  it("タブバーが上なら投稿ボタンは既定の高さに置く", () => {
+    app.ui = { ...app.ui, uiMode: "mobile", tabBarPosition: "top" };
+    const { getByTitle } = render(App);
+    expect(getByTitle("投稿").className).toContain("bottom-[calc(20px+var(--safe-bottom))]");
+  });
+
+  it("タブバーが下なら、投稿ボタンはタブバーの右端(メニューボタン)に重ならないよう持ち上げる", () => {
+    app.ui = { ...app.ui, uiMode: "mobile", tabBarPosition: "bottom" };
+    const { getByTitle } = render(App);
+    expect(getByTitle("投稿").className).toContain("bottom-[calc(60px+var(--safe-bottom))]");
   });
 });
 

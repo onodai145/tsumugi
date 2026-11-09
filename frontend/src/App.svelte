@@ -264,7 +264,11 @@
 
   {#if useMobileUi && app.accounts.length > 0 && !app.booting}
     <button
-      class="fixed right-[calc(20px+var(--safe-right))] bottom-[calc(20px+var(--safe-bottom))] z-40 grid size-14 place-items-center rounded-full bg-primary text-white shadow-[0_3px_10px_rgba(0,0,0,0.3)]"
+      class={[
+        "fixed right-[calc(20px+var(--safe-right))] z-40 grid size-14 place-items-center rounded-full bg-primary text-white shadow-[0_3px_10px_rgba(0,0,0,0.3)]",
+        // タブバーが下だと右端のメニューボタンに重なるため、タブバーの高さ分だけ持ち上げる(Issue #577)。
+        app.ui.tabBarPosition === "bottom" ? "bottom-[calc(60px+var(--safe-bottom))]" : "bottom-[calc(20px+var(--safe-bottom))]",
+      ]}
       onclick={() => app.openCompose(app.defaultAccountId())}
       title="投稿"
     >

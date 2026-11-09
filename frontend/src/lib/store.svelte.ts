@@ -192,6 +192,7 @@ class AppStore {
     recentEmojis: [],
     uiMode: "auto",
     composePosition: "top",
+    tabBarPosition: "top",
     defaultAccountId: "",
     emojiStyle: "twemoji",
     gapFillLimit: 200,
