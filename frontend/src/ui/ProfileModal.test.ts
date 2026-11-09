@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import type { Note, User } from "../bindings/tauri.gen";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+const openUrlMock = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: openUrlMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
@@ -20,6 +21,7 @@ const { app } = await import("../lib/store.svelte");
 afterEach(() => {
   cleanup();
   invokeMock.mockClear();
+  openUrlMock.mockClear();
   app.ui = { ...app.ui, uiMode: "auto" };
 });
 
@@ -92,6 +94,9 @@ function profileResponse(overrides: Record<string, unknown> = {}) {
     },
     isFollowing: false,
     isMuted: false,
+    isBlocking: false,
+    isRenoteMuted: false,
+    profileUrl: null,
     isSelf: false,
     ...overrides,
   };
@@ -403,6 +408,318 @@ describe("ProfileModal", () => {
 
       expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "mute_user")).toHaveLength(1);
       expect(r.queryByText("ミュート中")).toBeNull();
+    });
+  });
+
+  describe("ブロック・リノートミュート・リスト・通報・ブラウザで開く(Issue #546)", () => {
+    function mockProfile(overrides: Record<string, unknown> = {}, onCommand?: (cmd: string) => unknown) {
+      invokeMock.mockImplementation((cmd: string) => {
+        const custom = onCommand?.(cmd);
+        if (custom !== undefined) return custom;
+        if (cmd === "get_user_profile") return Promise.resolve(profileResponse(overrides));
+        if (cmd === "get_user_notes") return Promise.resolve([]);
+        return Promise.resolve(null);
+      });
+    }
+    const renderModal = () =>
+      render(ProfileModal, { props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} } });
+    const menuButton = (r: ReturnType<typeof renderModal>) =>
+      r.findByRole("button", { name: "ユーザーメニュー" });
+    const called = (cmd: string) => invokeMock.mock.calls.filter(([c]) => c === cmd);
+
+    describe("ブロック", () => {
+      it("「ブロック」を押すと確認が出て、キャンセルならblock_userを呼ばない", async () => {
+        mockProfile();
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+
+        await fireEvent.click(r.getByRole("button", { name: "ブロック" }));
+        expect(r.getByRole("button", { name: "ブロックする" })).toBeTruthy(); // 確認ダイアログ(Modal も role=dialog なので、ボタンで判定する)
+        await fireEvent.click(r.getByRole("button", { name: "キャンセル" }));
+
+        expect(called("block_user")).toHaveLength(0);
+        expect(r.queryByText("ブロック中")).toBeNull();
+      });
+
+      it("確認でOKするとblock_userを呼び、「ブロック中」バッジが出て、フォロー中ならフォロー解除表示になる", async () => {
+        mockProfile({ isFollowing: true });
+        const r = renderModal();
+        await waitFor(() => expect(r.getByRole("button", { name: "フォロー解除" })).toBeTruthy());
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "ブロック" }));
+
+        await fireEvent.click(r.getByRole("button", { name: "ブロックする" }));
+
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "block_user",
+            expect.objectContaining({ accountId: "acc1", userId: "u1" }),
+          ),
+        );
+        await waitFor(() => expect(r.getByText("ブロック中")).toBeTruthy());
+        // サーバーはブロック時にフォローを外す
+        expect(r.getByRole("button", { name: "フォロー" })).toBeTruthy();
+        expect(r.queryByRole("button", { name: "フォロー解除" })).toBeNull();
+      });
+
+      it("ブロック中は「ブロック中」バッジが出て、「ブロック解除」は確認なしでunblock_userを呼ぶ", async () => {
+        mockProfile({ isBlocking: true });
+        const r = renderModal();
+        await waitFor(() => expect(r.getByText("ブロック中")).toBeTruthy());
+        await fireEvent.click(await menuButton(r));
+
+        await fireEvent.click(r.getByRole("button", { name: "ブロック解除" }));
+
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "unblock_user",
+            expect.objectContaining({ accountId: "acc1", userId: "u1" }),
+          ),
+        );
+        await waitFor(() => expect(r.queryByText("ブロック中")).toBeNull());
+      });
+
+      it("ALREADY_BLOCKINGで失敗したら、表示を「ブロック中」に直し、補正メッセージを出す", async () => {
+        mockProfile({}, (cmd) =>
+          cmd === "block_user"
+            ? Promise.reject(new Error("blocking/create: ALREADY_BLOCKING You are already blocking that user."))
+            : undefined,
+        );
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "ブロック" }));
+
+        await fireEvent.click(r.getByRole("button", { name: "ブロックする" }));
+
+        await waitFor(() => expect(r.getByText("ブロック中")).toBeTruthy());
+        expect(r.getByText(/すでにブロック中です/)).toBeTruthy();
+      });
+
+      it("NOT_BLOCKINGで失敗したら、表示を「ブロック中でない」に直す", async () => {
+        mockProfile({ isBlocking: true }, (cmd) =>
+          cmd === "unblock_user" ? Promise.reject(new Error("blocking/delete: NOT_BLOCKING")) : undefined,
+        );
+        const r = renderModal();
+        await waitFor(() => expect(r.getByText("ブロック中")).toBeTruthy());
+        await fireEvent.click(await menuButton(r));
+
+        await fireEvent.click(r.getByRole("button", { name: "ブロック解除" }));
+
+        await waitFor(() => expect(r.queryByText("ブロック中")).toBeNull());
+        expect(r.getByText(/すでにブロック中ではありません/)).toBeTruthy();
+      });
+
+      it("block_userが403(権限不足)で失敗したら、エラーを表示し、バッジは出さない", async () => {
+        mockProfile({}, (cmd) =>
+          cmd === "block_user"
+            ? Promise.reject({ kind: "forbidden", message: "blocking/create: PERMISSION_DENIED" })
+            : undefined,
+        );
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "ブロック" }));
+
+        await fireEvent.click(r.getByRole("button", { name: "ブロックする" }));
+
+        await waitFor(() => expect(r.getByText(/PERMISSION_DENIED|forbidden|権限/)).toBeTruthy());
+        expect(r.queryByText("ブロック中")).toBeNull();
+      });
+    });
+
+    describe("リノートミュート", () => {
+      it("「リノートをミュート」でrenote_mute_userを呼び、メニューを開き直すと「リノートのミュートを解除」になる", async () => {
+        mockProfile();
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+
+        await fireEvent.click(r.getByRole("button", { name: "リノートをミュート" }));
+
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "renote_mute_user",
+            expect.objectContaining({ accountId: "acc1", userId: "u1" }),
+          ),
+        );
+        await fireEvent.click(await menuButton(r));
+        expect(await r.findByRole("button", { name: "リノートのミュートを解除" })).toBeTruthy();
+      });
+
+      it("リノートミュート中なら、解除でunrenote_mute_userを呼ぶ", async () => {
+        mockProfile({ isRenoteMuted: true });
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+
+        await fireEvent.click(r.getByRole("button", { name: "リノートのミュートを解除" }));
+
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "unrenote_mute_user",
+            expect.objectContaining({ accountId: "acc1", userId: "u1" }),
+          ),
+        );
+      });
+
+      it("ALREADY_MUTINGで失敗したら、表示をリノートミュート中に直す", async () => {
+        mockProfile({}, (cmd) =>
+          cmd === "renote_mute_user" ? Promise.reject(new Error("renote-mute/create: ALREADY_MUTING")) : undefined,
+        );
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+
+        await fireEvent.click(r.getByRole("button", { name: "リノートをミュート" }));
+
+        await waitFor(() => expect(r.getByText(/すでにリノートをミュート中です/)).toBeTruthy());
+        await fireEvent.click(await menuButton(r));
+        expect(await r.findByRole("button", { name: "リノートのミュートを解除" })).toBeTruthy();
+      });
+
+      it("isRenoteMutedがnullなら「リノートをミュート」を出さない(サーバーが返さない場合)", async () => {
+        mockProfile({ isRenoteMuted: null });
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        expect(r.queryByRole("button", { name: "リノートをミュート" })).toBeNull();
+      });
+    });
+
+    describe("リストに追加", () => {
+      it("パネルを開くとlist_user_lists_with_membershipを呼び、押すとadd_user_to_listを呼ぶ", async () => {
+        mockProfile({}, (cmd) =>
+          cmd === "list_user_lists_with_membership"
+            ? Promise.resolve([{ id: "L1", name: "友達", hasUser: false }])
+            : undefined,
+        );
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "リストに追加" }));
+
+        const row = await r.findByRole("checkbox", { name: "友達" });
+        await fireEvent.click(row);
+
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "add_user_to_list",
+            expect.objectContaining({ accountId: "acc1", listId: "L1", userId: "u1" }),
+          ),
+        );
+        expect(invokeMock).toHaveBeenCalledWith(
+          "list_user_lists_with_membership",
+          expect.objectContaining({ accountId: "acc1", userId: "u1" }),
+        );
+        await waitFor(() => expect(row.getAttribute("aria-checked")).toBe("true"));
+      });
+
+      it("入っているリストを押すとremove_user_from_listを呼ぶ", async () => {
+        mockProfile({}, (cmd) =>
+          cmd === "list_user_lists_with_membership"
+            ? Promise.resolve([{ id: "L1", name: "友達", hasUser: true }])
+            : undefined,
+        );
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "リストに追加" }));
+
+        await fireEvent.click(await r.findByRole("checkbox", { name: "友達" }));
+
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "remove_user_from_list",
+            expect.objectContaining({ listId: "L1", userId: "u1" }),
+          ),
+        );
+      });
+
+      it("ALREADY_ADDEDで失敗したら、パネルにエラーを出し、メニューは開いたまま", async () => {
+        mockProfile({}, (cmd) => {
+          if (cmd === "list_user_lists_with_membership")
+            return Promise.resolve([{ id: "L1", name: "友達", hasUser: false }]);
+          if (cmd === "add_user_to_list") return Promise.reject(new Error("users/lists/push: ALREADY_ADDED"));
+          return undefined;
+        });
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "リストに追加" }));
+
+        await fireEvent.click(await r.findByRole("checkbox", { name: "友達" }));
+
+        await waitFor(() => expect(r.getByText(/ALREADY_ADDED/)).toBeTruthy());
+        expect(r.getByTestId("user-menu")).toBeTruthy();
+      });
+    });
+
+    describe("通報", () => {
+      it("「通報」でダイアログが開き、コメントを送るとreport_userを呼び、閉じて「通報しました」を出す", async () => {
+        mockProfile();
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "通報" }));
+
+        await fireEvent.input(r.getByLabelText("通報の内容"), { target: { value: "スパムです" } });
+        await fireEvent.click(r.getByRole("button", { name: "通報する" }));
+
+        await waitFor(() =>
+          expect(invokeMock).toHaveBeenCalledWith(
+            "report_user",
+            expect.objectContaining({ accountId: "acc1", userId: "u1", comment: "スパムです" }),
+          ),
+        );
+        await waitFor(() => expect(r.queryByLabelText("通報の内容")).toBeNull());
+        expect(r.getByText("通報しました")).toBeTruthy();
+      });
+
+      it("通報に失敗したら、ダイアログは開いたまま入力が残る", async () => {
+        mockProfile({}, (cmd) =>
+          cmd === "report_user" ? Promise.reject(new Error("users/report-abuse: CANNOT_REPORT_THE_ADMIN")) : undefined,
+        );
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        await fireEvent.click(r.getByRole("button", { name: "通報" }));
+        await fireEvent.input(r.getByLabelText("通報の内容"), { target: { value: "スパムです" } });
+
+        await fireEvent.click(r.getByRole("button", { name: "通報する" }));
+
+        await waitFor(() => expect(r.getByText(/CANNOT_REPORT_THE_ADMIN/)).toBeTruthy());
+        expect((r.getByLabelText("通報の内容") as HTMLTextAreaElement).value).toBe("スパムです");
+        expect(r.queryByText("通報しました")).toBeNull();
+      });
+    });
+
+    describe("ブラウザで開く", () => {
+      it("profileUrlがあれば「ブラウザで開く」を出し、押すとopenUrlでその元ページを開く", async () => {
+        mockProfile({ profileUrl: "https://remote.example/@alice" });
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+
+        await fireEvent.click(r.getByRole("button", { name: "ブラウザで開く" }));
+
+        expect(openUrlMock).toHaveBeenCalledWith("https://remote.example/@alice");
+        expect(r.queryByTestId("user-menu")).toBeNull(); // メニューは閉じる
+      });
+
+      it("profileUrlがnullなら「ブラウザで開く」を出さない", async () => {
+        mockProfile({ profileUrl: null });
+        const r = renderModal();
+        await fireEvent.click(await menuButton(r));
+        expect(r.queryByRole("button", { name: "ブラウザで開く" })).toBeNull();
+      });
+    });
+
+    it("操作の応答が返る前にプロフィールが切り替わっても、新しいプロフィールの表示とbusyを汚さない", async () => {
+      let rejectBlock!: (e: Error) => void;
+      mockProfile({}, (cmd) =>
+        cmd === "block_user" ? new Promise((_, rej) => (rejectBlock = rej)) : undefined,
+      );
+      const r = renderModal();
+      await fireEvent.click(await menuButton(r));
+      await fireEvent.click(r.getByRole("button", { name: "ブロック" }));
+      await fireEvent.click(r.getByRole("button", { name: "ブロックする" }));
+      await waitFor(() => expect(called("block_user")).toHaveLength(1));
+
+      await r.rerender({ target: { userId: "u2" }, accountId: "acc1", onclose: () => {} });
+      rejectBlock(new Error("blocking/create: ALREADY_BLOCKING"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(r.queryByText("ブロック中")).toBeNull();
+      expect(r.queryByText(/すでにブロック中です/)).toBeNull();
     });
   });
 });
