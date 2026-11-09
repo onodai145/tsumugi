@@ -129,6 +129,7 @@ E2E（`e2e/specs-mobile/`）がこれらの変数を上書きしてセーフエ�
 - 本文の左右余白は`Modal`の`p-4`。全幅で見せたい要素(`Settings`のタブ帯)は`-mx-4`で打ち消す。
 - 呼び出し側が持つ高さ上限(`max-h-*`)や内側の`overflow-y-auto`はPC(箱型)専用。モバイルでは二重スクロールになるため、`app.useMobileUi()`で外し、`Modal`の`maxHeight`を渡して本文を縦並びの枠にした上で、自前のスクロール領域を`min-h-0 flex-1`にする(`SearchModal`/`FollowListModal`/`ProfileModal`参照)。
 - PC(箱型)の高さ上限は、内側に`max-h-[calc(84vh-3rem)]`のような手計算を置かず、`Modal`の`maxHeight`(枠込み。例: `83vh`)に渡し、内側は`min-h-0 flex-1`で残りを埋める(`Settings`/`SearchModal`参照)。`Modal`の枠は54px(border 2 + `p-4` 16 + ヘッダー 24 + 余白 12)あり、`3rem`(48px)の見積もりでは6px上限を超え、上下の画面余白(16vh)と合わせて画面全体にスクロールが出る(#537/#542)。`83vh`の1vhは丸め誤差で100vhを超えないための余裕。
+- ダイアログ(`Modal`/`ConfirmDialog`/`ReportUserDialog`等)は`role="dialog" aria-modal="true"`を付け、開いた時に自分の中の要素へフォーカスを移す(Issue #570)。`App.svelte`の`onGlobalKey`は`[aria-modal="true"]`が表示されている間キーマップを無効にするため、付け忘れるとダイアログ越しに`t`(Renote)等が実行される。フォーカスを取らないと背景のEscapeも届かない。
 - `sticky`を本文内に置く場合、基準はスクロール領域のパディング内側になる。本文の`p-4`ぶん`-top-4`で打ち消す(`Settings`のタブ帯参照)。
 - 下端に張り付けるバー(`settings/SaveBar`)も同じく、スクロール領域の下余白ぶん`bottom`を負にして打ち消さないと、バーの下に本文が透けて見える。モバイルの下余白は上記のとおり可変なので、`bottom`は `キーボード - max(1rem, セーフエリア, キーボード + 0.5rem)` にする。
 - 全画面本文の下余白は `max(1rem, var(--safe-bottom), calc(var(--keyboard-inset) + 0.5rem))`。`--keyboard-inset` はソフトキーボードが WebView 下端を覆う高さ(CSS px)で、Android のネイティブ(`MainActivity.kt`)が実行時に設定する。WebView はキーボードで縮まない(`adjustNothing`)ため、`100dvh` では合わせられない。キーボードが無い/PC では `app.css` の既定 `0px`。

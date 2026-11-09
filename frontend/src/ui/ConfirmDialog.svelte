@@ -32,6 +32,14 @@
     document.body.appendChild(node);
     return { destroy: () => node.remove() };
   }
+
+  // 開いた時にキャンセルボタンへフォーカスする(Issue #570)。呼び出し元のメニュー等が消えるとフォーカスは
+  // body に落ち、そのままでは背景の Escape が届かず、App のグローバルショートカットも効いてしまう。
+  // 破壊的な確認でも Enter 一発で確定しないよう、確定側ではなくキャンセル側に置く。
+  let cancelButton = $state<HTMLButtonElement | null>(null);
+  $effect(() => {
+    cancelButton?.focus();
+  });
 </script>
 
 <div
@@ -53,7 +61,7 @@
     <header class="mb-2.5 font-semibold">{title}</header>
     <p class="mb-4 mt-0 whitespace-pre-wrap text-sm text-foreground">{message}</p>
     <div class="flex justify-end gap-2">
-      <Button variant="secondary" size="sm" onclick={onCancel}>{cancelLabel}</Button>
+      <Button bind:ref={cancelButton} variant="secondary" size="sm" onclick={onCancel}>{cancelLabel}</Button>
       <Button variant={danger ? "destructive" : "default"} size="sm" onclick={onConfirm}>{confirmLabel}</Button>
     </div>
   </div>

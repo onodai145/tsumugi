@@ -142,7 +142,10 @@
       }
       return;
     }
-    // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）
+    // モーダル表示中はキーバインド無効（各モーダルの Esc 等に委ねる）。個々の showXxx フラグを
+    // 列挙すると、ProfileModal や ConfirmDialog など列挙漏れのモーダルでショートカットが漏れる
+    // (Issue #570)。aria-modal の要素が DOM にあるかで一括判定する。
+    if (document.querySelector('[aria-modal="true"]')) return;
     if (showAdd || showAddColumn || showSearch || showSettings || app.showComposeModal || app.errorModal) return;
     const action = keymap.get(eventToChord(e));
     if (!action) return;
