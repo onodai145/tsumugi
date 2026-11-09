@@ -55,6 +55,8 @@ async fn record_note_accounts(&self, account_id: &str, note_ids: &[String]) -> R
 async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()>;
 /// アカウント削除時に、そのアカウントの帰属を全て消す。
 async fn forget_account_notes(&self, account_id: &str) -> Result<()>;
+/// このノートがそのアカウントに帰属しているか(テストと、後続の MCP の `get_note` が使う読み取り口)。
+async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool>;
 ```
 
 `NoteCacheStore` にも同名の委譲メソッドを足す。
@@ -65,9 +67,11 @@ async fn forget_account_notes(&self, account_id: &str) -> Result<()>;
 2. `commands/column.rs` の `cache_fetched`(取得結果の書き込み)。
 3. `commands/column.rs` の `commit_gap_fill_writes`(ギャップ埋め)。
 
-2 と 3 は現在 `column_id` しか持たない。`account_id` と「このカラムは `from cache` を含むか(`use_cache`)」を呼び出し元から渡す(要確認: 渡し方は plan で決める)。
+2 は `FilteredFetch` に `attribute_to: Option<String>`(記録先のアカウント ID)を持たせ、`cache_fetched` がそれを見て記録する。3 は `commit_gap_fill_writes` に同名の引数を追加する。どちらも呼び出し元が `ResolvedSources.use_cache` から決める。
 
-**`from cache` を含むカラムでは記録しない。** その結果はグローバルなキャッシュ由来で、そのアカウントが取得した証拠にならないため。ストリーミングは `from cache` カラムには存在しないので、1 は対象外。
+**`from cache` を含むカラムの REST 取得・ギャップ埋めでは記録しない(`attribute_to = None`)。** その結果にはグローバルなキャッシュ由来のノートが混ざり、そのアカウントが取得した証拠にならないため。一方、**ストリーミング受信(1)は常に記録する。** 受信したノートは、そのアカウント自身の WebSocket から届いた事実であり、`from home, cache` のような混在カラムでも変わらない。
+
+記録の失敗では、取得処理(境界の延長を含む)を失敗させない。警告ログだけ出す(未記録は「見えない」側に倒れるだけのため)。
 
 2段階書き込み(`cache_notes` → `record_note_accounts`)は原子的でない。間でクラッシュすると帰属が欠けるが、欠けた場合は「見えない」側に倒れるだけで、外部への漏れにはならない。
 
@@ -79,7 +83,7 @@ async fn forget_account_notes(&self, account_id: &str) -> Result<()>;
 
 ### 既存データの埋め直し
 
-起動時、キャッシュ DB を開いた後のアプリ層で、各アカウントのカラムのうち `from cache` を含まないものについて `backfill_note_accounts(account_id, column_id)` を呼ぶ。`INSERT … SELECT note_id FROM column_note WHERE column_id = ?` を `ON CONFLICT DO NOTHING`(MySQL は `INSERT IGNORE`)で行い、冪等にする(既存のマイグレーション方針と同じ: マーカー用テーブルを持たない)。
+起動時と、キャッシュのバックエンドを切り替えた直後に、アプリ層で、各アカウントのカラムのうち `from cache` を含まないものについて `backfill_note_accounts(account_id, column_id)` を呼ぶ。`from cache` を含むかの判定は、ネットワークを使わない純粋な関数(TQL のパースのみ。パース失敗は「含む」として除外)で行う。`INSERT … SELECT note_id FROM column_note WHERE column_id = ?` を `ON CONFLICT DO NOTHING`(MySQL は `INSERT IGNORE`)で行い、冪等にする(既存のマイグレーション方針と同じ: マーカー用テーブルを持たない)。
 
 - 過去に `from cache` へ設定変更されたカラムは、当時の状態が分からない。現在 `from cache` を含むカラムは除外する(安全側)。過去に `from cache` だった後で通常に戻したカラムの `column_note` は区別できないが、その分は混入しうる(既知の限界。spec に明記して受け入れる)。
 - 毎起動で全カラム分を走らせると、キャッシュが大きい場合に起動が遅くなりうる(要確認)。問題があれば「`note_account` が空のときだけ実行する」に限定する。
@@ -102,10 +106,10 @@ async fn forget_account_notes(&self, account_id: &str) -> Result<()>;
 
 ## 要確認事項(plan で解消する)
 
-- PostgreSQL / MySQL の DDL(特に MySQL の主キーの型)。
-- `cache_fetched` / `commit_gap_fill_writes` に `account_id` と `use_cache` を渡す方法。
-- 起動時の埋め直しのコスト。
-- 既存の `delete_matching` 系の固定テーブル一覧が3 backend で一致していること。
+- 起動時の埋め直しのコスト(毎起動で全カラム分を実行する。大きなキャッシュで起動後の負荷が問題になる場合は、`note_account` が空のときだけに限定する)。
+- PostgreSQL / MySQL の DDL は実 DB テスト(`#[ignore]`)で確認する。MySQL の ID 列は既存の `column_note` と同じ `string_len(64)` を使う(`text` は主キーにできないため)。
+
+解消済み: `account_id` と `use_cache` の渡し方(上記「書き込み経路」)、3 backend の prune 対象テーブル一覧(それぞれに `note_account` を追加する)。
 
 ## 後続作業
 
