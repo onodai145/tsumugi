@@ -71,6 +71,30 @@ pub async fn unfollow(client: &MisskeyClient, user_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// ユーザーを通報する。`users/report-abuse`(コメントは1〜2048文字。検証は呼び出し側)。
+pub async fn report_abuse(client: &MisskeyClient, user_id: &str, comment: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("users/report-abuse", &json!({ "userId": user_id, "comment": comment }))
+        .await?;
+    Ok(())
+}
+
+/// 自分のリストにユーザーを追加する。`users/lists/push`。すでに入っていれば `ALREADY_ADDED` で失敗する。
+pub async fn add_to_list(client: &MisskeyClient, list_id: &str, user_id: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("users/lists/push", &json!({ "listId": list_id, "userId": user_id }))
+        .await?;
+    Ok(())
+}
+
+/// 自分のリストからユーザーを外す。`users/lists/pull`。
+pub async fn remove_from_list(client: &MisskeyClient, list_id: &str, user_id: &str) -> Result<()> {
+    let _: serde_json::Value = client
+        .post("users/lists/pull", &json!({ "listId": list_id, "userId": user_id }))
+        .await?;
+    Ok(())
+}
+
 /// `users/followers` / `users/following` の1件（Followingオブジェクト）。
 /// `id` はこのFollowingレコード自身のIDで、`until_id` によるページングのカーソルに使う
 /// （ユーザーIDではない）。一覧の主体（followers なら相手=follower、following なら相手=followee）
@@ -250,5 +274,44 @@ mod tests {
         assert_eq!(raw.is_renote_muted, None);
         assert_eq!(raw.url, None);
         assert_eq!(raw.uri, None);
+    }
+
+    fn test_client(mock: &wiremock::MockServer) -> crate::api::MisskeyClient {
+        crate::api::MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None)
+    }
+
+    #[tokio::test]
+    async fn report_abuse_posts_the_user_id_and_comment() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/users/report-abuse"))
+            .and(body_partial_json(serde_json::json!({ "userId": "u1", "comment": "spam" })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        report_abuse(&test_client(&mock), "u1", "spam").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_to_list_posts_to_lists_push_and_remove_posts_to_lists_pull() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let mock = MockServer::start().await;
+        for endpoint in ["/users/lists/push", "/users/lists/pull"] {
+            Mock::given(method("POST"))
+                .and(path(endpoint))
+                .and(body_partial_json(serde_json::json!({ "listId": "L1", "userId": "u1" })))
+                .respond_with(ResponseTemplate::new(204))
+                .expect(1)
+                .mount(&mock)
+                .await;
+        }
+
+        add_to_list(&test_client(&mock), "L1", "u1").await.unwrap();
+        remove_from_list(&test_client(&mock), "L1", "u1").await.unwrap();
     }
 }

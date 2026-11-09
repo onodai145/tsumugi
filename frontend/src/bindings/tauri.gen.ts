@@ -461,6 +461,14 @@ export const commands = {
 	getUserFollowers: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_followers", { accountId, userId, untilId })),
 	/**  フォロー中一覧（ページング）。 */
 	getUserFollowing: (accountId: string, userId: string, untilId: string | null) => typedError<FollowListEntry[], Error>(__TAURI_INVOKE("get_user_following", { accountId, userId, untilId })),
+	/**  ユーザーを通報する(Issue #546)。 */
+	reportUser: (accountId: string, userId: string, comment: string) => typedError<null, Error>(__TAURI_INVOKE("report_user", { accountId, userId, comment })),
+	/**  自分のリスト一覧と、`user_id` が各リストに入っているか。 */
+	listUserListsWithMembership: (accountId: string, userId: string) => typedError<UserListMembership[], Error>(__TAURI_INVOKE("list_user_lists_with_membership", { accountId, userId })),
+	/**  リストにユーザーを追加する。 */
+	addUserToList: (accountId: string, listId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("add_user_to_list", { accountId, listId, userId })),
+	/**  リストからユーザーを外す。 */
+	removeUserFromList: (accountId: string, listId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("remove_user_from_list", { accountId, listId, userId })),
 	getCacheBackend: () => typedError<CacheBackendConfig, string>(__TAURI_INVOKE("get_cache_backend")),
 	setCacheBackend: (config: CacheBackendConfig, password: string | null) => typedError<null, string>(__TAURI_INVOKE("set_cache_backend", { config, password })),
 };
@@ -1469,6 +1477,16 @@ export type User = {
 export type UserList = {
 	id: string,
 	name: string,
+};
+
+/**
+ *  「リストに追加」メニュー用。自分のリスト1件と、対象ユーザーがそのリストに入っているか。
+ *  `has_user` は Rust 側で `users/lists/list` の `userIds` から計算し、`userIds` 自体は IPC に載せない。
+ */
+export type UserListMembership = {
+	id: string,
+	name: string,
+	hasUser: boolean,
 };
 
 /**

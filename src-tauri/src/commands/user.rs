@@ -1,8 +1,8 @@
 //! ユーザープロフィール取得・フォロー操作。
 
 use crate::api;
-use crate::domain::{Account, ColumnKind, Note, User};
-use crate::error::Result;
+use crate::domain::{Account, ColumnKind, Note, User, UserListMembership};
+use crate::error::{Error, Result};
 use crate::state::AppState;
 use specta::Type;
 use tauri::State;
@@ -144,6 +144,74 @@ pub async fn get_user_following(
     Ok(entries.into_iter().map(|(user, cursor)| FollowListEntry { user, cursor }).collect())
 }
 
+/// 通報コメントの上限(文字数)。上流 `users/report-abuse` の `maxLength`。
+const REPORT_COMMENT_MAX_CHARS: usize = 2048;
+
+/// 通報コメントを検証して前後の空白を削る(純粋関数、テスト用に分離)。空(空白のみを含む)と
+/// 2048文字超はサーバーに送らず `Invalid` にする。
+pub(crate) fn validate_report_comment(comment: &str) -> Result<String> {
+    let trimmed = comment.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Invalid("通報の内容を入力してください".into()));
+    }
+    if trimmed.chars().count() > REPORT_COMMENT_MAX_CHARS {
+        return Err(Error::Invalid(format!("通報の内容は{REPORT_COMMENT_MAX_CHARS}文字以内にしてください")));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// ユーザーを通報する(Issue #546)。
+#[tauri::command]
+#[specta::specta]
+pub async fn report_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+    comment: String,
+) -> Result<()> {
+    let comment = validate_report_comment(&comment)?;
+    let client = state.client_for(&account_id)?;
+    api::users::report_abuse(&client, &user_id, &comment).await
+}
+
+/// 自分のリスト一覧と、`user_id` が各リストに入っているか。
+#[tauri::command]
+#[specta::specta]
+pub async fn list_user_lists_with_membership(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<Vec<UserListMembership>> {
+    let client = state.client_for(&account_id)?;
+    api::meta::fetch_user_lists_with_membership(&client, &user_id).await
+}
+
+/// リストにユーザーを追加する。
+#[tauri::command]
+#[specta::specta]
+pub async fn add_user_to_list(
+    state: State<'_, AppState>,
+    account_id: String,
+    list_id: String,
+    user_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    api::users::add_to_list(&client, &list_id, &user_id).await
+}
+
+/// リストからユーザーを外す。
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_user_from_list(
+    state: State<'_, AppState>,
+    account_id: String,
+    list_id: String,
+    user_id: String,
+) -> Result<()> {
+    let client = state.client_for(&account_id)?;
+    api::users::remove_from_list(&client, &list_id, &user_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +298,18 @@ mod tests {
                 "{bad:?} は採用しない"
             );
         }
+    }
+
+    #[test]
+    fn report_comment_is_trimmed_and_must_not_be_blank() {
+        assert_eq!(validate_report_comment("  スパムです \n").unwrap(), "スパムです");
+        assert!(validate_report_comment("").is_err());
+        assert!(validate_report_comment("  \n\t ").is_err());
+    }
+
+    #[test]
+    fn report_comment_longer_than_2048_chars_is_rejected() {
+        assert!(validate_report_comment(&"あ".repeat(2048)).is_ok());
+        assert!(validate_report_comment(&"あ".repeat(2049)).is_err());
     }
 }

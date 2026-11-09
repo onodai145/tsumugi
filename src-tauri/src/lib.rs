@@ -151,6 +151,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::user::get_user_notes,
             commands::user::get_user_followers,
             commands::user::get_user_following,
+            commands::user::report_user,
+            commands::user::list_user_lists_with_membership,
+            commands::user::add_user_to_list,
+            commands::user::remove_user_from_list,
             commands::cache_backend::get_cache_backend,
             commands::cache_backend::set_cache_backend,
         ])
