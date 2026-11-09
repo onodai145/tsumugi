@@ -90,3 +90,33 @@ describe("App 投稿欄の位置(Issue #548)", () => {
     expect(layout(container).header).toBeNull();
   });
 });
+
+describe("App グローバルショートカットとモーダル(Issue #570)", () => {
+  function pressT() {
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true }));
+  }
+
+  it("モーダルが無ければキーマップが実行される", () => {
+    const run = vi.spyOn(app, "runKeyAction").mockImplementation(() => {});
+    render(App);
+    pressT();
+    expect(run).toHaveBeenCalledWith("note.renote");
+  });
+
+  it("aria-modal のダイアログが表示されている間はキーマップを実行しない", () => {
+    const run = vi.spyOn(app, "runKeyAction").mockImplementation(() => {});
+    render(App);
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    document.body.appendChild(dialog);
+    try {
+      pressT();
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      dialog.remove();
+    }
+    pressT();
+    expect(run).toHaveBeenCalledWith("note.renote");
+  });
+});
