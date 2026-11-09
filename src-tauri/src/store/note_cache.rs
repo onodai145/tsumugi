@@ -63,6 +63,27 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
         until_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Note>>;
+
+    // --- アカウント帰属(Issue #557、docs/superpowers/specs/2026-11-09-note-account-attribution-design.md) ---
+    // 一時的なデフォルト実装(何もしない)。PostgreSQL / MySQL の実装が揃ったら削除する。
+
+    /// アカウントがこれらのノートを自分の取得経路で得たことを記録する(冪等)。
+    /// `note` に存在しない ID は無視する(孤児行を作らない)。
+    async fn record_note_accounts(&self, _account_id: &str, _note_ids: &[String]) -> Result<()> {
+        Ok(())
+    }
+    /// `column_note` のあるカラムのノートを、アカウントの帰属として複写する(埋め直し用、冪等)。
+    async fn backfill_note_accounts(&self, _account_id: &str, _column_id: &str) -> Result<()> {
+        Ok(())
+    }
+    /// アカウント削除時に、そのアカウントの帰属を全て消す。
+    async fn forget_account_notes(&self, _account_id: &str) -> Result<()> {
+        Ok(())
+    }
+    /// このノートがそのアカウントに帰属しているか。
+    async fn account_has_note(&self, _account_id: &str, _note_id: &str) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 /// note cacheの公開API。内部の`NoteCacheBackend`実装(`SqliteBackend`、将来的な
@@ -198,6 +219,26 @@ impl NoteCacheStore {
     ) -> Result<Vec<Note>> {
         self.backend().search_cache(where_sql, until_id, limit).await
     }
+
+    /// アカウントがこれらのノートを自分の取得経路で得たことを記録する(Issue #557)。
+    pub async fn record_note_accounts(&self, account_id: &str, note_ids: &[String]) -> Result<()> {
+        self.backend().record_note_accounts(account_id, note_ids).await
+    }
+
+    /// `column_note` のあるカラムのノートをアカウントの帰属として複写する(埋め直し用)。
+    pub async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()> {
+        self.backend().backfill_note_accounts(account_id, column_id).await
+    }
+
+    /// アカウント削除時に、そのアカウントの帰属を全て消す。
+    pub async fn forget_account_notes(&self, account_id: &str) -> Result<()> {
+        self.backend().forget_account_notes(account_id).await
+    }
+
+    /// このノートがそのアカウントに帰属しているか。
+    pub async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool> {
+        self.backend().account_has_note(account_id, note_id).await
+    }
 }
 
 /// (note_id, payload) の行群を Note へ復元する(Issue #263)。
@@ -309,7 +350,7 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
         rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?
     };
 
-    for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
+    for table in ["column_note", "note_account", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
         conn.execute(
             &format!("DELETE FROM {table} WHERE note_id IN (SELECT id FROM prune_ids)"),
             [],

@@ -160,6 +160,75 @@ impl NoteCacheBackend for SqliteBackend {
         .map_err(map_join_error)?
     }
 
+    async fn record_note_accounts(&self, account_id: &str, note_ids: &[String]) -> Result<()> {
+        if note_ids.is_empty() {
+            return Ok(());
+        }
+        let conn = Arc::clone(&self.conn);
+        let account_id = account_id.to_string();
+        let note_ids = note_ids.to_vec();
+        tauri::async_runtime::spawn_blocking(move || -> Result<()> {
+            let mut guard = conn.lock().unwrap();
+            let tx = guard.transaction()?;
+            for id in &note_ids {
+                // note に存在する ID だけを記録する(prune 済みのノートで孤児行を作らない)。
+                tx.execute(
+                    "INSERT OR IGNORE INTO note_account (account_id, note_id)
+                     SELECT ?1, id FROM note WHERE id = ?2",
+                    rusqlite::params![account_id, id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .map_err(map_join_error)?
+    }
+
+    async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let (account_id, column_id) = (account_id.to_string(), column_id.to_string());
+        tauri::async_runtime::spawn_blocking(move || -> Result<()> {
+            let guard = conn.lock().unwrap();
+            guard.execute(
+                "INSERT OR IGNORE INTO note_account (account_id, note_id)
+                 SELECT ?1, note_id FROM column_note WHERE column_id = ?2",
+                rusqlite::params![account_id, column_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(map_join_error)?
+    }
+
+    async fn forget_account_notes(&self, account_id: &str) -> Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let account_id = account_id.to_string();
+        tauri::async_runtime::spawn_blocking(move || -> Result<()> {
+            let guard = conn.lock().unwrap();
+            guard.execute("DELETE FROM note_account WHERE account_id = ?1", rusqlite::params![account_id])?;
+            Ok(())
+        })
+        .await
+        .map_err(map_join_error)?
+    }
+
+    async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let (account_id, note_id) = (account_id.to_string(), note_id.to_string());
+        tauri::async_runtime::spawn_blocking(move || -> Result<bool> {
+            let guard = conn.lock().unwrap();
+            let found: bool = guard.query_row(
+                "SELECT EXISTS(SELECT 1 FROM note_account WHERE account_id = ?1 AND note_id = ?2)",
+                rusqlite::params![account_id, note_id],
+                |r| r.get(0),
+            )?;
+            Ok(found)
+        })
+        .await
+        .map_err(map_join_error)?
+    }
+
     async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
         let conn = Arc::clone(&self.conn);
         let column_id = column_id.to_string();
@@ -1216,5 +1285,82 @@ mod tests {
             .query_row("SELECT count FROM note_reaction WHERE note_id='n1' AND emoji_key='👍'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 5);
+    }
+
+    #[tokio::test]
+    async fn note_account_records_idempotently_and_ignores_unknown_notes() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+
+        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap(); // 再実行しても変わらない
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        // note に存在しない ID は孤児行にしない
+        assert!(!s.account_has_note("acc1", "ghost").await.unwrap());
+        // 記録していない別アカウントには帰属しない
+        assert!(!s.account_has_note("acc2", "n1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn note_account_allows_one_note_to_belong_to_several_accounts() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc2", &["n1".to_string()]).await.unwrap();
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(s.account_has_note("acc2", "n1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn note_account_is_removed_together_with_the_note_by_prune() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()]).await.unwrap();
+
+        s.prune(2, 0, 0).await.unwrap(); // 最古の n1 が消える
+
+        assert!(!s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(s.account_has_note("acc1", "n3").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn note_account_forget_removes_only_the_given_account() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc2", &["n1".to_string()]).await.unwrap();
+
+        s.forget_account_notes("acc1").await.unwrap();
+
+        assert!(!s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(s.account_has_note("acc2", "n1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn note_account_backfill_copies_the_column_notes_idempotently() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col2", &[note("n3", 300)]).await.unwrap();
+
+        s.backfill_note_accounts("acc1", "col1").await.unwrap();
+        s.backfill_note_accounts("acc1", "col1").await.unwrap(); // 再実行しても変わらない
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(s.account_has_note("acc1", "n2").await.unwrap());
+        assert!(!s.account_has_note("acc1", "n3").await.unwrap()); // 別カラムは複写しない
+    }
+
+    #[tokio::test]
+    async fn note_account_survives_clear_column_notes() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+
+        s.clear_column_notes("col1").await.unwrap();
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
     }
 }
