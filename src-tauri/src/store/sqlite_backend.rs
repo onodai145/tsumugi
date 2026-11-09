@@ -192,7 +192,7 @@ impl NoteCacheBackend for SqliteBackend {
             let guard = conn.lock().unwrap();
             guard.execute(
                 "INSERT OR IGNORE INTO note_account (account_id, note_id)
-                 SELECT ?1, note_id FROM column_note WHERE column_id = ?2",
+                 SELECT ?1, cn.note_id FROM column_note cn JOIN note n ON n.id = cn.note_id WHERE cn.column_id = ?2",
                 rusqlite::params![account_id, column_id],
             )?;
             Ok(())
@@ -1373,6 +1373,26 @@ mod tests {
         s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
 
         assert!(!s.note_account_is_empty().await.unwrap());
+    }
+
+    /// `column_note` に実体のないノート ID が残っていても、孤児の `note_account` 行を作らない。
+    #[tokio::test]
+    async fn note_account_backfill_ignores_column_note_rows_without_a_note() {
+        let s = store();
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        {
+            let conn = s.conn().lock().unwrap();
+            conn.execute(
+                "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', 'ghost', 0, 0)",
+                [],
+            )
+            .unwrap();
+        }
+
+        s.backfill_note_accounts("acc1", "col1").await.unwrap();
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(!s.account_has_note("acc1", "ghost").await.unwrap());
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@
 
 use crate::domain::CacheBackendConfig;
 use crate::state::AppState;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[tauri::command]
 #[specta::specta]
@@ -16,6 +16,7 @@ pub async fn get_cache_backend(state: State<'_, AppState>) -> Result<CacheBacken
 #[tauri::command]
 #[specta::specta]
 pub async fn set_cache_backend(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     config: CacheBackendConfig,
     password: Option<String>,
@@ -65,7 +66,12 @@ pub async fn set_cache_backend(
     // 不整合window(再起動すると旧バックエンドに戻ってしまう)が生じるため。
     state.settings.save_cache_backend(&config).map_err(|e| e.to_string())?;
     state.cache.swap_backend(new_backend);
-    // 切り替え先に既存のキャッシュがある場合に備えて、帰属を埋め直す(Issue #557)。
-    crate::attribution::backfill_all(&state.settings, &state.cache).await;
+    // 切り替え先に既存のキャッシュがある場合に備えて、帰属を埋め直す(Issue #557)。切り替えの応答を
+    // 遅らせないよう、待たずに裏で実行する。
+    tauri::async_runtime::spawn(async move {
+        if let Some(state) = app.try_state::<AppState>() {
+            crate::attribution::backfill_all(&state.settings, &state.cache).await;
+        }
+    });
     Ok(())
 }

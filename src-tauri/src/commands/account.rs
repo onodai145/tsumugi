@@ -101,6 +101,8 @@ pub async fn remove_account(state: State<'_, AppState>, account_id: String) -> R
     // そのアカウントのノート帰属も消す(Issue #557)。
     crate::attribution::forget(&state.cache, &account_id).await;
     state.settings.delete_account(&account_id)?; // アカウント＋カラムを永続層から削除
+    // 実行中の取得が上の `forget` の後に完了して再記録した分も消す(競合の窓を狭める。完全には塞げない)。
+    crate::attribution::forget(&state.cache, &account_id).await;
     // 上記でそのアカウントのカラムが全て消えたことで空になったグループが有り得るため、
     // 空グループとペイン分割ツリー上の対応するLeafも掃除する(Issue #31)。
     state.settings.delete_empty_groups()?;

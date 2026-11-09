@@ -937,7 +937,8 @@ impl NoteCacheBackend for PostgresBackend {
 
     async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()> {
         sqlx::query(
-            "INSERT INTO note_account (account_id, note_id) SELECT $1, note_id FROM column_note WHERE column_id = $2
+            "INSERT INTO note_account (account_id, note_id)
+             SELECT $1, cn.note_id FROM column_note cn JOIN note n ON n.id = cn.note_id WHERE cn.column_id = $2
              ON CONFLICT DO NOTHING",
         )
         .bind(account_id)
@@ -1793,6 +1794,23 @@ mod tests {
         s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
 
         assert!(!s.note_account_is_empty().await.unwrap());
+    }
+
+    /// `column_note` に実体のないノート ID が残っていても、孤児の `note_account` 行を作らない。
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_backfill_ignores_column_note_rows_without_a_note() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        sqlx::query("INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', 'ghost', 0, 0)")
+            .execute(s.pool())
+            .await
+            .unwrap();
+
+        s.backfill_note_accounts("acc1", "col1").await.unwrap();
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(!s.account_has_note("acc1", "ghost").await.unwrap());
     }
 
     #[tokio::test]
