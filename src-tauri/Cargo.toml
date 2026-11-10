@@ -92,6 +92,13 @@ tauri-plugin-single-instance = "2"
 # optional の "wayland" feature が必要(ext-data-control / wlr-data-control 対応コンポジタのみ)。
 # image feature は #57 のプラグイン経由の画像読み取りと重複するため無効にする。
 clipboard-rs = { version = "=0.3.5", default-features = false, features = ["wayland"] }
+# MCPサーバー(Issue #557)。ステートレスのStreamable HTTP。公式Rust SDK。
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "macros", "transport-streamable-http-server", "schemars"] }
+axum = "0.8"
+tokio-util = "0.7"
+# bearerトークンの定数時間比較と、OS乱数によるトークン生成。
+subtle = "2.6"
+getrandom = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # "keychain"(コード署名なしのCLI/デスクトップアプリ向け)を選択。

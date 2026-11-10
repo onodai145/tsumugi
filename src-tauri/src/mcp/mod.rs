@@ -3,3 +3,5 @@
 #![allow(dead_code)]
 
 pub mod settings;
+#[cfg(desktop)]
+pub mod token;
