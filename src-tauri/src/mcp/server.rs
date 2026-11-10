@@ -40,11 +40,19 @@ pub struct McpRuntime {
     pub token: SharedToken,
     state: Mutex<RunState>,
     running: tokio::sync::Mutex<Option<Running>>,
+    /// 起動・停止・再構成を直列にする。`start` の途中(bind の最中)に別の `stop` が割り込むと、設定が
+    /// オフなのに待ち受けが残る、または稼働中なのに `Error` と表示される。
+    pub(crate) lifecycle: tokio::sync::Mutex<()>,
 }
 
 impl Default for McpRuntime {
     fn default() -> Self {
-        Self { token: SharedToken::default(), state: Mutex::new(RunState::Stopped), running: tokio::sync::Mutex::new(None) }
+        Self {
+            token: SharedToken::default(),
+            state: Mutex::new(RunState::Stopped),
+            running: tokio::sync::Mutex::new(None),
+            lifecycle: tokio::sync::Mutex::new(()),
+        }
     }
 }
 
@@ -66,14 +74,20 @@ impl McpRuntime {
         self.state.lock().unwrap().clone()
     }
 
-    fn set_state(&self, s: RunState) {
+    pub(crate) fn set_state(&self, s: RunState) {
         *self.state.lock().unwrap() = s;
     }
 
     /// `127.0.0.1:<port>` で起動し、束縛したポートを返す(`0` なら空きポート。テスト用)。
     /// すでに動いていれば先に止める。失敗したら状態を `Error` にして `Err` を返す。
     pub async fn start<R: Runtime>(&self, app: AppHandle<R>, port: u16) -> Result<u16, String> {
-        self.stop().await;
+        let _lifecycle = self.lifecycle.lock().await;
+        self.start_locked(app, port).await
+    }
+
+    /// `lifecycle` のロックを持っている呼び出し元用の `start`。
+    async fn start_locked<R: Runtime>(&self, app: AppHandle<R>, port: u16) -> Result<u16, String> {
+        self.stop_locked().await;
         let listener = match TcpListener::bind(("127.0.0.1", port)).await {
             Ok(l) => l,
             Err(e) => {
@@ -112,6 +126,12 @@ impl McpRuntime {
     }
 
     pub async fn stop(&self) {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.stop_locked().await;
+    }
+
+    /// `lifecycle` のロックを持っている呼び出し元用の `stop`。
+    async fn stop_locked(&self) {
         let running = self.running.lock().await.take();
         if let Some(r) = running {
             r.shutdown.cancel();
@@ -128,15 +148,25 @@ impl McpRuntime {
 pub async fn reconcile<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     use tauri::Manager;
     let state = app.try_state::<crate::state::AppState>().ok_or("app state is not available")?;
+    // 他の起動・停止と直列にする。設定は、ロックを取ったあとに読む(待っている間の変更を反映するため)。
+    let _lifecycle = state.mcp.lifecycle.lock().await;
     let settings = state.settings.load_mcp();
-    state.mcp.stop().await;
+    state.mcp.stop_locked().await;
     if !settings.enabled {
         return Ok(());
     }
-    let token = crate::mcp::token::load_or_create(state.secrets.as_ref()).map_err(|e| e.to_string())?;
+    let token = match crate::mcp::token::load_or_create(state.secrets.as_ref()) {
+        Ok(t) => t,
+        Err(e) => {
+            // 起動しない理由を状態に残す(設定画面を開き直しても分かるように)。
+            let msg = format!("トークンを用意できません: {e}");
+            state.mcp.set_state(RunState::Error(msg.clone()));
+            return Err(msg);
+        }
+    };
     state.mcp.token.set(token);
-    // バインド失敗は `start` が状態に記録する。ここではエラーにしない。
-    let _ = state.mcp.start(app.clone(), settings.port).await;
+    // バインド失敗は `start_locked` が状態に記録する。ここではエラーにしない。
+    let _ = state.mcp.start_locked(app.clone(), settings.port).await;
     Ok(())
 }
 
@@ -354,7 +384,51 @@ mod tests {
         app.manage(state);
 
         assert!(reconcile(app.handle()).await.is_err());
-        assert_eq!(app.state::<AppState>().mcp.status(), RunState::Stopped, "平文などへフォールバックせず、起動しない");
+        // 平文などへフォールバックせず、起動しない。理由は状態に残す(設定画面を開き直しても分かるように)。
+        match app.state::<AppState>().mcp.status() {
+            RunState::Error(msg) => assert!(msg.contains("no keyring"), "{msg}"),
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reconcile_waits_while_another_lifecycle_operation_holds_the_lock() {
+        // start / stop / reconcile は直列にする。`stop` が `start` の途中(bind の最中)に割り込むと、
+        // 設定がオフなのに待ち受けが残る(Issue #557 の最終レビュー)。
+        let app = tauri::test::mock_app();
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.settings.update_mcp(|m| { m.enabled = true; m.port = 0; }).unwrap();
+        app.manage(state);
+        let st = app.state::<AppState>();
+
+        let guard = st.mcp.lifecycle.lock().await;
+        let handle = app.handle().clone();
+        let task = tokio::spawn(async move { reconcile(&handle).await });
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert_eq!(st.mcp.status(), RunState::Stopped, "ロックを持っている間は進まない");
+
+        drop(guard);
+        task.await.unwrap().unwrap();
+        assert!(matches!(st.mcp.status(), RunState::Running { .. }));
+    }
+
+    #[tokio::test]
+    async fn reconcile_applies_the_latest_settings_after_acquiring_the_lock() {
+        // 設定は、ロックを取ったあとに読む。待っている間にオフへ変わったら、起動せずに止まる。
+        let app = tauri::test::mock_app();
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.settings.update_mcp(|m| { m.enabled = true; m.port = 0; }).unwrap();
+        app.manage(state);
+        let st = app.state::<AppState>();
+
+        let guard = st.mcp.lifecycle.lock().await;
+        let handle = app.handle().clone();
+        let task = tokio::spawn(async move { reconcile(&handle).await });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        st.settings.update_mcp(|m| m.enabled = false).unwrap(); // 待っている間にオフへ
+        drop(guard);
+        task.await.unwrap().unwrap();
+        assert_eq!(st.mcp.status(), RunState::Stopped, "オフの設定のまま、待ち受けは残らない");
     }
 
     #[tokio::test]
