@@ -8,6 +8,7 @@
   import BackgroundSection from "./settings/BackgroundSection.svelte";
   import ReactionSection from "./settings/ReactionSection.svelte";
   import ExternalIntegrationSection from "./settings/ExternalIntegrationSection.svelte";
+  import McpSection from "./settings/McpSection.svelte";
   import DataSection from "./settings/DataSection.svelte";
   import CacheBackendSettings from "./settings/CacheBackendSettings.svelte";
   import DeveloperSection from "./settings/DeveloperSection.svelte";
@@ -26,6 +27,7 @@
     | "background"
     | "reaction"
     | "externalIntegration"
+    | "mcp"
     | "data"
     | "notify"
     | "mute"
@@ -57,6 +59,7 @@
     { id: "background" as const, label: "背景" },
     { id: "reaction" as const, label: "リアクション" },
     { id: "externalIntegration" as const, label: "外部連携" },
+    ...(isMobilePlatform ? [] : [{ id: "mcp" as const, label: "MCPサーバー" }]),
     { id: "data" as const, label: "データ" },
     { id: "notify" as const, label: "通知" },
     { id: "mute" as const, label: "NG（ミュート）" },
@@ -95,6 +98,8 @@
     <ReactionSection />
   {:else if active === "externalIntegration"}
     <ExternalIntegrationSection />
+  {:else if active === "mcp"}
+    <McpSection />
   {:else if active === "data"}
     <!-- 保存バー(sticky)の効く範囲を DataSection の中に限る。包まないと、下の
          CacheBackendSettings までスクロールしても DataSection の保存バーが被さる。 -->
