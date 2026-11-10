@@ -43,10 +43,11 @@ tsumugi はキャッシュ済みの Misskey タイムラインを SQLite / Postg
 | `token.rs` | トークンの生成、keyring への保存、現在値の共有 |
 | `query.rs` | 構造化パラメータ → TQL の AST → `SqlWhere`、スコープ条件の合成 |
 | `dto.rs` | ノート返却用 DTO(ホワイトリスト変換) |
-| `tools.rs` | rmcp のツール3つ |
+| `service.rs` | ツールの中身(公開判定、クエリ実行、DTO 変換)。rmcp に依存せず、`AppState` だけでテストできる |
+| `tools.rs` | rmcp のツール3つ。`service` を呼ぶだけの薄い層 |
 | `server.rs` | axum ルーター、rmcp の組み込み、起動・停止・状態 |
 
-`guard` / `query` / `dto` / `tools` / `server` はデスクトップのみ(`#[cfg(desktop)]`)。`settings.rs` と Tauri コマンドは全プラットフォームで登録し、TS バインディングを環境で変えない。Android で有効化すると「未対応」エラーを返し、UI はセクションごと非表示にする。`rmcp` / `axum` は `cfg(not(target_os = "android"))` の依存にする。
+`guard` / `token` / `query` / `dto` / `service` / `tools` / `server` はデスクトップのみ(`#[cfg(desktop)]`)。`settings.rs` と Tauri コマンドは全プラットフォームで登録し、TS バインディングを環境で変えない。Android で有効化すると「未対応」エラーを返し、UI はセクションごと非表示にする。`rmcp` / `axum` は `cfg(not(any(target_os = "android", target_os = "ios")))` の依存にする。
 
 ### ライフサイクル
 
@@ -54,7 +55,8 @@ tsumugi はキャッシュ済みの Misskey タイムラインを SQLite / Postg
 - 停止: 無効化トグル、アプリ終了。
 - ポート変更: 稼働中なら再起動する。
 - バインド失敗(使用中など): 自動で別ポートに逃げない(クライアントの URL を安定させるため)。状態を `Error(理由)` にして停止のままにする。
-- rmcp はステートレスモードで使う(ツールは読み取り専用で、サーバーからの通知がない)。実装前に、rmcp 側の設定名(`stateful_mode` / `json_response` 相当)を確認する。
+- rmcp はステートレスモードで使う(ツールは読み取り専用で、サーバーからの通知がない)。rmcp 3.9.0 では `StreamableHttpServerConfig::default().with_legacy_session_mode(false).with_json_response(true)` と `NeverSessionManager`(`legacy_session_mode` の既定は `true` なので、明示的に `false` にする)。実際に HTTP で `initialize` → `tools/list` → `tools/call` が往復することを確認済み。
+- POST ボディの上限は 64KiB にする(rmcp の既定は 4MiB。ツールの引数は小さい)。
 
 ## セキュリティ
 
@@ -108,12 +110,14 @@ tsumugi はキャッシュ済みの Misskey タイムラインを SQLite / Postg
 ```
 (構造化パラメータ → TQL の AST → filter::sql::build_where)
  AND n.visibility IN ('public','home')
- AND n.local_only = 0
+ AND NOT n.local_only
  AND n.id IN (SELECT note_id FROM note_account WHERE account_id = ?)
 ```
 
 - `SqlWhere` のプレースホルダーは3 backend とも `?`(PostgreSQL は後段の `to_postgres_sql` で `$n` に振り直される)。後ろ3行を `sql` の末尾に足し、`params` の末尾にアカウント ID を足すだけで、既存の `NoteCacheStore::search_cache` にそのまま渡せる。**`NoteCacheBackend` の trait は変えない。**
 - 後ろ3行は固定文字列で、値は bind する。クライアントの入力は SQL 文字列に入らない。
+- `local_only` は PostgreSQL では BOOLEAN 列(SQLite は INTEGER、MySQL は TINYINT)なので、`= 0` ではなく `NOT n.local_only` と書く(`= 0` は PostgreSQL で `boolean = integer` のエラーになる)。実 DB テストで3 backend を確認する。
+- TQL の部分一致(`Contains`)は LIKE の値をエスケープしない。`text` に含まれる `%` / `_` はワイルドカードとして働く。値は bind されるので SQL インジェクションにはならず、スコープ条件の AND で範囲も変わらない(結果が少し広がるだけ)。仕様として受け入れ、テストで固定する。
 - `SqlCtx` の `my_ids` / `following_ids` は空にする。`mine` / `reacted` / `renoted` / `favorited` / `following` など、アカウント視点の述語は AST に含めない。
 - `get_note` は AST ではなく、`n.id = ?` を固定文字列で組み立て、同じスコープ条件を AND する。
 - 合成の順序: 各断片を括弧で囲んで AND する(`(a) AND (b)`)。`or` を含む式でも優先順位が崩れない。
@@ -122,7 +126,7 @@ tsumugi はキャッシュ済みの Misskey タイムラインを SQLite / Postg
 
 `domain::Note` を直接シリアライズせず、`dto.rs` の専用型へ明示的に詰め替える。将来 `Note` にフィールドが増えても、自動では外に出ない。
 
-返す: `id`、`url`、`createdAt`(ISO 8601)、`text`、`cw`、`visibility`、`user{ id, acct, name, isBot }`、`replyId`、`renoteId`、`tags`、`files[{ type, isSensitive, description }]`、`reactionCount`、`renoteCount`、`replyCount`。
+返す: `id`、`url`、`createdAt`(ISO 8601)、`text`、`cw`、`visibility`、`user{ id, acct, name, isBot }`、`replyId`、`renoteId`、`tags`、`files[{ name, mimeType, isSensitive }]`、`reactionCount`、`renoteCount`、`replyCount`。
 
 - `url` は、そのアカウントのホストの `https://<host>/notes/<id>` から組み立てる(引用元に使える)。
 - 返さない: 返信先・引用元の本文、`my_reaction`、`is_renoted_by_me`、`is_favorited_by_me`、`is_pinned`、メンション先の ID、ファイルの URL、`local_only`(そもそも除外している)。アカウント視点のフィールドは共有の `note` 行に入っていて、アカウント間で混ざる。
@@ -193,10 +197,13 @@ tsumugi はキャッシュ済みの Misskey タイムラインを SQLite / Postg
 - ローカル限定のノートは安全側で除外した。必要になれば、別の判断として扱う。
 - `127.0.0.1` に接続できる同一マシン上の他のプロセスは、トークンを知っていれば読める。トークンは keyring で守られ、OS のユーザー境界までを信頼範囲とする。
 
-## 実装時に確認すること(plan で解消する)
+## 実装時に確認すること
 
-- rmcp 3.9.0 のステートレス / JSON レスポンスの設定名と、axum への組み込み方(`StreamableHttpService` の使い方)。
-- 既定ポートの値。
-- `DriveFile` の `description` フィールドの有無(DTO の `files`)。
-- `generates_frontend_bindings` の「トークンが型に現れない」アサーションが、`get_mcp_token`(戻り値は `String`)と両立するか。
-- `rmcp` / `axum` を `cfg(not(target_os = "android"))` の依存にしたときの、Android ビルド(CI の `android-build`)への影響。
+- `rmcp` / `axum` を `cfg(not(any(target_os = "android", target_os = "ios")))` の依存にしたときの、Android ビルド(CI の `android-build`)への影響。
+
+## plan で解消した事項
+
+- rmcp の組み込みは、probe で実際に HTTP の往復まで確認した(上記「ライフサイクル」)。rmcp 自身も Host / Origin を検証する(`allowed_hosts` / `enforce_origin_validation`)ので、tsumugi の `guard` の前段に加えて二重に設定する。
+- `DriveFile` に `description` は無い。DTO の `files` は `{ name, mimeType, isSensitive }`。
+- 既定ポートは 49731。
+- `generates_frontend_bindings` の「`token:` を含まない」アサーションは、`getMcpToken`(戻り値は `string`)と両立する。
