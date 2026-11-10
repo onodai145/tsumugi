@@ -84,8 +84,8 @@ tsumugi はキャッシュ済みの Misskey タイムラインを SQLite / Postg
 |---|---|---|
 | `account` | string(必須) | `list_accounts` の `id` |
 | `text` | string | 空白区切りの語を AND で部分一致。語数は最大 8、全体は 200 字まで |
-| `user` | string | `@alice` / `@alice@host` 形式で完全一致 |
-| `since` / `until` | string | ISO 8601。範囲を満たさない値はエラー |
+| `user` | string | `@alice` / `@alice@host` 形式で完全一致。そのアカウントと同じホストのユーザーは、キャッシュ上ローカル(host なし)として保存されるため、`@alice@<アカウントのホスト>` も `@alice` と同じに扱う |
+| `since` / `until` | string | ISO 8601 の日時、または日付のみ(`2026-11-01`、UTC)。日付のみのときは、`since` はその日の0時、`until` はその日の最後の秒(その日全体を含む)。不正な値はエラー |
 | `has_media` | bool | |
 | `limit` | int | 既定 20、最大 50 |
 | `cursor` | string | 前回の `nextCursor` |

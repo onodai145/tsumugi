@@ -123,4 +123,43 @@ describe("McpSection", () => {
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(getByTestId("mcp-token").textContent).toContain("tok-new"));
   });
+
+  it("ポートが範囲外・空なら setMcpPort を呼ばず、日本語のエラーを出して元の値に戻す", async () => {
+    const spy = vi.spyOn(commands, "setMcpPort").mockResolvedValue(ok(status({ port: 50000 })));
+    const { findByTestId, getByTestId } = render(McpSection);
+    const input = (await findByTestId("mcp-port")) as HTMLInputElement;
+    for (const bad of ["80", "70000", ""]) {
+      await fireEvent.input(input, { target: { value: bad } });
+      await fireEvent.change(input);
+      await vi.waitFor(() => expect(getByTestId("mcp-error").textContent).toContain("1024"));
+      expect(input.value).toBe("49731");
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("初期ロードに失敗したら、理由を表示する", async () => {
+    vi.mocked(commands.getMcpStatus).mockResolvedValue({ status: "error", error: "boom" });
+    const { findByTestId } = render(McpSection);
+    expect((await findByTestId("mcp-error")).textContent).toContain("boom");
+  });
+
+  it("バインド失敗のときだけ「再試行」を出し、押すと setMcpEnabled(true) を呼ぶ", async () => {
+    const spy = vi
+      .spyOn(commands, "setMcpEnabled")
+      .mockResolvedValue(ok(status({ enabled: true, state: { type: "running" } })));
+    vi.mocked(commands.getMcpStatus).mockResolvedValue(
+      ok(status({ enabled: true, state: { type: "error", message: "port in use" } })),
+    );
+    const { findByTestId, getByTestId, queryByTestId } = render(McpSection);
+    await fireEvent.click(await findByTestId("mcp-retry"));
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith(true));
+    await vi.waitFor(() => expect(getByTestId("mcp-state").textContent).toContain("稼働中"));
+    expect(queryByTestId("mcp-retry")).toBeNull();
+  });
+
+  it("停止中・稼働中のときは「再試行」を出さない", async () => {
+    const { findByTestId, queryByTestId } = render(McpSection);
+    await findByTestId("mcp-enabled");
+    expect(queryByTestId("mcp-retry")).toBeNull();
+  });
 });

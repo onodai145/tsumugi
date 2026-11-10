@@ -58,8 +58,21 @@
     else el.checked = status?.enabled ?? false; // 失敗したら、表示を保存済みの状態に戻す
   }
 
+  /// バインド失敗(ポート使用中など)のあと、同じ設定でもう一度起動を試す。
+  async function retry() {
+    const s = await run(() => commands.setMcpEnabled(true));
+    if (s) apply(s);
+  }
+
   async function commitPort() {
-    if (!status || portInput === status.port) return;
+    if (!status) return;
+    // 空・小数・範囲外は、サーバーへ送る前に弾く(型変換エラーの英語メッセージを出さないため)。
+    if (!Number.isInteger(portInput) || portInput < 1024 || portInput > 65535) {
+      err = "ポートは1024〜65535の整数で指定してください";
+      portInput = status.port;
+      return;
+    }
+    if (portInput === status.port) return;
     const s = await run(() => commands.setMcpPort(portInput));
     if (s) apply(s);
     else portInput = status.port;
@@ -132,6 +145,10 @@
   公開を許可したアカウントの、キャッシュ済みの「公開」「ホーム」のノートが、アプリの外のAIへ渡ります。返るノートの本文は第三者が書いた入力で、AIがそこに書かれた指示に従う恐れがあります。信頼できるクライアントだけに設定してください。
 </p>
 
+{#if err}
+  <p data-testid="mcp-error" class="mb-3 mt-0 text-sm text-destructive">{err}</p>
+{/if}
+
 {#if status}
   <label class="mb-2 flex items-center gap-2 text-sm">
     <input
@@ -143,10 +160,12 @@
     />
     MCPサーバーを有効にする
   </label>
-  <p data-testid="mcp-state" class="mb-3 mt-0 text-xs text-muted-foreground">{stateLabel}</p>
-  {#if err}
-    <p data-testid="mcp-error" class="mb-3 mt-0 text-sm text-destructive">{err}</p>
-  {/if}
+  <p data-testid="mcp-state" class="mb-3 mt-0 flex items-center gap-2 text-xs text-muted-foreground">
+    <span>{stateLabel}</span>
+    {#if status.enabled && status.state.type === "error"}
+      <Button variant="outline" size="xs" data-testid="mcp-retry" disabled={busy} onclick={retry}>再試行</Button>
+    {/if}
+  </p>
 
   <div class="mb-3.5 flex flex-col gap-1 text-sm">
     <span class="text-muted-foreground">公開するアカウント(初期状態はすべてオフ)</span>
