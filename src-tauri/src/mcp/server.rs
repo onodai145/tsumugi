@@ -80,6 +80,8 @@ impl McpRuntime {
 
     /// `127.0.0.1:<port>` で起動し、束縛したポートを返す(`0` なら空きポート。テスト用)。
     /// すでに動いていれば先に止める。失敗したら状態を `Error` にして `Err` を返す。
+    // 本体は `reconcile`(ロックを持って `*_locked` を呼ぶ)だけが使う。ロック付きの公開版はテスト用。
+    #[cfg(test)]
     pub async fn start<R: Runtime>(&self, app: AppHandle<R>, port: u16) -> Result<u16, String> {
         let _lifecycle = self.lifecycle.lock().await;
         self.start_locked(app, port).await
@@ -125,6 +127,8 @@ impl McpRuntime {
         Ok(bound)
     }
 
+    // 本体は `reconcile`(ロックを持って `*_locked` を呼ぶ)だけが使う。ロック付きの公開版はテスト用。
+    #[cfg(test)]
     pub async fn stop(&self) {
         let _lifecycle = self.lifecycle.lock().await;
         self.stop_locked().await;
