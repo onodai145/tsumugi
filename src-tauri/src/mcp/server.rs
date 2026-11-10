@@ -122,6 +122,24 @@ impl McpRuntime {
     }
 }
 
+/// 設定(`enabled` / `port`)に合わせて、サーバーを止めて、必要なら起動し直す。
+/// keyring が使えない(トークンを作れない)ときだけ `Err`。バインド失敗は `RunState::Error` として
+/// 状態に残し、`Ok` を返す(設定はオンのままで、ポートを直して再試行できる)。
+pub async fn reconcile<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    use tauri::Manager;
+    let state = app.try_state::<crate::state::AppState>().ok_or("app state is not available")?;
+    let settings = state.settings.load_mcp();
+    state.mcp.stop().await;
+    if !settings.enabled {
+        return Ok(());
+    }
+    let token = crate::mcp::token::load_or_create(state.secrets.as_ref()).map_err(|e| e.to_string())?;
+    state.mcp.token.set(token);
+    // バインド失敗は `start` が状態に記録する。ここではエラーにしない。
+    let _ = state.mcp.start(app.clone(), settings.port).await;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +317,58 @@ mod tests {
         assert_eq!(h.state().mcp.status(), RunState::Stopped);
         let r = h.client.post(format!("http://127.0.0.1:{}/mcp", h.port)).send().await;
         assert!(r.is_err(), "停止後はポートが閉じている");
+    }
+
+    #[tokio::test]
+    async fn reconcile_starts_when_enabled_and_stops_when_disabled() {
+        let app = tauri::test::mock_app();
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.settings.update_mcp(|m| {
+            m.enabled = true;
+            m.port = 0; // 空きポート(テスト用。コマンド経由では 1024 未満を拒否する)
+        }).unwrap();
+        app.manage(state);
+
+        reconcile(app.handle()).await.unwrap();
+        let st = app.state::<AppState>();
+        assert!(matches!(st.mcp.status(), RunState::Running { .. }));
+        assert!(st.mcp.token.get().is_some(), "トークンが作られて共有されている");
+
+        st.settings.update_mcp(|m| m.enabled = false).unwrap();
+        reconcile(app.handle()).await.unwrap();
+        assert_eq!(st.mcp.status(), RunState::Stopped);
+    }
+
+    #[tokio::test]
+    async fn reconcile_fails_without_starting_when_the_keyring_is_unavailable() {
+        struct Failing;
+        impl crate::session::SecretStore for Failing {
+            fn set(&self, _: &str, _: &str) -> crate::error::Result<()> { Err(crate::error::Error::Secret("no keyring".into())) }
+            fn get(&self, _: &str) -> crate::error::Result<Option<String>> { Err(crate::error::Error::Secret("no keyring".into())) }
+            fn delete(&self, _: &str) -> crate::error::Result<()> { Err(crate::error::Error::Secret("no keyring".into())) }
+        }
+        let app = tauri::test::mock_app();
+        let mut state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.secrets = Box::new(Failing);
+        state.settings.update_mcp(|m| { m.enabled = true; m.port = 0; }).unwrap();
+        app.manage(state);
+
+        assert!(reconcile(app.handle()).await.is_err());
+        assert_eq!(app.state::<AppState>().mcp.status(), RunState::Stopped, "平文などへフォールバックせず、起動しない");
+    }
+
+    #[tokio::test]
+    async fn reconcile_keeps_the_setting_on_and_reports_error_when_the_port_is_taken() {
+        let blocker = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = blocker.local_addr().unwrap().port();
+        let app = tauri::test::mock_app();
+        let state = AppState::new_for_test(SettingsStore::new_in_memory());
+        state.settings.update_mcp(|m| { m.enabled = true; m.port = port; }).unwrap();
+        app.manage(state);
+
+        reconcile(app.handle()).await.unwrap(); // バインド失敗はコマンドのエラーにしない(状態で伝える)
+        let st = app.state::<AppState>();
+        assert!(matches!(st.mcp.status(), RunState::Error(_)));
+        assert!(st.settings.load_mcp().enabled, "設定はオンのまま。ポートを直して再試行できる");
     }
 }

@@ -159,6 +159,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::user::remove_user_from_list,
             commands::cache_backend::get_cache_backend,
             commands::cache_backend::set_cache_backend,
+            commands::mcp::get_mcp_status,
+            commands::mcp::set_mcp_enabled,
+            commands::mcp::set_mcp_port,
+            commands::mcp::set_mcp_account_exposed,
+            commands::mcp::get_mcp_token,
+            commands::mcp::regenerate_mcp_token,
         ])
         .events(collect_events![
             events::ColumnNote,
@@ -407,13 +413,26 @@ pub fn run() {
             );
             scheduler::spawn(app.handle().clone());
 
-            // 既存の column_note から、アカウントの帰属を埋め直す(Issue #557)。冪等なので毎起動で実行する。
+            // 既存の column_note から、アカウントの帰属を埋め直す(Issue #557)。`note_account` が空のときだけ
+            // 動く一度きりの移行(`attribution::backfill_all`)。
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Some(state) = handle.try_state::<AppState>() {
                     attribution::backfill_all(&state.settings, &state.cache).await;
                 }
             });
+
+            // MCPサーバー(Issue #557)。設定がオンのときだけ起動する(既定はオフ)。バインド失敗は
+            // 状態(`Error`)に残るだけで、アプリの起動は止めない。
+            #[cfg(desktop)]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = mcp::server::reconcile(&handle).await {
+                        log::warn!("MCP server did not start: {e}");
+                    }
+                });
+            }
 
             // Linux(WebKitGTK): wry がデフォルトで input method の preedit(IME変換中の
             // 未確定文字列インライン表示)を無効化しているため、明示的に再度有効化する。
@@ -461,6 +480,14 @@ mod specta_export {
         assert!(ts.contains("startMiauth"), "missing startMiauth in:\n{ts}");
         assert!(ts.contains("completeMiauth"));
         assert!(ts.contains("whoami"));
+        // MCPサーバー(Issue #557)のコマンドと型
+        assert!(ts.contains("getMcpStatus"), "missing getMcpStatus command");
+        assert!(ts.contains("setMcpEnabled"), "missing setMcpEnabled command");
+        assert!(ts.contains("setMcpPort"), "missing setMcpPort command");
+        assert!(ts.contains("setMcpAccountExposed"), "missing setMcpAccountExposed command");
+        assert!(ts.contains("getMcpToken"), "missing getMcpToken command");
+        assert!(ts.contains("regenerateMcpToken"), "missing regenerateMcpToken command");
+        assert!(ts.contains("McpStatus") && ts.contains("exposedAccountIds"), "missing McpStatus type");
         // サーバーサイド検索(Issue #430)のコマンドと型
         assert!(ts.contains("searchServerNotes"), "missing searchServerNotes command");
         assert!(ts.contains("getSearchCapabilities"), "missing getSearchCapabilities command");

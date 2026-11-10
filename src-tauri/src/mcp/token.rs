@@ -43,6 +43,7 @@ impl SharedToken {
     pub fn set(&self, token: String) {
         *self.0.write().unwrap() = Some(token);
     }
+    #[cfg(test)]
     pub fn clear(&self) {
         *self.0.write().unwrap() = None;
     }

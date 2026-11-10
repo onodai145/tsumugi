@@ -311,14 +311,11 @@ impl SettingsStore {
         self.save(&guard)
     }
 
-    // 配線(MCP Task 9)まで未使用。配線後にこの属性を外す。
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn load_mcp(&self) -> crate::mcp::settings::McpSettings {
         self.data.lock().unwrap().mcp.clone()
     }
 
     /// MCP設定を書き換えて保存し、新しい値を返す。
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn update_mcp(
         &self,
         f: impl FnOnce(&mut crate::mcp::settings::McpSettings),
