@@ -371,6 +371,23 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .build(MysqlQueryBuilder);
     execute_index(pool, idx_cn_column_created.as_str()).await?;
 
+    let note_account = Table::create()
+        .table(NoteAccountTable::Table)
+        .if_not_exists()
+        .col(ColumnDef::new(NoteAccountTable::AccountId).string_len(64).not_null())
+        .col(ColumnDef::new(NoteAccountTable::NoteId).string_len(64).not_null())
+        .primary_key(Index::create().col(NoteAccountTable::AccountId).col(NoteAccountTable::NoteId))
+        .build(MysqlQueryBuilder);
+    pool.execute(sqlx::AssertSqlSafe(note_account)).await?;
+
+    let idx_na_note = Index::create()
+        .if_not_exists()
+        .name("idx_na_note")
+        .table(NoteAccountTable::Table)
+        .col(NoteAccountTable::NoteId)
+        .build(MysqlQueryBuilder);
+    execute_index(pool, idx_na_note.as_str()).await?;
+
     let column_source_boundary = Table::create()
         .table(ColumnSourceBoundaryTable::Table)
         .if_not_exists()
@@ -442,6 +459,12 @@ enum NoteFileTable {
 enum ColumnNoteTable {
     #[iden = "column_note"]
     Table, ColumnId, NoteId, ReceivedAt, CreatedAt,
+}
+
+#[derive(sea_query::Iden)]
+enum NoteAccountTable {
+    #[iden = "note_account"]
+    Table, AccountId, NoteId,
 }
 
 #[derive(sea_query::Iden)]
@@ -810,6 +833,57 @@ impl NoteCacheBackend for MySqlBackend {
         Ok(())
     }
 
+    async fn record_note_accounts(&self, account_id: &str, note_ids: &[String]) -> Result<()> {
+        // MySQL のプレースホルダー上限(65535)を超えないよう、チャンクに分けて記録する。
+        for chunk in note_ids.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            // note に存在する ID だけを記録する(prune 済みのノートで孤児行を作らない)。
+            // `placeholders` は "?" の羅列のみで、ID は `.bind()` 経由でのみ渡すためSQLインジェクションの懸念はない。
+            let sql = format!(
+                "INSERT IGNORE INTO note_account (account_id, note_id) SELECT ?, id FROM note WHERE id IN ({placeholders})"
+            );
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(account_id);
+            for id in chunk {
+                q = q.bind(id);
+            }
+            q.execute(&self.pool).await?;
+        }
+        Ok(())
+    }
+
+    async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT IGNORE INTO note_account (account_id, note_id)
+             SELECT ?, cn.note_id FROM column_note cn JOIN note n ON n.id = cn.note_id WHERE cn.column_id = ?",
+        )
+        .bind(account_id)
+        .bind(column_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn forget_account_notes(&self, account_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM note_account WHERE account_id = ?").bind(account_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool> {
+        let (found,): (i64,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account WHERE account_id = ? AND note_id = ?)")
+                .bind(account_id)
+                .bind(note_id)
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(found != 0)
+    }
+
+    async fn note_account_is_empty(&self) -> Result<bool> {
+        let (any,): (i64,) =
+            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account)").fetch_one(&self.pool).await?;
+        Ok(any == 0)
+    }
+
     async fn get_fetch_boundaries(&self, column_id: &str) -> Result<Vec<(u32, String)>> {
         let rows: Vec<(i32, String)> = sqlx::query_as(
             "SELECT source_idx, oldest_fetched_id FROM column_source_boundary
@@ -1016,7 +1090,7 @@ async fn delete_matching_ids_chunk(
     let max_deleted_rows: Vec<(String, String)> = q.fetch_all(&mut **tx).await?;
     let max_deleted_by_column: std::collections::HashMap<String, String> = max_deleted_rows.into_iter().collect();
 
-    for table in ["column_note", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
+    for table in ["column_note", "note_account", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
         let sql = format!("DELETE FROM {table} WHERE note_id IN ({placeholders})");
         let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
         for id in ids {
@@ -1744,5 +1818,98 @@ mod tests {
         }
         let late = fence.write_if_current("c1", &late_epoch, |boundaries_ok| async move { boundaries_ok }).await;
         assert_eq!(late, Some(false), "invalidate_boundaries より前に控えた世代の境界の書き込みは、古い扱い");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_records_idempotently_and_ignores_unknown_notes() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+
+        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(!s.account_has_note("acc1", "ghost").await.unwrap());
+        assert!(!s.account_has_note("acc2", "n1").await.unwrap());
+    }
+
+    /// プレースホルダー数の上限(65535)を超えうる大量の ID でも記録できる(チャンク分割)。
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_records_a_large_id_list_in_chunks() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        let mut ids: Vec<String> = (0..70_000).map(|i| format!("ghost{i}")).collect();
+        ids.push("n1".to_string());
+        ids.push("n2".to_string());
+
+        s.record_note_accounts("acc1", &ids).await.unwrap();
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(s.account_has_note("acc1", "n2").await.unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_is_removed_together_with_the_note_by_prune() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()]).await.unwrap();
+
+        s.prune(2, 0, 0).await.unwrap();
+
+        assert!(!s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(s.account_has_note("acc1", "n3").await.unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_is_empty_reports_whether_any_attribution_exists() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        assert!(s.note_account_is_empty().await.unwrap());
+
+        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+
+        assert!(!s.note_account_is_empty().await.unwrap());
+    }
+
+    /// `column_note` に実体のないノート ID が残っていても、孤児の `note_account` 行を作らない。
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_backfill_ignores_column_note_rows_without_a_note() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
+        sqlx::query("INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('col1', 'ghost', 0, 0)")
+            .execute(s.pool())
+            .await
+            .unwrap();
+
+        s.backfill_note_accounts("acc1", "col1").await.unwrap();
+
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(!s.account_has_note("acc1", "ghost").await.unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn note_account_forget_and_backfill_and_clear_column() {
+        let s = backend().await;
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col2", &[note("n3", 300)]).await.unwrap();
+
+        s.backfill_note_accounts("acc1", "col1").await.unwrap();
+        s.backfill_note_accounts("acc1", "col1").await.unwrap(); // 冪等
+        s.backfill_note_accounts("acc2", "col1").await.unwrap();
+        assert!(s.account_has_note("acc1", "n1").await.unwrap());
+        assert!(!s.account_has_note("acc1", "n3").await.unwrap());
+
+        s.clear_column_notes("col1").await.unwrap();
+        assert!(s.account_has_note("acc1", "n2").await.unwrap());
+
+        s.forget_account_notes("acc1").await.unwrap();
+        assert!(!s.account_has_note("acc1", "n2").await.unwrap());
+        assert!(s.account_has_note("acc2", "n2").await.unwrap());
     }
 }

@@ -756,6 +756,14 @@ enum HandleResult {
     CaptureNote { column_id: String, note_id: String },
 }
 
+/// ストリーミングで受信したノートをキャッシュへ書き、そのアカウントの取得経路として記録する。
+/// 受信したノートはそのアカウント自身の WebSocket から届いた事実なので、`from cache` を含む
+/// カラムでも常に記録する(Issue #557)。
+async fn cache_streamed_note(state: &AppState, column_id: &str, account_id: &str, note: &Note) {
+    let _ = state.cache.cache_note(column_id, note).await;
+    crate::attribution::record(&state.cache, account_id, std::slice::from_ref(note)).await;
+}
+
 /// テキストフレームを解釈して該当カラムへ emit する。
 /// - channel note: sub_id からカラムを特定し、フィルタ/ミュート適用後に ColumnNote を emit。
 ///   新規なら自動キャプチャのため CaptureNote を返す。
@@ -806,7 +814,7 @@ async fn handle_text<R: Runtime>(
                     log::debug!(target: "filter", "[{column_id}] note {id} dropped: word mute");
                     return HandleResult::None;
                 }
-                let _ = state.cache.cache_note(&column_id, &normalized).await;
+                cache_streamed_note(&state, &column_id, account_id, &normalized).await;
                 // キャッシュには元の返信先を残し、画面へ出す分だけ外す(Issue #486)。cache_note の後に呼ぶこと。
                 state.strip_muted_reply(account_id, &mut normalized);
             }
@@ -1274,6 +1282,17 @@ mod tests {
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.reactions.get("👍"), None);
         assert_eq!(n.reaction_count, 0);
+    }
+
+    #[tokio::test]
+    async fn cache_streamed_note_caches_the_note_and_attributes_it_to_the_account() {
+        let state = state_with_account("acc1", "u-self");
+
+        cache_streamed_note(&state, "col1", "acc1", &minimal_note("n1")).await;
+
+        assert!(state.cache.get_note("n1").await.unwrap().is_some());
+        assert!(state.cache.account_has_note("acc1", "n1").await.unwrap());
+        assert!(!state.cache.account_has_note("acc2", "n1").await.unwrap());
     }
 
     #[tokio::test]

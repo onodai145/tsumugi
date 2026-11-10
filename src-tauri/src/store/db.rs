@@ -115,6 +115,15 @@ CREATE TABLE IF NOT EXISTS column_note (
 );
 CREATE INDEX IF NOT EXISTS idx_cn_column ON column_note(column_id);
 
+-- アカウントがどのノートを自分の取得経路(ストリーミング/REST)で得たか(Issue #557)。
+-- note は全アカウント共通なので、アカウント単位の絞り込みはこのテーブルで行う。
+CREATE TABLE IF NOT EXISTS note_account (
+    account_id TEXT NOT NULL,
+    note_id    TEXT NOT NULL,
+    PRIMARY KEY (account_id, note_id)
+);
+CREATE INDEX IF NOT EXISTS idx_na_note ON note_account(note_id);
+
 -- ソースごとの「これより新しいノートはAPI取得済みで完全」境界（Issue #228 / #238）。
 -- source_idx は TQL の from 節内の位置。oldest_fetched_id = '' はそのソースが先頭まで枯渇済み。
 CREATE TABLE IF NOT EXISTS column_source_boundary (
