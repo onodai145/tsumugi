@@ -11,3 +11,5 @@ pub mod guard;
 pub mod query;
 #[cfg(test)]
 pub(crate) mod testutil;
+#[cfg(desktop)]
+pub mod dto;
