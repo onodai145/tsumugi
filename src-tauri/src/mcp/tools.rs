@@ -25,11 +25,11 @@ pub struct SearchArgs {
     pub account: String,
     /// Words to search for, separated by spaces. Every word must appear (substring match). Max 8 words, 200 characters.
     pub text: Option<String>,
-    /// Author, e.g. "@alice" or "@alice@example.com".
+    /// Author, e.g. "@alice" or "@alice@example.com". For a user on the account's own server, "@alice" and "@alice@<the account's host>" both work.
     pub user: Option<String>,
-    /// Only notes at or after this ISO 8601 time, e.g. "2026-11-01T00:00:00Z".
+    /// Only notes at or after this ISO 8601 time (e.g. "2026-11-01T00:00:00Z") or date (UTC, e.g. "2026-11-01", from 00:00:00).
     pub since: Option<String>,
-    /// Only notes at or before this ISO 8601 time.
+    /// Only notes at or before this ISO 8601 time or date (UTC; a date includes the whole day).
     pub until: Option<String>,
     /// true: only notes with attached files; false: only notes without.
     pub has_media: Option<bool>,

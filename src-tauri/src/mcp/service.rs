@@ -82,7 +82,7 @@ fn exposed_account(state: &AppState, account_id: &str) -> Result<Account, ToolEr
 
 pub async fn search_notes(state: &AppState, account_id: &str, params: &SearchParams) -> Result<SearchResult, ToolError> {
     let account = exposed_account(state, account_id)?;
-    let q = build_search(&account.id, params).map_err(|e| ToolError::Invalid(e.0))?;
+    let q = build_search(&account.id, &account.host, params).map_err(|e| ToolError::Invalid(e.0))?;
     let notes = state.cache.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.map_err(|e| {
         log::warn!("mcp search failed: {e}");
         ToolError::Internal
@@ -221,6 +221,17 @@ mod tests {
         s.cache.cache_notes("col1", &[public_note("p", 1, "hello")]).await.unwrap();
         let r = search_notes(&s, "a1", &SearchParams::default()).await.unwrap();
         assert!(r.notes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_accounts_own_host_in_the_user_filter_finds_local_users() {
+        // a1 のホストは one.example。同じサーバーのユーザーはキャッシュ上ローカル(host なし)なので、
+        // `@alice@one.example` でも見つかる(以前は 0 件になっていた)。別のホストには一致しない。
+        let s = state().await;
+        let by = |u: &str| SearchParams { user: Some(u.into()), ..Default::default() };
+        assert_eq!(ids(&search_notes(&s, "a1", &by("@alice@one.example")).await.unwrap()), vec!["p", "h"]);
+        assert_eq!(ids(&search_notes(&s, "a1", &by("@alice")).await.unwrap()), vec!["p", "h"]);
+        assert!(search_notes(&s, "a1", &by("@alice@two.example")).await.unwrap().notes.is_empty());
     }
 
     #[tokio::test]

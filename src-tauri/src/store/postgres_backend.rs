@@ -1529,12 +1529,12 @@ mod tests {
         s.record_note_accounts("a1", &ids(&["p", "h", "f", "l"])).await.unwrap();
         s.record_note_accounts("a2", &ids(&["o"])).await.unwrap();
 
-        let q = build_search("a1", &SearchParams::default()).unwrap();
+        let q = build_search("a1", "one.example", &SearchParams::default()).unwrap();
         let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
         assert_eq!(got, vec!["p", "h"]);
 
         // フィルタ付き(パラメータが複数)でも、アカウントIDの位置がずれない。
-        let q = build_search("a1", &SearchParams { text: Some("hello".into()), limit: Some(1), ..Default::default() }).unwrap();
+        let q = build_search("a1", "one.example", &SearchParams { text: Some("hello".into()), limit: Some(1), ..Default::default() }).unwrap();
         let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
         assert_eq!(got, vec!["p"]);
 

@@ -62,7 +62,7 @@ struct GuardState {
 }
 
 async fn guard_middleware(State(g): State<Arc<GuardState>>, req: Request, next: Next) -> Response {
-    match guard::check(req.headers(), g.port, g.token.get().as_deref()) {
+    match guard::check(req.headers(), req.uri(), g.port, g.token.get().as_deref()) {
         Verdict::Allow => next.run(req).await,
         Verdict::Forbidden => (StatusCode::FORBIDDEN, "Forbidden").into_response(),
         Verdict::Unauthorized => (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, "Bearer")], "Unauthorized").into_response(),

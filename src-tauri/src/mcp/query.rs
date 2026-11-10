@@ -63,10 +63,20 @@ fn and_all(mut parts: Vec<Expr>) -> Option<Expr> {
     Some(parts.into_iter().fold(first, |acc, e| Expr::And(Box::new(acc), Box::new(e))))
 }
 
-fn parse_time(label: &str, s: &str) -> Result<f64, QueryError> {
-    chrono::DateTime::parse_from_rfc3339(s.trim())
-        .map(|d| d.timestamp() as f64)
-        .map_err(|_| QueryError(format!("{label} must be an ISO 8601 timestamp, e.g. 2026-11-01T00:00:00Z")))
+/// ISO 8601 の日時(`2026-11-01T00:00:00Z`)か、日付だけ(`2026-11-01`、UTC)。日付だけのときは、
+/// 範囲の下限(`since`)ならその日の0時、上限(`until`)ならその日の最後の秒にする(その日全体を含む)。
+fn parse_time(label: &str, s: &str, end_of_day: bool) -> Result<f64, QueryError> {
+    let s = s.trim();
+    if let Ok(d) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Ok(d.timestamp() as f64);
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let t = if end_of_day { d.and_hms_opt(23, 59, 59) } else { d.and_hms_opt(0, 0, 0) };
+        if let Some(t) = t {
+            return Ok(t.and_utc().timestamp() as f64);
+        }
+    }
+    Err(QueryError(format!("{label} must be an ISO 8601 timestamp or date, e.g. 2026-11-01T00:00:00Z or 2026-11-01")))
 }
 
 fn is_id(s: &str) -> bool {
@@ -74,7 +84,9 @@ fn is_id(s: &str) -> bool {
 }
 
 /// `@alice` / `alice` / `@alice@example.com` を、`@alice[@host]` に揃える。
-fn normalize_acct(raw: &str) -> Result<String, QueryError> {
+/// キャッシュ上、そのアカウントと同じサーバーのユーザーはローカル(host なし)として `@alice` で
+/// 保存されている。`account_host` と同じホストが指定されたら、ローカルユーザーとして `@alice` にする。
+fn normalize_acct(raw: &str, account_host: &str) -> Result<String, QueryError> {
     let t = raw.trim();
     let t = t.strip_prefix('@').unwrap_or(t);
     let mut it = t.splitn(2, '@');
@@ -86,12 +98,13 @@ fn normalize_acct(raw: &str) -> Result<String, QueryError> {
         return Err(invalid("user must look like @name or @name@host"));
     }
     Ok(match host {
-        Some(h) => format!("@{name}@{h}"),
-        None => format!("@{name}"),
+        Some(h) if !h.eq_ignore_ascii_case(account_host) => format!("@{name}@{h}"),
+        _ => format!("@{name}"),
     })
 }
 
-pub fn build_search(account_id: &str, p: &SearchParams) -> Result<Query, QueryError> {
+/// `account_host` は、検索するアカウントのホスト(`user` の正規化に使う)。
+pub fn build_search(account_id: &str, account_host: &str, p: &SearchParams) -> Result<Query, QueryError> {
     let mut parts: Vec<Expr> = Vec::new();
 
     if let Some(text) = p.text.as_deref() {
@@ -108,13 +121,13 @@ pub fn build_search(account_id: &str, p: &SearchParams) -> Result<Query, QueryEr
         }
     }
     if let Some(user) = p.user.as_deref() {
-        parts.push(compare(Field::UserAcct, CompareOp::Eq, Value::Str(normalize_acct(user)?)));
+        parts.push(compare(Field::UserAcct, CompareOp::Eq, Value::Str(normalize_acct(user, account_host)?)));
     }
     if let Some(since) = p.since.as_deref() {
-        parts.push(compare(Field::CreatedAt, CompareOp::Ge, Value::Num(parse_time("since", since)?)));
+        parts.push(compare(Field::CreatedAt, CompareOp::Ge, Value::Num(parse_time("since", since, false)?)));
     }
     if let Some(until) = p.until.as_deref() {
-        parts.push(compare(Field::CreatedAt, CompareOp::Le, Value::Num(parse_time("until", until)?)));
+        parts.push(compare(Field::CreatedAt, CompareOp::Le, Value::Num(parse_time("until", until, true)?)));
     }
     match p.has_media {
         Some(true) => parts.push(Expr::Bare(Value::Field(Field::HasFiles))),
@@ -157,6 +170,9 @@ mod tests {
     use crate::mcp::testutil::{note, public_note, user};
     use crate::store::NoteCacheStore;
 
+    /// テストのアカウントのホスト。
+    const HOST: &str = "one.example";
+
     fn texts(q: &Query) -> Vec<String> {
         q.where_sql
             .params
@@ -171,8 +187,8 @@ mod tests {
     #[test]
     fn every_query_carries_the_scope_with_the_account_id_bound_last() {
         for q in [
-            build_search("a1", &SearchParams::default()).unwrap(),
-            build_search("a1", &SearchParams { text: Some("rust".into()), has_media: Some(true), ..Default::default() }).unwrap(),
+            build_search("a1", HOST, &SearchParams::default()).unwrap(),
+            build_search("a1", HOST, &SearchParams { text: Some("rust".into()), has_media: Some(true), ..Default::default() }).unwrap(),
             build_get("a1", "note1").unwrap(),
         ] {
             assert!(q.where_sql.sql.contains(SCOPE_SQL), "スコープ条件が付いていない: {}", q.where_sql.sql);
@@ -183,7 +199,7 @@ mod tests {
     #[test]
     fn text_words_become_bound_like_patterns_and_never_enter_the_sql() {
         let p = SearchParams { text: Some("rust  '; DROP TABLE note;--".into()), ..Default::default() };
-        let q = build_search("a1", &p).unwrap();
+        let q = build_search("a1", HOST, &p).unwrap();
         assert!(!q.where_sql.sql.contains("DROP"), "入力がSQLに入っている: {}", q.where_sql.sql);
         assert!(!q.where_sql.sql.contains("rust"));
         let t = texts(&q);
@@ -194,7 +210,7 @@ mod tests {
 
     #[test]
     fn invalid_inputs_are_rejected() {
-        let bad = |p: SearchParams| build_search("a1", &p).is_err();
+        let bad = |p: SearchParams| build_search("a1", HOST, &p).is_err();
         assert!(bad(SearchParams { text: Some("a b c d e f g h i".into()), ..Default::default() }), "9語");
         assert!(bad(SearchParams { text: Some("x".repeat(201)), ..Default::default() }), "201字");
         assert!(bad(SearchParams { since: Some("yesterday".into()), ..Default::default() }));
@@ -208,14 +224,14 @@ mod tests {
 
     #[test]
     fn blank_text_is_treated_as_absent() {
-        let a = build_search("a1", &SearchParams { text: Some("   ".into()), ..Default::default() }).unwrap();
-        let b = build_search("a1", &SearchParams::default()).unwrap();
+        let a = build_search("a1", HOST, &SearchParams { text: Some("   ".into()), ..Default::default() }).unwrap();
+        let b = build_search("a1", HOST, &SearchParams::default()).unwrap();
         assert_eq!(a.where_sql.sql, b.where_sql.sql);
     }
 
     #[test]
     fn limit_defaults_to_20_and_is_clamped_to_1_through_50() {
-        let lim = |l: Option<u32>| build_search("a1", &SearchParams { limit: l, ..Default::default() }).unwrap().limit;
+        let lim = |l: Option<u32>| build_search("a1", HOST, &SearchParams { limit: l, ..Default::default() }).unwrap().limit;
         assert_eq!(lim(None), 20);
         assert_eq!(lim(Some(0)), 1);
         assert_eq!(lim(Some(10)), 10);
@@ -224,7 +240,7 @@ mod tests {
 
     #[test]
     fn user_is_normalized_to_an_acct_with_a_leading_at() {
-        let t = |u: &str| texts(&build_search("a1", &SearchParams { user: Some(u.into()), ..Default::default() }).unwrap());
+        let t = |u: &str| texts(&build_search("a1", HOST, &SearchParams { user: Some(u.into()), ..Default::default() }).unwrap());
         assert_eq!(t("@alice")[0], "@alice");
         assert_eq!(t("alice")[0], "@alice", "@無しでも受け付ける");
         assert_eq!(t("@alice@example.com")[0], "@alice@example.com");
@@ -234,6 +250,7 @@ mod tests {
     fn since_and_until_become_epoch_second_bounds() {
         let q = build_search(
             "a1",
+            HOST,
             &SearchParams { since: Some("2026-11-01T00:00:00Z".into()), until: Some("2026-11-02T09:00:00+09:00".into()), ..Default::default() },
         )
         .unwrap();
@@ -245,6 +262,49 @@ mod tests {
             .collect();
         // 2026-11-01T00:00:00Z と、2026-11-02T09:00:00+09:00(= 2026-11-02T00:00:00Z)のepoch秒。
         assert_eq!(reals, vec![1_793_491_200.0, 1_793_577_600.0]);
+    }
+
+    #[test]
+    fn a_user_on_the_accounts_own_host_is_matched_as_a_local_user() {
+        // キャッシュ上、アカウントと同じサーバーのユーザーはローカル(host なし)として `@name` で保存される。
+        let t = |u: &str| texts(&build_search("a1", HOST, &SearchParams { user: Some(u.into()), ..Default::default() }).unwrap())[0].clone();
+        assert_eq!(t("@alice@one.example"), "@alice");
+        assert_eq!(t("@alice@ONE.Example"), "@alice", "ホストの大文字小文字は区別しない");
+        assert_eq!(t("alice@one.example"), "@alice", "@無しでも同じ");
+        assert_eq!(t("@alice@other.example"), "@alice@other.example", "別のホストはそのまま");
+        assert_eq!(t("@alice"), "@alice");
+    }
+
+    #[tokio::test]
+    async fn searching_with_the_accounts_own_host_finds_the_local_users_notes() {
+        let cache = NoteCacheStore::new(crate::store::SqliteBackend::new(crate::store::db::open_cache_in_memory().unwrap()));
+        let notes = vec![
+            note("l1", 200, Visibility::Public, false, "from a local user", user("u1", "alice", None)),
+            note("r1", 100, Visibility::Public, false, "from a remote user", user("u2", "bob", Some("remote.example"))),
+        ];
+        cache.cache_notes("col1", &notes).await.unwrap();
+        cache.record_note_accounts("a1", &["l1".to_string(), "r1".to_string()]).await.unwrap();
+        let by = |u: &str| build_search("a1", HOST, &SearchParams { user: Some(u.into()), ..Default::default() }).unwrap();
+        assert_eq!(ids_of(&cache, &by("@alice@one.example")).await, vec!["l1"], "同じホストを付けても見つかる");
+        assert_eq!(ids_of(&cache, &by("@alice")).await, vec!["l1"]);
+        assert_eq!(ids_of(&cache, &by("@bob@remote.example")).await, vec!["r1"]);
+    }
+
+    #[test]
+    fn date_only_since_and_until_cover_the_whole_day() {
+        let reals = |since: Option<&str>, until: Option<&str>| -> Vec<f64> {
+            build_search("a1", HOST, &SearchParams { since: since.map(Into::into), until: until.map(Into::into), ..Default::default() })
+                .unwrap()
+                .where_sql
+                .params
+                .iter()
+                .filter_map(|p| if let SqlParam::Real(x) = p { Some(*x) } else { None })
+                .collect()
+        };
+        // 2026-11-01 は 1793491200(UTC 0時)。since は0時、until はその日の最後の秒。
+        assert_eq!(reals(Some("2026-11-01"), None), vec![1_793_491_200.0]);
+        assert_eq!(reals(None, Some("2026-11-01")), vec![1_793_491_200.0 + 86_399.0]);
+        assert!(build_search("a1", HOST, &SearchParams { since: Some("2026-13-01".into()), ..Default::default() }).is_err());
     }
 
     /// 実際のSQLiteで、スコープ条件が効くことを確かめる。
@@ -274,20 +334,20 @@ mod tests {
     #[tokio::test]
     async fn search_returns_only_attributed_public_or_home_notes_that_are_not_local_only() {
         let cache = seeded().await;
-        let q = build_search("a1", &SearchParams::default()).unwrap();
+        let q = build_search("a1", HOST, &SearchParams::default()).unwrap();
         assert_eq!(ids_of(&cache, &q).await, vec!["p", "h"]);
     }
 
     #[tokio::test]
     async fn filters_narrow_within_the_scope_and_never_widen_it() {
         let cache = seeded().await;
-        let q = build_search("a1", &SearchParams { text: Some("home".into()), ..Default::default() }).unwrap();
+        let q = build_search("a1", HOST, &SearchParams { text: Some("home".into()), ..Default::default() }).unwrap();
         assert_eq!(ids_of(&cache, &q).await, vec!["h"]);
         // 他アカウントのノートは、文字列が一致しても出ない。
-        let q = build_search("a1", &SearchParams { text: Some("other account".into()), ..Default::default() }).unwrap();
+        let q = build_search("a1", HOST, &SearchParams { text: Some("other account".into()), ..Default::default() }).unwrap();
         assert!(ids_of(&cache, &q).await.is_empty());
         // 帰属の無いノートも出ない。
-        let q = build_search("a1", &SearchParams { text: Some("no attribution".into()), ..Default::default() }).unwrap();
+        let q = build_search("a1", HOST, &SearchParams { text: Some("no attribution".into()), ..Default::default() }).unwrap();
         assert!(ids_of(&cache, &q).await.is_empty());
     }
 
@@ -296,14 +356,14 @@ mod tests {
         // TQLのLIKEは値をエスケープしないので、`%` はワイルドカードになる(仕様として受け入れる)。
         // ただしスコープ条件のANDは外れないので、範囲外のノートは出ない。
         let cache = seeded().await;
-        let q = build_search("a1", &SearchParams { text: Some("%".into()), ..Default::default() }).unwrap();
+        let q = build_search("a1", HOST, &SearchParams { text: Some("%".into()), ..Default::default() }).unwrap();
         assert_eq!(ids_of(&cache, &q).await, vec!["p", "h"]);
     }
 
     #[tokio::test]
     async fn an_account_with_no_attribution_gets_an_empty_result_not_an_error() {
         let cache = seeded().await;
-        let q = build_search("never-seen", &SearchParams::default()).unwrap();
+        let q = build_search("never-seen", HOST, &SearchParams::default()).unwrap();
         assert!(ids_of(&cache, &q).await.is_empty());
     }
 
@@ -314,9 +374,9 @@ mod tests {
         cache.cache_notes("col1", &notes).await.unwrap();
         cache.record_note_accounts("a1", &notes.iter().map(|n| n.id.clone()).collect::<Vec<_>>()).await.unwrap();
 
-        let first = build_search("a1", &SearchParams { limit: Some(2), ..Default::default() }).unwrap();
+        let first = build_search("a1", HOST, &SearchParams { limit: Some(2), ..Default::default() }).unwrap();
         assert_eq!(ids_of(&cache, &first).await, vec!["n5", "n4"]);
-        let second = build_search("a1", &SearchParams { limit: Some(2), cursor: Some("n4".into()), ..Default::default() }).unwrap();
+        let second = build_search("a1", HOST, &SearchParams { limit: Some(2), cursor: Some("n4".into()), ..Default::default() }).unwrap();
         assert_eq!(ids_of(&cache, &second).await, vec!["n3", "n2"]);
     }
 
