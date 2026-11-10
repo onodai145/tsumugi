@@ -7,3 +7,7 @@ pub mod settings;
 pub mod token;
 #[cfg(desktop)]
 pub mod guard;
+#[cfg(desktop)]
+pub mod query;
+#[cfg(test)]
+pub(crate) mod testutil;
