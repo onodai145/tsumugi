@@ -13,3 +13,5 @@ pub mod query;
 pub(crate) mod testutil;
 #[cfg(desktop)]
 pub mod dto;
+#[cfg(desktop)]
+pub mod service;
