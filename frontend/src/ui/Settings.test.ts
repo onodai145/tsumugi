@@ -31,6 +31,11 @@ afterEach(() => {
 });
 
 describe("Settings タブ構成(Issue #326)", () => {
+  it("デスクトップではMCPサーバーのタブを表示する", () => {
+    const { queryByTestId } = renderSettings();
+    expect(queryByTestId("settings-tab-mcp")).not.toBeNull();
+  });
+
   it("外部連携タブを表示し、キャッシュバックエンドタブは単独では表示しない", () => {
     const { queryByTestId } = renderSettings();
     expect(queryByTestId("settings-tab-externalIntegration")).not.toBeNull();

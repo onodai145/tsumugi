@@ -1503,6 +1503,48 @@ mod tests {
         assert_eq!(got.len(), 1);
     }
 
+    /// MCPのスコープ条件(Issue #557)が、PostgreSQLでも型エラーなく、期待どおりに絞ること。
+    /// `local_only` はBOOLEAN列なので `NOT n.local_only` が通ること、`?`の振り直しで末尾に足した
+    /// アカウントIDが正しい位置に入ることを確かめる。
+    #[tokio::test]
+    #[ignore]
+    async fn mcp_scope_query_returns_only_attributed_public_or_home_notes() {
+        use crate::domain::Visibility;
+        use crate::mcp::query::{build_get, build_search, SearchParams};
+        let s = backend().await;
+
+        let mut p = note("p", 500);
+        p.visibility = Visibility::Public;
+        let mut h = note("h", 400);
+        h.visibility = Visibility::Home;
+        let mut f = note("f", 300);
+        f.visibility = Visibility::Followers;
+        let mut l = note("l", 200);
+        l.visibility = Visibility::Public;
+        l.local_only = true;
+        let o = note("o", 450); // 他アカウントに帰属
+        let x = note("x", 420); // 帰属なし
+        s.cache_notes("col1", &[p, h, f, l, o, x]).await.unwrap();
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        s.record_note_accounts("a1", &ids(&["p", "h", "f", "l"])).await.unwrap();
+        s.record_note_accounts("a2", &ids(&["o"])).await.unwrap();
+
+        let q = build_search("a1", "one.example", &SearchParams::default()).unwrap();
+        let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(got, vec!["p", "h"]);
+
+        // フィルタ付き(パラメータが複数)でも、アカウントIDの位置がずれない。
+        let q = build_search("a1", "one.example", &SearchParams { text: Some("hello".into()), limit: Some(1), ..Default::default() }).unwrap();
+        let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(got, vec!["p"]);
+
+        for (id, expected) in [("p", 1), ("h", 1), ("f", 0), ("l", 0), ("o", 0), ("x", 0)] {
+            let q = build_get("a1", id).unwrap();
+            let n = s.search_cache(&q.where_sql, None, q.limit).await.unwrap().len();
+            assert_eq!(n, expected, "note {id}");
+        }
+    }
+
     /// Fix 1 (最終レビュー対応): `has_poll`/`is_bot`のようなbool系TQL述語がPostgresでも
     /// エラーにならず正しくフィルタされることを確認する回帰テスト。改修前は`bool_field`が
     /// 発行する`n.has_poll = 1`/`u.is_bot = 1`がBOOLEAN列に対して

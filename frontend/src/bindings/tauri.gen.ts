@@ -471,6 +471,12 @@ export const commands = {
 	removeUserFromList: (accountId: string, listId: string, userId: string) => typedError<null, Error>(__TAURI_INVOKE("remove_user_from_list", { accountId, listId, userId })),
 	getCacheBackend: () => typedError<CacheBackendConfig, string>(__TAURI_INVOKE("get_cache_backend")),
 	setCacheBackend: (config: CacheBackendConfig, password: string | null) => typedError<null, string>(__TAURI_INVOKE("set_cache_backend", { config, password })),
+	getMcpStatus: () => typedError<McpStatus, string>(__TAURI_INVOKE("get_mcp_status")),
+	setMcpEnabled: (enabled: boolean) => typedError<McpStatus, string>(__TAURI_INVOKE("set_mcp_enabled", { enabled })),
+	setMcpPort: (port: number) => typedError<McpStatus, string>(__TAURI_INVOKE("set_mcp_port", { port })),
+	setMcpAccountExposed: (accountId: string, exposed: boolean) => typedError<McpStatus, string>(__TAURI_INVOKE("set_mcp_account_exposed", { accountId, exposed })),
+	getMcpToken: () => typedError<string, string>(__TAURI_INVOKE("get_mcp_token")),
+	regenerateMcpToken: () => typedError<string, string>(__TAURI_INVOKE("regenerate_mcp_token")),
 };
 
 /** Events */
@@ -876,6 +882,15 @@ export type LocalScheduledNote = {
 	note: ScheduledNote,
 	status: LocalScheduleStatus,
 	error: string | null,
+};
+
+export type McpRunState = { type: "stopped" } | { type: "running" } | { type: "error"; message: string };
+
+export type McpStatus = {
+	enabled: boolean,
+	port: number,
+	state: McpRunState,
+	exposedAccountIds: string[],
 };
 
 /**  `start_miauth` の戻り値。フロントは `url` をブラウザで開く。 */

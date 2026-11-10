@@ -42,3 +42,4 @@ pub use user::{
 };
 #[allow(unused_imports)]
 pub use sound::{parse_mml, play_notify_sound};
+pub mod mcp;
