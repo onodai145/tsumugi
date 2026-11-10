@@ -70,6 +70,10 @@ pub(crate) struct SettingsData {
     /// 保存した値」か、取得先が空であること。エクスポートには含めない。
     #[serde(default)]
     pub(crate) summaly_proxy_imported: bool,
+    /// MCPサーバーの設定(Issue #557)。**エクスポートには含めない**。インポートでは現在の値を引き継ぐ
+    /// (ファイルでMCPの公開が勝手にオンにならないようにするため)。
+    #[serde(default)]
+    pub(crate) mcp: crate::mcp::settings::McpSettings,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -150,6 +154,7 @@ impl SettingsStore {
         guard.accounts.retain(|a| a.id != account_id);
         guard.columns.retain(|c| c.account_id != account_id);
         guard.server_mute_snapshots.remove(account_id);
+        guard.mcp.exposed_account_ids.retain(|id| id != account_id);
         self.save(&guard)
     }
 
@@ -304,6 +309,24 @@ impl SettingsStore {
         let mut guard = self.data.lock().unwrap();
         guard.cache_backend = cfg.clone();
         self.save(&guard)
+    }
+
+    // 配線(MCP Task 9)まで未使用。配線後にこの属性を外す。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn load_mcp(&self) -> crate::mcp::settings::McpSettings {
+        self.data.lock().unwrap().mcp.clone()
+    }
+
+    /// MCP設定を書き換えて保存し、新しい値を返す。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn update_mcp(
+        &self,
+        f: impl FnOnce(&mut crate::mcp::settings::McpSettings),
+    ) -> Result<crate::mcp::settings::McpSettings> {
+        let mut guard = self.data.lock().unwrap();
+        f(&mut guard.mcp);
+        self.save(&guard)?;
+        Ok(guard.mcp.clone())
     }
 
     pub fn load_notify(&self) -> Result<NotifyConfig> {
@@ -706,6 +729,7 @@ pub fn migrate_from_legacy_sqlite(
             cache_backend: CacheBackendConfig::default(),
             server_mute_snapshots: HashMap::new(),
             summaly_proxy_imported: false,
+            mcp: Default::default(),
         }),
     };
     store.save(&store.data.lock().unwrap())?;
@@ -715,6 +739,34 @@ pub fn migrate_from_legacy_sqlite(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_settings_file_without_mcp_loads_with_mcp_off() {
+        let d: SettingsData = serde_json::from_str("{}").unwrap();
+        assert_eq!(d.mcp, crate::mcp::settings::McpSettings::default());
+    }
+
+    #[test]
+    fn update_mcp_returns_and_keeps_the_new_value() {
+        let s = SettingsStore::new_in_memory();
+        let updated = s
+            .update_mcp(|m| {
+                m.enabled = true;
+                m.port = 50000;
+            })
+            .unwrap();
+        assert!(updated.enabled);
+        assert_eq!(s.load_mcp().port, 50000);
+    }
+
+    #[test]
+    fn delete_account_removes_it_from_mcp_exposed_ids() {
+        let s = SettingsStore::new_in_memory();
+        s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into(), "a2".into()]).unwrap();
+        s.delete_account("a1").unwrap();
+        assert_eq!(s.load_mcp().exposed_account_ids, vec!["a2".to_string()]);
+    }
+
     use crate::domain::{ColumnKind, FilterQuery, PaneChild, SplitDirection};
 
     fn store() -> SettingsStore {

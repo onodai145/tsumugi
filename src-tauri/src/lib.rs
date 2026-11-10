@@ -8,6 +8,7 @@ mod error;
 mod events;
 mod fence;
 mod filter;
+mod mcp;
 mod mml;
 mod mobile_intent;
 mod net_guard;

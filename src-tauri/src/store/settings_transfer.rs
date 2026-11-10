@@ -294,6 +294,17 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
             ui.search_engine_url != defaults.search_engine_url || ui.summaly_proxy_url != defaults.summaly_proxy_url
         },
     };
+    // MCP設定はファイルから取り込まず、現在の値を引き継ぐ。存在しないアカウントのIDだけ除く。
+    let mcp = crate::mcp::settings::McpSettings {
+        exposed_account_ids: current
+            .mcp
+            .exposed_account_ids
+            .iter()
+            .filter(|id| accounts.iter().any(|a| &a.id == *id))
+            .cloned()
+            .collect(),
+        ..current.mcp.clone()
+    };
     let data = SettingsData {
         accounts,
         groups,
@@ -305,6 +316,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         cache_backend: current.cache_backend.clone(),
         server_mute_snapshots: current.server_mute_snapshots.clone(),
         summaly_proxy_imported,
+        mcp,
     };
     Ok(ImportPlan { data, preview, accounts_needing_login })
 }
@@ -469,6 +481,40 @@ mod tests {
 
     fn plan_err(current: &SettingsData, file: ExportFile) -> String {
         plan_import(current, file).err().expect("拒否されるはず").to_string()
+    }
+
+    #[test]
+    fn import_keeps_the_current_mcp_settings() {
+        let mut current = current_with_local_account();
+        current.mcp.enabled = true;
+        current.mcp.port = 50000;
+        current.mcp.exposed_account_ids = vec!["local1".into()];
+
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+
+        assert_eq!(plan.data.mcp, current.mcp, "ファイルでMCPの公開が変わってはいけない");
+    }
+
+    #[test]
+    fn import_drops_exposed_ids_of_accounts_that_do_not_exist() {
+        let mut current = current_with_local_account();
+        current.mcp.exposed_account_ids = vec!["local1".into(), "gone".into()];
+
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+
+        assert_eq!(plan.data.mcp.exposed_account_ids, vec!["local1".to_string()]);
+    }
+
+    #[test]
+    fn export_does_not_include_mcp_settings() {
+        let mut d = settings_data();
+        d.mcp.enabled = true;
+        d.mcp.exposed_account_ids = vec!["a1".into()];
+
+        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-10T00:00:00Z")).unwrap();
+
+        assert!(!json.to_lowercase().contains("mcp"), "MCP設定はエクスポートに含めない: {json}");
+        assert!(!json.contains("exposed"), "公開アカウントの一覧は含めない: {json}");
     }
 
     #[test]
