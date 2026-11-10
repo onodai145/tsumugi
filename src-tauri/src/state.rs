@@ -165,6 +165,11 @@ pub struct AppState {
     pub scheduled_posts: crate::store::ScheduledPostStore,
     /// スケジューラを起こす通知。予約の追加・取り消し・「今すぐ投稿」の後に `notify_one` する。
     pub scheduler_wakeup: std::sync::Arc<tokio::sync::Notify>,
+    /// MCPサーバーの実行状態と、実行中のサーバーが読むトークン(Issue #557)。デスクトップのみ。
+    // 配線(MCP Task 9)まで本体からは読まれない。配線後に `allow(dead_code)` を外す。
+    #[cfg(desktop)]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub mcp: crate::mcp::server::McpRuntime,
     pub cache: NoteCacheStore,
     /// ノートキャッシュDB(`cache.db`)を置くディレクトリ。`set_cache_backend`がSqliteへ
     /// 切り替える際に`cache_dir.join("cache.db")`を再度開くために保持する(Issue #115 Phase 2)。
@@ -247,6 +252,8 @@ impl AppState {
             drafts,
             scheduled_posts: crate::store::ScheduledPostStore::new_in_memory(),
             scheduler_wakeup: std::sync::Arc::new(tokio::sync::Notify::new()),
+            #[cfg(desktop)]
+            mcp: Default::default(),
             cache,
             cache_dir,
             gap_fill_in_flight: Mutex::new(HashSet::new()),

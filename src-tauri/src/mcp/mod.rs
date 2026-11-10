@@ -15,3 +15,7 @@ pub(crate) mod testutil;
 pub mod dto;
 #[cfg(desktop)]
 pub mod service;
+#[cfg(desktop)]
+pub mod tools;
+#[cfg(desktop)]
+pub mod server;
