@@ -79,16 +79,24 @@ function makeNote(overrides: Partial<Note> = {}): Note {
 
 describe("ReplyTargetCard", () => {
   it("shows the avatar, display name, @acct and relative time", () => {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const { getByTestId } = render(ReplyTargetCard, {
-      props: { note: makeNote({ createdAt: nowSec - 30 }) },
-    });
-    const card = getByTestId("reply-card");
-    const img = card.querySelector("img") as HTMLImageElement;
-    expect(img.getAttribute("src")).toBe("https://example.com/bob.png");
-    expect(getByTestId("reply-card-name").textContent).toContain("Bob");
-    expect(getByTestId("reply-card-acct").textContent).toBe("@bob");
-    expect(getByTestId("reply-card-time").textContent?.trim()).toBe("30s");
+    // 実時間だと、nowSec を取ってから描画までに秒境界をまたいで "31s" になり得る(Issue #581)。
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-29T12:00:00Z"));
+      const nowSec = Math.floor(Date.now() / 1000);
+      app.now = Date.now();
+      const { getByTestId } = render(ReplyTargetCard, {
+        props: { note: makeNote({ createdAt: nowSec - 30 }) },
+      });
+      const card = getByTestId("reply-card");
+      const img = card.querySelector("img") as HTMLImageElement;
+      expect(img.getAttribute("src")).toBe("https://example.com/bob.png");
+      expect(getByTestId("reply-card-name").textContent).toContain("Bob");
+      expect(getByTestId("reply-card-acct").textContent).toBe("@bob");
+      expect(getByTestId("reply-card-time").textContent?.trim()).toBe("30s");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the body with line-clamp-3 and keeps newlines", () => {
