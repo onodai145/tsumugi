@@ -109,12 +109,52 @@ fn cases() -> Vec<Case> {
 
 /// 部分一致(`->` / `startswith` / `endswith`)が、3 backend で同じ結果になること。
 pub(crate) async fn text_match_contract(b: &dyn NoteCacheBackend) {
+    run_cases(b, cases()).await;
+}
+
+/// 正規表現(`match`、Issue #598)が、3 backend とインメモリ評価で同じ結果になること。
+/// 方言をまたいで同じ意味になる構文(`^` `$` `.` `[0-9]` `|`)だけを使う。大文字小文字を区別する。
+pub(crate) async fn regex_contract(b: &dyn NoteCacheBackend) {
+    run_cases(b, regex_cases()).await;
+}
+
+fn regex_cases() -> Vec<Case> {
+    use CompareOp::Match;
+    use Field::{CwText, Text};
+    vec![
+        // 大文字小文字を区別する(MySQL の既定照合順序 `_ci` に引きずられない)。
+        c(Text, Match, "Hello", &["t05"]),
+        c(Text, Match, "hello", &["t06"]),
+        c(Text, Match, "HELLO", &[]),
+        c(Text, Match, "^Hello", &["t05"]),
+        c(Text, Match, "World$", &["t05"]),
+        c(Text, Match, "Hello|hello", &["t05", "t06"]),
+        // 非 ASCII の大文字小文字も区別する。
+        c(Text, Match, "Ä", &["t12"]),
+        c(Text, Match, "ä", &["t13"]),
+        c(Text, Match, "日本語", &["t09"]),
+        c(Text, Match, "テキスト😀$", &["t09"]),
+        // メタ文字。
+        c(Text, Match, "a.b", &["t03", "t04"]),
+        c(Text, Match, "^[0-9]+", &["t01", "t02"]),
+        c(Text, Match, "wow!$", &["t08"]),
+        // 末尾空白は意味を持つ。
+        c(Text, Match, "^trail $", &["t14"]),
+        c(Text, Match, "^trail$", &["t15"]),
+        // NULL の text / cw は空文字列として扱われる。
+        c(Text, Match, "^$", &["t10"]),
+        c(CwText, Match, "^Spoiler$", &["t11"]),
+        c(CwText, Match, "^spoiler$", &[]),
+    ]
+}
+
+async fn run_cases(b: &dyn NoteCacheBackend, cases: Vec<Case>) {
     let notes = fixtures();
     b.cache_notes("col1", &notes).await.unwrap();
     let ctx = SqlCtx { my_ids: vec![], following_ids: None };
     let eval_ctx = EvalContext::default();
 
-    for case in cases() {
+    for case in cases {
         let expr = Expr::Compare {
             lhs: Value::Field(case.field),
             op: case.op,

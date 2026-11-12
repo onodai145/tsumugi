@@ -144,9 +144,42 @@ pub fn open_settings(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// SQLite のコアは `X REGEXP Y` 演算子の実装を持たない(`regexp(Y, X)` という関数を利用側が登録する)。
+/// TQL の `match` をキャッシュ検索で動かすために、ライブ受信のインメモリ評価(`filter/eval.rs`)と同じ
+/// `regex` crate で登録する(構文も大文字小文字の区別も一致する)。無効なパターンはエラーにせず不一致として扱う
+/// (`eval.rs` と同じ。検索モーダルやバックフィルを `match` の書き損じで失敗させない)。NULL は不一致。
+fn register_regexp(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    use rusqlite::types::ValueRef;
+    use std::sync::Arc;
+    type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+    conn.create_scalar_function(
+        "regexp",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            // パターンは引数 0。1クエリの間は SQLite の補助データにコンパイル済みを持ち回す。
+            let re: Arc<Option<regex::Regex>> = ctx.get_or_create_aux(0, |vr| -> std::result::Result<_, BoxError> {
+                Ok(match vr {
+                    ValueRef::Text(bytes) => std::str::from_utf8(bytes).ok().and_then(|p| regex::Regex::new(p).ok()),
+                    _ => None,
+                })
+            })?;
+            let Some(re) = re.as_ref() else { return Ok(false) };
+            Ok(match ctx.get_raw(1) {
+                ValueRef::Text(bytes) => std::str::from_utf8(bytes).map(|s| re.is_match(s)).unwrap_or(false),
+                _ => false,
+            })
+        },
+    )?;
+    Ok(())
+}
+
 /// ノートキャッシュDBを開き（無ければ作成し）、スキーマを適用する。
 pub fn open_cache(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
+    register_regexp(&conn)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -400,6 +433,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 #[cfg(test)]
 pub fn open_cache_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
+    register_regexp(&conn)?;
     conn.execute_batch(CACHE_SCHEMA)?;
     migrate_cache(&conn)?;
     enable_incremental_vacuum(&conn)?;
