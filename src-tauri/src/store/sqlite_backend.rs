@@ -358,8 +358,7 @@ impl NoteCacheBackend for SqliteBackend {
         limit: u32,
     ) -> Result<Vec<Note>> {
         let conn = Arc::clone(&self.conn);
-        // SqlWhereはCloneをderiveしていないためフィールドごとに複製する(Global Constraints参照)。
-        let where_sql = crate::filter::sql::SqlWhere { sql: where_sql.sql.clone(), params: where_sql.params.clone() };
+        let where_sql = where_sql.clone();
         let until_id = until_id.map(|s| s.to_string());
         tauri::async_runtime::spawn_blocking(move || -> Result<Vec<Note>> {
             let guard = conn.lock().unwrap();
@@ -574,6 +573,12 @@ mod tests {
         let expr2 = parser::parse_predicate("cw").unwrap();
         let w2 = sql::build_where(&expr2, &ctx).unwrap();
         assert!(s.search_cache(&w2, None, 10).await.unwrap().is_empty());
+    }
+
+    /// 部分一致の契約(Issue #583)。PostgreSQL / MySQL も同じケースを通る(`search_contract.rs`)。
+    #[tokio::test]
+    async fn search_cache_text_match_contract() {
+        crate::store::search_contract::text_match_contract(&store()).await;
     }
 
     #[tokio::test]

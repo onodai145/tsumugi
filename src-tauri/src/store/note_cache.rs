@@ -607,10 +607,11 @@ pub(crate) fn search_cache_sync(
     until_id: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Note>> {
-    use crate::filter::sql::SqlParam;
+    use crate::filter::sql::{Dialect, SqlParam};
 
+    let w = where_sql.render(Dialect::Sqlite);
     let mut sql = String::from("SELECT n.id, n.payload FROM note n JOIN user u ON u.id = n.user_id WHERE (");
-    sql.push_str(&where_sql.sql);
+    sql.push_str(&w.sql);
     sql.push(')');
     if until_id.is_some() {
         sql.push_str(" AND n.id < ?");
@@ -619,7 +620,7 @@ pub(crate) fn search_cache_sync(
 
     let mut stmt = conn.prepare(&sql)?;
     let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    for p in &where_sql.params {
+    for p in &w.params {
         binds.push(match p {
             SqlParam::Text(s) => Box::new(s.clone()),
             SqlParam::Real(x) => Box::new(*x),

@@ -1142,21 +1142,19 @@ async fn search_cache_impl(
     until_id: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Note>> {
-    use crate::filter::sql::SqlParam;
+    use crate::filter::sql::{Dialect, SqlParam};
 
-    // SqlWhere.sql(`?`プレースホルダ、` REGEXP `)は無変換でそのまま使う
-    // (Global Constraints参照、to_mysql_sqlに相当する変換関数は実装しない)。
-    // `where_sql.sql`はTQLコンパイラ(`filter/sql.rs`)が生成する固定文字列で、値は
-    // 一切埋め込まず`where_sql.params`(下でbind)経由のみで渡す設計のため、
-    // `sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
-    let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN `user` u ON u.id = n.user_id WHERE ({})", where_sql.sql);
+    // `w`はTQLコンパイラ(`filter/sql.rs`)が生成する固定文字列で、値は一切埋め込まず
+    // `w.params`(下でbind)経由のみで渡す設計のため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
+    let w = where_sql.render(Dialect::MySql);
+    let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN `user` u ON u.id = n.user_id WHERE ({})", w.sql);
     if until_id.is_some() {
         sql.push_str(" AND n.id < ?");
     }
     sql.push_str(" ORDER BY n.created_at DESC, n.id DESC LIMIT ?");
 
     let mut query = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
-    for p in &where_sql.params {
+    for p in &w.params {
         query = match p {
             SqlParam::Text(s) => query.bind(s.clone()),
             SqlParam::Real(x) => query.bind(*x),

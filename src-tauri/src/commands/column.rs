@@ -1947,7 +1947,7 @@ async fn search_cache_core(
     };
     let where_sql = match &compiled {
         CompiledFilter::Tql(expr) => sql::build_where(expr, &sql_ctx).map_err(Error::Invalid)?,
-        _ => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
+        _ => sql::SqlWhere::always_true(),
     };
     let raw = cache.search_cache(&where_sql, until_id, limit).await?;
     let mut filtered: Vec<Note> = raw
@@ -2273,7 +2273,7 @@ async fn fetch_backfill_pass(
         };
         let where_sql = match expr {
             Some(e) => sql::build_where(e, &sql_ctx).map_err(Error::Invalid)?,
-            None => sql::SqlWhere { sql: "1=1".into(), params: vec![] },
+            None => sql::SqlWhere::always_true(),
         };
         if let Ok(cached) = state.cache.search_cache(&where_sql, until_id, INITIAL_LIMIT).await {
             // 検索結果が上限に達したときだけ、その最小idを透かしの候補にする(未満なら枯渇扱い)。

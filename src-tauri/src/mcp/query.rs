@@ -4,8 +4,8 @@
 //! (公開範囲・ローカル限定・アカウント帰属)を AND する。クライアントの入力は、AST の値か bind される
 //! パラメータにしかならず、SQL 文字列には入らない。
 //!
-//! 注意: TQL の部分一致(`Contains`)は LIKE の値をエスケープしないので、`text` の `%` / `_` は
-//! ワイルドカードとして働く。範囲はスコープ条件の AND で変わらないので、仕様として受け入れる。
+//! 注意: TQL の部分一致(`Contains`)は、`%` / `_` / `\` を実文字として扱い、大文字小文字を区別する
+//! (方言ごとの関数で書くので、検索語のエスケープは要らない)。`text` の検索語はバインドされる。
 
 use crate::filter::ast::{CompareOp, Expr, Field, Value};
 use crate::filter::sql::{build_where, SqlCtx, SqlParam, SqlWhere};
@@ -46,9 +46,7 @@ fn invalid(msg: &str) -> QueryError {
 }
 
 fn with_scope(base: SqlWhere, account_id: &str) -> SqlWhere {
-    let mut params = base.params;
-    params.push(SqlParam::Text(account_id.to_string()));
-    SqlWhere { sql: format!("({}) AND ({})", base.sql, SCOPE_SQL), params }
+    base.and_raw(SCOPE_SQL, vec![SqlParam::Text(account_id.to_string())])
 }
 
 fn compare(field: Field, op: CompareOp, rhs: Value) -> Expr {
@@ -139,7 +137,7 @@ pub fn build_search(account_id: &str, account_host: &str, p: &SearchParams) -> R
     let ctx = SqlCtx { my_ids: vec![], following_ids: None };
     let base = match and_all(parts) {
         Some(expr) => build_where(&expr, &ctx).map_err(|_| invalid("invalid search parameters"))?,
-        None => SqlWhere { sql: "1=1".into(), params: vec![] },
+        None => SqlWhere::always_true(),
     };
 
     let until_id = match p.cursor.as_deref() {
@@ -158,7 +156,7 @@ pub fn build_get(account_id: &str, note_id: &str) -> Result<Query, QueryError> {
     if !is_id(note_id) {
         return Err(invalid("id is invalid"));
     }
-    let base = SqlWhere { sql: "n.id = ?".into(), params: vec![SqlParam::Text(note_id.to_string())] };
+    let base = SqlWhere::raw("n.id = ?", vec![SqlParam::Text(note_id.to_string())]);
     Ok(Query { where_sql: with_scope(base, account_id), until_id: None, limit: 1 })
 }
 
@@ -166,7 +164,7 @@ pub fn build_get(account_id: &str, note_id: &str) -> Result<Query, QueryError> {
 mod tests {
     use super::*;
     use crate::domain::Visibility;
-    use crate::filter::sql::SqlParam;
+    use crate::filter::sql::{Dialect, SqlParam};
     use crate::mcp::testutil::{note, public_note, user};
     use crate::store::NoteCacheStore;
 
@@ -175,6 +173,7 @@ mod tests {
 
     fn texts(q: &Query) -> Vec<String> {
         q.where_sql
+            .render(Dialect::Sqlite)
             .params
             .iter()
             .filter_map(|p| match p {
@@ -191,21 +190,25 @@ mod tests {
             build_search("a1", HOST, &SearchParams { text: Some("rust".into()), has_media: Some(true), ..Default::default() }).unwrap(),
             build_get("a1", "note1").unwrap(),
         ] {
-            assert!(q.where_sql.sql.contains(SCOPE_SQL), "スコープ条件が付いていない: {}", q.where_sql.sql);
+            let sql = &q.where_sql.render(Dialect::Sqlite).sql;
+            assert!(sql.contains(SCOPE_SQL), "スコープ条件が付いていない: {sql}");
             assert_eq!(texts(&q).last().map(String::as_str), Some("a1"), "最後のパラメータはアカウントID");
         }
     }
 
     #[test]
-    fn text_words_become_bound_like_patterns_and_never_enter_the_sql() {
+    fn text_words_become_bound_needles_and_never_enter_the_sql() {
         let p = SearchParams { text: Some("rust  '; DROP TABLE note;--".into()), ..Default::default() };
         let q = build_search("a1", HOST, &p).unwrap();
-        assert!(!q.where_sql.sql.contains("DROP"), "入力がSQLに入っている: {}", q.where_sql.sql);
-        assert!(!q.where_sql.sql.contains("rust"));
+        for d in [Dialect::Sqlite, Dialect::Postgres, Dialect::MySql] {
+            let sql = &q.where_sql.render(d).sql;
+            assert!(!sql.contains("DROP"), "入力がSQLに入っている: {sql}");
+            assert!(!sql.contains("rust"));
+        }
         let t = texts(&q);
-        assert_eq!(t[0], "%rust%");
-        assert_eq!(t[1], "%';%");
-        assert!(t.contains(&"%DROP%".to_string()));
+        assert_eq!(t[0], "rust");
+        assert_eq!(t[1], "';");
+        assert!(t.contains(&"DROP".to_string()));
     }
 
     #[test]
@@ -226,7 +229,7 @@ mod tests {
     fn blank_text_is_treated_as_absent() {
         let a = build_search("a1", HOST, &SearchParams { text: Some("   ".into()), ..Default::default() }).unwrap();
         let b = build_search("a1", HOST, &SearchParams::default()).unwrap();
-        assert_eq!(a.where_sql.sql, b.where_sql.sql);
+        assert_eq!(a.where_sql.render(Dialect::Sqlite).sql, b.where_sql.render(Dialect::Sqlite).sql);
     }
 
     #[test]
@@ -256,6 +259,7 @@ mod tests {
         .unwrap();
         let reals: Vec<f64> = q
             .where_sql
+            .render(Dialect::Sqlite)
             .params
             .iter()
             .filter_map(|p| if let SqlParam::Real(x) = p { Some(*x) } else { None })
@@ -296,6 +300,7 @@ mod tests {
             build_search("a1", HOST, &SearchParams { since: since.map(Into::into), until: until.map(Into::into), ..Default::default() })
                 .unwrap()
                 .where_sql
+                .render(Dialect::Sqlite)
                 .params
                 .iter()
                 .filter_map(|p| if let SqlParam::Real(x) = p { Some(*x) } else { None })
@@ -352,12 +357,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn percent_in_text_acts_as_a_wildcard_but_stays_inside_the_scope() {
-        // TQLのLIKEは値をエスケープしないので、`%` はワイルドカードになる(仕様として受け入れる)。
-        // ただしスコープ条件のANDは外れないので、範囲外のノートは出ない。
-        let cache = seeded().await;
+    async fn percent_and_underscore_in_text_are_literal_and_stay_inside_the_scope() {
+        let cache = NoteCacheStore::new(crate::store::SqliteBackend::new(crate::store::db::open_cache_in_memory().unwrap()));
+        let notes = vec![
+            public_note("n1", 400, "50% off"),
+            public_note("n2", 300, "50 off"),
+            public_note("n3", 200, "a_b"),
+            public_note("n4", 100, "aXb"),
+        ];
+        cache.cache_notes("col1", &notes).await.unwrap();
+        cache.record_note_accounts("a1", &notes.iter().map(|n| n.id.clone()).collect::<Vec<_>>()).await.unwrap();
+
+        for (text, expected) in [("%", vec!["n1"]), ("50%", vec!["n1"]), ("_", vec!["n3"]), ("a_b", vec!["n3"])] {
+            let q = build_search("a1", HOST, &SearchParams { text: Some(text.into()), ..Default::default() }).unwrap();
+            assert_eq!(ids_of(&cache, &q).await, expected, "text = {text:?}");
+        }
+        // スコープ条件のANDは外れない: 帰属の無いアカウントでは、何も出ない。
+        let q = build_search("never-seen", HOST, &SearchParams { text: Some("%".into()), ..Default::default() }).unwrap();
+        assert!(ids_of(&cache, &q).await.is_empty());
+        // seeded() の範囲外のノートも、`%` では出ない。
+        let seeded = seeded().await;
         let q = build_search("a1", HOST, &SearchParams { text: Some("%".into()), ..Default::default() }).unwrap();
-        assert_eq!(ids_of(&cache, &q).await, vec!["p", "h"]);
+        assert!(ids_of(&seeded, &q).await.is_empty());
     }
 
     #[tokio::test]

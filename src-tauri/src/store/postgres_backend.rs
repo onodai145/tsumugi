@@ -1141,38 +1141,20 @@ async fn prune_impl(pool: &sqlx::PgPool, keep: i32, max_age_days: i32, max_size_
     Ok(deleted as usize)
 }
 
-/// `SqlWhere.sql`(`?`プレースホルダ、SQLite方言)をPostgres用に変換する。
-/// `?`を出現順に`$1`,`$2`,...へ振り直し、` REGEXP `を` ~ `へ置換する。
-/// 設計書「filter/sql.rs(TQLの扱い)」参照(build_where自体は変更しない)。
-fn to_postgres_sql(where_sql: &crate::filter::sql::SqlWhere) -> String {
-    let mut out = String::with_capacity(where_sql.sql.len());
-    let mut n = 0usize;
-    for ch in where_sql.sql.chars() {
-        if ch == '?' {
-            n += 1;
-            out.push('$');
-            out.push_str(&n.to_string());
-        } else {
-            out.push(ch);
-        }
-    }
-    out.replace(" REGEXP ", " ~ ")
-}
-
 async fn search_cache_impl(
     pool: &sqlx::PgPool,
     where_sql: &crate::filter::sql::SqlWhere,
     until_id: Option<&str>,
     limit: u32,
 ) -> Result<Vec<Note>> {
-    use crate::filter::sql::SqlParam;
+    use crate::filter::sql::{Dialect, SqlParam};
 
-    // `converted_where`はTQLコンパイラ(`filter/sql.rs`)が生成した固定文字列を`$n`番号の
-    // 振り直しのみ行ったもので、値は一切埋め込まず`where_sql.params`(下でbind)経由のみで
-    // 渡す設計のため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
-    let converted_where = to_postgres_sql(where_sql);
-    let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN \"user\" u ON u.id = n.user_id WHERE ({converted_where})");
-    let mut next_placeholder = where_sql.params.len() + 1;
+    // `w`はTQLコンパイラ(`filter/sql.rs`)が生成した固定文字列(`$n`番号付き)で、値は
+    // 一切埋め込まず`w.params`(下でbind)経由のみで渡す設計のため、
+    // `sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
+    let w = where_sql.render(Dialect::Postgres);
+    let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN \"user\" u ON u.id = n.user_id WHERE ({})", w.sql);
+    let mut next_placeholder = w.params.len() + 1;
     if until_id.is_some() {
         sql.push_str(&format!(" AND n.id < ${next_placeholder}"));
         next_placeholder += 1;
@@ -1180,7 +1162,7 @@ async fn search_cache_impl(
     sql.push_str(&format!(" ORDER BY n.created_at DESC, n.id DESC LIMIT ${next_placeholder}"));
 
     let mut query = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
-    for p in &where_sql.params {
+    for p in &w.params {
         query = match p {
             SqlParam::Text(s) => query.bind(s.clone()),
             SqlParam::Real(x) => query.bind(*x),
