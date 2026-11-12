@@ -1504,6 +1504,14 @@ mod tests {
         crate::store::search_contract::text_match_contract(&*s).await;
     }
 
+    /// 正規表現(`match`)の契約(Issue #598)。
+    #[tokio::test]
+    #[ignore]
+    async fn search_cache_regex_contract() {
+        let s = backend().await;
+        crate::store::search_contract::regex_contract(&*s).await;
+    }
+
     #[tokio::test]
     #[ignore]
     async fn search_cache_paging_contract() {

@@ -428,7 +428,7 @@ CREATE TABLE note_file     (note_id TEXT, mime_type TEXT, mime_category TEXT, is
 ```
 - クエリは `note n JOIN user u ON n.user_id = u.id` を基本とする。
 - `mine` / `following` / `to_me` など EvalContext 依存の値は**バインド変数**（`:my_ids` 等）で注入。
-- `match`（正規表現）は rusqlite に **REGEXP 関数を登録**して `col REGEXP :pat` で使う。
+- `match`（正規表現）は方言ごとに書く（Issue #598）。SQLite は rusqlite に `regexp()` 関数を登録（`store/db.rs`。インメモリ評価と同じ `regex` crate）して `col REGEXP :pat`、PostgreSQL は `~`、MySQL は `REGEXP_LIKE(col, :pat, 'c')`。いずれも大文字小文字を区別する（MySQL の `REGEXP` は既定の `_ci` 照合順序だと区別しないため `'c'` を付ける）。無効なパターンは不一致（インメモリ評価と同じ）。
 
 ## 10. Field × 評価/SQL射影 対応表
 凡例：`n`=&Note, `ctx`=&EvalContext（インメモリ）／`n`,`u`=note,user テーブル別名（SQL）。
@@ -509,7 +509,7 @@ CREATE TABLE note_file     (note_id TEXT, mime_type TEXT, mime_category TEXT, is
 | `contains` / `->` | 文字列 | 方言ごとの関数（下記） |
 | `contains` / `->` | 集合 | `rhs IN (集合サブクエリ)` |
 | `in` / `<-` | 値∈集合 | `lhs IN (集合サブクエリ)` |
-| `match` | 文字列 | `lhs REGEXP rhs`（REGEXP関数を登録） |
+| `match` | 文字列 | SQLite: `lhs REGEXP rhs`（`regexp()` 関数を登録） / PostgreSQL: `lhs ~ rhs` / MySQL: `REGEXP_LIKE(lhs, rhs, 'c')` |
 
 - 文字列の部分一致は `LIKE` を使わず、方言ごとの関数で書く（Issue #583）。検索語はエスケープせずバインドし、`%` `_` `\` は実文字、大文字小文字は区別する（インメモリ評価 `filter/eval.rs` と一致）。`build_where` は3方言ぶんを同時に作り（`SqlWhere`）、backend が `SqlWhere::render(Dialect)` で自分の分を選ぶ。
 

@@ -582,6 +582,12 @@ mod tests {
         crate::store::search_contract::text_match_contract(&store()).await;
     }
 
+    /// 正規表現(`match`)の契約(Issue #598)。
+    #[tokio::test]
+    async fn search_cache_regex_contract() {
+        crate::store::search_contract::regex_contract(&store()).await;
+    }
+
     #[tokio::test]
     async fn search_cache_paging_contract() {
         crate::store::search_contract::paging_contract(&store()).await;

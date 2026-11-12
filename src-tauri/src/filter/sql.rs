@@ -4,7 +4,7 @@
 //! 生成物は、SQLite / PostgreSQL / MySQL の3方言ぶんの [`Rendered`](SQL とバインド値の列)を
 //! まとめた [`SqlWhere`]。呼び出し側は backend を知らなくてよい(backend は実行時に差し替わる)ので、
 //! 組み立ては方言なしで行い、backend が自分の方言を [`SqlWhere::render`] で選ぶ。
-//! 方言で変わるのは、プレースホルダ(`?` / `$n`)・文字列の部分一致・正規表現。
+//! 方言で変わるのは、プレースホルダ(`?` / `$n`)・文字列の部分一致・正規表現(いずれも大文字小文字を区別する)。
 //! 部分一致は `LIKE` を使わず、方言ごとの関数で書く(検索語のエスケープが要らず、大文字小文字を区別する
 //! = インメモリ評価 `filter/eval.rs` と一致する)。
 //! context 依存(mine/following/to_me/@account) は my_ids / following_ids をプレースホルダとして展開する。
@@ -203,8 +203,14 @@ impl Builder<'_> {
             Match => {
                 let col = self.str(lhs)?;
                 let pat = self.str(rhs)?;
-                let op = if self.dialect == Dialect::Postgres { "~" } else { "REGEXP" };
-                format!("({col} {op} {pat})")
+                match self.dialect {
+                    // SQLite は `regexp()` 関数(`store/db.rs` で登録)。PostgreSQL の `~` は大文字小文字を区別する。
+                    Dialect::Sqlite => format!("({col} REGEXP {pat})"),
+                    Dialect::Postgres => format!("({col} ~ {pat})"),
+                    // MySQL の `REGEXP` は照合順序(既定の `_ci`)に従い大文字小文字を区別しない。
+                    // 第3引数 `'c'` で、インメモリ評価・PostgreSQL と同じく区別させる。
+                    Dialect::MySql => format!("REGEXP_LIKE({col}, {pat}, 'c')"),
+                }
             }
             Contains => {
                 if set_capable(lhs) {
@@ -582,7 +588,7 @@ mod tests {
 
         let w = where_of("from cache where text match \"(?i)mi\"");
         assert_eq!(sq(&w).sql, "(COALESCE(n.text,'') REGEXP ?)");
-        assert_eq!(w.render(Dialect::MySql).sql, "(COALESCE(n.text,'') REGEXP ?)");
+        assert_eq!(w.render(Dialect::MySql).sql, "REGEXP_LIKE(COALESCE(n.text,''), ?, 'c')");
         assert_eq!(w.render(Dialect::Postgres).sql, "(COALESCE(n.text,'') ~ $1)");
     }
 
