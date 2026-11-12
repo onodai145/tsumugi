@@ -5,7 +5,7 @@
 use crate::domain::Note;
 use crate::filter::ast::{CompareOp, Expr, Field, Value};
 use crate::filter::eval::{evaluate, EvalContext};
-use crate::filter::sql::{build_where, SqlCtx};
+use crate::filter::sql::{build_where, SqlCtx, SqlWhere};
 use crate::mcp::testutil::public_note;
 use crate::store::note_cache::NoteCacheBackend;
 
@@ -116,4 +116,36 @@ pub(crate) async fn text_match_contract(b: &dyn NoteCacheBackend) {
         mem.sort();
         assert_eq!(mem, want, "eval: {label}");
     }
+}
+
+/// ページ境界が ID 基準で、`created_at` と ID の順序が食い違うノートでも欠落も重複も起きないこと。
+pub(crate) async fn paging_contract(b: &dyn NoteCacheBackend) {
+    // ID の昇順: a0 < a1 < a2 < a3 < z9。`created_at` の新しい順: a0(999) > a3 > a2 > a1 > z9(10)。
+    let notes = vec![
+        public_note("a0", 999, "newest by time, smallest id"),
+        public_note("a1", 100, "x"),
+        public_note("a2", 200, "x"),
+        public_note("a3", 300, "x"),
+        public_note("z9", 10, "oldest by time, largest id"),
+    ];
+    b.cache_notes("col1", &notes).await.unwrap();
+    let w = SqlWhere::always_true();
+    let ids = |notes: Vec<Note>| -> Vec<String> { notes.into_iter().map(|n| n.id).collect() };
+
+    // 先頭ページは ID の大きい順。
+    assert_eq!(ids(b.search_cache(&w, None, 2).await.unwrap()), ["z9", "a3"]);
+
+    // 各ページの最後の ID をカーソルにしてたどると、全ノートが1回ずつ現れる。
+    let mut seen: Vec<String> = vec![];
+    let mut cursor: Option<String> = None;
+    for _ in 0..10 {
+        let page = b.search_cache(&w, cursor.as_deref(), 2).await.unwrap();
+        let Some(last) = page.last() else { break };
+        cursor = Some(last.id.clone());
+        seen.extend(ids(page));
+    }
+    assert_eq!(seen, ["z9", "a3", "a2", "a1", "a0"]);
+
+    // 存在しない ID をカーソルにしても、その ID より小さいものが続く("a2" < "a25" < "a3")。
+    assert_eq!(ids(b.search_cache(&w, Some("a25"), 10).await.unwrap()), ["a2", "a1", "a0"]);
 }

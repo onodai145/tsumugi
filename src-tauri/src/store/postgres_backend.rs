@@ -1159,7 +1159,7 @@ async fn search_cache_impl(
         sql.push_str(&format!(" AND n.id < ${next_placeholder}"));
         next_placeholder += 1;
     }
-    sql.push_str(&format!(" ORDER BY n.created_at DESC, n.id DESC LIMIT ${next_placeholder}"));
+    sql.push_str(&format!(" ORDER BY n.id DESC LIMIT ${next_placeholder}"));
 
     let mut query = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
     for p in &w.params {
@@ -1469,7 +1469,7 @@ mod tests {
         let expr = parser::parse_predicate("has_files").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, Some("a3"), 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a2", "a1"]);
     }
 
     #[tokio::test]

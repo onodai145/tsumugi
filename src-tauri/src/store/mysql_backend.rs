@@ -1151,7 +1151,7 @@ async fn search_cache_impl(
     if until_id.is_some() {
         sql.push_str(" AND n.id < ?");
     }
-    sql.push_str(" ORDER BY n.created_at DESC, n.id DESC LIMIT ?");
+    sql.push_str(" ORDER BY n.id DESC LIMIT ?");
 
     let mut query = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
     for p in &w.params {
@@ -1493,7 +1493,7 @@ mod tests {
         let expr = parser::parse_predicate("has_files").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, Some("a3"), 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a2", "a1"]);
     }
 
     /// MCPのスコープ条件(Issue #557)が、MySQLでも型エラーなく、期待どおりに絞ること。

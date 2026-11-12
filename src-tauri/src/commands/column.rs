@@ -1925,6 +1925,7 @@ fn split_display_and_cacheable(
 /// キャッシュDB検索(Issue #248)の中核ロジック。SQL射影で粗く絞り込んだ後、
 /// `fetch_and_filter` の cache 経路と同じ二段構成(in-memory フィルタ + ミュート除外)で
 /// 再検証する。AppState を直接取らず必要な値だけを受け取ることで単体テスト可能にしている。
+/// 返す順序は ID 降順(`search_cache` と同じ。カーソルは最後のノートの ID)。
 // `is_server_muted`と`is_word_muted`を1つのクロージャに統合しないのは、各々を単独で
 // 検証するテスト(search_cache_core_excludes_notes_the_closure_marks_server_muted /
 // search_cache_core_excludes_notes_matched_by_word_mute_closure)を独立させたいため。
@@ -1959,7 +1960,9 @@ async fn search_cache_core(
                 && !is_word_muted(n)
         })
         .collect();
-    filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    // `search_cache` が返した ID 降順のまま返す。検索モーダルは「表示中の最後のノートの ID」を次の
+    // `until_id` にするため、ここで `created_at` に並べ直すと最後が最小 ID でなくなり、ページ送りで
+    // 取りこぼしや重複が起きる(Issue #583)。
     filtered.truncate(limit as usize);
     Ok(filtered)
 }
@@ -2436,7 +2439,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_cache_core_with_empty_predicate_returns_all_desc_order() {
+    async fn search_cache_core_with_empty_predicate_returns_all_in_id_desc_order() {
         let cache = cache_with(&[note("n1", 100), note("n2", 300), note("n3", 200)]).await;
 
         let filter = FilterQuery::Tql(String::new());
@@ -2453,7 +2456,35 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n2", "n1"]);
+    }
+
+    /// `created_at` と ID の順序が食い違っても、最後のノートの ID をカーソルにしたページ送りで
+    /// 欠落も重複も起きない(Issue #583)。
+    #[tokio::test]
+    async fn search_cache_core_pages_by_id_even_when_created_at_order_differs() {
+        let cache = cache_with(&[note("a0", 999), note("a1", 100), note("z9", 10)]).await;
+        let filter = FilterQuery::Tql(String::new());
+        let mut seen: Vec<String> = vec![];
+        let mut cursor: Option<String> = None;
+        for _ in 0..5 {
+            let page = search_cache_core(
+                &cache,
+                &filter,
+                &EvalContext::default(),
+                &MuteConfig::default(),
+                cursor.as_deref(),
+                1,
+                |_| false,
+                |_| false,
+            )
+            .await
+            .unwrap();
+            let Some(last) = page.last() else { break };
+            cursor = Some(last.id.clone());
+            seen.extend(page.iter().map(|n| n.id.clone()));
+        }
+        assert_eq!(seen, ["z9", "a1", "a0"]);
     }
 
     #[tokio::test]

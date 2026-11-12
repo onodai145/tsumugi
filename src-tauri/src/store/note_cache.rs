@@ -204,8 +204,10 @@ impl NoteCacheStore {
         self.backend().prune(keep, max_age_days, max_size_mb).await
     }
 
-    /// TQL `cache` ソース: ローカルSQLiteキャッシュ全体を where 句で検索する（受信せず検索のみ）。
-    /// until_id は作成順の境界（id 自体は sortable なので created_at の代わりに使える）。
+    /// TQL `cache` ソース: ローカルキャッシュ全体を where 句で検索する（受信せず検索のみ）。
+    /// 並びと境界は **ID 順**(`ORDER BY n.id DESC`、`until_id` はそれより小さい ID)。バックフィルの透かし・
+    /// REST の `untilId`・MCP の `cursor` と同じ基準で、返したページの最後のノートがその最小 ID になる。
+    /// 表示用に `created_at` で並べ直すのは呼び出し側の責務(カーソルには使わない)。
     pub async fn search_cache(
         &self,
         where_sql: &crate::filter::sql::SqlWhere,
@@ -616,7 +618,7 @@ pub(crate) fn search_cache_sync(
     if until_id.is_some() {
         sql.push_str(" AND n.id < ?");
     }
-    sql.push_str(" ORDER BY n.created_at DESC, n.id DESC LIMIT ?");
+    sql.push_str(" ORDER BY n.id DESC LIMIT ?");
 
     let mut stmt = conn.prepare(&sql)?;
     let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();

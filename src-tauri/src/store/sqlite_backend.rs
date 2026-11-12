@@ -567,7 +567,8 @@ mod tests {
         let expr = parser::parse_predicate("has_files").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, Some("a3"), 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a1", "a2"]);
+        // 結果は ID 降順(a2 > a1)。このデータは created_at の順と ID の順が逆なので、ID 基準で並ぶことの確認も兼ねる。
+        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a2", "a1"]);
 
         // 述語が全件falseなら空
         let expr2 = parser::parse_predicate("cw").unwrap();
@@ -579,6 +580,11 @@ mod tests {
     #[tokio::test]
     async fn search_cache_text_match_contract() {
         crate::store::search_contract::text_match_contract(&store()).await;
+    }
+
+    #[tokio::test]
+    async fn search_cache_paging_contract() {
+        crate::store::search_contract::paging_contract(&store()).await;
     }
 
     #[tokio::test]
