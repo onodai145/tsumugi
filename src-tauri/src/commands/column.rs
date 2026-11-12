@@ -2412,12 +2412,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn search_cache_core_filters_by_tql_predicate_and_orders_desc() {
-        let mut n1 = note("n1", 100);
+    async fn search_cache_core_filters_by_tql_predicate_and_returns_id_desc_order() {
+        // created_at の順は ID の順と逆(n1 が最新)。ID 降順で返ることを確かめる。
+        let mut n1 = note("n1", 300);
         n1.text = Some("hello needle".into());
         let mut n2 = note("n2", 200);
         n2.text = Some("hello world".into());
-        let mut n3 = note("n3", 300);
+        let mut n3 = note("n3", 100);
         n3.text = Some("needle again".into());
         let cache = cache_with(&[n1, n2, n3]).await;
 
