@@ -204,11 +204,11 @@ mod tests {
 
     #[tokio::test]
     async fn percent_in_text_is_a_literal_and_never_widens_the_scope() {
-        // `%` は実文字として扱われ、ワイルドカードにならない。テストのノートに `%` は無いので何も出ない
-        // (範囲外のノートが混ざらないことも兼ねる)。
+        // `%` は実文字として扱われ、ワイルドカードにならない。本文に `%` を含む `p`(`100%`)だけが出て、
+        // `h` などは出ない。他アカウント・範囲外のノートも混ざらない。
         let s = state().await;
         let p = SearchParams { text: Some("%".into()), ..Default::default() };
-        assert!(ids(&search_notes(&s, "a1", &p).await.unwrap()).is_empty());
+        assert_eq!(ids(&search_notes(&s, "a1", &p).await.unwrap()), vec!["p"]);
     }
 
     #[tokio::test]
