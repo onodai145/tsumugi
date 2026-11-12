@@ -9,7 +9,7 @@ use crate::filter::sql::{build_where, SqlCtx, SqlWhere};
 use crate::mcp::testutil::public_note;
 use crate::store::note_cache::NoteCacheBackend;
 
-const ALL: &[&str] = &["t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11"];
+const ALL: &[&str] = &["t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t10", "t11", "t12", "t13", "t14", "t15"];
 
 fn fixtures() -> Vec<Note> {
     let mut notes = vec![
@@ -24,6 +24,10 @@ fn fixtures() -> Vec<Note> {
         public_note("t09", 108, "日本語のテキスト😀"),
         public_note("t10", 109, "placeholder"),
         public_note("t11", 110, "x"),
+        public_note("t12", 111, "Äpfel"),  // 非 ASCII の大文字(MySQL の _ai_ci は `Ä` と `ä` を同一視する)
+        public_note("t13", 112, "äpfel"),
+        public_note("t14", 113, "trail "), // 末尾空白あり
+        public_note("t15", 114, "trail"),  // 末尾空白なし(PAD SPACE 照合順序だと t14 と等しくなる)
     ];
     notes[9].text = None; // t10: 本文なし。空文字列として扱われる。
     notes[10].cw = Some("Spoiler".into()); // t11: CW あり。他のノートは CW なし(空文字列として扱われる)。
@@ -59,6 +63,12 @@ fn cases() -> Vec<Case> {
         c(Text, Contains, "😀", &["t09"]),
         c(Text, Contains, "", ALL),
         c(Text, Contains, "100% sure and more", &[]),
+        // 非 ASCII の大文字小文字も区別する。
+        c(Text, Contains, "Ä", &["t12"]),
+        c(Text, Contains, "ä", &["t13"]),
+        // 末尾空白は意味を持つ(PAD SPACE 照合順序でも、`trail ` と `trail` は別)。
+        c(Text, Contains, "trail ", &["t14"]),
+        c(Text, Contains, "trail  ", &[]),
         // --- StartsWith
         c(Text, StartsWith, "100", &["t01", "t02"]),
         c(Text, StartsWith, "100%", &["t01"]),
@@ -69,6 +79,10 @@ fn cases() -> Vec<Case> {
         c(Text, StartsWith, "日本", &["t09"]),
         c(Text, StartsWith, "", ALL),
         c(Text, StartsWith, "100% sure and more", &[]),
+        c(Text, StartsWith, "Ä", &["t12"]),
+        c(Text, StartsWith, "ä", &["t13"]),
+        c(Text, StartsWith, "trail", &["t14", "t15"]),
+        c(Text, StartsWith, "trail ", &["t14"]),
         // --- EndsWith
         c(Text, EndsWith, "sure", &["t01"]),
         c(Text, EndsWith, "percent", &["t02"]),
@@ -80,6 +94,9 @@ fn cases() -> Vec<Case> {
         c(Text, EndsWith, "World", &["t05"]),
         c(Text, EndsWith, "", ALL),
         c(Text, EndsWith, "100% sure and more", &[]),
+        c(Text, EndsWith, "pfel", &["t12", "t13"]),
+        c(Text, EndsWith, "trail", &["t15"]),
+        c(Text, EndsWith, "trail ", &["t14"]),
         // --- NULL の cw / text は空文字列として扱われる(空の検索語にだけ一致)。
         c(CwText, Contains, "Spoil", &["t11"]),
         c(CwText, Contains, "spoil", &[]),
