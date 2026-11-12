@@ -11,6 +11,8 @@ pub mod note_cache;
 pub mod settings;
 pub mod settings_transfer;
 mod sqlite_backend;
+#[cfg(test)]
+pub(crate) mod search_contract;
 pub(crate) mod postgres_backend;
 pub(crate) mod postgres_user_ref;
 pub(crate) mod mysql_backend;

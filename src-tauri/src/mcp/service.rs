@@ -203,10 +203,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn percent_wildcard_does_not_escape_the_scope() {
+    async fn percent_in_text_is_a_literal_and_never_widens_the_scope() {
+        // `%` は実文字として扱われ、ワイルドカードにならない。本文に `%` を含む `p`(`100%`)だけが出て、
+        // `h` などは出ない。他アカウント・範囲外のノートも混ざらない。
         let s = state().await;
         let p = SearchParams { text: Some("%".into()), ..Default::default() };
-        assert_eq!(ids(&search_notes(&s, "a1", &p).await.unwrap()), vec!["p", "h"]);
+        assert_eq!(ids(&search_notes(&s, "a1", &p).await.unwrap()), vec!["p"]);
     }
 
     #[tokio::test]

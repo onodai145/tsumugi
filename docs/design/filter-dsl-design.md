@@ -504,13 +504,22 @@ CREATE TABLE note_file     (note_id TEXT, mime_type TEXT, mime_category TEXT, is
 |---|---|---|
 | `==` / `!=` | 数値/文字列 | `lhs = rhs` / `lhs <> rhs` |
 | `<` `>` `<=` `>=` | 数値 | 同記号 |
-| `startswith` | 文字列 | `lhs LIKE rhs \|\| '%'` |
-| `endswith` | 文字列 | `lhs LIKE '%' \|\| rhs` |
-| `contains` / `->` | 文字列 | `lhs LIKE '%' \|\| rhs \|\| '%'` |
+| `startswith` | 文字列 | 方言ごとの関数（下記） |
+| `endswith` | 文字列 | 方言ごとの関数（下記） |
+| `contains` / `->` | 文字列 | 方言ごとの関数（下記） |
 | `contains` / `->` | 集合 | `rhs IN (集合サブクエリ)` |
 | `in` / `<-` | 値∈集合 | `lhs IN (集合サブクエリ)` |
 | `match` | 文字列 | `lhs REGEXP rhs`（REGEXP関数を登録） |
 
-- LIKE の右辺はエスケープしてワイルドカード誤爆を防ぐ（`%` `_` を実文字扱いにしたい場合）。
+- 文字列の部分一致は `LIKE` を使わず、方言ごとの関数で書く（Issue #583）。検索語はエスケープせずバインドし、`%` `_` `\` は実文字、大文字小文字は区別する（インメモリ評価 `filter/eval.rs` と一致）。`build_where` は3方言ぶんを同時に作り（`SqlWhere`）、backend が `SqlWhere::render(Dialect)` で自分の分を選ぶ。
+
+  | 種類 | SQLite | PostgreSQL | MySQL |
+  |---|---|---|---|
+  | `contains` / `->` | `instr(col, ?) > 0` | `strpos(col, ?) > 0` | `LOCATE(?, CAST(col AS BINARY)) > 0` |
+  | `startswith` | `substr(col, 1, length(?)) = ?` | `left(col, length(?)) = ?` | `LEFT(col, CHAR_LENGTH(?)) = CAST(? AS BINARY)` |
+  | `endswith` | `substr(col, length(col) - length(?) + 1) = ?` | `right(col, length(?)) = ?` | `RIGHT(col, CHAR_LENGTH(?)) = CAST(? AS BINARY)` |
+
+  MySQL 8.1 では `LOCATE(BINARY ?, col)` は大文字小文字を区別しない（バイナリへの変換は列の側に付ける）。`BINARY expr` は 8.0.27 以降で非推奨のため `CAST(.. AS BINARY)` を使う。SQLite の `substr(X, -N)` は `N = 0` で全体を返すため、`endswith` は開始位置を `length` から計算する。
+- `search_cache` の並びと `until_id` の境界は ID 順（`ORDER BY n.id DESC` / `n.id < ?`）。バックフィルの透かし・REST の `untilId`・MCP の `cursor` と同じ基準。
 - 集合同士の比較（両辺Set）は初期は非対応でよい（KQLも実質スカラ×集合が中心）。
 - `reactions`/`emojis` の集合比較は §3.4 正規化を通した値でバインドする。
