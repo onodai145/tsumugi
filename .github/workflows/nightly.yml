@@ -113,7 +113,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-latest
+          # release.yml と同じ理由で 24.04 に固定している(Issue #594, #596)。
+          - platform: ubuntu-24.04
             args: ""
           - platform: macos-latest
             args: "--target universal-apple-darwin"
@@ -121,11 +122,12 @@ jobs:
             args: ""
 
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Install system dependencies (Tauri v2 Linux)
-        if: matrix.platform == 'ubuntu-latest'
+        if: matrix.platform == 'ubuntu-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
