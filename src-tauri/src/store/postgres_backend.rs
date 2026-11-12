@@ -1485,6 +1485,21 @@ mod tests {
         assert_eq!(got.len(), 1);
     }
 
+    /// 部分一致の契約(Issue #583)。SQLite と同じケースを通る(`search_contract.rs`)。
+    #[tokio::test]
+    #[ignore]
+    async fn search_cache_text_match_contract() {
+        let s = backend().await;
+        crate::store::search_contract::text_match_contract(&*s).await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn search_cache_paging_contract() {
+        let s = backend().await;
+        crate::store::search_contract::paging_contract(&*s).await;
+    }
+
     /// MCPのスコープ条件(Issue #557)が、PostgreSQLでも型エラーなく、期待どおりに絞ること。
     /// `local_only` はBOOLEAN列なので `NOT n.local_only` が通ること、`?`の振り直しで末尾に足した
     /// アカウントIDが正しい位置に入ることを確かめる。
