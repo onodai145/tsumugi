@@ -277,24 +277,24 @@ impl Builder<'_> {
                 format!("(right({col}, length({n1})) = {n2})")
             }
             (Dialect::MySql, TextMatch::Contains) => {
-                // 大文字小文字を区別するには、`BINARY` を検索語ではなく**列の側**に付ける(MySQL 8.1 で確認:
+                // 大文字小文字を区別するには、バイナリへの変換を検索語ではなく**列の側**に付ける(MySQL 8.1 で確認:
                 // `LOCATE(BINARY 'hello', 'Hello World')` は 1、`LOCATE('hello', BINARY 'Hello World')` は 0)。
-                // 検索語が先。
+                // `BINARY expr` は 8.0.27 以降で非推奨なので、同じ意味の `CAST(.. AS BINARY)` を使う。検索語が先。
                 let n = self.push_text(needle);
                 let col = self.str(lhs)?;
-                format!("(LOCATE({n}, BINARY {col}) > 0)")
+                format!("(LOCATE({n}, CAST({col} AS BINARY)) > 0)")
             }
             (Dialect::MySql, TextMatch::StartsWith) => {
                 let col = self.str(lhs)?;
                 let n1 = self.push_text(needle.clone());
                 let n2 = self.push_text(needle);
-                format!("(LEFT({col}, CHAR_LENGTH({n1})) = BINARY {n2})")
+                format!("(LEFT({col}, CHAR_LENGTH({n1})) = CAST({n2} AS BINARY))")
             }
             (Dialect::MySql, TextMatch::EndsWith) => {
                 let col = self.str(lhs)?;
                 let n1 = self.push_text(needle.clone());
                 let n2 = self.push_text(needle);
-                format!("(RIGHT({col}, CHAR_LENGTH({n1})) = BINARY {n2})")
+                format!("(RIGHT({col}, CHAR_LENGTH({n1})) = CAST({n2} AS BINARY))")
             }
         })
     }
@@ -501,7 +501,7 @@ mod tests {
         assert_eq!(p.sql, "(strpos(COALESCE(n.text,''), $1) > 0)");
         assert_eq!(p.params, vec![text("Rust")]);
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(LOCATE(?, BINARY COALESCE(n.text,'')) > 0)");
+        assert_eq!(m.sql, "(LOCATE(?, CAST(COALESCE(n.text,'') AS BINARY)) > 0)");
         assert_eq!(m.params, vec![text("Rust")]);
     }
 
@@ -515,7 +515,7 @@ mod tests {
         assert_eq!(p.sql, "(left(COALESCE(n.text,''), length($1)) = $2)");
         assert_eq!(p.params, vec![text("hi"), text("hi")]);
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(LEFT(COALESCE(n.text,''), CHAR_LENGTH(?)) = BINARY ?)");
+        assert_eq!(m.sql, "(LEFT(COALESCE(n.text,''), CHAR_LENGTH(?)) = CAST(? AS BINARY))");
         assert_eq!(m.params, vec![text("hi"), text("hi")]);
     }
 
@@ -532,7 +532,7 @@ mod tests {
         let p = w.render(Dialect::Postgres);
         assert_eq!(p.sql, "(right(COALESCE(n.text,''), length($1)) = $2)");
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(RIGHT(COALESCE(n.text,''), CHAR_LENGTH(?)) = BINARY ?)");
+        assert_eq!(m.sql, "(RIGHT(COALESCE(n.text,''), CHAR_LENGTH(?)) = CAST(? AS BINARY))");
     }
 
     #[test]
@@ -557,11 +557,11 @@ mod tests {
         assert_eq!(p.sql, "(right($1, length($2)) = $3)");
         assert_eq!(p.params, vec![text("abc"), text("c"), text("c")]);
 
-        // MySQL の `LOCATE(BINARY ?, col)` は検索語が先。
+        // MySQL の `LOCATE(?, CAST(col AS BINARY))` は検索語が先。
         let e = cmp(Value::Str("abc".into()), CompareOp::Contains, Value::Str("b".into()));
         let w = build_where(&e, &ctx()).unwrap();
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(LOCATE(?, BINARY ?) > 0)");
+        assert_eq!(m.sql, "(LOCATE(?, CAST(? AS BINARY)) > 0)");
         assert_eq!(m.params, vec![text("b"), text("abc")]);
     }
 

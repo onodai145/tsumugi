@@ -515,11 +515,11 @@ CREATE TABLE note_file     (note_id TEXT, mime_type TEXT, mime_category TEXT, is
 
   | 種類 | SQLite | PostgreSQL | MySQL |
   |---|---|---|---|
-  | `contains` / `->` | `instr(col, ?) > 0` | `strpos(col, ?) > 0` | `LOCATE(?, BINARY col) > 0` |
-  | `startswith` | `substr(col, 1, length(?)) = ?` | `left(col, length(?)) = ?` | `LEFT(col, CHAR_LENGTH(?)) = BINARY ?` |
-  | `endswith` | `substr(col, length(col) - length(?) + 1) = ?` | `right(col, length(?)) = ?` | `RIGHT(col, CHAR_LENGTH(?)) = BINARY ?` |
+  | `contains` / `->` | `instr(col, ?) > 0` | `strpos(col, ?) > 0` | `LOCATE(?, CAST(col AS BINARY)) > 0` |
+  | `startswith` | `substr(col, 1, length(?)) = ?` | `left(col, length(?)) = ?` | `LEFT(col, CHAR_LENGTH(?)) = CAST(? AS BINARY)` |
+  | `endswith` | `substr(col, length(col) - length(?) + 1) = ?` | `right(col, length(?)) = ?` | `RIGHT(col, CHAR_LENGTH(?)) = CAST(? AS BINARY)` |
 
-  MySQL 8.1 では `LOCATE(BINARY ?, col)` は大文字小文字を区別しない（`BINARY` は列の側に付ける）。SQLite の `substr(X, -N)` は `N = 0` で全体を返すため、`endswith` は開始位置を `length` から計算する。
+  MySQL 8.1 では `LOCATE(BINARY ?, col)` は大文字小文字を区別しない（バイナリへの変換は列の側に付ける）。`BINARY expr` は 8.0.27 以降で非推奨のため `CAST(.. AS BINARY)` を使う。SQLite の `substr(X, -N)` は `N = 0` で全体を返すため、`endswith` は開始位置を `length` から計算する。
 - `search_cache` の並びと `until_id` の境界は ID 順（`ORDER BY n.id DESC` / `n.id < ?`）。バックフィルの透かし・REST の `untilId`・MCP の `cursor` と同じ基準。
 - 集合同士の比較（両辺Set）は初期は非対応でよい（KQLも実質スカラ×集合が中心）。
 - `reactions`/`emojis` の集合比較は §3.4 正規化を通した値でバインドする。
