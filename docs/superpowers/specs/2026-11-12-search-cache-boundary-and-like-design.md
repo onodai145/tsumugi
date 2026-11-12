@@ -68,7 +68,7 @@ impl SqlWhere {
 - 上の表は**出発点**で、関数の細部は実 DB テスト(後述)の結果で確定する。表の式が3方言で次のケースに通らなければ、その方言の式を直す。
 - SQLite の `substr(X, -N)` は `N = 0` で全体を返してしまうため、`EndsWith` は `-length(?)` ではなく `length(col) - length(?) + 1` で開始位置を計算する。
 - 検索語は式の中で2回現れる場合があるので、同じ値を2回バインドする(`params` に2つ積む)。
-- 列が NULL のときは、従来の `LIKE` と同じく偽(NULL)のまま。`text` は従来どおり `COALESCE(n.text, '')` を通る。
+- 文字列フィールドはすべて `COALESCE(..., '')` を通るか NOT NULL 列なので、NULL は式まで届かない。NULL の `cw` / `text` は空文字列として扱われ、空の検索語にだけ一致する(従来の `LIKE` と同じ)。
 
 ### 3. ページ境界(各 backend の `search_cache`)
 
@@ -103,7 +103,7 @@ impl SqlWhere {
 - 空の検索語は、`Contains` / `StartsWith` / `EndsWith` のすべてで真(Rust の `""` 判定と一致)。
 - 検索語が列より長いとき、`StartsWith` / `EndsWith` は偽。
 - 多バイト文字(日本語、絵文字)を含む列と検索語。
-- 列が NULL(`cw` など)のとき偽。
+- NULL の `cw`(`cw_text`)・`text` は空文字列として扱われる: 空の検索語には一致し、空でない検索語には一致しない。
 - 同じケースを、インメモリ評価(`filter/eval.rs`)にも流し、SQL とインメモリが一致することを確かめる。
 
 **ページ境界**(3 backend):
