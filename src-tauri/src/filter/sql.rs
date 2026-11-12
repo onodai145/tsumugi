@@ -277,10 +277,12 @@ impl Builder<'_> {
                 format!("(right({col}, length({n1})) = {n2})")
             }
             (Dialect::MySql, TextMatch::Contains) => {
-                // `LOCATE` は、引数のどちらかがバイナリ文字列なら大文字小文字を区別する。検索語が先。
+                // 大文字小文字を区別するには、`BINARY` を検索語ではなく**列の側**に付ける(MySQL 8.1 で確認:
+                // `LOCATE(BINARY 'hello', 'Hello World')` は 1、`LOCATE('hello', BINARY 'Hello World')` は 0)。
+                // 検索語が先。
                 let n = self.push_text(needle);
                 let col = self.str(lhs)?;
-                format!("(LOCATE(BINARY {n}, {col}) > 0)")
+                format!("(LOCATE({n}, BINARY {col}) > 0)")
             }
             (Dialect::MySql, TextMatch::StartsWith) => {
                 let col = self.str(lhs)?;
@@ -499,7 +501,7 @@ mod tests {
         assert_eq!(p.sql, "(strpos(COALESCE(n.text,''), $1) > 0)");
         assert_eq!(p.params, vec![text("Rust")]);
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(LOCATE(BINARY ?, COALESCE(n.text,'')) > 0)");
+        assert_eq!(m.sql, "(LOCATE(?, BINARY COALESCE(n.text,'')) > 0)");
         assert_eq!(m.params, vec![text("Rust")]);
     }
 
@@ -559,7 +561,7 @@ mod tests {
         let e = cmp(Value::Str("abc".into()), CompareOp::Contains, Value::Str("b".into()));
         let w = build_where(&e, &ctx()).unwrap();
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(LOCATE(BINARY ?, ?) > 0)");
+        assert_eq!(m.sql, "(LOCATE(?, BINARY ?) > 0)");
         assert_eq!(m.params, vec![text("b"), text("abc")]);
     }
 
