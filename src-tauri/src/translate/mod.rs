@@ -3,8 +3,18 @@
 
 use crate::error::Error;
 
+pub mod engine;
 pub mod lang;
+pub mod manager;
+pub mod model_store;
 pub mod prompt;
+
+pub use manager::LocalTranslate;
+
+/// アイドルがこれだけ続いたらモデルを解放する（初期値。Android は段階3で短くする）。
+pub const IDLE_UNLOAD: std::time::Duration = std::time::Duration::from_secs(600);
+/// アイドル解放の確認間隔。
+pub const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// ローカル翻訳のエラー文言。専用の `Error` variant は足さず、#440 の `UNAVAILABLE` と同じく
 /// `Error::Invalid` の文言で区別する（フロントは文言で判別する）。
