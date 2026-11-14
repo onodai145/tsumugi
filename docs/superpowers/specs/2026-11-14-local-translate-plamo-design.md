@@ -131,9 +131,10 @@ PFN の翻訳特化 LLM「PLaMo 3 Translate」（0.8B）を端末内で動かし
 
 | 文言 | 意味 | 表示 |
 |---|---|---|
-| `LOCAL_MODEL_NOT_READY` | モデル未取得、または検査に失敗 | 「設定でモデルを取得してください」 |
+| `LOCAL_MODEL_NOT_READY` | モデル未取得、サイズの不一致、または読み込みに失敗 | 「PLaMo のモデルが未取得か、読み込めません」（設定画面ができたら、取得を案内する文を足す） |
 | `LOCAL_TEXT_TOO_LONG` | 入力が長すぎる | 「ノートが長すぎるため翻訳できません」 |
-| `LOCAL_LANG_UNSUPPORTED` | 翻訳先の言語に非対応 | 「この言語には対応していません」 |
+| `LOCAL_LANG_UNSUPPORTED` | 翻訳先の言語に非対応 | 「翻訳先の言語に PLaMo は対応していません」 |
+| `LOCAL_UNSUPPORTED` | このビルド・プラットフォームが非対応 | 「この環境では PLaMo による翻訳は使えません」 |
 
 ### 6. 通信種別の判定（Android）
 
@@ -183,7 +184,8 @@ PFN の翻訳特化 LLM「PLaMo 3 Translate」（0.8B）を端末内で動かし
   メモリ逼迫の通知（`onTrimMemory`）でのアンロードは今回入れない（フォローアップ）。
 - ダウンロードにフォアグラウンドサービスは使わない。アプリが止められたら `.part` が残り、次回は途中から再開する。
 - `android-build` CI ジョブ（aarch64 のビルド確認）に llama.cpp のコンパイルが加わり、約 2 分延びる。
-- デスクトップは、Linux / macOS / Windows の各 CI で cmake と libclang（bindgen 用）が使えるかを確認する。
+- デスクトップは、Linux / macOS / Windows の各 CI で cmake が使えるかを確認する（`llama-cpp-sys-2` の固定した rev は、
+  bindings を生成済みで bindgen を使わないので、libclang は要らない）。
   Windows と macOS は**未検証**なので、plan の最初のタスクにする。
 - ローカルでの llama.cpp ビルドは、並列度 4・ディスク上の target・メモリ上限付きで行う
   （例: `CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 CARGO_TARGET_DIR=$HOME/.cache/<名前> systemd-run --user --scope -p MemoryMax=10G cargo build`）。
