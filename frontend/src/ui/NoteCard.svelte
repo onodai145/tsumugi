@@ -300,7 +300,7 @@
 
   type TranslationState =
     | { status: "loading" }
-    | { status: "done"; sourceLang: string; text: string }
+    | { status: "done"; sourceLang: string | null; text: string }
     | { status: "empty" }
     | { status: "error"; unavailable: boolean };
   let translation = $state<TranslationState | null>(null);
@@ -489,7 +489,7 @@
             {#if translation.status === "loading"}
               <span class="text-muted-foreground">翻訳中…</span>
             {:else if translation.status === "done"}
-              <div class="mb-0.5 text-xs text-muted-foreground">{translation.sourceLang} から翻訳</div>
+              <div class="mb-0.5 text-xs text-muted-foreground">{translation.sourceLang ? `${translation.sourceLang} から翻訳` : "翻訳"}</div>
               <div class="whitespace-pre-wrap break-words leading-[1.42] [-webkit-user-select:text] select-text">{translation.text}</div>
             {:else if translation.status === "empty"}
               <span class="text-muted-foreground">翻訳結果がありません</span>

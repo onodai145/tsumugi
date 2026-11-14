@@ -237,7 +237,7 @@ export const commands = {
 	 *  サーバーで翻訳が未設定なら `Error::Api`（message に `UNAVAILABLE` を含む）。
 	 */
 	translateNote: (accountId: string, noteId: string) => typedError<{
-	sourceLang: string,
+	sourceLang: string | null,
 	text: string,
 } | null, Error>(__TAURI_INVOKE("translate_note", { accountId, noteId })),
 	/**  アンケートに投票する（choice は 0-based index）。 */
@@ -1261,9 +1261,12 @@ export type TqlEditMode =
 /**  where 述語のみ(簡単モードのfilter input) */
 "predicate";
 
-/**  `notes/translate` の翻訳結果（Issue #440）。`source_lang` は検出された翻訳元言語コード。 */
+/**
+ *  翻訳結果（Issue #440、#603）。`source_lang` は検出された翻訳元言語コード。ローカル翻訳（PLaMo 3 Translate）は
+ *  翻訳元言語を内部で判別するが、結果を返さないので `None`。
+ */
 export type Translation = {
-	sourceLang: string,
+	sourceLang: string | null,
 	text: string,
 };
 
@@ -1434,6 +1437,11 @@ export type UiPrefs = {
 	 *  そのまま渡す。空文字や空白のみの値は翻訳時に `ja` として扱う（`commands::note::effective_translate_lang`）。
 	 */
 	translateTargetLang?: string,
+	/**
+	 *  ノート翻訳のエンジン（Issue #603）。`"server"`（Misskey サーバーの翻訳、既定）か `"local"`（端末内の
+	 *  PLaMo 3 Translate）。未知の値は翻訳時に `"server"` として扱う（`commands::note::effective_translate_engine`）。
+	 */
+	translateEngine?: string,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */

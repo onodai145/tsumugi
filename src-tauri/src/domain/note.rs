@@ -162,11 +162,12 @@ pub struct PollChoice {
     pub is_voted: bool,
 }
 
-/// `notes/translate` の翻訳結果（Issue #440）。`source_lang` は検出された翻訳元言語コード。
+/// 翻訳結果（Issue #440、#603）。`source_lang` は検出された翻訳元言語コード。ローカル翻訳（PLaMo 3 Translate）は
+/// 翻訳元言語を内部で判別するが、結果を返さないので `None`。
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Translation {
-    pub source_lang: String,
+    pub source_lang: Option<String>,
     pub text: String,
 }
 

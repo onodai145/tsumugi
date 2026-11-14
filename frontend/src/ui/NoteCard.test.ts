@@ -1019,6 +1019,18 @@ describe("ノート翻訳", () => {
     await waitFor(() => expect(translateSpy).toHaveBeenCalledWith("acc1", "n-target"));
   });
 
+  it("翻訳元言語が分からない(null)ときは、言語を出さず「翻訳」とだけ表示する", async () => {
+    setup(true, async () => ({ sourceLang: null, text: "Hello" }));
+    const { getByLabelText, findByText, getByTestId } = render(NoteCard, {
+      props: { note: makeNote({ text: "こんにちは" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("Hello"));
+    expect(getByTestId("note-translation").textContent).not.toContain("null");
+    expect(getByTestId("note-translation").textContent).not.toContain("から翻訳");
+  });
+
   it("同じidの新しいノートオブジェクトに差し替わっても(リアクション更新など)、表示中の翻訳は消えない", async () => {
     setup(true);
     const { getByLabelText, findByText, getByTestId, rerender } = render(NoteCard, {

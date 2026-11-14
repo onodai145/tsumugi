@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(
             t,
             Some(crate::domain::Translation {
-                source_lang: "EN".into(),
+                source_lang: Some("EN".into()),
                 text: "こんにちは".into()
             })
         );
