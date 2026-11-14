@@ -230,7 +230,18 @@ export const commands = {
 	favoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("favorite_note", { accountId, noteId })),
 	/**  お気に入り解除。 */
 	unfavoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unfavorite_note", { accountId, noteId })),
+	/**
+	 *  NoteMenu の「翻訳」項目を出すか（Issue #440、#603）。サーバー翻訳のときは接続先サーバーで翻訳が使えるとき、
+	 *  ローカル翻訳のときはこのビルド・プラットフォームが対応しているときに true（詳細は `get_translator_available_core`）。
+	 */
 	getTranslatorAvailable: (accountId: string) => typedError<boolean, Error>(__TAURI_INVOKE("get_translator_available", { accountId })),
+	/**
+	 *  ノートを `UiPrefs.translate_target_lang` へ翻訳する（Issue #440、#603）。結果なしは `None`。
+	 *  翻訳エンジン（`UiPrefs.translate_engine`）が server なら Misskey サーバーの `notes/translate`（`text` は使わない。
+	 *  未設定のサーバーは `Error::Api` の `UNAVAILABLE`）、local なら `text` を端末内のモデルで翻訳する
+	 *  （失敗は `Error::Invalid` の `LOCAL_MODEL_NOT_READY` / `LOCAL_TEXT_TOO_LONG` / `LOCAL_LANG_UNSUPPORTED` /
+	 *  `LOCAL_UNSUPPORTED`）。詳細は `translate_note_core`。
+	 */
 	translateNote: (accountId: string, noteId: string, text: string) => typedError<{
 	sourceLang: string | null,
 	text: string,

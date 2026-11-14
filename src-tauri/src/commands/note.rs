@@ -216,6 +216,8 @@ pub(crate) async fn get_translator_available_core(state: &AppState, account_id: 
     }
 }
 
+/// NoteMenu の「翻訳」項目を出すか（Issue #440、#603）。サーバー翻訳のときは接続先サーバーで翻訳が使えるとき、
+/// ローカル翻訳のときはこのビルド・プラットフォームが対応しているときに true（詳細は `get_translator_available_core`）。
 #[tauri::command]
 #[specta::specta]
 pub async fn get_translator_available(
@@ -256,6 +258,11 @@ pub(crate) async fn translate_note_core(
     }
 }
 
+/// ノートを `UiPrefs.translate_target_lang` へ翻訳する（Issue #440、#603）。結果なしは `None`。
+/// 翻訳エンジン（`UiPrefs.translate_engine`）が server なら Misskey サーバーの `notes/translate`（`text` は使わない。
+/// 未設定のサーバーは `Error::Api` の `UNAVAILABLE`）、local なら `text` を端末内のモデルで翻訳する
+/// （失敗は `Error::Invalid` の `LOCAL_MODEL_NOT_READY` / `LOCAL_TEXT_TOO_LONG` / `LOCAL_LANG_UNSUPPORTED` /
+/// `LOCAL_UNSUPPORTED`）。詳細は `translate_note_core`。
 #[tauri::command]
 #[specta::specta]
 pub async fn translate_note(
