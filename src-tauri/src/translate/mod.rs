@@ -3,14 +3,17 @@
 
 use crate::error::Error;
 
+pub mod download;
 pub mod engine;
 pub mod lang;
+pub mod local_models;
 #[cfg(all(feature = "local-translate", desktop))]
 pub mod llama;
 pub mod manager;
 pub mod model_store;
 pub mod prompt;
 
+pub use local_models::LocalModels;
 pub use manager::LocalTranslate;
 
 /// アイドルがこれだけ続いたらモデルを解放する（初期値。Android は段階3で短くする）。

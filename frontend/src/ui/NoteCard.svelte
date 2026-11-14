@@ -324,7 +324,7 @@
   }
   const TRANSLATE_ERROR_TEXT: Record<TranslateErrorKind, string> = {
     unavailable: "このサーバーは翻訳に対応していません",
-    modelNotReady: "PLaMo のモデルが未取得か、読み込めません",
+    modelNotReady: "PLaMo のモデルが未取得か、読み込めません。設定の「外部連携」の「翻訳エンジン」からモデルをダウンロードしてください",
     tooLong: "ノートが長すぎるため翻訳できません",
     langUnsupported: "翻訳先の言語に PLaMo は対応していません",
     localUnsupported: "この環境では PLaMo による翻訳は使えません",

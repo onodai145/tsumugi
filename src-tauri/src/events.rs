@@ -103,3 +103,10 @@ pub struct ScheduledPostFailed {
     pub id: String,
     pub message: String,
 }
+
+/// ローカル翻訳のモデルの状態が変わった（ダウンロードの進捗・検証・完了・失敗）。約 250ms に間引く（Issue #603）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalModelStatusChanged {
+    pub status: crate::translate::model_store::LocalModelStatus,
+}

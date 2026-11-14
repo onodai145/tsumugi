@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { app } from "../../lib/store.svelte";
-import { commands } from "../../lib/ipc";
+import { commands, events } from "../../lib/ipc";
+import type { LocalModelInfo } from "../../lib/ipc";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -147,5 +148,105 @@ describe("ExternalIntegrationSection 外部サービスのURL", () => {
 
     await vi.waitFor(() => expect(getByText(/URLプレビューの取得先/)).toBeTruthy());
     expect(trust).not.toHaveBeenCalled();
+  });
+});
+
+describe("ExternalIntegrationSection 翻訳エンジン", () => {
+  const okv = <T,>(data: T) => ({ status: "ok" as const, data });
+  const modelInfo = (): LocalModelInfo => ({
+    status: { type: "notInstalled" },
+    sizeBytes: 573_126_848,
+    licenseVersion: "2026-11-09",
+    licenseUrl: "https://example.com/license-ja",
+    licenseAccepted: false,
+    partialBytes: 0,
+    supported: true,
+  });
+
+  function mockLocalModel(langSupported = true) {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(okv(modelInfo()));
+    vi.spyOn(commands, "isTranslateLangSupported").mockResolvedValue(okv(langSupported));
+    vi.spyOn(events.localModelStatusChanged, "listen").mockResolvedValue(() => {});
+  }
+
+  it("既定はサーバーで、PLaMo を選ぶまでモデルカードは出ない", () => {
+    app.ui = { ...app.ui, translateEngine: "server" };
+    const { getByTestId, queryByTestId } = render(ExternalIntegrationSection);
+    expect(getByTestId("translate-engine").textContent).toContain("サーバー");
+    expect(queryByTestId("local-model-card")).toBeNull();
+  });
+
+  it("PLaMo を選ぶと(保存前でも)モデルカードが出る", async () => {
+    mockLocalModel();
+    app.ui = { ...app.ui, translateEngine: "server" };
+    const { getByTestId, findByTestId } = render(ExternalIntegrationSection);
+    getByTestId("translate-engine").click();
+    await vi.waitFor(() => expect(getByTestId("translate-engine-option-local")).toBeTruthy());
+    getByTestId("translate-engine-option-local").click();
+    expect(await findByTestId("local-model-card")).toBeTruthy();
+  });
+
+  it("PLaMo を選んで保存すると translateEngine=local になり、他の項目は保持される", async () => {
+    mockLocalModel();
+    app.ui = { ...app.ui, translateEngine: "server", searchEngineUrl: "https://example.com/?q={query}", translateTargetLang: "en" };
+    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const { getByTestId, getByText } = render(ExternalIntegrationSection);
+    getByTestId("translate-engine").click();
+    await vi.waitFor(() => expect(getByTestId("translate-engine-option-local")).toBeTruthy());
+    getByTestId("translate-engine-option-local").click();
+    getByText("保存").click();
+
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    const saved = spy.mock.calls[0][0];
+    expect(saved.translateEngine).toBe("local");
+    expect(saved.searchEngineUrl).toBe("https://example.com/?q={query}");
+    expect(saved.translateTargetLang).toBe("en");
+  });
+
+  it("エンジンを変えずに保存すると、保存値を local/server に整えて書く(手編集の値も壊さない)", async () => {
+    mockLocalModel();
+    app.ui = { ...app.ui, translateEngine: " Local " };
+    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const { findByTestId, getByText } = render(ExternalIntegrationSection);
+    expect(await findByTestId("local-model-card")).toBeTruthy();
+    getByText("保存").click();
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(spy.mock.calls[0][0].translateEngine).toBe("local");
+  });
+
+  it("エンジンが PLaMo で翻訳先が非対応の言語なら、注記を出す", async () => {
+    mockLocalModel(false);
+    app.ui = { ...app.ui, translateEngine: "local", translateTargetLang: "pt" };
+    const { findByTestId } = render(ExternalIntegrationSection);
+    expect((await findByTestId("translate-lang-unsupported")).textContent).toContain("この言語には対応していません");
+  });
+
+  it("エンジンがサーバーなら、翻訳先が非対応の言語でも注記は出ない", async () => {
+    vi.spyOn(commands, "isTranslateLangSupported").mockResolvedValue(okv(false));
+    app.ui = { ...app.ui, translateEngine: "server", translateTargetLang: "pt" };
+    const { getByTestId, queryByTestId } = render(ExternalIntegrationSection);
+    await vi.waitFor(() => expect(commands.isTranslateLangSupported).toHaveBeenCalled());
+    expect(getByTestId("translate-engine")).toBeTruthy();
+    expect(queryByTestId("translate-lang-unsupported")).toBeNull();
+  });
+
+  it("対応言語なら、PLaMo でも注記は出ない", async () => {
+    mockLocalModel(true);
+    app.ui = { ...app.ui, translateEngine: "local", translateTargetLang: "ja" };
+    const { findByTestId, queryByTestId } = render(ExternalIntegrationSection);
+    await findByTestId("local-model-card");
+    await vi.waitFor(() => expect(commands.isTranslateLangSupported).toHaveBeenCalledWith("ja"));
+    expect(queryByTestId("translate-lang-unsupported")).toBeNull();
+  });
+
+  it("翻訳先の説明が、エンジンに合わせて変わる", async () => {
+    mockLocalModel();
+    app.ui = { ...app.ui, translateEngine: "local" };
+    const local = render(ExternalIntegrationSection);
+    expect(local.container.textContent).toContain("端末内で行われ");
+    local.unmount();
+    app.ui = { ...app.ui, translateEngine: "server" };
+    const server = render(ExternalIntegrationSection);
+    expect(server.container.textContent).toContain("接続先サーバーの翻訳機能");
   });
 });

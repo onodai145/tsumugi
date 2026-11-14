@@ -246,6 +246,19 @@ export const commands = {
 	sourceLang: string | null,
 	text: string,
 } | null, Error>(__TAURI_INVOKE("translate_note", { accountId, noteId, text })),
+	/**  モデルの状態と、ダウンロードの前提（サイズ・ライセンス・対応可否）を返す。 */
+	getLocalModelStatus: () => typedError<LocalModelInfo, Error>(__TAURI_INVOKE("get_local_model_status")),
+	/**
+	 *  モデルのダウンロードを始める。`accepted_license_version` が現行のライセンス版と一致しなければ拒否する。
+	 *  進捗は Event `LocalModelStatusChanged`。設定画面を閉じても続く。
+	 */
+	startLocalModelDownload: (acceptedLicenseVersion: string) => typedError<null, Error>(__TAURI_INVOKE("start_local_model_download", { acceptedLicenseVersion })),
+	/**  実行中のダウンロードを止める。途中までのファイルは残り、次回は続きから再開する。 */
+	cancelLocalModelDownload: () => typedError<null, Error>(__TAURI_INVOKE("cancel_local_model_download")),
+	/**  取得済みのモデルと、途中までのファイルを削除する。ダウンロード中は拒否する。 */
+	deleteLocalModel: () => typedError<null, Error>(__TAURI_INVOKE("delete_local_model")),
+	/**  翻訳先の言語コードが PLaMo の対応言語か（`pt` などは非対応）。 */
+	isTranslateLangSupported: (lang: string) => typedError<boolean, Error>(__TAURI_INVOKE("is_translate_lang_supported", { lang })),
 	/**  アンケートに投票する（choice は 0-based index）。 */
 	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
@@ -493,6 +506,7 @@ export const events = {
 	columnNoteUpdated: makeEvent<ColumnNoteUpdated>("column-note-updated"),
 	columnNotification: makeEvent<ColumnNotification>("column-notification"),
 	columnNotificationGapFill: makeEvent<ColumnNotificationGapFill>("column-notification-gap-fill"),
+	localModelStatusChanged: makeEvent<LocalModelStatusChanged>("local-model-status-changed"),
 	scheduledPostFailed: makeEvent<ScheduledPostFailed>("scheduled-post-failed"),
 	scheduledPostPosted: makeEvent<ScheduledPostPosted>("scheduled-post-posted"),
 };
@@ -867,6 +881,29 @@ export type InstanceInfo = {
 export type LatestRelease = {
 	version: string,
 	url: string,
+};
+
+export type LocalModelInfo = {
+	status: LocalModelStatus,
+	sizeBytes: number,
+	/**  現行のライセンス版（`start_local_model_download` の引数に渡す）。 */
+	licenseVersion: string,
+	/**  ライセンス全文（日本語）の写しの URL。 */
+	licenseUrl: string,
+	/**  現行の版に同意済みか。 */
+	licenseAccepted: boolean,
+	/**  途中まで取得済みで、再開できるファイルのバイト数（無ければ 0）。 */
+	partialBytes: number,
+	/**  このビルド・プラットフォームがローカル翻訳に対応しているか。 */
+	supported: boolean,
+};
+
+/**  モデルの状態。ダウンロード中・検証中・失敗は `LocalModels` が持ち、ディスクから分かるのは `Ready` と `NotInstalled`。 */
+export type LocalModelStatus = { type: "notInstalled" } | { type: "downloading"; downloaded: number; total: number } | { type: "verifying" } | { type: "ready" } | { type: "failed"; reason: string };
+
+/**  ローカル翻訳のモデルの状態が変わった（ダウンロードの進捗・検証・完了・失敗）。約 250ms に間引く（Issue #603）。 */
+export type LocalModelStatusChanged = {
+	status: LocalModelStatus,
 };
 
 /**  クライアント側(ローカル)予約の状態(Issue #60 B)。 */

@@ -74,6 +74,10 @@ pub(crate) struct SettingsData {
     /// (ファイルでMCPの公開が勝手にオンにならないようにするため)。
     #[serde(default)]
     pub(crate) mcp: crate::mcp::settings::McpSettings,
+    /// 同意した PLaMo Community License の版（Issue #603）。未同意は `None`。**エクスポートには含めない**。
+    /// インポートでは現在の値を維持する（同意は端末ごとの行為で、ファイルで同意済みにならないようにする）。
+    #[serde(default)]
+    pub(crate) local_model_license_version: Option<String>,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -324,6 +328,16 @@ impl SettingsStore {
         f(&mut guard.mcp);
         self.save(&guard)?;
         Ok(guard.mcp.clone())
+    }
+
+    pub fn local_model_license_version(&self) -> Option<String> {
+        self.data.lock().unwrap().local_model_license_version.clone()
+    }
+
+    pub fn set_local_model_license_version(&self, version: &str) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        guard.local_model_license_version = Some(version.to_string());
+        self.save(&guard)
     }
 
     pub fn load_notify(&self) -> Result<NotifyConfig> {
@@ -727,6 +741,7 @@ pub fn migrate_from_legacy_sqlite(
             server_mute_snapshots: HashMap::new(),
             summaly_proxy_imported: false,
             mcp: Default::default(),
+            local_model_license_version: None,
         }),
     };
     store.save(&store.data.lock().unwrap())?;
@@ -741,6 +756,20 @@ mod tests {
     fn old_settings_file_without_mcp_loads_with_mcp_off() {
         let d: SettingsData = serde_json::from_str("{}").unwrap();
         assert_eq!(d.mcp, crate::mcp::settings::McpSettings::default());
+    }
+
+    #[test]
+    fn old_settings_file_without_local_model_license_loads_as_not_accepted() {
+        let d: SettingsData = serde_json::from_str("{}").unwrap();
+        assert_eq!(d.local_model_license_version, None);
+    }
+
+    #[test]
+    fn set_local_model_license_version_is_kept() {
+        let s = SettingsStore::new_in_memory();
+        assert_eq!(s.local_model_license_version(), None);
+        s.set_local_model_license_version("2026-11-09").unwrap();
+        assert_eq!(s.local_model_license_version().as_deref(), Some("2026-11-09"));
     }
 
     #[test]

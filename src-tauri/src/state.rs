@@ -168,6 +168,8 @@ pub struct AppState {
     /// ローカル翻訳（PLaMo 3 Translate、Issue #603）。モデルの置き場は起動時に `with_local_translate` で渡す。
     /// `AppState::new*` のシグネチャを変えずに済むよう、既定は「非対応」。
     pub local_translate: std::sync::Arc<crate::translate::LocalTranslate>,
+    /// ローカル翻訳のモデルの取得・状態・削除（Issue #603）。既定は非対応（`unconfigured`）で、起動時に `with_local_models` で差し替える。
+    pub local_models: std::sync::Arc<crate::translate::LocalModels>,
     /// MCPサーバーの実行状態と、実行中のサーバーが読むトークン(Issue #557)。デスクトップのみ。
     #[cfg(desktop)]
     pub mcp: crate::mcp::server::McpRuntime,
@@ -208,6 +210,12 @@ impl AppState {
     /// ローカル翻訳のマネージャーを差し替える(起動時にモデルの置き場つきのものへ)。
     pub fn with_local_translate(mut self, local_translate: std::sync::Arc<crate::translate::LocalTranslate>) -> Self {
         self.local_translate = local_translate;
+        self
+    }
+
+    /// ローカル翻訳のモデル管理を差し替える(起動時にモデルの置き場つきのものへ)。
+    pub fn with_local_models(mut self, local_models: std::sync::Arc<crate::translate::LocalModels>) -> Self {
+        self.local_models = local_models;
         self
     }
 
@@ -260,6 +268,7 @@ impl AppState {
             scheduled_posts: crate::store::ScheduledPostStore::new_in_memory(),
             scheduler_wakeup: std::sync::Arc::new(tokio::sync::Notify::new()),
             local_translate: std::sync::Arc::new(crate::translate::LocalTranslate::unconfigured()),
+            local_models: std::sync::Arc::new(crate::translate::LocalModels::unconfigured()),
             #[cfg(desktop)]
             mcp: Default::default(),
             cache,

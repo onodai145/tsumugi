@@ -317,6 +317,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         server_mute_snapshots: current.server_mute_snapshots.clone(),
         summaly_proxy_imported,
         mcp,
+        local_model_license_version: current.local_model_license_version.clone(),
     };
     Ok(ImportPlan { data, preview, accounts_needing_login })
 }
@@ -493,6 +494,27 @@ mod tests {
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
 
         assert_eq!(plan.data.mcp, current.mcp, "ファイルでMCPの公開が変わってはいけない");
+    }
+
+    #[test]
+    fn import_keeps_the_current_local_model_license_version() {
+        let mut current = current_with_local_account();
+        current.local_model_license_version = Some("2026-11-09".into());
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert_eq!(plan.data.local_model_license_version.as_deref(), Some("2026-11-09"));
+
+        // ファイル側に同意版の項目はない（エクスポートに含めない）ので、取り込みで同意済みにはならない。
+        let current = current_with_local_account();
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert_eq!(plan.data.local_model_license_version, None, "インポートで同意済みになってはいけない");
+    }
+
+    #[test]
+    fn export_does_not_include_the_local_model_license_version() {
+        let mut d = settings_data();
+        d.local_model_license_version = Some("2026-11-09".into());
+        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-14T00:00:00Z")).unwrap().to_lowercase();
+        assert!(!json.contains("local_model") && !json.contains("localmodel"), "同意はエクスポートに含めない: {json}");
     }
 
     #[test]

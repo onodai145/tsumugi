@@ -100,6 +100,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::note::unfavorite_note,
             commands::note::get_translator_available,
             commands::note::translate_note,
+            commands::local_model::get_local_model_status,
+            commands::local_model::start_local_model_download,
+            commands::local_model::cancel_local_model_download,
+            commands::local_model::delete_local_model,
+            commands::local_model::is_translate_lang_supported,
             commands::note::vote_poll,
             commands::note::list_custom_emojis,
             commands::note::upload_file,
@@ -176,6 +181,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ColumnNotificationGapFill,
             events::ScheduledPostPosted,
             events::ScheduledPostFailed,
+            events::LocalModelStatusChanged,
         ])
 }
 
@@ -409,9 +415,13 @@ pub fn run() {
             };
             let cache = NoteCacheStore::new_from_arc(cache_backend);
             // ローカル翻訳(Issue #603)。モデルは app_data_dir/models/ に置く。対応していないビルドでは「非対応」を返す。
-            let local_translate = std::sync::Arc::new(translate::LocalTranslate::with_models_dir(
-                app.path().app_data_dir().expect("no app data dir").join("models"),
-            ));
+            let models_dir = app.path().app_data_dir().expect("no app data dir").join("models");
+            let local_translate = std::sync::Arc::new(translate::LocalTranslate::with_models_dir(models_dir.clone()));
+            // モデルのダウンロードは固定のURLだけに接続し、私的アドレスは拒否する（許可リストは空）。
+            let model_http = net_guard::build_fetch_client(state::USER_AGENT, net_guard::FetchAllowlist::default())
+                .expect("failed to build the model download client");
+            let local_models =
+                std::sync::Arc::new(translate::LocalModels::new(models_dir, model_http, local_translate.clone()));
             translate::manager::spawn_idle_sweeper(
                 local_translate.clone(),
                 translate::IDLE_UNLOAD,
@@ -420,7 +430,8 @@ pub fn run() {
             app.manage(
                 AppState::new(Box::new(KeyringStore), settings, drafts, cache, cache_dir.clone())
                     .with_scheduled_posts(scheduled_posts)
-                    .with_local_translate(local_translate),
+                    .with_local_translate(local_translate)
+                    .with_local_models(local_models),
             );
             scheduler::spawn(app.handle().clone());
 
