@@ -298,11 +298,37 @@
 
   let cwOpen = $state(false);
 
+  type TranslateErrorKind =
+    | "unavailable"
+    | "modelNotReady"
+    | "tooLong"
+    | "langUnsupported"
+    | "localUnsupported"
+    | "other";
   type TranslationState =
     | { status: "loading" }
-    | { status: "done"; sourceLang: string | null; text: string }
+    | { status: "done"; sourceLang: string | null; text: string; local: boolean }
     | { status: "empty" }
-    | { status: "error"; unavailable: boolean };
+    | { status: "error"; kind: TranslateErrorKind };
+
+  // Rust は専用のエラー型を持たず、Error::Invalid / Error::Api の文言で区別している(#440、#603)。
+  function translateErrorKind(e: unknown): TranslateErrorKind {
+    const m = String(e);
+    if (m.includes("LOCAL_MODEL_NOT_READY")) return "modelNotReady";
+    if (m.includes("LOCAL_TEXT_TOO_LONG")) return "tooLong";
+    if (m.includes("LOCAL_LANG_UNSUPPORTED")) return "langUnsupported";
+    if (m.includes("LOCAL_UNSUPPORTED")) return "localUnsupported";
+    if (m.includes("UNAVAILABLE")) return "unavailable";
+    return "other";
+  }
+  const TRANSLATE_ERROR_TEXT: Record<TranslateErrorKind, string> = {
+    unavailable: "このサーバーは翻訳に対応していません",
+    modelNotReady: "PLaMo のモデルが未取得です。設定でダウンロードしてください",
+    tooLong: "ノートが長すぎるため翻訳できません",
+    langUnsupported: "翻訳先の言語に PLaMo は対応していません",
+    localUnsupported: "この環境では PLaMo による翻訳は使えません",
+    other: "翻訳に失敗しました",
+  };
   let translation = $state<TranslationState | null>(null);
   // 翻訳の読み込み中にノートが入れ替わっても古い結果を出さないための世代番号。
   let translateSeq = 0;
@@ -319,14 +345,18 @@
   async function startTranslate() {
     if (!accountId) return;
     const seq = ++translateSeq;
+    // 翻訳中に設定が切り替わっても、この翻訳を始めたときのエンジンで表示する。
+    const local = app.ui.translateEngine === "local";
     translation = { status: "loading" };
     try {
       const r = await app.translateNote(accountId, inner.id, inner.text ?? "");
       if (seq !== translateSeq) return;
-      translation = r ? { status: "done", sourceLang: r.sourceLang ?? null, text: r.text } : { status: "empty" };
+      translation = r
+        ? { status: "done", sourceLang: r.sourceLang ?? null, text: r.text, local }
+        : { status: "empty" };
     } catch (e) {
       if (seq !== translateSeq) return;
-      translation = { status: "error", unavailable: String(e).includes("UNAVAILABLE") };
+      translation = { status: "error", kind: translateErrorKind(e) };
     }
   }
   const VIS_ICON = { public: Globe, home: House, followers: Lock, specified: Mail } as const;
@@ -489,12 +519,12 @@
             {#if translation.status === "loading"}
               <span class="text-muted-foreground">翻訳中…</span>
             {:else if translation.status === "done"}
-              <div class="mb-0.5 text-xs text-muted-foreground">{translation.sourceLang ? `${translation.sourceLang} から翻訳` : "翻訳"}</div>
+              <div class="mb-0.5 text-xs text-muted-foreground">{translation.local ? "PLaMo で翻訳" : translation.sourceLang ? `${translation.sourceLang} から翻訳` : "翻訳"}</div>
               <div class="whitespace-pre-wrap break-words leading-[1.42] [-webkit-user-select:text] select-text">{translation.text}</div>
             {:else if translation.status === "empty"}
               <span class="text-muted-foreground">翻訳結果がありません</span>
             {:else}
-              <span class="text-destructive">{translation.unavailable ? "このサーバーは翻訳に対応していません" : "翻訳に失敗しました"}</span>
+              <span class="text-destructive">{TRANSLATE_ERROR_TEXT[translation.kind]}</span>
             {/if}
             {#if translation.status !== "loading"}
               <div class="mt-1">

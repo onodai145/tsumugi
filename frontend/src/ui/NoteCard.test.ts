@@ -910,6 +910,7 @@ describe("ノート翻訳", () => {
   let translateSpy: ReturnType<typeof vi.spyOn> | null = null;
   afterEach(() => {
     app.accounts.length = 0;
+    app.ui = { ...app.ui, translateEngine: "server" };
     availSpy?.mockRestore();
     translateSpy?.mockRestore();
     availSpy = null;
@@ -1029,6 +1030,57 @@ describe("ノート翻訳", () => {
     await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("Hello"));
     expect(getByTestId("note-translation").textContent).not.toContain("null");
     expect(getByTestId("note-translation").textContent).not.toContain("から翻訳");
+  });
+
+  it("ローカル翻訳では、メニューも結果欄も「PLaMo で翻訳」と表示する", async () => {
+    app.ui = { ...app.ui, translateEngine: "local" };
+    setup(true, async () => ({ sourceLang: null, text: "Hello" }));
+    const { getByLabelText, findByText, getByTestId, queryByText } = render(NoteCard, {
+      props: { note: makeNote({ text: "こんにちは" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await findByText("PLaMo で翻訳");
+    // サーバー翻訳の「翻訳」項目は出ない。
+    expect(queryByText("翻訳")).toBeNull();
+    await (await findByText("PLaMo で翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("Hello"));
+    expect(getByTestId("note-translation").textContent).toContain("PLaMo で翻訳");
+  });
+
+  it("サーバー翻訳では、「PLaMo で翻訳」は出ず、元の「翻訳」と「{言語} から翻訳」になる", async () => {
+    app.ui = { ...app.ui, translateEngine: "server" };
+    setup(true);
+    const { getByLabelText, findByText, getByTestId, queryByText } = render(NoteCard, {
+      props: { note: makeNote({ text: "hello" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await findByText("翻訳");
+    expect(queryByText("PLaMo で翻訳")).toBeNull();
+    await (await findByText("翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("EN から翻訳"));
+  });
+
+  it("ローカル翻訳のエラーを種類ごとの文言で表示する", async () => {
+    app.ui = { ...app.ui, translateEngine: "local" };
+    const cases: [string, string][] = [
+      ["LOCAL_MODEL_NOT_READY", "PLaMo のモデルが未取得です。設定でダウンロードしてください"],
+      ["LOCAL_TEXT_TOO_LONG", "ノートが長すぎるため翻訳できません"],
+      ["LOCAL_LANG_UNSUPPORTED", "翻訳先の言語に PLaMo は対応していません"],
+      ["LOCAL_UNSUPPORTED", "この環境では PLaMo による翻訳は使えません"],
+    ];
+    setup(true, async () => {
+      throw new Error("x");
+    });
+    for (const [code, text] of cases) {
+      translateSpy!.mockImplementation((async () => {
+        throw new Error(code);
+      }) as never);
+      const r = render(NoteCard, { props: { note: makeNote({ text: "こんにちは" }), accountId: "acc1" } });
+      await r.getByLabelText("その他").click();
+      await (await r.findByText("PLaMo で翻訳")).click();
+      await waitFor(() => expect(r.getByTestId("note-translation").textContent).toContain(text));
+      cleanup();
+    }
   });
 
   it("同じidの新しいノートオブジェクトに差し替わっても(リアクション更新など)、表示中の翻訳は消えない", async () => {
