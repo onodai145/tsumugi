@@ -321,9 +321,9 @@
     const seq = ++translateSeq;
     translation = { status: "loading" };
     try {
-      const r = await app.translateNote(accountId, inner.id);
+      const r = await app.translateNote(accountId, inner.id, inner.text ?? "");
       if (seq !== translateSeq) return;
-      translation = r ? { status: "done", sourceLang: r.sourceLang, text: r.text } : { status: "empty" };
+      translation = r ? { status: "done", sourceLang: r.sourceLang ?? null, text: r.text } : { status: "empty" };
     } catch (e) {
       if (seq !== translateSeq) return;
       translation = { status: "error", unavailable: String(e).includes("UNAVAILABLE") };

@@ -230,16 +230,11 @@ export const commands = {
 	favoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("favorite_note", { accountId, noteId })),
 	/**  お気に入り解除。 */
 	unfavoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unfavorite_note", { accountId, noteId })),
-	/**  NoteMenu の「翻訳」項目を出すか（Issue #440）。接続先サーバーで翻訳が使えるときだけ true。 */
 	getTranslatorAvailable: (accountId: string) => typedError<boolean, Error>(__TAURI_INVOKE("get_translator_available", { accountId })),
-	/**
-	 *  ノート本文を `UiPrefs.translate_target_lang` へ翻訳する（Issue #440）。結果なしは `None`。
-	 *  サーバーで翻訳が未設定なら `Error::Api`（message に `UNAVAILABLE` を含む）。
-	 */
-	translateNote: (accountId: string, noteId: string) => typedError<{
+	translateNote: (accountId: string, noteId: string, text: string) => typedError<{
 	sourceLang: string | null,
 	text: string,
-} | null, Error>(__TAURI_INVOKE("translate_note", { accountId, noteId })),
+} | null, Error>(__TAURI_INVOKE("translate_note", { accountId, noteId, text })),
 	/**  アンケートに投票する（choice は 0-based index）。 */
 	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */

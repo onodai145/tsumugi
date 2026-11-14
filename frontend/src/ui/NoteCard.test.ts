@@ -961,7 +961,7 @@ describe("ノート翻訳", () => {
 
     await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("こんにちは"));
     expect(getByTestId("note-translation").textContent).toContain("EN");
-    expect(translateSpy).toHaveBeenCalledWith("acc1", "n-tr-1");
+    expect(translateSpy).toHaveBeenCalledWith("acc1", "n-tr-1", "hello");
 
     await getByText("翻訳を閉じる").click();
     expect(queryByTestId("note-translation")).toBeNull();
@@ -1016,7 +1016,7 @@ describe("ノート翻訳", () => {
     const { getByLabelText, findByText } = render(NoteCard, { props: { note: rn, accountId: "acc1" } });
     await getByLabelText("その他").click();
     await (await findByText("翻訳")).click();
-    await waitFor(() => expect(translateSpy).toHaveBeenCalledWith("acc1", "n-target"));
+    await waitFor(() => expect(translateSpy).toHaveBeenCalledWith("acc1", "n-target", "original"));
   });
 
   it("翻訳元言語が分からない(null)ときは、言語を出さず「翻訳」とだけ表示する", async () => {
