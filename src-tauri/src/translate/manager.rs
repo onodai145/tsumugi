@@ -30,6 +30,25 @@ impl LocalTranslate {
         Self::new(Arc::new(|| Err(invalid(ERR_UNSUPPORTED))))
     }
 
+    /// モデルの置き場（`app_data_dir/models`）を指定して作る。対応していないビルド（`local-translate` 無効、
+    /// モバイル）では `unconfigured()` と同じ。
+    pub fn with_models_dir(models_dir: std::path::PathBuf) -> Self {
+        #[cfg(all(feature = "local-translate", desktop))]
+        {
+            Self::new(Arc::new(move || {
+                let path = super::model_store::model_path(&models_dir);
+                super::model_store::check_ready(&path)?;
+                let translator = super::llama::LlamaTranslator::load(&path)?;
+                Ok(Arc::new(translator) as Arc<dyn LocalTranslator>)
+            }))
+        }
+        #[cfg(not(all(feature = "local-translate", desktop)))]
+        {
+            let _ = models_dir;
+            Self::unconfigured()
+        }
+    }
+
     pub async fn translate(&self, text: &str, plamo_lang: &str) -> Result<String> {
         // ロックを推論の終わりまで持つ: 翻訳要求を直列に処理し、ロード中の二重ロードも防ぐ。
         let mut guard = self.loaded.lock().await;
@@ -214,6 +233,14 @@ mod tests {
 
         lt.translate("b", "en").await.unwrap();
         assert_eq!(loads.load(Ordering::SeqCst), 2, "解放後の翻訳で再ロードされる");
+    }
+
+    #[tokio::test]
+    async fn with_models_dir_reports_not_ready_when_the_model_is_missing() {
+        let dir = std::env::temp_dir().join(format!("tsumugi_test_{}", uuid::Uuid::new_v4()));
+        let lt = LocalTranslate::with_models_dir(dir);
+        let expected = if super::super::is_supported() { "LOCAL_MODEL_NOT_READY" } else { "LOCAL_UNSUPPORTED" };
+        assert_invalid(lt.translate("a", "en").await, expected);
     }
 
     #[tokio::test]
