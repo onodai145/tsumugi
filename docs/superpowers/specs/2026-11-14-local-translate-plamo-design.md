@@ -51,8 +51,9 @@ PFN の翻訳特化 LLM「PLaMo 3 Translate」（0.8B）を端末内で動かし
   - `local`: `text` を端末内のモデルで翻訳する。サーバーには何も送らない。
 - `get_translator_available(account_id)`: `local` のときは「このビルド・プラットフォームでローカル翻訳に対応しているか」を返す
   （モデル未取得でも true。押したときに案内を出すほうが分かりやすい）。
-- `Translation.source_lang` を `String` から `Option<String>` にする。PLaMo の生プロンプトは翻訳元言語を受け取らず、
-  自動判別もしないので、`local` では `None`。波及先は `domain/note.rs`、生成バインディング、`NoteCard.svelte` とそのテスト。
+- `Translation.source_lang` を `String` から `Option<String>` にする。PLaMo は翻訳元言語を内部で判別する
+  （`source_lang` を省略すると判別する。モデルカードより）が、判別結果は返さないので、`local` では `None`。
+  波及先は `domain/note.rs`、生成バインディング、`NoteCard.svelte` とそのテスト。
 
 ### 2. モデルの取得と保存（`translate/model_store.rs`）
 
@@ -114,8 +115,10 @@ PFN の翻訳特化 LLM「PLaMo 3 Translate」（0.8B）を端末内で動かし
   通常の文では一括トークン化と同じ結果になることを、実モデルのテストで確認する。
 - 停止: EOG、または出力に `<|plamo:` が現れたとき。最大生成トークン数は `n_ctx` から入力を引いた範囲。
 - ノート本文と訳文はログに出さない。llama.cpp 自体のログも抑止する。
-- 言語コード: 設定の言語コード（`ja` / `en` / `zh` / `ko` / `fr` / `de` / `es` / `pt` / `ru` など）を PLaMo のコードへ変換する表を持つ
-  （例: `zh` → `zh-hans`）。表はモデルカードの対応言語一覧と照合して確定する。非対応は `LOCAL_LANG_UNSUPPORTED`。
+- 言語コード: 設定の言語コード（`ja` / `en` / `zh` / `ko` / `fr` / `de` / `es` / `pt` / `ru` など）を PLaMo のコードへ変換する表を持つ。
+  PLaMo の対応は 53 言語（モデルカードの対応言語一覧で確認済み）。`zh` は `zh-hans`（`zh-tw` / `zh-hk` は `zh-hant`）へ、
+  地域付きコード（`en-us` など）は地域を除いて照合する。**既存のプリセットのうち `pt`（ポルトガル語）だけが PLaMo の対応言語に
+  含まれない**ので、`LOCAL_LANG_UNSUPPORTED` になる。非対応は同じく `LOCAL_LANG_UNSUPPORTED`。
 
 ### 5. エラー
 
@@ -151,7 +154,8 @@ PFN の翻訳特化 LLM「PLaMo 3 Translate」（0.8B）を端末内で動かし
 - `ui/settings/ExternalIntegrationSection.svelte`: 「翻訳エンジン」（サーバー / PLaMo（端末内））を追加する。既存の
   `Dropdown` と `setUiPrefs({ ...app.ui, ... })` の保存方式に合わせる。PLaMo を選ぶとモデルの状態カード
   （状態、サイズ、進捗バー、ダウンロード / キャンセル / 削除、"Built with PLaMo"）を出す。
-  モデル未取得でもエンジンの切り替え自体はできる。
+  モデル未取得でもエンジンの切り替え自体はできる。エンジンが PLaMo で、翻訳先が PLaMo 非対応の言語
+  （プリセットでは `pt`）のときは、「この言語には対応していません」と注記を出す。
 - `ui/NoteMenu.svelte`: 項目名をエンジン別にする（サーバー「翻訳」、ローカル「PLaMo で翻訳」）。表示条件は既存に加えて
   `get_translator_available` の結果。
 - `ui/NoteCard.svelte`: 結果欄の見出しをエンジン別にする（サーバー「{言語} から翻訳」、ローカル「PLaMo で翻訳」）。
@@ -263,7 +267,7 @@ Vitest:
 ## 実装時に確定する値
 
 - モデルの SHA-256 と HF のリビジョン: HF API の `lfs.oid` から取得して定数にする。
-- 言語コード変換表: モデルカードの対応言語一覧と照合して確定する。
+- 言語コード変換表: 53 言語の一覧はモデルカードで確認済み（plan に全コードを記載）。
 - アイドルのアンロード時間、`n_ctx`、入力上限: 初期値は上記のとおり。デスクトップと Android の実測で見直す。
 
 ## スコープ外
@@ -273,5 +277,5 @@ Vitest:
 - 翻訳結果をそのまま投稿・共有する機能（作る場合は5条(4)の周知を設計に含める。§3 参照）。
 - デスクトップの通信種別の判定、ダウンロード中の従量制への切り替え検知。
 - Android の CPU 最適化の実行時選択、`onTrimMemory` でのアンロード、フォアグラウンドサービスでのダウンロード。
-- 翻訳元言語の自動判別（PLaMo の生プロンプトが受け取らないため、`local` では表示しない）。
+- 翻訳元言語の表示（PLaMo は翻訳元言語を判別するが、結果を返さないため、`local` では表示しない）。
 - CW 文・投票選択肢の翻訳（#440 と同じ）。
