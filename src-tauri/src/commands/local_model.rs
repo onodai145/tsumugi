@@ -24,6 +24,9 @@ pub struct LocalModelInfo {
     pub license_url: String,
     /// 現行の版に同意済みか。
     pub license_accepted: bool,
+    /// 途中まで取得済みで、再開できるファイルのバイト数（無ければ 0）。
+    #[specta(type = specta_typescript::Number)]
+    pub partial_bytes: u64,
     /// このビルド・プラットフォームがローカル翻訳に対応しているか。
     pub supported: bool,
 }
@@ -35,6 +38,7 @@ pub(crate) fn info(s: &AppState) -> LocalModelInfo {
         license_version: LICENSE_VERSION.into(),
         license_url: LICENSE_URL.into(),
         license_accepted: s.settings.local_model_license_version().as_deref() == Some(LICENSE_VERSION),
+        partial_bytes: s.local_models.partial_bytes(),
         supported: is_supported(),
     }
 }
@@ -186,6 +190,7 @@ mod tests {
         assert_eq!(i.size_bytes, MODEL_SIZE_BYTES);
         assert_eq!(i.supported, is_supported());
         assert_eq!(i.status, LocalModelStatus::NotInstalled);
+        assert_eq!(i.partial_bytes, 0);
         s.settings.set_local_model_license_version("1999-01-01").unwrap();
         assert!(!info(&s).license_accepted, "古い版の同意は、現行の同意ではない");
         s.settings.set_local_model_license_version(LICENSE_VERSION).unwrap();

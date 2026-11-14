@@ -892,6 +892,8 @@ export type LocalModelInfo = {
 	licenseUrl: string,
 	/**  現行の版に同意済みか。 */
 	licenseAccepted: boolean,
+	/**  途中まで取得済みで、再開できるファイルのバイト数（無ければ 0）。 */
+	partialBytes: number,
 	/**  このビルド・プラットフォームがローカル翻訳に対応しているか。 */
 	supported: boolean,
 };

@@ -3,7 +3,9 @@
 
 use super::download::{download, DownloadError, ModelSpec, Phase};
 use super::manager::LocalTranslate;
-use super::model_store::{available_space, model_path, part_path, status_on_disk, LocalModelStatus};
+use super::model_store::{
+    available_space, model_path, part_files, part_path, partial_bytes, status_on_disk, LocalModelStatus,
+};
 use super::{invalid, ERR_UNSUPPORTED};
 use crate::error::{Error, Result};
 use std::path::PathBuf;
@@ -21,6 +23,8 @@ struct Inner {
     running: Option<Arc<AtomicBool>>,
     /// ダウンロード中・検証中・失敗の状態。`None` ならディスクの状態（Ready / NotInstalled）。
     transient: Option<LocalModelStatus>,
+    /// 削除中（アンロードの待ち〜ファイルの削除）。この間は、開始も 2 つ目の削除も拒否する。
+    deleting: bool,
 }
 
 pub struct LocalModels {
@@ -39,7 +43,7 @@ impl LocalModels {
             http: reqwest::Client::new(),
             translator: Arc::new(LocalTranslate::unconfigured()),
             spec: ModelSpec::official(),
-            inner: Mutex::new(Inner { running: None, transient: None }),
+            inner: Mutex::new(Inner { running: None, transient: None, deleting: false }),
         }
     }
 
@@ -48,11 +52,19 @@ impl LocalModels {
     }
 
     pub(crate) fn with_spec(models_dir: PathBuf, http: reqwest::Client, translator: Arc<LocalTranslate>, spec: ModelSpec) -> Self {
-        Self { models_dir: Some(models_dir), http, translator, spec, inner: Mutex::new(Inner { running: None, transient: None }) }
+        Self { models_dir: Some(models_dir), http, translator, spec, inner: Mutex::new(Inner { running: None, transient: None, deleting: false }) }
     }
 
     pub fn size_bytes(&self) -> u64 {
         self.spec.size
+    }
+
+    /// 再開できる `.part` のバイト数（このリビジョンのもの）。
+    pub fn partial_bytes(&self) -> u64 {
+        match &self.models_dir {
+            Some(dir) => partial_bytes(dir, &self.spec.sha256),
+            None => 0,
+        }
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -77,6 +89,9 @@ impl LocalModels {
             if g.running.is_some() {
                 return Err(Error::Invalid("すでにダウンロード中です".into()));
             }
+            if g.deleting {
+                return Err(Error::Invalid("削除中です。完了してからやり直してください".into()));
+            }
             if status_on_disk(&dir, self.spec.size) == LocalModelStatus::Ready {
                 return Err(Error::Invalid("モデルは取得済みです".into()));
             }
@@ -85,6 +100,8 @@ impl LocalModels {
         }
         notify(LocalModelStatus::Downloading { downloaded: 0, total: self.spec.size });
         let this = self.clone();
+        // `tauri::async_runtime::spawn` ではなく `tokio::spawn`: この型は Tauri に依存させない（テストも tokio のランタイムで動かす）。
+        // コマンドは async で、tokio のランタイム上で呼ばれる。
         tokio::spawn(async move { this.run(dir, cancel, notify).await });
         Ok(())
     }
@@ -94,7 +111,13 @@ impl LocalModels {
             self.finish(Err(DownloadError::Io(e.to_string())), &notify);
             return;
         }
-        let (part, dest) = (part_path(&dir), model_path(&dir));
+        let (part, dest) = (part_path(&dir, &self.spec.sha256), model_path(&dir));
+        // 別リビジョンの `.part` は、続きとして使えず、ディスクを食うだけなので消す。
+        for stale in part_files(&dir) {
+            if stale != part {
+                let _ = std::fs::remove_file(stale);
+            }
+        }
         let mut last = Instant::now() - PROGRESS_INTERVAL;
         let this = self.clone();
         let n = notify.clone();
@@ -129,6 +152,8 @@ impl LocalModels {
                     LocalModelStatus::NotInstalled
                 }
                 Err(e) => {
+                    // 失敗の種類だけをログに残す（URL・パスは含めない）。
+                    log::warn!("local model download failed: {}", e.log_tag());
                     let f = LocalModelStatus::Failed { reason: e.reason() };
                     g.transient = Some(f.clone());
                     f
@@ -145,21 +170,45 @@ impl LocalModels {
         }
     }
 
-    /// モデルを削除する（`.part` も）。読み込み中なら先にアンロードする。ダウンロード中は拒否する。
+    /// モデルを削除する（全リビジョンの `.part` も）。読み込み中なら先にアンロードする。
+    /// ダウンロード中と、別の削除の最中は拒否する（削除中は `start` も拒否される）。
     pub async fn delete(&self) -> Result<()> {
         let Some(dir) = &self.models_dir else { return Ok(()) };
-        if self.is_running() {
-            return Err(Error::Invalid("ダウンロード中は削除できません".into()));
+        {
+            let mut g = self.inner.lock().unwrap();
+            if g.running.is_some() {
+                return Err(Error::Invalid("ダウンロード中は削除できません".into()));
+            }
+            if g.deleting {
+                return Err(Error::Invalid("削除中です。完了してからやり直してください".into()));
+            }
+            g.deleting = true;
         }
+        let r = self.delete_files(dir).await;
+        let mut g = self.inner.lock().unwrap();
+        g.deleting = false;
+        if r.is_ok() {
+            g.transient = None;
+        }
+        r
+    }
+
+    async fn delete_files(&self, dir: &std::path::Path) -> Result<()> {
         self.translator.unload().await;
-        for p in [model_path(dir), part_path(dir)] {
+        let mut targets = vec![model_path(dir)];
+        targets.extend(part_files(dir));
+        for p in targets {
             match std::fs::remove_file(&p) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(Error::Invalid(format!("モデルを削除できませんでした: {}", e.kind()))),
+                Err(e) => {
+                    log::warn!("local model could not be deleted: {:?}", e.kind());
+                    return Err(Error::Invalid(
+                        "モデルのファイルを削除できませんでした。他のアプリが使っていないか確認してください".into(),
+                    ));
+                }
             }
         }
-        self.inner.lock().unwrap().transient = None;
         Ok(())
     }
 }
@@ -219,6 +268,7 @@ mod tests {
     }
 
     struct Fx {
+        sha: String,
         _server: MockServer,
         dir: PathBuf,
         hits: Arc<AtomicUsize>,
@@ -236,17 +286,14 @@ mod tests {
             .respond_with(Server { body: data.clone(), delay, hits: hits.clone() })
             .mount(&server)
             .await;
-        let spec = ModelSpec {
-            url: format!("{}/m.gguf", server.uri()),
-            size: data.len() as u64,
-            sha256: if wrong_sha { sha(b"other") } else { sha(&data) },
-        };
+        let spec_sha = if wrong_sha { sha(b"other") } else { sha(&data) };
+        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: data.len() as u64, sha256: spec_sha.clone() };
         let dir = temp_dir();
         let models = Arc::new(LocalModels::with_spec(dir.clone(), reqwest::Client::new(), translator, spec));
         let events = Arc::new(Mutex::new(vec![]));
         let ev = events.clone();
         let notify: Notify = Arc::new(move |s| ev.lock().unwrap().push(s));
-        Fx { _server: server, dir, hits, models, events, notify, data }
+        Fx { sha: spec_sha, _server: server, dir, hits, models, events, notify, data }
     }
 
     fn plain() -> Arc<LocalTranslate> {
@@ -279,7 +326,7 @@ mod tests {
 
         assert_eq!(f.models.status(), LocalModelStatus::Ready);
         assert_eq!(std::fs::read(model_path(&f.dir)).unwrap(), f.data);
-        assert!(!part_path(&f.dir).exists());
+        assert!(!part_path(&f.dir, &f.sha).exists());
         let ev = f.events.lock().unwrap();
         assert_eq!(ev.last(), Some(&LocalModelStatus::Ready));
         let verifying = ev.iter().position(|s| *s == LocalModelStatus::Verifying).expect("Verifying の通知がある");
@@ -360,7 +407,7 @@ mod tests {
         let translator = Arc::new(LocalTranslate::new(Arc::new(|| Ok(Arc::new(Echo) as Arc<dyn LocalTranslator>))));
         let f = fx(None, false, translator.clone()).await;
         std::fs::write(model_path(&f.dir), &f.data).unwrap();
-        std::fs::write(part_path(&f.dir), b"leftover").unwrap();
+        std::fs::write(part_path(&f.dir, &f.sha), b"leftover").unwrap();
         translator.translate("hi", "en").await.unwrap();
         assert!(translator.is_loaded().await);
 
@@ -368,7 +415,7 @@ mod tests {
 
         assert!(!translator.is_loaded().await, "読み込み中のファイルは消せないので、先にアンロードする");
         assert!(!model_path(&f.dir).exists());
-        assert!(!part_path(&f.dir).exists());
+        assert!(!part_path(&f.dir, &f.sha).exists());
         assert_eq!(f.models.status(), LocalModelStatus::NotInstalled);
     }
 
@@ -401,6 +448,95 @@ mod tests {
         }
         assert_eq!(m.status(), LocalModelStatus::NotInstalled);
         m.delete().await.unwrap();
+    }
+
+    /// 翻訳に時間がかかる偽の翻訳器（`unload` が待たされる状況を作る）。
+    struct SlowEcho;
+    impl LocalTranslator for SlowEcho {
+        fn translate(&self, text: &str, _lang: &str) -> Result<String> {
+            std::thread::sleep(Duration::from_millis(400));
+            Ok(text.to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn start_and_a_second_delete_are_rejected_while_a_delete_is_in_progress() {
+        let translator = Arc::new(LocalTranslate::new(Arc::new(|| Ok(Arc::new(SlowEcho) as Arc<dyn LocalTranslator>))));
+        let f = fx(None, false, translator.clone()).await;
+        // 翻訳中はモデルがロックを持つので、削除の unload が待たされる。その間を「削除中」にする。
+        let t = translator.clone();
+        let busy = tokio::spawn(async move { t.translate("x", "en").await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let m = f.models.clone();
+        let del = tokio::spawn(async move { m.delete().await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_invalid(f.models.start(f.notify.clone()), "削除中");
+        assert_invalid(f.models.delete().await, "削除中");
+        assert_eq!(f.hits.load(Ordering::SeqCst), 0, "削除中はダウンロードを始めない");
+
+        busy.await.unwrap().unwrap();
+        del.await.unwrap().unwrap();
+        // 削除が終われば、また始められる。
+        f.models.start(f.notify.clone()).unwrap();
+        wait_idle(&f.models).await;
+        assert_eq!(f.models.status(), LocalModelStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn a_delete_that_fails_says_so_in_japanese_and_does_not_stay_busy() {
+        let f = fx(None, false, plain()).await;
+        // model_path がディレクトリ（中身あり）だと、ファイルの削除は失敗する。
+        std::fs::create_dir_all(model_path(&f.dir)).unwrap();
+        std::fs::write(model_path(&f.dir).join("x"), b"x").unwrap();
+        for _ in 0..2 {
+            match f.models.delete().await {
+                Err(Error::Invalid(m)) => {
+                    assert!(m.contains("削除できませんでした"), "{m}");
+                    assert!(!m.contains("IsADirectory") && !m.contains("PermissionDenied") && !m.contains("kind"), "{m}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stale_part_of_another_revision_is_removed_when_a_download_starts() {
+        let f = fx(None, false, plain()).await;
+        let stale = part_path(&f.dir, "deadbeef00");
+        std::fs::write(&stale, vec![0u8; 100]).unwrap();
+        f.models.start(f.notify.clone()).unwrap();
+        wait_idle(&f.models).await;
+        assert_eq!(f.models.status(), LocalModelStatus::Ready);
+        assert!(!stale.exists(), "別リビジョンの .part はディスクを食うだけなので消す");
+    }
+
+    #[tokio::test]
+    async fn delete_removes_the_parts_of_every_revision() {
+        let f = fx(None, false, plain()).await;
+        let (a, b) = (part_path(&f.dir, &f.sha), part_path(&f.dir, "deadbeef00"));
+        std::fs::write(&a, b"x").unwrap();
+        std::fs::write(&b, b"x").unwrap();
+        f.models.delete().await.unwrap();
+        assert!(!a.exists() && !b.exists());
+    }
+
+    #[tokio::test]
+    async fn partial_bytes_reports_the_resumable_part_of_the_current_revision() {
+        let f = fx(None, false, plain()).await;
+        assert_eq!(f.models.partial_bytes(), 0);
+        std::fs::write(part_path(&f.dir, &f.sha), &f.data[..1234]).unwrap();
+        std::fs::write(part_path(&f.dir, "deadbeef00"), vec![0u8; 99]).unwrap();
+        assert_eq!(f.models.partial_bytes(), 1234);
+        f.models.start(f.notify.clone()).unwrap();
+        wait_idle(&f.models).await;
+        assert_eq!(f.models.status(), LocalModelStatus::Ready);
+        assert_eq!(f.models.partial_bytes(), 0, "完走したら .part は残らない");
+    }
+
+    #[test]
+    fn partial_bytes_of_the_unconfigured_instance_is_zero() {
+        assert_eq!(LocalModels::unconfigured().partial_bytes(), 0);
     }
 
     #[tokio::test]

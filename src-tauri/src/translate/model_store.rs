@@ -29,8 +29,32 @@ pub fn model_path(models_dir: &Path) -> PathBuf {
 }
 
 /// ダウンロード中のファイル。検証に通ってから `model_path` へリネームする。
-pub fn part_path(models_dir: &Path) -> PathBuf {
-    models_dir.join(format!("{MODEL_FILE_NAME}.part"))
+/// 名前にリビジョンのハッシュ（先頭 8 文字）を含める: リビジョンを更新したあとに、古い `.part` へ続きを継ぎ足して、
+/// 最後にハッシュ不一致で全部やり直し、という無駄を避けるため。
+pub fn part_path(models_dir: &Path, sha256: &str) -> PathBuf {
+    let tag: String = sha256.chars().take(8).collect();
+    models_dir.join(format!("{MODEL_FILE_NAME}.{tag}.part"))
+}
+
+/// 再開できる `.part` のバイト数（このリビジョンのもの。無ければ 0）。
+pub fn partial_bytes(models_dir: &Path, sha256: &str) -> u64 {
+    match std::fs::metadata(part_path(models_dir, sha256)) {
+        Ok(m) if m.is_file() => m.len(),
+        _ => 0,
+    }
+}
+
+/// 全リビジョンの `.part`（`<モデルのファイル名>*.part`）。削除と、古い `.part` の掃除に使う。
+pub fn part_files(models_dir: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(models_dir) else { return vec![] };
+    rd.filter_map(|e| e.ok())
+        .filter(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            n.starts_with(MODEL_FILE_NAME) && n.ends_with(".part")
+        })
+        .map(|e| e.path())
+        .collect()
 }
 
 /// モデルの状態。ダウンロード中・検証中・失敗は `LocalModels` が持ち、ディスクから分かるのは `Ready` と `NotInstalled`。
@@ -113,9 +137,37 @@ mod tests {
     }
 
     #[test]
-    fn part_path_sits_next_to_the_model() {
-        let p = part_path(Path::new("/data/models"));
-        assert_eq!(p, Path::new("/data/models").join(format!("{MODEL_FILE_NAME}.part")));
+    fn part_path_sits_next_to_the_model_and_carries_the_revision_hash() {
+        let p = part_path(Path::new("/data/models"), MODEL_SHA256);
+        assert_eq!(p, Path::new("/data/models").join(format!("{MODEL_FILE_NAME}.70891ec7.part")));
+        // リビジョンを変えると別の .part になる（古い .part に継ぎ足して、最後にハッシュ不一致、を避ける）。
+        assert_ne!(part_path(Path::new("/d"), "aaaaaaaa11"), part_path(Path::new("/d"), "bbbbbbbb22"));
+    }
+
+    #[test]
+    fn partial_bytes_counts_only_the_part_of_this_revision() {
+        let dir = temp_dir();
+        assert_eq!(partial_bytes(&dir, "abcdef0123"), 0);
+        std::fs::write(part_path(&dir, "abcdef0123"), vec![0u8; 1234]).unwrap();
+        std::fs::write(part_path(&dir, "99999999zz"), vec![0u8; 77]).unwrap();
+        assert_eq!(partial_bytes(&dir, "abcdef0123"), 1234);
+        assert_eq!(partial_bytes(&dir, "99999999zz"), 77);
+    }
+
+    #[test]
+    fn part_files_lists_the_parts_of_every_revision_but_nothing_else() {
+        let dir = temp_dir();
+        std::fs::write(part_path(&dir, "aaaaaaaa11"), b"x").unwrap();
+        std::fs::write(part_path(&dir, "bbbbbbbb22"), b"x").unwrap();
+        std::fs::write(model_path(&dir), b"model").unwrap();
+        std::fs::write(dir.join("other.part"), b"x").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"x").unwrap();
+        let mut got = part_files(&dir);
+        got.sort();
+        let mut want = vec![part_path(&dir, "aaaaaaaa11"), part_path(&dir, "bbbbbbbb22")];
+        want.sort();
+        assert_eq!(got, want);
+        assert!(part_files(&dir.join("missing")).is_empty());
     }
 
     #[test]

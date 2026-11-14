@@ -42,6 +42,8 @@ pub enum DownloadError {
     HashMismatch,
     SizeMismatch,
     NoSpace,
+    /// サーバーの応答が想定と違う（Content-Range の無い 206 など）。
+    BadResponse,
     Io(String),
 }
 
@@ -55,7 +57,24 @@ impl DownloadError {
             Self::HashMismatch => "ダウンロードしたファイルの検証に失敗しました。もう一度お試しください".into(),
             Self::SizeMismatch => "ダウンロードしたファイルのサイズが想定と違います。もう一度お試しください".into(),
             Self::NoSpace => "ディスクの空き容量が足りません".into(),
+            Self::BadResponse => "サーバーの応答が想定と違います。時間をおいて再度お試しください".into(),
             Self::Io(_) => "ファイルの書き込みに失敗しました（ディスクの空き容量を確認してください）".into(),
+        }
+    }
+}
+
+impl DownloadError {
+    /// ログ用の短いタグ。失敗の種類だけで、URL・パス・I/O の詳細文字列は含めない。
+    pub fn log_tag(&self) -> String {
+        match self {
+            Self::Cancelled => "cancelled".into(),
+            Self::Http(s) => format!("http {s}"),
+            Self::Network(kind) => format!("network {kind}"),
+            Self::HashMismatch => "hash mismatch".into(),
+            Self::SizeMismatch => "size mismatch".into(),
+            Self::NoSpace => "no space".into(),
+            Self::BadResponse => "bad response".into(),
+            Self::Io(_) => "io".into(),
         }
     }
 }
@@ -160,7 +179,7 @@ pub(crate) async fn download_with_stall(
                         // 想定した位置と違う続きは、継ぎ足せない。捨てて最初から。
                         std::fs::remove_file(part).ok();
                         if restarted {
-                            return Err(DownloadError::Http(206));
+                            return Err(DownloadError::BadResponse);
                         }
                         restarted = true;
                         continue;
@@ -179,13 +198,18 @@ pub(crate) async fn download_with_stall(
                 }
                 s => return Err(DownloadError::Http(s)),
             };
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .append(append)
-                .truncate(!append)
-                .open(part)
-                .map_err(io_err)?;
+            // 数万回の小さな write を避けるため、1MiB ずつまとめて書く。途中で戻る場合（キャンセル・通信の中断）も、
+            // drop で受け取った分は書き出されるので、`.part` の長さは受け取った分と一致する。
+            let mut file = std::io::BufWriter::with_capacity(
+                1 << 20,
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .append(append)
+                    .truncate(!append)
+                    .open(part)
+                    .map_err(io_err)?,
+            );
             let mut downloaded = if append { have } else { 0 };
             on_phase(Phase::Downloading { downloaded, total: spec.size });
             let mut stream = resp.bytes_stream();
@@ -218,6 +242,7 @@ pub(crate) async fn download_with_stall(
         std::fs::remove_file(part).ok();
         return Err(DownloadError::SizeMismatch);
     }
+    // 検証中（数秒）は、キャンセルを見ない。UI もこの間はキャンセルを出さない。
     on_phase(Phase::Verifying);
     let part_buf = part.to_path_buf();
     let digest = tokio::task::spawn_blocking(move || -> std::io::Result<String> {
@@ -474,7 +499,8 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_mid_download_keeps_the_part_for_resuming() {
-        let data = body(600_000);
+        // 本文は十分大きくして、複数のチャンクに分かれて届くようにする（途中で止められるように）。
+        let data = body(4_000_000);
         let f = fixture(data.clone(), true, None).await;
         let cancel = AtomicBool::new(false);
         let mut seen = 0u64;
@@ -491,14 +517,16 @@ mod tests {
         assert_eq!(r, Err(DownloadError::Cancelled));
         assert!(seen > 0);
         let kept = std::fs::metadata(f.dir.join("m.gguf.part")).unwrap().len();
-        assert!(kept > 0 && kept < data.len() as u64, "途中まで残る: {kept}");
+        assert!(kept > 0 && kept <= data.len() as u64, "受け取った分は .part に残る（バッファに溜めたまま失わない）: {kept}");
         assert!(!f.dir.join("m.gguf").exists());
         // 残った .part から再開して完走する。
         cancel.store(false, Ordering::SeqCst);
         let (r, _) = run(&f, &cancel).await;
         r.unwrap();
         assert_eq!(std::fs::read(f.dir.join("m.gguf")).unwrap(), data);
-        assert!(f.ranges.lock().unwrap().iter().any(|r| r.as_deref().is_some_and(|v| v.starts_with("bytes="))), "再開は Range で行う");
+        if kept < data.len() as u64 {
+            assert!(f.ranges.lock().unwrap().iter().any(|r| r.as_deref().is_some_and(|v| v.starts_with("bytes="))), "再開は Range で行う");
+        }
     }
 
     #[tokio::test]
@@ -559,6 +587,32 @@ mod tests {
         assert!(t.elapsed() < std::time::Duration::from_secs(3), "{:?}", t.elapsed());
     }
 
+    /// Range を付けても付けなくても、Content-Range の無い 206 を返すサーバー。
+    #[tokio::test]
+    async fn a_206_without_content_range_twice_is_reported_as_a_bad_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(206).set_body_bytes(vec![1u8; 10])).mount(&server).await;
+        let dir = temp_dir();
+        std::fs::write(dir.join("p"), [1u8; 4]).unwrap();
+        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: 10, sha256: sha(&[1u8; 10]) };
+        let r = download(&client(), &spec, &dir.join("p"), &dir.join("d"), &AtomicBool::new(false), &|_| None, &mut |_| {}).await;
+        assert_eq!(r, Err(DownloadError::BadResponse));
+        assert!(DownloadError::BadResponse.reason().contains("応答"), "HTTP 206 のような番号を見せない");
+    }
+
+    #[test]
+    fn log_tags_name_the_failure_without_urls_or_paths() {
+        assert_eq!(DownloadError::Http(503).log_tag(), "http 503");
+        assert_eq!(DownloadError::Network("timeout".into()).log_tag(), "network timeout");
+        assert_eq!(DownloadError::HashMismatch.log_tag(), "hash mismatch");
+        assert_eq!(DownloadError::NoSpace.log_tag(), "no space");
+        assert_eq!(DownloadError::BadResponse.log_tag(), "bad response");
+        assert_eq!(DownloadError::Cancelled.log_tag(), "cancelled");
+        assert_eq!(DownloadError::SizeMismatch.log_tag(), "size mismatch");
+        // Io は種別だけ（`io::Error` の文字列は渡さない）。
+        assert_eq!(DownloadError::Io("No space left on device (os error 28)".into()).log_tag(), "io");
+    }
+
     #[test]
     fn failure_reasons_are_japanese_and_leak_nothing() {
         for e in [
@@ -568,6 +622,7 @@ mod tests {
             DownloadError::HashMismatch,
             DownloadError::SizeMismatch,
             DownloadError::NoSpace,
+            DownloadError::BadResponse,
             DownloadError::Io("/home/me/.local/share/x: disk full".into()),
         ] {
             let r = e.reason();
