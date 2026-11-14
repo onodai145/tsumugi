@@ -114,7 +114,8 @@ impl LocalTranslator for LlamaTranslator {
             n_cur += 1;
             ctx.decode(&mut batch).map_err(|e| llama_err("decode", e))?;
         }
-        Ok(String::from_utf8_lossy(&out).trim().to_string())
+        // 本文の無害化で入れたゼロ幅スペースが、モデルの写した訳文に残っていたら取り除く。
+        Ok(prompt::restore_text(String::from_utf8_lossy(&out).trim()).into_owned())
     }
 }
 
@@ -189,7 +190,8 @@ mod tests {
             .unwrap();
         eprintln!("OUT: {out}");
         assert!(!out.is_empty());
-        assert!(!out.contains("<|plamo:"));
+        // 無害化で入れたゼロ幅スペースは、訳文に残らない（モデルが本文を写しても、利用者には元の文字列に見える）。
+        assert!(!out.contains('\u{200B}'), "{out:?}");
     }
 
     #[test]

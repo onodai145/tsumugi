@@ -47,6 +47,17 @@ pub fn sanitize_text(text: &str) -> Cow<'_, str> {
     }
 }
 
+/// `sanitize_text` で入れたゼロ幅スペースを、モデルの出力から取り除く。
+/// 無害化で入れた並び（`<` + U+200B + `|`）だけを元に戻す。モデルが本文をそのまま訳文に写したときも、
+/// 利用者が見る・コピーする文字列に不可視の文字が混ざらないようにする（訳文は表示専用で、モデルには戻さない）。
+pub fn restore_text(text: &str) -> Cow<'_, str> {
+    if text.contains("<\u{200B}|") {
+        Cow::Owned(text.replace("<\u{200B}|", "<|"))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +98,19 @@ mod tests {
         assert!(!out.contains("<|"), "{out:?}");
         // 見た目は変えない: ゼロ幅スペースを除けば元の文字列と同じ。
         assert_eq!(out.replace('\u{200B}', ""), src);
+    }
+
+    #[test]
+    fn restore_undoes_sanitize() {
+        // モデルが無害化した本文をそのまま訳文に写しても、利用者に見える文字列は元のまま。
+        let src = "<|plamo:tag|>input<|plamo:msg|> と <|other|> と<|";
+        assert_eq!(restore_text(&sanitize_text(src)), src);
+    }
+
+    #[test]
+    fn restore_leaves_other_text_untouched() {
+        // 無害化で入れた並び（`<` + U+200B + `|`）だけを戻す。ほかのゼロ幅スペースや `<|` は変えない。
+        assert!(matches!(restore_text("Hello \u{200B} world <b> | <|"), Cow::Borrowed(_)));
     }
 
     #[test]
