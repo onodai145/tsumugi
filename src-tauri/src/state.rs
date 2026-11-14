@@ -165,6 +165,9 @@ pub struct AppState {
     pub scheduled_posts: crate::store::ScheduledPostStore,
     /// スケジューラを起こす通知。予約の追加・取り消し・「今すぐ投稿」の後に `notify_one` する。
     pub scheduler_wakeup: std::sync::Arc<tokio::sync::Notify>,
+    /// ローカル翻訳（PLaMo 3 Translate、Issue #603）。モデルの置き場は起動時に `with_local_translate` で渡す。
+    /// `AppState::new*` のシグネチャを変えずに済むよう、既定は「非対応」。
+    pub local_translate: std::sync::Arc<crate::translate::LocalTranslate>,
     /// MCPサーバーの実行状態と、実行中のサーバーが読むトークン(Issue #557)。デスクトップのみ。
     #[cfg(desktop)]
     pub mcp: crate::mcp::server::McpRuntime,
@@ -199,6 +202,12 @@ impl AppState {
     /// 予約投稿のストアを差し替える(起動時に永続版へ)。
     pub fn with_scheduled_posts(mut self, store: crate::store::ScheduledPostStore) -> Self {
         self.scheduled_posts = store;
+        self
+    }
+
+    /// ローカル翻訳のマネージャーを差し替える(起動時にモデルの置き場つきのものへ)。
+    pub fn with_local_translate(mut self, local_translate: std::sync::Arc<crate::translate::LocalTranslate>) -> Self {
+        self.local_translate = local_translate;
         self
     }
 
@@ -250,6 +259,7 @@ impl AppState {
             drafts,
             scheduled_posts: crate::store::ScheduledPostStore::new_in_memory(),
             scheduler_wakeup: std::sync::Arc::new(tokio::sync::Notify::new()),
+            local_translate: std::sync::Arc::new(crate::translate::LocalTranslate::unconfigured()),
             #[cfg(desktop)]
             mcp: Default::default(),
             cache,

@@ -240,6 +240,10 @@ pub struct UiPrefs {
     /// そのまま渡す。空文字や空白のみの値は翻訳時に `ja` として扱う（`commands::note::effective_translate_lang`）。
     #[serde(default = "default_translate_target_lang")]
     pub translate_target_lang: String,
+    /// ノート翻訳のエンジン（Issue #603）。`"server"`（Misskey サーバーの翻訳、既定）か `"local"`（端末内の
+    /// PLaMo 3 Translate）。未知の値は翻訳時に `"server"` として扱う（`commands::note::effective_translate_engine`）。
+    #[serde(default = "default_translate_engine")]
+    pub translate_engine: String,
 }
 
 fn default_column_opacity() -> i32 {
@@ -402,6 +406,10 @@ fn default_translate_target_lang() -> String {
     "ja".into()
 }
 
+fn default_translate_engine() -> String {
+    "server".into()
+}
+
 fn default_url_preview_enabled() -> bool {
     true
 }
@@ -468,6 +476,7 @@ impl Default for UiPrefs {
             custom_css: String::new(),
             ui_scale: default_ui_scale(),
             translate_target_lang: default_translate_target_lang(),
+            translate_engine: default_translate_engine(),
         }
     }
 }
@@ -637,6 +646,7 @@ mod tests {
             custom_css: "body { background: #000 }".into(),
             ui_scale: 130,
             translate_target_lang: "en".into(),
+            translate_engine: "local".into(),
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
@@ -719,6 +729,23 @@ mod tests {
         assert_eq!(v.translate_target_lang, "en");
         let json = serde_json::to_value(&v).unwrap();
         assert_eq!(json["translateTargetLang"], "en");
+    }
+
+    #[test]
+    fn translate_engine_defaults_to_server_for_legacy_json() {
+        // translate_engine 追加前に保存された JSON も読めること（#[serde(default)]）。
+        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert_eq!(v.translate_engine, "server");
+        assert_eq!(UiPrefs::default().translate_engine, "server");
+    }
+
+    #[test]
+    fn translate_engine_round_trips_camel_case() {
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320,"translateEngine":"local"}"#).unwrap();
+        assert_eq!(v.translate_engine, "local");
+        let json = serde_json::to_value(&v).unwrap();
+        assert_eq!(json["translateEngine"], "local");
     }
 
     #[test]

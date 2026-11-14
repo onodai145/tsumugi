@@ -230,16 +230,22 @@ export const commands = {
 	favoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("favorite_note", { accountId, noteId })),
 	/**  お気に入り解除。 */
 	unfavoriteNote: (accountId: string, noteId: string) => typedError<null, Error>(__TAURI_INVOKE("unfavorite_note", { accountId, noteId })),
-	/**  NoteMenu の「翻訳」項目を出すか（Issue #440）。接続先サーバーで翻訳が使えるときだけ true。 */
+	/**
+	 *  NoteMenu の「翻訳」項目を出すか（Issue #440、#603）。サーバー翻訳のときは接続先サーバーで翻訳が使えるとき、
+	 *  ローカル翻訳のときはこのビルド・プラットフォームが対応しているときに true（詳細は `get_translator_available_core`）。
+	 */
 	getTranslatorAvailable: (accountId: string) => typedError<boolean, Error>(__TAURI_INVOKE("get_translator_available", { accountId })),
 	/**
-	 *  ノート本文を `UiPrefs.translate_target_lang` へ翻訳する（Issue #440）。結果なしは `None`。
-	 *  サーバーで翻訳が未設定なら `Error::Api`（message に `UNAVAILABLE` を含む）。
+	 *  ノートを `UiPrefs.translate_target_lang` へ翻訳する（Issue #440、#603）。結果なしは `None`。
+	 *  翻訳エンジン（`UiPrefs.translate_engine`）が server なら Misskey サーバーの `notes/translate`（`text` は使わない。
+	 *  未設定のサーバーは `Error::Api` の `UNAVAILABLE`）、local なら `text` を端末内のモデルで翻訳する
+	 *  （失敗は `Error::Invalid` の `LOCAL_MODEL_NOT_READY` / `LOCAL_TEXT_TOO_LONG` / `LOCAL_LANG_UNSUPPORTED` /
+	 *  `LOCAL_UNSUPPORTED`）。詳細は `translate_note_core`。
 	 */
-	translateNote: (accountId: string, noteId: string) => typedError<{
-	sourceLang: string,
+	translateNote: (accountId: string, noteId: string, text: string) => typedError<{
+	sourceLang: string | null,
 	text: string,
-} | null, Error>(__TAURI_INVOKE("translate_note", { accountId, noteId })),
+} | null, Error>(__TAURI_INVOKE("translate_note", { accountId, noteId, text })),
 	/**  アンケートに投票する（choice は 0-based index）。 */
 	votePoll: (accountId: string, noteId: string, choice: number) => typedError<null, Error>(__TAURI_INVOKE("vote_poll", { accountId, noteId, choice })),
 	/**  カスタム絵文字一覧（リアクションピッカー用）。host 単位でキャッシュする。 */
@@ -1261,9 +1267,12 @@ export type TqlEditMode =
 /**  where 述語のみ(簡単モードのfilter input) */
 "predicate";
 
-/**  `notes/translate` の翻訳結果（Issue #440）。`source_lang` は検出された翻訳元言語コード。 */
+/**
+ *  翻訳結果（Issue #440、#603）。`source_lang` は検出された翻訳元言語コード。ローカル翻訳（PLaMo 3 Translate）は
+ *  翻訳元言語を内部で判別するが、結果を返さないので `None`。
+ */
 export type Translation = {
-	sourceLang: string,
+	sourceLang: string | null,
 	text: string,
 };
 
@@ -1434,6 +1443,11 @@ export type UiPrefs = {
 	 *  そのまま渡す。空文字や空白のみの値は翻訳時に `ja` として扱う（`commands::note::effective_translate_lang`）。
 	 */
 	translateTargetLang?: string,
+	/**
+	 *  ノート翻訳のエンジン（Issue #603）。`"server"`（Misskey サーバーの翻訳、既定）か `"local"`（端末内の
+	 *  PLaMo 3 Translate）。未知の値は翻訳時に `"server"` として扱う（`commands::note::effective_translate_engine`）。
+	 */
+	translateEngine?: string,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */

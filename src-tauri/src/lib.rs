@@ -18,6 +18,7 @@ mod sound;
 mod state;
 mod store;
 mod stream;
+mod translate;
 
 use session::KeyringStore;
 use state::AppState;
@@ -407,9 +408,19 @@ pub fn run() {
                 }
             };
             let cache = NoteCacheStore::new_from_arc(cache_backend);
+            // ローカル翻訳(Issue #603)。モデルは app_data_dir/models/ に置く。対応していないビルドでは「非対応」を返す。
+            let local_translate = std::sync::Arc::new(translate::LocalTranslate::with_models_dir(
+                app.path().app_data_dir().expect("no app data dir").join("models"),
+            ));
+            translate::manager::spawn_idle_sweeper(
+                local_translate.clone(),
+                translate::IDLE_UNLOAD,
+                translate::SWEEP_INTERVAL,
+            );
             app.manage(
                 AppState::new(Box::new(KeyringStore), settings, drafts, cache, cache_dir.clone())
-                    .with_scheduled_posts(scheduled_posts),
+                    .with_scheduled_posts(scheduled_posts)
+                    .with_local_translate(local_translate),
             );
             scheduler::spawn(app.handle().clone());
 

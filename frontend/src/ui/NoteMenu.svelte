@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { Note, Clip } from "../bindings/tauri.gen";
   import { app } from "../lib/store.svelte";
+  import { isLocalTranslateEngine } from "../lib/translateLang";
   import { Star, Paperclip, ChevronRight, Trash2, Copy, Repeat2, ArrowDownToLine, Languages } from "@lucide/svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
@@ -154,7 +155,7 @@
   {#if note.text && ontranslate && translatorAvailable}
     <button type="button" class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted" onclick={translate}>
       <Languages size={16} />
-      翻訳
+      {isLocalTranslateEngine(app.ui.translateEngine) ? "PLaMo で翻訳" : "翻訳"}
     </button>
   {/if}
   {#if tabId && listNoteId}

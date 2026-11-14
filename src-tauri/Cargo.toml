@@ -20,8 +20,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # フロントエンド一式をバイナリに埋め込みビルドさせる標準機能。cargo tauri dev/build は
 # 内部でこのフラグを付け外ししてくれるが、素の `cargo build --release` でも本番動作に
 # なるようデフォルトで有効化しておく(無いと devUrl に接続しにいき「接続が拒否されました」になる)。
-default = ["custom-protocol"]
+default = ["custom-protocol", "local-translate"]
 custom-protocol = ["tauri/custom-protocol"]
+# ローカル翻訳（PLaMo 3 Translate、Issue #603）。llama.cpp の C++ ビルドが走るので、重いビルドを避けたい
+# 開発時は無効にできる。無効のとき（とモバイル）は、ローカル翻訳は「非対応」を返す。
+local-translate = ["dep:llama-cpp-2"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.1", features = [] }
@@ -100,6 +103,10 @@ tokio-util = "0.7"
 # bearerトークンの定数時間比較と、OS乱数によるトークン生成。
 subtle = "2.6"
 getrandom = "0.3"
+# ローカル翻訳（Issue #603）。crates.io の 0.1.161 までは、同梱の llama.cpp に plamo3 トークナイザが無く
+# 公式の GGUF（tokenizer.ggml.model = plamo3）を読めない。llama.cpp v0.9.0 を同梱する git の rev を固定する。
+# crates.io の次のリリースに plamo3 が入ったら、バージョン指定へ戻す。OpenMP は使わない（default-features を切る）。
+llama-cpp-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "955aa2f72463c2535cc5ab894d5d52f27a38cde2", default-features = false, features = ["common"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # "keychain"(コード署名なしのCLI/デスクトップアプリ向け)を選択。

@@ -189,28 +189,89 @@ async fn translator_available_for(state: &AppState, account_id: &str) -> Result<
     }
 }
 
-/// NoteMenu の「翻訳」項目を出すか（Issue #440）。接続先サーバーで翻訳が使えるときだけ true。
+/// 翻訳エンジン（Issue #603）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TranslateEngine {
+    Server,
+    Local,
+}
+
+/// 設定の翻訳エンジン。未知の値・空は `Server`（設定を文字列で持つのは、将来の値の追加やダウングレードで
+/// `UiPrefs` 全体が読めなくならないようにするため）。
+pub(crate) fn effective_translate_engine(prefs: &UiPrefs) -> TranslateEngine {
+    if prefs.translate_engine.trim().eq_ignore_ascii_case("local") {
+        TranslateEngine::Local
+    } else {
+        TranslateEngine::Server
+    }
+}
+
+/// NoteMenu の「翻訳」項目を出すか（Issue #440、#603）。サーバー翻訳のときは、接続先サーバーで翻訳が使えるとき
+/// だけ true。ローカル翻訳のときは、このビルド・プラットフォームが対応しているとき true（モデル未取得でも true:
+/// 押したときに「モデルを取得してください」と案内するほうが、項目が消えるより分かりやすい）。
+pub(crate) async fn get_translator_available_core(state: &AppState, account_id: &str) -> Result<bool> {
+    match effective_translate_engine(&state.settings.load_ui()?) {
+        TranslateEngine::Server => translator_available_for(state, account_id).await,
+        TranslateEngine::Local => Ok(crate::translate::is_supported()),
+    }
+}
+
+/// NoteMenu の「翻訳」項目を出すか（Issue #440、#603）。サーバー翻訳のときは接続先サーバーで翻訳が使えるとき、
+/// ローカル翻訳のときはこのビルド・プラットフォームが対応しているときに true（詳細は `get_translator_available_core`）。
 #[tauri::command]
 #[specta::specta]
 pub async fn get_translator_available(
     state: State<'_, AppState>,
     account_id: String,
 ) -> Result<bool> {
-    translator_available_for(&state, &account_id).await
+    get_translator_available_core(&state, &account_id).await
 }
 
-/// ノート本文を `UiPrefs.translate_target_lang` へ翻訳する（Issue #440）。結果なしは `None`。
-/// サーバーで翻訳が未設定なら `Error::Api`（message に `UNAVAILABLE` を含む）。
+/// ノートを `UiPrefs.translate_target_lang` へ翻訳する（Issue #440、#603）。結果なしは `None`。
+/// - サーバー翻訳: `notes/translate`。`text` は使わない。サーバーで翻訳が未設定なら `Error::Api`
+///   （message に `UNAVAILABLE` を含む）。
+/// - ローカル翻訳: `text` を端末内のモデルで翻訳する。サーバーへは何も送らない。`text` が空白のみなら `None`。
+///   失敗は `Error::Invalid` の `LOCAL_MODEL_NOT_READY` / `LOCAL_TEXT_TOO_LONG` / `LOCAL_LANG_UNSUPPORTED` /
+///   `LOCAL_UNSUPPORTED`。
+pub(crate) async fn translate_note_core(
+    state: &AppState,
+    account_id: &str,
+    note_id: &str,
+    text: &str,
+) -> Result<Option<Translation>> {
+    let prefs = state.settings.load_ui()?;
+    let lang = effective_translate_lang(&prefs);
+    match effective_translate_engine(&prefs) {
+        TranslateEngine::Server => {
+            let client = state.client_for(account_id)?;
+            api_translate_note(&client, note_id, &lang).await
+        }
+        TranslateEngine::Local => {
+            if text.trim().is_empty() {
+                return Ok(None);
+            }
+            let plamo_lang = crate::translate::lang::to_plamo_lang(&lang)
+                .ok_or_else(|| crate::translate::invalid(crate::translate::ERR_LANG_UNSUPPORTED))?;
+            let out = state.local_translate.translate(text, plamo_lang).await?;
+            Ok(Some(Translation { source_lang: None, text: out }))
+        }
+    }
+}
+
+/// ノートを `UiPrefs.translate_target_lang` へ翻訳する（Issue #440、#603）。結果なしは `None`。
+/// 翻訳エンジン（`UiPrefs.translate_engine`）が server なら Misskey サーバーの `notes/translate`（`text` は使わない。
+/// 未設定のサーバーは `Error::Api` の `UNAVAILABLE`）、local なら `text` を端末内のモデルで翻訳する
+/// （失敗は `Error::Invalid` の `LOCAL_MODEL_NOT_READY` / `LOCAL_TEXT_TOO_LONG` / `LOCAL_LANG_UNSUPPORTED` /
+/// `LOCAL_UNSUPPORTED`）。詳細は `translate_note_core`。
 #[tauri::command]
 #[specta::specta]
 pub async fn translate_note(
     state: State<'_, AppState>,
     account_id: String,
     note_id: String,
+    text: String,
 ) -> Result<Option<Translation>> {
-    let lang = effective_translate_lang(&state.settings.load_ui()?);
-    let client = state.client_for(&account_id)?;
-    api_translate_note(&client, &note_id, &lang).await
+    translate_note_core(&state, &account_id, &note_id, &text).await
 }
 
 /// アンケートに投票する（choice は 0-based index）。
@@ -847,6 +908,117 @@ mod tests {
 
         prefs.translate_target_lang = " en ".into();
         assert_eq!(effective_translate_lang(&prefs), "en");
+    }
+
+    #[test]
+    fn effective_translate_engine_defaults_to_server() {
+        let mut prefs = crate::domain::UiPrefs::default();
+        assert_eq!(effective_translate_engine(&prefs), TranslateEngine::Server);
+        for (v, want) in [
+            ("server", TranslateEngine::Server),
+            ("local", TranslateEngine::Local),
+            (" LOCAL ", TranslateEngine::Local),
+            ("", TranslateEngine::Server),
+            ("bogus", TranslateEngine::Server),
+        ] {
+            prefs.translate_engine = v.into();
+            assert_eq!(effective_translate_engine(&prefs), want, "{v:?}");
+        }
+    }
+
+    /// `"[{lang}] {text}"` を返す偽のローカル翻訳器。
+    struct Echo;
+    impl crate::translate::engine::LocalTranslator for Echo {
+        fn translate(&self, text: &str, plamo_lang: &str) -> Result<String> {
+            Ok(format!("[{plamo_lang}] {text}"))
+        }
+    }
+
+    fn state_with_translate_engine(engine: &str, target_lang: &str) -> AppState {
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory()).with_local_translate(
+            std::sync::Arc::new(crate::translate::LocalTranslate::new(std::sync::Arc::new(|| {
+                Ok(std::sync::Arc::new(Echo) as std::sync::Arc<dyn crate::translate::engine::LocalTranslator>)
+            }))),
+        );
+        let mut prefs = crate::domain::UiPrefs::default();
+        prefs.translate_engine = engine.into();
+        prefs.translate_target_lang = target_lang.into();
+        state.settings.save_ui(&prefs).unwrap();
+        state
+    }
+
+    #[tokio::test]
+    async fn local_engine_translates_the_given_text_without_an_account() {
+        let state = state_with_translate_engine("local", "ja");
+        let t = translate_note_core(&state, "no-such-account", "n1", "hello").await.unwrap();
+        assert_eq!(t, Some(Translation { source_lang: None, text: "[ja] hello".into() }));
+    }
+
+    #[tokio::test]
+    async fn local_engine_maps_the_target_language_to_plamo() {
+        let state = state_with_translate_engine("local", "zh");
+        let t = translate_note_core(&state, "a", "n1", "hello").await.unwrap().unwrap();
+        assert_eq!(t.text, "[zh-hans] hello");
+        let state = state_with_translate_engine("local", "en-US");
+        let t = translate_note_core(&state, "a", "n1", "こんにちは").await.unwrap().unwrap();
+        assert_eq!(t.text, "[en] こんにちは");
+    }
+
+    #[tokio::test]
+    async fn local_engine_rejects_unsupported_target_languages() {
+        let state = state_with_translate_engine("local", "pt");
+        match translate_note_core(&state, "a", "n1", "hello").await {
+            Err(Error::Invalid(m)) => assert_eq!(m, "LOCAL_LANG_UNSUPPORTED"),
+            other => panic!("expected LOCAL_LANG_UNSUPPORTED, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn local_engine_returns_none_for_blank_text() {
+        let state = state_with_translate_engine("local", "ja");
+        for blank in ["", "   ", "\n\t"] {
+            assert_eq!(translate_note_core(&state, "a", "n1", blank).await.unwrap(), None, "{blank:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn server_engine_uses_notes_translate_and_never_the_local_model() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/notes/translate"))
+            .and(body_partial_json(serde_json::json!({ "noteId": "n1", "targetLang": "ja" })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "sourceLang": "EN", "text": "こんにちは" })),
+            )
+            .mount(&mock)
+            .await;
+        // 未知の値("bogus")はサーバー翻訳として扱う。ローカルの偽翻訳器は呼ばれないはず。
+        let state = state_with_translate_engine("bogus", "ja");
+        state.register_test_account("acc1");
+        state.set_test_api_base(mock.uri());
+
+        let t = translate_note_core(&state, "acc1", "n1", "hello").await.unwrap();
+        assert_eq!(t, Some(Translation { source_lang: Some("EN".into()), text: "こんにちは".into() }));
+    }
+
+    #[tokio::test]
+    async fn translator_available_follows_the_engine() {
+        // ローカル: アカウントやサーバーに関係なく、このビルドの対応状況。
+        let state = state_with_translate_engine("local", "ja");
+        assert_eq!(
+            get_translator_available_core(&state, "none").await.unwrap(),
+            crate::translate::is_supported()
+        );
+        // サーバー: 従来どおり、サーバーごとにキャッシュした値。
+        let state = state_with_translate_engine("server", "ja");
+        state.set_translator_available("acc1", true);
+        assert!(get_translator_available_core(&state, "acc1").await.unwrap());
+        state.set_translator_available("acc2", false);
+        assert!(!get_translator_available_core(&state, "acc2").await.unwrap());
     }
 
     fn test_note(id: &str, my_reaction: Option<&str>) -> Note {

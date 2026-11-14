@@ -1761,10 +1761,11 @@ class AppStore {
     }
   }
 
-  /// ノート本文を翻訳する(Issue #440)。結果なしは null。失敗は throw するだけで、
-  /// エラーモーダルは出さない(NoteCard の翻訳ブロックがインラインで表示するため)。
-  async translateNote(accountId: string, noteId: string) {
-    return await unwrapAcc(accountId, commands.translateNote(accountId, noteId));
+  /// ノートを翻訳する(Issue #440、#603)。結果なしは null。`text` はローカル翻訳が使う本文
+  /// (サーバー翻訳は使わない)。失敗は throw するだけで、エラーモーダルは出さない
+  /// (NoteCard の翻訳ブロックがインラインで表示するため)。
+  async translateNote(accountId: string, noteId: string, text: string) {
+    return await unwrapAcc(accountId, commands.translateNote(accountId, noteId, text));
   }
 
   /// 通知設定を保存。desktop を有効化したら権限を要求する。
