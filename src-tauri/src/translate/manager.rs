@@ -89,6 +89,12 @@ impl LocalTranslate {
         }
     }
 
+    /// モデルを解放する。ファイルを消す前に呼ぶ（Windows は読み込み中のファイルを消せない）。
+    /// 翻訳中は `translate` がロックを持っているので、終わるまで待つ。
+    pub async fn unload(&self) {
+        *self.loaded.lock().await = None;
+    }
+
     pub async fn is_loaded(&self) -> bool {
         self.loaded.lock().await.is_some()
     }
@@ -160,6 +166,18 @@ mod tests {
         assert_eq!(lt.translate("b", "ja").await.unwrap(), "ja:b");
         assert!(lt.is_loaded().await);
         assert_eq!(loads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn unload_releases_the_model_and_the_next_translate_loads_again() {
+        let loads = Arc::new(AtomicUsize::new(0));
+        let lt = LocalTranslate::new(counting_loader(loads.clone(), Arc::new(AtomicUsize::new(0))));
+        lt.translate("a", "en").await.unwrap();
+        assert!(lt.is_loaded().await);
+        lt.unload().await;
+        assert!(!lt.is_loaded().await);
+        lt.translate("b", "en").await.unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

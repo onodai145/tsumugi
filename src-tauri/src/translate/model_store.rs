@@ -12,6 +12,8 @@ pub const MODEL_FILE_NAME: &str = "plamo-3-translate-0.8b-Q4_K_M.gguf";
 pub const MODEL_SIZE_BYTES: u64 = 573_126_848;
 /// PFN 側の更新で重みが黙って変わらないよう、リビジョン（コミット）を固定する。更新はアプリのリリースで追従する。
 /// 2026-11-14 に HF API（`/api/models/pfnet/plamo-3-translate-0.8b-GGUF?blobs=true`）の `sha` と `lfs.sha256` から取得した。
+/// URL・ライセンス URL に埋め込んだリビジョンと一致することを、テストが検証する（`concat!` で定数から組み立てられないため）。
+#[allow(dead_code)]
 pub const MODEL_REVISION: &str = "1cf96ae02133958a20074bfdfab76517bb737d00";
 pub const MODEL_SHA256: &str = "70891ec70dc7ab4205745a38307867c2881b99239f20327927633abfe4bc9ec6";
 pub const MODEL_URL: &str = "https://huggingface.co/pfnet/plamo-3-translate-0.8b-GGUF/resolve/1cf96ae02133958a20074bfdfab76517bb737d00/plamo-3-translate-0.8b-Q4_K_M.gguf";
