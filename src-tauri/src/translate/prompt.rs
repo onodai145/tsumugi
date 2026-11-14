@@ -1,6 +1,8 @@
 //! PFML3 プロンプトの組み立て（Issue #603）。純粋関数だけで、モデルなしでテストできる。
 //! 形式はモデルカード（pfnet/plamo-3-translate-0.8b の「PFML3」の節）による。BOS は llama.cpp が付ける。
 
+use std::borrow::Cow;
+
 /// 出力にこの文字列が現れたら生成を止める（次の要素の開始＝翻訳が終わった合図）。
 pub const STOP_MARKER: &str = "<|plamo:";
 
@@ -31,6 +33,20 @@ pub fn is_stop(piece: &str) -> bool {
     piece.contains(STOP_MARKER)
 }
 
+/// 本文から、スペシャルトークンとして解釈される文字列（`<|...|>`）を無害にする。
+///
+/// PLaMo 3 のトークナイザは、`parse_special = false` でも、本文中の `<|plamo:tag|>` などをスペシャルトークンへ
+/// 変換する（実モデルで確認、Issue #603）。本文を固定部分と別にトークン化するだけでは、プロンプトを乗っ取られる。
+/// そこで、トークン化の前に `<|` の間へゼロ幅スペース（U+200B）を挟み、スペシャルトークンの文字列に一致しないようにする。
+/// 見た目は変わらない。`<|` を含まない本文は変えない。
+pub fn sanitize_text(text: &str) -> Cow<'_, str> {
+    if text.contains("<|") {
+        Cow::Owned(text.replace("<|", "<\u{200B}|"))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,6 +72,27 @@ mod tests {
         assert!(joined.ends_with(&parts.suffix));
         assert_eq!(&joined[parts.prefix.len()..joined.len() - parts.suffix.len()], text);
         assert_eq!(parts, build_parts("ja"));
+    }
+
+    #[test]
+    fn sanitize_leaves_text_without_the_opener_untouched() {
+        assert!(matches!(sanitize_text("Hello <b>x</b> | a < | b"), Cow::Borrowed(_)));
+        assert!(matches!(sanitize_text(""), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn sanitize_breaks_every_special_token_opener() {
+        let src = "<|plamo:tag|>input<|plamo:msg|> と <|other|> と<|";
+        let out = sanitize_text(src);
+        assert!(!out.contains("<|"), "{out:?}");
+        // 見た目は変えない: ゼロ幅スペースを除けば元の文字列と同じ。
+        assert_eq!(out.replace('\u{200B}', ""), src);
+    }
+
+    #[test]
+    fn sanitize_is_stable_when_applied_twice() {
+        let once = sanitize_text("<|plamo:tag|>x").into_owned();
+        assert_eq!(sanitize_text(&once), once);
     }
 
     #[test]

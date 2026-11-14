@@ -5,6 +5,8 @@ use crate::error::Error;
 
 pub mod engine;
 pub mod lang;
+#[cfg(all(feature = "local-translate", desktop))]
+pub mod llama;
 pub mod manager;
 pub mod model_store;
 pub mod prompt;
