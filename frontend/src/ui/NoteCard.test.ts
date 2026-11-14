@@ -1047,6 +1047,17 @@ describe("ノート翻訳", () => {
     expect(getByTestId("note-translation").textContent).toContain("PLaMo で翻訳");
   });
 
+  it("エンジンの値は Rust と同じく、前後の空白と大文字小文字を無視する(手で編集した設定でも表示が実際の動作と食い違わない)", async () => {
+    app.ui = { ...app.ui, translateEngine: " LOCAL " };
+    setup(true, async () => ({ sourceLang: null, text: "Hello" }));
+    const { getByLabelText, findByText, getByTestId } = render(NoteCard, {
+      props: { note: makeNote({ text: "こんにちは" }), accountId: "acc1" },
+    });
+    await getByLabelText("その他").click();
+    await (await findByText("PLaMo で翻訳")).click();
+    await waitFor(() => expect(getByTestId("note-translation").textContent).toContain("PLaMo で翻訳"));
+  });
+
   it("サーバー翻訳では、「PLaMo で翻訳」は出ず、元の「翻訳」と「{言語} から翻訳」になる", async () => {
     app.ui = { ...app.ui, translateEngine: "server" };
     setup(true);
@@ -1063,7 +1074,7 @@ describe("ノート翻訳", () => {
   it("ローカル翻訳のエラーを種類ごとの文言で表示する", async () => {
     app.ui = { ...app.ui, translateEngine: "local" };
     const cases: [string, string][] = [
-      ["LOCAL_MODEL_NOT_READY", "PLaMo のモデルが未取得です。設定でダウンロードしてください"],
+      ["LOCAL_MODEL_NOT_READY", "PLaMo のモデルが未取得か、読み込めません"],
       ["LOCAL_TEXT_TOO_LONG", "ノートが長すぎるため翻訳できません"],
       ["LOCAL_LANG_UNSUPPORTED", "翻訳先の言語に PLaMo は対応していません"],
       ["LOCAL_UNSUPPORTED", "この環境では PLaMo による翻訳は使えません"],

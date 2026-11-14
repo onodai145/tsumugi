@@ -15,6 +15,13 @@ export const TRANSLATE_LANG_PRESETS: { code: string; label: string }[] = [
   { code: "ru", label: "Русский" },
 ];
 
+/// 翻訳エンジンがローカル（PLaMo）か（Issue #603）。Rust の `commands::note::effective_translate_engine` と
+/// 同じ規則: 前後の空白と大文字小文字を無視し、`local` だけがローカルで、未知の値・空・未設定は server。
+/// 手で編集した設定でも、表示が実際に使われるエンジンと食い違わないようにする。
+export function isLocalTranslateEngine(v: string | null | undefined): boolean {
+  return (v ?? "").trim().toLowerCase() === "local";
+}
+
 /// 保存値を整える。空・空白のみ・未設定は既定（ja）へ戻す。
 export function normalizeTranslateLang(v: string | null | undefined): string {
   const t = (v ?? "").trim();

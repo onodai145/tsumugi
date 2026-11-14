@@ -17,6 +17,7 @@
   import { readableTextColor, isValidHexColor } from "../lib/color";
   import { acct, displayName } from "../lib/userDisplay";
   import { app } from "../lib/store.svelte";
+  import { isLocalTranslateEngine } from "../lib/translateLang";
   import { extractPreviewUrls } from "../lib/extractPreviewUrls";
   import { reactionEmoji, isRemoteCustomEmoji, proxiedEmojiMap } from "../lib/emoji";
   import { isCustomEmojiKey, customEmojiPinKey, parseCustomEmojiPinKey } from "../lib/emojiKey";
@@ -323,7 +324,7 @@
   }
   const TRANSLATE_ERROR_TEXT: Record<TranslateErrorKind, string> = {
     unavailable: "このサーバーは翻訳に対応していません",
-    modelNotReady: "PLaMo のモデルが未取得です。設定でダウンロードしてください",
+    modelNotReady: "PLaMo のモデルが未取得か、読み込めません",
     tooLong: "ノートが長すぎるため翻訳できません",
     langUnsupported: "翻訳先の言語に PLaMo は対応していません",
     localUnsupported: "この環境では PLaMo による翻訳は使えません",
@@ -346,7 +347,7 @@
     if (!accountId) return;
     const seq = ++translateSeq;
     // 翻訳中に設定が切り替わっても、この翻訳を始めたときのエンジンで表示する。
-    const local = app.ui.translateEngine === "local";
+    const local = isLocalTranslateEngine(app.ui.translateEngine);
     translation = { status: "loading" };
     try {
       const r = await app.translateNote(accountId, inner.id, inner.text ?? "");
