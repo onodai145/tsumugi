@@ -48,7 +48,7 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "
 # これによりnative-roots解決が効くプラットフォームでは従来通りの恩恵(自己署名/内部CA
 # 対応)を維持しつつ、Androidのような解決失敗プラットフォームでも常にMozillaルート
 # 証明書という最低限のフロアが確保される。
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "stream", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 thiserror = "2.0.18"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 url = "2.5.8"

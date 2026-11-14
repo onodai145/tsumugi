@@ -3,6 +3,7 @@
 
 use crate::error::Error;
 
+pub mod download;
 pub mod engine;
 pub mod lang;
 #[cfg(all(feature = "local-translate", desktop))]
