@@ -5,8 +5,9 @@
   import { commands, unwrap } from "../../lib/ipc";
   import { validateSearchEngineUrl, validateSummalyProxyUrl } from "../../lib/externalUrl";
   import { SEARCH_ENGINE_PRESETS, DEFAULT_SEARCH_ENGINE_URL } from "../../lib/searchEngine";
-  import { TRANSLATE_LANG_PRESETS, normalizeTranslateLang } from "../../lib/translateLang";
+  import { TRANSLATE_LANG_PRESETS, isLocalTranslateEngine, normalizeTranslateLang } from "../../lib/translateLang";
   import Dropdown from "../Dropdown.svelte";
+  import LocalModelCard from "./LocalModelCard.svelte";
 
   let searchEngineUrl = $state(app.ui.searchEngineUrl ?? DEFAULT_SEARCH_ENGINE_URL);
   let urlPreviewEnabled = $state(app.ui.urlPreviewEnabled ?? true);
@@ -19,6 +20,29 @@
       : [...TRANSLATE_LANG_PRESETS, { code: translateTargetLang, label: translateTargetLang }]
     ).map((o) => ({ value: o.code, label: o.label })),
   );
+  // 翻訳エンジン(Issue #603)。保存値は「local だけがローカル、それ以外はサーバー」(Rust の effective_translate_engine と同じ規則)に整える。
+  const TRANSLATE_ENGINE_OPTIONS = [
+    { value: "server", label: "サーバー" },
+    { value: "local", label: "PLaMo（端末内）" },
+  ];
+  let translateEngine = $state(isLocalTranslateEngine(app.ui.translateEngine) ? "local" : "server");
+  // 翻訳先が PLaMo の対応言語か。判定は Rust(lang::to_plamo_lang)に一本化している。失敗したら対応扱い(注記を出さない)。
+  let langSupported = $state(true);
+  $effect(() => {
+    const lang = translateTargetLang;
+    let stale = false;
+    (async () => {
+      try {
+        const v = await unwrap(commands.isTranslateLangSupported(lang));
+        if (!stale) langSupported = v;
+      } catch {
+        if (!stale) langSupported = true;
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  });
   let busy = $state(false);
   let err = $state<string | null>(null);
   let saved = $state(false);
@@ -57,6 +81,7 @@
         urlPreviewEnabled,
         summalyProxyUrl: proxyUrl,
         translateTargetLang: normalizeTranslateLang(translateTargetLang),
+        translateEngine,
       });
       // インポート由来の取得先は、この保存で利用者が設定した値として扱う。
       if (summalyImported) {
@@ -127,15 +152,36 @@
 </div>
 
 <div class="mb-3 flex flex-col gap-1.5 text-sm">
+  <span class="text-muted-foreground">翻訳エンジン</span>
+  <div class="w-48">
+    <Dropdown bind:value={translateEngine} options={TRANSLATE_ENGINE_OPTIONS} testid="translate-engine" />
+  </div>
+  {#if translateEngine === "local"}
+    <LocalModelCard />
+  {/if}
+</div>
+
+<div class="mb-3 flex flex-col gap-1.5 text-sm">
   <span class="text-muted-foreground">翻訳先言語</span>
   <!-- OSネイティブの<select>は一覧をWebKitGTK/OSが描画してテーマが効かないため、Dropdownを使う。 -->
   <div class="w-48">
     <Dropdown bind:value={translateTargetLang} options={translateLangOptions} testid="translate-target-lang" />
   </div>
-  <p class="mb-0 mt-0 text-xs text-muted-foreground">
-    ノートのメニューの「翻訳」で使う言語です。翻訳は接続先サーバーの翻訳機能（DeepL / LibreTranslate）で行われるため、
-    サーバー側で翻訳が設定されている場合のみ使えます。
-  </p>
+  {#if translateEngine === "local"}
+    <p class="mb-0 mt-0 text-xs text-muted-foreground">
+      ノートのメニューの「PLaMo で翻訳」で使う言語です。翻訳は端末内で行われ、ノートの本文は外部へ送信されません。
+    </p>
+    {#if !langSupported}
+      <p class="mb-0 mt-0 text-xs text-destructive" data-testid="translate-lang-unsupported">
+        この言語には対応していません。PLaMo は、日本語・英語・中国語・韓国語など 53 言語に対応しています（ポルトガル語は対応していません）。
+      </p>
+    {/if}
+  {:else}
+    <p class="mb-0 mt-0 text-xs text-muted-foreground">
+      ノートのメニューの「翻訳」で使う言語です。翻訳は接続先サーバーの翻訳機能（DeepL / LibreTranslate）で行われるため、
+      サーバー側で翻訳が設定されている場合のみ使えます。
+    </p>
+  {/if}
 </div>
 
 <SaveBar {busy} {saved} {err} onsave={save} />
