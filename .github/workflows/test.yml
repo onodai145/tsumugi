@@ -59,7 +59,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libasound2-dev \
-            patchelf
+            patchelf \
+            cmake \
+            libclang-dev
 
       # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
       # resolves the current stable Rust release, so it is left unpinned by design.
@@ -121,7 +123,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libasound2-dev \
-            patchelf
+            patchelf \
+            cmake \
+            libclang-dev
 
       # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
       # resolves the current stable Rust release, so it is left unpinned by design.

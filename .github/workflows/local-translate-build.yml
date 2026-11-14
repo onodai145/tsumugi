@@ -1,0 +1,64 @@
+name: local-translate-build
+
+# ローカル翻訳（Issue #603）の llama.cpp のビルドが Windows / macOS で通るかを確認する。
+# 通常の PR では走らせず、関係するファイルを触ったときと手動のときだけ走る。
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/.cargo/**"
+      - "src-tauri/src/translate/**"
+      - ".github/workflows/local-translate-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: ""
+          - os: macos-latest
+            target: ""
+          # リリースは macOS を universal（aarch64 + x86_64）でビルドするため、x86_64 も確認する。
+          - os: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
+      # resolves the current stable Rust release, so it is left unpinned by design.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+
+      # tauri::generate_context!() は frontendDist の実在を要求する（test.yml と同じ事情）。
+      # cargo check にビルド済みのフロントは要らないので、空の index.html で足りる。
+      - name: Create empty frontendDist
+        shell: bash
+        run: |
+          mkdir -p frontend/dist
+          echo '<!doctype html>' > frontend/dist/index.html
+
+      - name: cargo check (llama.cpp のビルドを含む)
+        working-directory: src-tauri
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ -n "$TARGET" ]; then
+            cargo check --lib --target "$TARGET"
+          else
+            cargo check --lib
+          fi

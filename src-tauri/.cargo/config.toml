@@ -1,0 +1,4 @@
+# llama.cpp（ローカル翻訳、Issue #603）の C++ ビルドは、並列度が既定で全コアになり、メモリを使い切って
+# OOM になることがある（16 コアの開発機で実際に発生）。cmake に渡す並列度を抑える。
+[env]
+CMAKE_BUILD_PARALLEL_LEVEL = "4"
