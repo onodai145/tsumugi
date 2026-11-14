@@ -67,7 +67,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@f4371d1ec7179bfbd04a82a81e3b3af7f720750f # v2
         if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
@@ -132,7 +132,7 @@ jobs:
         with:
           components: llvm-tools
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@f4371d1ec7179bfbd04a82a81e3b3af7f720750f # v2
         if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
@@ -293,7 +293,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@f4371d1ec7179bfbd04a82a81e3b3af7f720750f # v2
         if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
@@ -481,7 +481,7 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@f4371d1ec7179bfbd04a82a81e3b3af7f720750f # v2
         if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
