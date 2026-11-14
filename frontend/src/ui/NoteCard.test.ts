@@ -1074,7 +1074,7 @@ describe("ノート翻訳", () => {
   it("ローカル翻訳のエラーを種類ごとの文言で表示する", async () => {
     app.ui = { ...app.ui, translateEngine: "local" };
     const cases: [string, string][] = [
-      ["LOCAL_MODEL_NOT_READY", "PLaMo のモデルが未取得か、読み込めません"],
+      ["LOCAL_MODEL_NOT_READY", "PLaMo のモデルが未取得か、読み込めません。設定の「外部連携」の「翻訳エンジン」からモデルをダウンロードしてください"],
       ["LOCAL_TEXT_TOO_LONG", "ノートが長すぎるため翻訳できません"],
       ["LOCAL_LANG_UNSUPPORTED", "翻訳先の言語に PLaMo は対応していません"],
       ["LOCAL_UNSUPPORTED", "この環境では PLaMo による翻訳は使えません"],
