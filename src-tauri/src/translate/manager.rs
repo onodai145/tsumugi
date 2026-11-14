@@ -38,7 +38,12 @@ impl LocalTranslate {
             Self::new(Arc::new(move || {
                 let path = super::model_store::model_path(&models_dir);
                 super::model_store::check_ready(&path)?;
-                let translator = super::llama::LlamaTranslator::load(&path)?;
+                // サイズが合っても読み込めないファイル（破損、別の量子化）は、利用者には「モデルを取り直す」
+                // ことを伝えたいので、未取得と同じ LOCAL_MODEL_NOT_READY にする。詳細（本文は含まない）はログに残す。
+                let translator = super::llama::LlamaTranslator::load(&path).map_err(|e| {
+                    log::warn!("local translate model could not be loaded: {e}");
+                    invalid(super::ERR_MODEL_NOT_READY)
+                })?;
                 Ok(Arc::new(translator) as Arc<dyn LocalTranslator>)
             }))
         }
@@ -241,6 +246,23 @@ mod tests {
         let lt = LocalTranslate::with_models_dir(dir);
         let expected = if super::super::is_supported() { "LOCAL_MODEL_NOT_READY" } else { "LOCAL_UNSUPPORTED" };
         assert_invalid(lt.translate("a", "en").await, expected);
+    }
+
+    #[tokio::test]
+    async fn with_models_dir_reports_not_ready_when_the_file_has_the_right_size_but_cannot_be_loaded() {
+        // 破損や別の量子化のファイルは、サイズが合っても読み込めない。利用者には「モデルを取り直す」ことを
+        // 伝えるため、一般的な失敗ではなく LOCAL_MODEL_NOT_READY にする。
+        let dir = std::env::temp_dir().join(format!("tsumugi_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = std::fs::File::create(super::super::model_store::model_path(&dir)).unwrap();
+        // 中身はゼロ（GGUF ではない）。スパースファイルなので、ディスクもメモリも使わない。
+        f.set_len(super::super::model_store::MODEL_SIZE_BYTES).unwrap();
+        drop(f);
+
+        let lt = LocalTranslate::with_models_dir(dir);
+        let expected = if super::super::is_supported() { "LOCAL_MODEL_NOT_READY" } else { "LOCAL_UNSUPPORTED" };
+        assert_invalid(lt.translate("a", "en").await, expected);
+        assert!(!lt.is_loaded().await);
     }
 
     #[tokio::test]
