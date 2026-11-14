@@ -7,10 +7,13 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::future::Future;
+use std::time::{Duration, Instant};
 
-/// 1チャンクを待つ上限。接続が黙って止まったときに、いつまでも進捗が止まったままにしない。
+/// 応答ヘッダ・次のチャンクを待つ上限。接続が黙って止まったときに、いつまでも進捗が止まったままにしない。
 const CHUNK_TIMEOUT: Duration = Duration::from_secs(30);
+/// 待っている間にキャンセルを確かめる間隔。
+const CANCEL_POLL: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
@@ -78,6 +81,26 @@ fn content_range_start(v: &str) -> Option<u64> {
     v.strip_prefix("bytes ")?.split('-').next()?.parse().ok()
 }
 
+/// `fut` を待つ。待っている間もキャンセルを見て、`limit` を超えたらネットワークエラー（タイムアウト）にする。
+/// 接続の確立やチャンクの到着を待っているときでも、キャンセルがすぐ効くようにするため。
+async fn wait<F: Future>(fut: F, cancel: &AtomicBool, limit: Duration) -> Result<F::Output, DownloadError> {
+    tokio::pin!(fut);
+    let start = Instant::now();
+    loop {
+        match tokio::time::timeout(CANCEL_POLL, &mut fut).await {
+            Ok(v) => return Ok(v),
+            Err(_) => {
+                if cancel.load(Ordering::SeqCst) {
+                    return Err(DownloadError::Cancelled);
+                }
+                if start.elapsed() >= limit {
+                    return Err(DownloadError::Network("timeout".into()));
+                }
+            }
+        }
+    }
+}
+
 /// `spec.url` を `part` へ取得し、SHA-256 を検証して `dest` へリネームする。`part` が残っていれば Range で続きから。
 /// キャンセル・通信の中断では `part` を残す（再開できる）。ハッシュ・サイズの不一致では `part` を捨てる。
 pub async fn download(
@@ -88,6 +111,21 @@ pub async fn download(
     cancel: &AtomicBool,
     free_space: &(dyn Fn(&Path) -> Option<u64> + Sync),
     on_phase: &mut (dyn FnMut(Phase) + Send),
+) -> Result<(), DownloadError> {
+    download_with_stall(client, spec, part, dest, cancel, free_space, on_phase, CHUNK_TIMEOUT).await
+}
+
+/// `download` の本体。`stall` は、応答ヘッダと各チャンクを待つ上限（テストで短くするために引数にしてある）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn download_with_stall(
+    client: &reqwest::Client,
+    spec: &ModelSpec,
+    part: &Path,
+    dest: &Path,
+    cancel: &AtomicBool,
+    free_space: &(dyn Fn(&Path) -> Option<u64> + Sync),
+    on_phase: &mut (dyn FnMut(Phase) + Send),
+    stall: Duration,
 ) -> Result<(), DownloadError> {
     let mut restarted = false;
     loop {
@@ -110,7 +148,7 @@ pub async fn download(
             if have > 0 {
                 req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
             }
-            let resp = req.send().await.map_err(net_err)?;
+            let resp = wait(req.send(), cancel, stall).await?.map_err(net_err)?;
             let append = match resp.status().as_u16() {
                 206 => {
                     let start = resp
@@ -155,8 +193,8 @@ pub async fn download(
                 if cancel.load(Ordering::SeqCst) {
                     return Err(DownloadError::Cancelled);
                 }
-                match tokio::time::timeout(CHUNK_TIMEOUT, stream.next()).await {
-                    Err(_) => return Err(DownloadError::Network("timeout".into())),
+                match wait(stream.next(), cancel, stall).await {
+                    Err(e) => return Err(e),
                     Ok(None) => break,
                     Ok(Some(Err(e))) => return Err(net_err(e)),
                     Ok(Some(Ok(chunk))) => {
@@ -471,6 +509,54 @@ mod tests {
         let (r, _) = run(&f, &AtomicBool::new(false)).await;
         assert!(matches!(r, Err(DownloadError::Network(_))), "{r:?}");
         assert_eq!(std::fs::metadata(f.dir.join("m.gguf.part")).unwrap().len(), 1000);
+    }
+
+    /// 応答ヘッダが届くのを待っている間（接続確立中）でも、キャンセルが効く。
+    #[tokio::test]
+    async fn cancelling_while_waiting_for_the_response_returns_quickly() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(10)).set_body_bytes(vec![0u8; 10]))
+            .mount(&server)
+            .await;
+        let dir = temp_dir();
+        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: 10, sha256: sha(&[0u8; 10]) };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let c = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            c.store(true, Ordering::SeqCst);
+        });
+        let t = std::time::Instant::now();
+        let r = download(&client(), &spec, &dir.join("p"), &dir.join("d"), &cancel, &|_| None, &mut |_| {}).await;
+        assert_eq!(r, Err(DownloadError::Cancelled));
+        assert!(t.elapsed() < std::time::Duration::from_secs(3), "キャンセルが応答待ちで止まった: {:?}", t.elapsed());
+    }
+
+    /// 応答ヘッダが来ない接続は、一定時間でネットワークエラーにする（SYN が黙って落ちる回線など）。
+    #[tokio::test]
+    async fn a_response_that_never_arrives_times_out_as_a_network_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(10)).set_body_bytes(vec![0u8; 10]))
+            .mount(&server)
+            .await;
+        let dir = temp_dir();
+        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: 10, sha256: sha(&[0u8; 10]) };
+        let t = std::time::Instant::now();
+        let r = download_with_stall(
+            &client(),
+            &spec,
+            &dir.join("p"),
+            &dir.join("d"),
+            &AtomicBool::new(false),
+            &|_| None,
+            &mut |_| {},
+            std::time::Duration::from_millis(400),
+        )
+        .await;
+        assert_eq!(r, Err(DownloadError::Network("timeout".into())));
+        assert!(t.elapsed() < std::time::Duration::from_secs(3), "{:?}", t.elapsed());
     }
 
     #[test]
