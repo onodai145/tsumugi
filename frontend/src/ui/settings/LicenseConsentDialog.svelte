@@ -8,10 +8,11 @@
   // ここは同意を取る画面。ConfirmDialog と同じく portal で body 直下に置き、キャンセルに初期フォーカスする。
   let {
     sizeBytes,
+    busy = false,
     onAccept,
     onCancel,
     onOpenLicense,
-  }: { sizeBytes: number; onAccept: () => void; onCancel: () => void; onOpenLicense: () => void } = $props();
+  }: { sizeBytes: number; busy?: boolean; onAccept: () => void; onCancel: () => void; onOpenLicense: () => void } = $props();
 
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
@@ -66,7 +67,7 @@
     </p>
     <div class="flex justify-end gap-2">
       <Button bind:ref={cancelButton} variant="secondary" size="sm" onclick={onCancel} data-testid="license-cancel">キャンセル</Button>
-      <Button size="sm" onclick={onAccept} data-testid="license-accept">同意してダウンロード</Button>
+      <Button size="sm" onclick={onAccept} disabled={busy} data-testid="license-accept">同意してダウンロード</Button>
     </div>
   </div>
 </div>

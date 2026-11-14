@@ -20,12 +20,13 @@
   // イベントを受けるたびに進める。refresh の応答が、それより新しいイベントの状態を古いスナップショットで上書きしないために使う。
   let eventSeq = 0;
 
-  async function refresh() {
+  // `infoOnly` のときは status に触れない（イベントが運んだ状態を、スナップショットで上書きしない）。
+  async function refresh(infoOnly = false) {
     const seqAtRequest = eventSeq;
     const i = await unwrap(commands.getLocalModelStatus());
     info = i;
     // 応答を待つ間にイベントが届いていたら、そちらが新しい。info（同意済みなど）だけ更新する。
-    if (eventSeq === seqAtRequest) status = i.status;
+    if (!infoOnly && eventSeq === seqAtRequest) status = i.status;
   }
 
   onMount(() => {
@@ -38,6 +39,10 @@
         const u = await events.localModelStatusChanged.listen((e) => {
           eventSeq++;
           status = e.payload.status;
+          // 止まった状態では、再開できる途中のファイルの有無（partialBytes）が変わっているので、取り直す。
+          if (status.type === "notInstalled" || status.type === "failed" || status.type === "ready") {
+            refresh(true).catch((e) => (err = String(e)));
+          }
         });
         if (disposed) u();
         else unlisten = u;
@@ -57,9 +62,13 @@
     };
   });
 
+  // 開始を要求してから応答が返るまで true。連打で2回目を送って、Rust の「すでにダウンロード中です」を赤字で出さないため。
+  let starting = $state(false);
+
   async function start() {
+    if (starting || !info) return;
     err = null;
-    if (!info) return;
+    starting = true;
     try {
       await unwrap(commands.startLocalModelDownload(info.licenseVersion));
       consentOpen = false;
@@ -67,6 +76,8 @@
     } catch (e) {
       consentOpen = false;
       err = String(e);
+    } finally {
+      starting = false;
     }
   }
 
@@ -96,7 +107,7 @@
   }
 </script>
 
-<div class="mt-1.5 rounded-md border border-border p-3 text-sm" data-testid="local-model-card">
+<div class="mt-1.5 rounded-lg border border-border p-3 text-sm" data-testid="local-model-card">
   {#if !info}
     <!-- 状態を読み込むまで、初期値の「未取得」やダウンロードボタンを出さない(進行中でも一瞬ボタンが見えてしまう)。 -->
     {#if err}
@@ -112,10 +123,15 @@
         <span class="font-semibold">PLaMo 3 Translate（0.8B・Q4_K_M）</span>
         <span class="text-xs text-muted-foreground" data-testid="local-model-status">{statusText(status)}</span>
         <span class="text-xs text-muted-foreground">サイズ {formatBytes(info.sizeBytes)}</span>
+        {#if (status.type === "notInstalled" || status.type === "failed") && info.partialBytes > 0}
+          <span class="text-xs text-muted-foreground">
+            途中まで取得済み（{formatBytes(info.partialBytes)}）。ダウンロードで続きから再開します
+          </span>
+        {/if}
       </div>
       <div class="flex gap-2">
         {#if status.type === "notInstalled" || status.type === "failed"}
-          <Button size="sm" onclick={onDownload} data-testid="local-model-download">ダウンロード</Button>
+          <Button size="sm" onclick={onDownload} disabled={starting} data-testid="local-model-download">ダウンロード</Button>
         {:else if status.type === "downloading"}
           <Button size="sm" variant="secondary" onclick={cancel} data-testid="local-model-cancel">キャンセル</Button>
         {:else if status.type === "ready"}
@@ -154,6 +170,7 @@
 {#if consentOpen && info}
   <LicenseConsentDialog
     sizeBytes={info.sizeBytes}
+    busy={starting}
     onAccept={start}
     onCancel={() => (consentOpen = false)}
     onOpenLicense={() => info && openUrl(info.licenseUrl)}

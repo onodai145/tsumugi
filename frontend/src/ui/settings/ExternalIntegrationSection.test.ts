@@ -159,6 +159,7 @@ describe("ExternalIntegrationSection 翻訳エンジン", () => {
     licenseVersion: "2026-11-09",
     licenseUrl: "https://example.com/license-ja",
     licenseAccepted: false,
+    partialBytes: 0,
     supported: true,
   });
 

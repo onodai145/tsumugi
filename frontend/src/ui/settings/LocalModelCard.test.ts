@@ -25,6 +25,7 @@ const info = (over: Partial<LocalModelInfo> = {}): LocalModelInfo => ({
   licenseVersion: "2026-11-09",
   licenseUrl: LICENSE_URL,
   licenseAccepted: false,
+  partialBytes: 0,
   supported: true,
   ...over,
 });
@@ -215,6 +216,75 @@ describe("LocalModelCard", () => {
     const status = await findByTestId("local-model-status");
     expect(status.textContent).toContain("取得済み");
     expect(status.textContent).not.toContain("検証中");
+  });
+
+  it("ダウンロードの連打は1回だけ開始する（2回目の拒否を赤字で出さない）", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    let release: (v: ReturnType<typeof ok<null>>) => void = () => {};
+    const start = vi
+      .spyOn(commands, "startLocalModelDownload")
+      .mockReturnValue(new Promise((r) => (release = r)) as never);
+    const { findByTestId, queryByRole } = render(LocalModelCard);
+    const button = await findByTestId("local-model-download");
+    await fireEvent.click(button);
+    await fireEvent.click(button);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    release(ok(null));
+    await vi.waitFor(() => expect(queryByRole("alert")).toBeNull());
+  });
+
+  it("「同意してダウンロード」の連打も1回だけ開始する", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info()));
+    let release: (v: ReturnType<typeof ok<null>>) => void = () => {};
+    const start = vi
+      .spyOn(commands, "startLocalModelDownload")
+      .mockReturnValue(new Promise((r) => (release = r)) as never);
+    const { findByTestId, getByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    const accept = getByTestId("license-accept");
+    await fireEvent.click(accept);
+    await fireEvent.click(accept);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect((accept as HTMLButtonElement).disabled).toBe(true);
+    release(ok(null));
+  });
+
+  it("途中まで取得済みのファイルがあれば、再開できることを出す", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ partialBytes: 366_000_000, licenseAccepted: true })));
+    const { findByTestId } = render(LocalModelCard);
+    const card = await findByTestId("local-model-card");
+    await vi.waitFor(() => expect(card.textContent).toContain("途中まで取得済み（366.0 MB）"));
+    expect(card.textContent).toContain("再開");
+  });
+
+  it("途中のファイルが無ければ、その表示は出さない", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ partialBytes: 0 })));
+    const { findByTestId } = render(LocalModelCard);
+    expect((await findByTestId("local-model-card")).textContent).not.toContain("途中まで");
+  });
+
+  it("キャンセルで未取得に戻ったら、残った分を取り直して表示する", async () => {
+    const get = vi
+      .spyOn(commands, "getLocalModelStatus")
+      .mockResolvedValueOnce(
+        ok(info({ status: { type: "downloading", downloaded: 100, total: 573_126_848 }, licenseAccepted: true })),
+      )
+      .mockResolvedValue(ok(info({ partialBytes: 120_000_000, licenseAccepted: true })));
+    const { findByTestId } = render(LocalModelCard);
+    const card = await findByTestId("local-model-card");
+    expect(card.textContent).not.toContain("途中まで");
+    emit({ type: "notInstalled" });
+    await vi.waitFor(() => expect(card.textContent).toContain("途中まで取得済み（120.0 MB）"));
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("ダウンロード中や取得済みのときは、途中のファイルの表示を出さない", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(
+      ok(info({ status: { type: "ready" }, partialBytes: 5_000_000, licenseAccepted: true })),
+    );
+    const { findByTestId } = render(LocalModelCard);
+    expect((await findByTestId("local-model-card")).textContent).not.toContain("途中まで");
   });
 
   it("アンマウントでイベントの購読を解除する", async () => {
