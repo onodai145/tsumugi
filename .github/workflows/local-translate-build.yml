@@ -33,6 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
+      # Windows の既定の CARGO_HOME（C:\Users\<名前>\.cargo）だと、llama-cpp-rs の git 依存のサブモジュール
+      # （llama.cpp、最長 195 文字のパスを含む）のチェックアウトが MAX_PATH（260）を超えて、`path too long` で失敗する
+      # （Issue #603）。後続のステップ（rust-cache を含む）が使えるよう、最初に短いパスへ移す。
+      - name: Use a short CARGO_HOME (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'CARGO_HOME=C:\c' >> "$GITHUB_ENV"
+
       # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
       # resolves the current stable Rust release, so it is left unpinned by design.
       - uses: dtolnay/rust-toolchain@stable

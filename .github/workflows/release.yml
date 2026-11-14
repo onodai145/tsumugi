@@ -51,6 +51,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
+      # Windows の既定の CARGO_HOME だと、llama-cpp-rs の git 依存のサブモジュール（llama.cpp、最長 195 文字の
+      # パス）のチェックアウトが MAX_PATH（260）を超えて失敗する（Issue #603）。短いパスへ移す。
+      - name: Use a short CARGO_HOME (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo 'CARGO_HOME=C:\c' >> "$GITHUB_ENV"
+
       - name: Install system dependencies (Tauri v2 Linux)
         if: matrix.platform == 'ubuntu-24.04'
         run: |
