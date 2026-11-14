@@ -18,6 +18,7 @@ mod sound;
 mod state;
 mod store;
 mod stream;
+mod translate;
 
 use session::KeyringStore;
 use state::AppState;
