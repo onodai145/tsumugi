@@ -17,18 +17,40 @@
   let consentOpen = $state(false);
   let deleteOpen = $state(false);
 
+  // イベントを受けるたびに進める。refresh の応答が、それより新しいイベントの状態を古いスナップショットで上書きしないために使う。
+  let eventSeq = 0;
+
   async function refresh() {
-    info = await unwrap(commands.getLocalModelStatus());
-    status = info.status;
+    const seqAtRequest = eventSeq;
+    const i = await unwrap(commands.getLocalModelStatus());
+    info = i;
+    // 応答を待つ間にイベントが届いていたら、そちらが新しい。info（同意済みなど）だけ更新する。
+    if (eventSeq === seqAtRequest) status = i.status;
   }
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    refresh().catch((e) => (err = String(e)));
-    events.localModelStatusChanged
-      .listen((e) => (status = e.payload.status))
-      .then((u) => (disposed ? u() : (unlisten = u)));
+    (async () => {
+      // 状態の取得より先にイベントを購読する。取得してから購読すると、その間に届いた終了イベント
+      // （検証中→取得済み、ダウンロード中→失敗）を取りこぼし、以後イベントは来ないので表示が固まる。
+      try {
+        const u = await events.localModelStatusChanged.listen((e) => {
+          eventSeq++;
+          status = e.payload.status;
+        });
+        if (disposed) u();
+        else unlisten = u;
+      } catch (e) {
+        err = String(e);
+      }
+      if (disposed) return;
+      try {
+        await refresh();
+      } catch (e) {
+        err = String(e);
+      }
+    })();
     return () => {
       disposed = true;
       unlisten?.();

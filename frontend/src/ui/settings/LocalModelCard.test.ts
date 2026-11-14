@@ -186,6 +186,37 @@ describe("LocalModelCard", () => {
     expect(queryByTestId("local-model-download")).toBeNull();
   });
 
+  it("状態の取得より先にイベントを購読する（取得中に届いた終了イベントを取りこぼさない）", async () => {
+    const order: string[] = [];
+    vi.spyOn(commands, "getLocalModelStatus").mockImplementation(async () => {
+      order.push("get");
+      return ok(info());
+    });
+    vi.spyOn(events.localModelStatusChanged, "listen").mockImplementation((async () => {
+      order.push("listen");
+      return unlisten;
+    }) as never);
+    const { findByTestId } = render(LocalModelCard);
+    await findByTestId("local-model-status");
+    expect(order).toEqual(["listen", "get"]);
+  });
+
+  it("取得の応答より先に終了イベントが届いたら、古いスナップショットで上書きしない", async () => {
+    let resolveSnapshot: (v: ReturnType<typeof ok<LocalModelInfo>>) => void = () => {};
+    vi.spyOn(commands, "getLocalModelStatus").mockReturnValue(
+      new Promise((r) => (resolveSnapshot = r)) as never,
+    );
+    const { findByTestId } = render(LocalModelCard);
+    // 取得が走り出してから（購読は済んでいる）、応答の前に「取得済み」のイベントが届く。
+    await vi.waitFor(() => expect(commands.getLocalModelStatus).toHaveBeenCalled());
+    emit({ type: "ready" });
+    // その後に、イベントより古い「検証中」のスナップショットが返る。
+    resolveSnapshot(ok(info({ status: { type: "verifying" }, licenseAccepted: true })));
+    const status = await findByTestId("local-model-status");
+    expect(status.textContent).toContain("取得済み");
+    expect(status.textContent).not.toContain("検証中");
+  });
+
   it("アンマウントでイベントの購読を解除する", async () => {
     vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info()));
     const { findByTestId, unmount } = render(LocalModelCard);
