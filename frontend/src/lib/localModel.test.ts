@@ -45,6 +45,10 @@ describe("downloadWarning", () => {
     expect(downloadWarning(net("wifi", "metered"), SIZE)).toBe("従量制の接続です。約 573.1 MB を取得します。続けますか?");
     expect(downloadWarning(net("other", "metered"), SIZE)).toBe("従量制の接続です。約 573.1 MB を取得します。続けますか?");
   });
+  it("従量制の有線（Ethernet）や、種類が不明の従量制も、従量制の警告", () => {
+    expect(downloadWarning(net("ethernet", "metered"), SIZE)).toBe("従量制の接続です。約 573.1 MB を取得します。続けますか?");
+    expect(downloadWarning(net("unknown", "metered"), SIZE)).toBe("従量制の接続です。約 573.1 MB を取得します。続けますか?");
+  });
   it("非従量制なら、種類に関わらず警告なし", () => {
     for (const t of ["wifi", "ethernet", "other", "unknown"] as const) expect(downloadWarning(net(t, "unmetered"), SIZE)).toBeNull();
   });

@@ -320,6 +320,68 @@ describe("LocalModelCard", () => {
     await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
   });
 
+  it("未同意・モバイル通信: 同意ダイアログの中の警告を見たうえで同意すると開始する", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: false })));
+    setNetwork({ transport: "cellular", metered: "metered" });
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, getByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect((await findByTestId("license-network-warning")).textContent).toContain("モバイル通信を使用中です");
+    expect(start).not.toHaveBeenCalled();
+    await fireEvent.click(getByTestId("license-accept"));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("未同意・回線が不明: 同意ダイアログに注記つきの警告を出し、同意すれば開始できる", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: false })));
+    setNetwork({ transport: "unknown", metered: "unknown" });
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, getByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect((await findByTestId("license-network-warning")).textContent).toContain("回線の種類を判定できませんでした");
+    await fireEvent.click(getByTestId("license-accept"));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("未同意で、通信種別の取得にも失敗: 不明として同意ダイアログに注記を出し、同意すれば開始できる", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: false })));
+    network.mockRejectedValue(new Error("ipc down"));
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, getByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect((await findByTestId("license-network-warning")).textContent).toContain("回線の種類を判定できませんでした");
+    await fireEvent.click(getByTestId("license-accept"));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("回線の状態を読んでいる間の連打は、読むのも確認を出すのも1回だけ", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    let release: (n: Net) => void = () => {};
+    network.mockReturnValue(new Promise<Net>((r) => (release = r)) as never);
+    const { findByTestId, queryAllByRole } = render(LocalModelCard);
+    const button = await findByTestId("local-model-download");
+    await fireEvent.click(button);
+    await fireEvent.click(button);
+    expect(network).toHaveBeenCalledTimes(1);
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    release({ transport: "cellular", metered: "metered" });
+    await vi.waitFor(() => expect(queryAllByRole("dialog").length).toBe(1));
+  });
+
+  it("同意済み・モバイル通信で続けたあと開始に失敗したら、理由を出して確認を閉じる", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    setNetwork({ transport: "cellular", metered: "metered" });
+    vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue({
+      status: "error",
+      error: { kind: "invalid", message: "LOCAL_UNSUPPORTED" },
+    } as never);
+    const { findByTestId, findByText, findByRole, queryByRole } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    await fireEvent.click(await findByText("ダウンロード", { selector: "[role=dialog] button" }));
+    expect((await findByRole("alert")).textContent).toContain("LOCAL_UNSUPPORTED");
+    expect(queryByRole("dialog")).toBeNull();
+  });
+
   it("途中まで取得済みのファイルがあれば、再開できることを出す", async () => {
     vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ partialBytes: 366_000_000, licenseAccepted: true })));
     const { findByTestId } = render(LocalModelCard);
