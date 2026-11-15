@@ -1,5 +1,5 @@
 //! llama.cpp（`llama-cpp-2`）によるローカル翻訳の実体（Issue #603）。
-//! `local-translate` が有効なデスクトップのビルドだけでコンパイルされる（`mod.rs` の cfg）。
+//! cfg `llama_target`（`local-translate` が有効な Linux / macOS / Windows / Android。`build.rs` が出す）のビルドだけでコンパイルされる。
 
 use super::engine::LocalTranslator;
 use super::{invalid, prompt, ERR_TEXT_TOO_LONG};

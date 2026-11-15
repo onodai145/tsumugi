@@ -25,13 +25,13 @@ impl LocalTranslate {
         Self { loader, loaded: Mutex::new(None) }
     }
 
-    /// ローカル翻訳に対応していない構成（ビルドで無効、モバイル、モデルの置き場が未設定）。
+    /// ローカル翻訳に対応していない構成（`local-translate` が無効、対象外のターゲット、モデルの置き場が未設定）。
     pub fn unconfigured() -> Self {
         Self::new(Arc::new(|| Err(invalid(ERR_UNSUPPORTED))))
     }
 
-    /// モデルの置き場（`app_data_dir/models`）を指定して作る。対応していないビルド（`local-translate` 無効、
-    /// モバイル）では `unconfigured()` と同じ。
+    /// モデルの置き場（`app_data_dir/models`）を指定して作る。cfg `llama_target` が立たないビルド
+    /// （`local-translate` 無効、対象外のターゲット）では `unconfigured()` と同じ。
     pub fn with_models_dir(models_dir: std::path::PathBuf) -> Self {
         #[cfg(llama_target)]
         {

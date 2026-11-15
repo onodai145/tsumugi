@@ -61,8 +61,26 @@ pub fn current() -> NetworkStatus {
 }
 
 #[cfg(any(target_os = "android", test))]
-fn set(s: NetworkStatus) {
+pub(crate) fn set(s: NetworkStatus) {
     *CURRENT.lock().unwrap() = s;
+}
+
+/// 静的変数 `CURRENT` に触るテストを直列にする（テストは並列に走るので、別のテストの `set` が見えてしまう）。
+/// 戻り値を持っている間だけ他のテストは待たされ、手放すとき(パニックでも)に `Unknown` へ戻す。
+#[cfg(test)]
+pub(crate) fn serialize_tests() -> TestGuard {
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    TestGuard(TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+#[cfg(test)]
+pub(crate) struct TestGuard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+#[cfg(test)]
+impl Drop for TestGuard {
+    fn drop(&mut self) {
+        set(NetworkStatus::UNKNOWN);
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -111,11 +129,15 @@ mod tests {
 
     #[test]
     fn current_is_unknown_until_set_and_then_follows_the_last_value() {
-        // プロセス共有の静的変数なので、初期値の確認と更新の確認を 1 つのテストにまとめる（並列テストと競合させない）。
+        let _serial = serialize_tests();
         assert_eq!(current(), NetworkStatus::UNKNOWN);
-        set(NetworkStatus::from_raw(3, 1));
-        assert_eq!(current().transport, Transport::Cellular);
-        set(NetworkStatus::UNKNOWN);
-        assert_eq!(current(), NetworkStatus::UNKNOWN);
+        for _ in 0..200 {
+            set(NetworkStatus::from_raw(3, 1));
+            std::thread::yield_now();
+            assert_eq!(current().transport, Transport::Cellular);
+            set(NetworkStatus::UNKNOWN);
+            std::thread::yield_now();
+            assert_eq!(current(), NetworkStatus::UNKNOWN);
+        }
     }
 }

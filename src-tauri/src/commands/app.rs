@@ -159,8 +159,14 @@ mod tests {
     }
 
     #[test]
-    fn get_network_status_is_unknown_by_default() {
-        assert_eq!(get_network_status(), crate::network_status::NetworkStatus::UNKNOWN);
+    fn get_network_status_returns_the_value_kotlin_pushed() {
+        use crate::network_status::{serialize_tests, set, NetworkStatus, Transport};
+        let _serial = serialize_tests();
+        for _ in 0..200 {
+            set(NetworkStatus::from_raw(3, 1));
+            std::thread::yield_now();
+            assert_eq!(get_network_status().transport, Transport::Cellular);
+        }
     }
 
     #[test]

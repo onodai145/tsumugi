@@ -45,14 +45,57 @@ pub const fn is_supported() -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "android")]
     #[test]
-    fn idle_unload_is_three_minutes_on_android_and_ten_elsewhere() {
-        let want = if cfg!(target_os = "android") { 180 } else { 600 };
-        assert_eq!(IDLE_UNLOAD, std::time::Duration::from_secs(want));
+    fn idle_unload_is_three_minutes_on_android() {
+        assert_eq!(IDLE_UNLOAD, std::time::Duration::from_secs(180));
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn idle_unload_is_ten_minutes_on_desktop() {
+        assert_eq!(IDLE_UNLOAD, std::time::Duration::from_secs(600));
+    }
+
+    // `build.rs` が cfg `llama_target` を立てる条件(`llama_target.rs`)。build.rs 自身はテストを走らせられないので、
+    // 同じファイルをここにも読み込んで、ターゲットごとの表で確かめる。
+    mod llama_target_rule {
+        include!("../../llama_target.rs");
+
+        #[test]
+        fn is_on_for_the_desktop_oses_and_every_android_abi_with_the_feature() {
+            for os in ["linux", "macos", "windows"] {
+                assert!(llama_target(true, os, "x86_64"), "{os}");
+            }
+            for arch in ["aarch64", "x86_64", "arm", "x86"] {
+                assert!(llama_target(true, "android", arch), "android {arch}");
+            }
+        }
+
+        #[test]
+        fn is_off_without_the_feature_on_any_target() {
+            for (os, arch) in [("linux", "x86_64"), ("macos", "aarch64"), ("windows", "x86_64"), ("android", "aarch64")] {
+                assert!(!llama_target(false, os, arch), "{os} {arch}");
+            }
+        }
+
+        #[test]
+        fn is_off_for_unsupported_targets_even_with_the_feature() {
+            // 配布しない OS(BSD など)と iOS、Android でも未確認の ABI(riscv64 など)。
+            for (os, arch) in [("freebsd", "x86_64"), ("openbsd", "x86_64"), ("ios", "aarch64"), ("android", "riscv64")] {
+                assert!(!llama_target(true, os, arch), "{os} {arch}");
+            }
+        }
     }
 
     #[test]
-    fn is_supported_follows_the_llama_target_cfg() {
-        assert_eq!(is_supported(), cfg!(llama_target));
+    fn is_supported_matches_the_rule_for_the_target_this_test_runs_on() {
+        // build.rs が実際に出した cfg が、同じ規則を今のターゲットに当てた結果と一致する(配線の確認)。
+        let want = llama_target_rule::llama_target(
+            cfg!(feature = "local-translate"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+        assert_eq!(is_supported(), want);
     }
 }

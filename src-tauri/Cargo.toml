@@ -23,7 +23,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 default = ["custom-protocol", "local-translate"]
 custom-protocol = ["tauri/custom-protocol"]
 # ローカル翻訳（PLaMo 3 Translate、Issue #603）。llama.cpp の C++ ビルドが走るので、重いビルドを避けたい
-# 開発時は無効にできる。無効のとき（とモバイル）は、ローカル翻訳は「非対応」を返す。
+# 開発時は無効にできる。無効のとき（と対象外のターゲット）は、ローカル翻訳は「非対応」を返す。
 local-translate = ["dep:llama-cpp-2"]
 
 [build-dependencies]
