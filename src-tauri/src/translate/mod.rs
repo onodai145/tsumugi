@@ -16,7 +16,10 @@ pub mod prompt;
 pub use local_models::LocalModels;
 pub use manager::LocalTranslate;
 
-/// アイドルがこれだけ続いたらモデルを解放する（初期値。Android は段階3で短くする）。
+/// アイドルがこれだけ続いたらモデルを解放する。Android はメモリが厳しいので短くする（実機の実測で見直す）。
+#[cfg(target_os = "android")]
+pub const IDLE_UNLOAD: std::time::Duration = std::time::Duration::from_secs(180);
+#[cfg(not(target_os = "android"))]
 pub const IDLE_UNLOAD: std::time::Duration = std::time::Duration::from_secs(600);
 /// アイドル解放の確認間隔。
 pub const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -41,6 +44,12 @@ pub const fn is_supported() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_unload_is_three_minutes_on_android_and_ten_elsewhere() {
+        let want = if cfg!(target_os = "android") { 180 } else { 600 };
+        assert_eq!(IDLE_UNLOAD, std::time::Duration::from_secs(want));
+    }
 
     #[test]
     fn is_supported_follows_the_llama_target_cfg() {
