@@ -2,6 +2,9 @@ package com.onodai.tsumugi
 
 import android.content.Intent
 import android.database.Cursor
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,6 +23,44 @@ class MainActivity : TauriActivity() {
     /// Rust側(mobile_intent.rs)へ共有インテントの内容を渡す(Issue #116)。
     /// `libtsumugi_lib.so` は generated/Rust.kt が既にロード済みなので追加ロード不要。
     private external fun nativeShareReceived(text: String?, filePaths: Array<String>)
+
+    /// Rust側(network_status.rs)へ回線の状態を渡す(Issue #603)。値の対応は network_status.rs の `from_raw` と同じ:
+    /// transport 0=不明 1=Wi-Fi 2=Ethernet 3=モバイル 4=その他、metered 0=不明 1=従量制 2=非従量制。
+    private external fun nativeNetworkChanged(transport: Int, metered: Int)
+
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private fun publishNetwork(caps: NetworkCapabilities?) {
+        if (caps == null) {
+            nativeNetworkChanged(0, 0)
+            return
+        }
+        // VPN は TRANSPORT_VPN のみで下層の種類が見えないことがある。その場合は「その他」とし、従量制の値だけで判断する。
+        val transport = when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 1
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> 2
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> 3
+            else -> 4
+        }
+        val metered = if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) 2 else 1
+        nativeNetworkChanged(transport, metered)
+    }
+
+    /// 既定のネットワークの変化を監視する(ダウンロード前の警告に使う)。権限が無い・取得できないときは
+    /// 何も渡さず、Rust側は不明のまま(安全側の確認が出るだけで、ダウンロードは妨げない)。
+    private fun startNetworkMonitoring() {
+        try {
+            val cm = getSystemService(ConnectivityManager::class.java) ?: return
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = publishNetwork(caps)
+                override fun onLost(network: Network) = publishNetwork(null)
+            }
+            cm.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (e: Exception) {
+            Log.w("MainActivity", "network monitoring unavailable", e)
+        }
+    }
 
     /// handleShareIntent() の呼び出し1回ごとに一意な値を振る(Issue #116 最終レビュー指摘: バッチを
     /// 跨いだファイル名衝突対策)。System.currentTimeMillis() だけだと同一ミリ秒内の連続呼び出しで
@@ -71,6 +112,8 @@ class MainActivity : TauriActivity() {
         // 初期化する。Tauri は自動で行わないため、ここで明示的に呼ぶ必要がある。
         Keyring.initializeNdkContext(applicationContext)
 
+        startNetworkMonitoring()
+
         // 前回起動分の共有インテント一時ファイルの残骸を掃除する(Issue #116)。
         File(cacheDir, "shared-intents").deleteRecursively()
 
@@ -83,6 +126,17 @@ class MainActivity : TauriActivity() {
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
             handleShareIntent(intent)
         }
+    }
+
+    override fun onDestroy() {
+        networkCallback?.let {
+            try {
+                getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(it)
+            } catch (_: Exception) {
+            }
+        }
+        networkCallback = null
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {

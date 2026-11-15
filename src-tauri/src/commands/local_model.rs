@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(s.settings.local_model_license_version(), None, "開始できなかったら同意を記録しない");
     }
 
-    #[cfg(all(feature = "local-translate", desktop))]
+    #[cfg(llama_target)]
     #[tokio::test]
     async fn the_right_version_starts_and_records_the_acceptance() {
         use wiremock::matchers::method;

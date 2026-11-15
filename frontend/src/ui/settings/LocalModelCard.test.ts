@@ -32,10 +32,16 @@ const info = (over: Partial<LocalModelInfo> = {}): LocalModelInfo => ({
 
 let emit: (s: LocalModelStatus) => void = () => {};
 const unlisten = vi.fn();
+type Net = { transport: "wifi" | "ethernet" | "cellular" | "other" | "unknown"; metered: "metered" | "unmetered" | "unknown" };
+let network: ReturnType<typeof vi.spyOn>;
+const setNetwork = (n: Net) => network.mockResolvedValue(n as never);
 
 beforeEach(() => {
   openUrl.mockReset();
   unlisten.mockReset();
+  // 既定は非従量制の Wi-Fi（確認なしで始まる）。回線ごとの挙動は各テストで setNetwork で切り替える。
+  network = vi.spyOn(commands, "getNetworkStatus");
+  setNetwork({ transport: "wifi", metered: "unmetered" });
   vi.spyOn(events.localModelStatusChanged, "listen").mockImplementation((async (cb: (e: { payload: { status: LocalModelStatus } }) => void) => {
     emit = (status) => cb({ payload: { status } });
     return unlisten;
@@ -228,7 +234,7 @@ describe("LocalModelCard", () => {
     const button = await findByTestId("local-model-download");
     await fireEvent.click(button);
     await fireEvent.click(button);
-    expect(start).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     expect((button as HTMLButtonElement).disabled).toBe(true);
     release(ok(null));
     await vi.waitFor(() => expect(queryByRole("alert")).toBeNull());
@@ -248,6 +254,132 @@ describe("LocalModelCard", () => {
     expect(start).toHaveBeenCalledTimes(1);
     expect((accept as HTMLButtonElement).disabled).toBe(true);
     release(ok(null));
+  });
+
+  it("同意済み・モバイル通信: 警告つきの確認を出し、続けるまで開始しない", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    setNetwork({ transport: "cellular", metered: "metered" });
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, findByText } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect(await findByText(/モバイル通信を使用中です/)).toBeTruthy();
+    expect(start).not.toHaveBeenCalled();
+    await fireEvent.click(await findByText("ダウンロード", { selector: "[role=dialog] button" }));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("同意済み・モバイル通信: キャンセルすると開始しない", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    setNetwork({ transport: "cellular", metered: "metered" });
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, findByText, queryByText } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    await fireEvent.click(await findByText("キャンセル", { selector: "[role=dialog] button" }));
+    expect(queryByText(/モバイル通信を使用中です/)).toBeNull();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("同意済み・従量制の Wi-Fi: 従量制の確認を出す", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    setNetwork({ transport: "wifi", metered: "metered" });
+    const { findByTestId, findByText } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect(await findByText(/従量制の接続です/)).toBeTruthy();
+  });
+
+  it("未同意・従量制: 同意ダイアログの中に警告を出す（別の確認は重ねない）", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: false })));
+    setNetwork({ transport: "wifi", metered: "metered" });
+    const { findByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect((await findByTestId("license-network-warning")).textContent).toContain("従量制の接続です");
+    expect(document.body.querySelectorAll("[role=dialog]").length).toBe(1);
+  });
+
+  it("回線が不明（回線なし・VPN・デスクトップ）なら、安全側に倒して注記つきの確認を出し、続ければ開始できる", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    setNetwork({ transport: "unknown", metered: "unknown" });
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, findByText } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect(await findByText(/回線の種類を判定できませんでした/)).toBeTruthy();
+    expect(start).not.toHaveBeenCalled();
+    await fireEvent.click(await findByText("ダウンロード", { selector: "[role=dialog] button" }));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("通信種別の取得に失敗したら、不明として注記つきの確認を出し、続ければ開始できる（取得の失敗がダウンロードを妨げない）", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    network.mockRejectedValue(new Error("ipc down"));
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, findByText } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect(await findByText(/回線の種類を判定できませんでした/)).toBeTruthy();
+    expect(start).not.toHaveBeenCalled();
+    await fireEvent.click(await findByText("ダウンロード", { selector: "[role=dialog] button" }));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("未同意・モバイル通信: 同意ダイアログの中の警告を見たうえで同意すると開始する", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: false })));
+    setNetwork({ transport: "cellular", metered: "metered" });
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, getByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect((await findByTestId("license-network-warning")).textContent).toContain("モバイル通信を使用中です");
+    expect(start).not.toHaveBeenCalled();
+    await fireEvent.click(getByTestId("license-accept"));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("未同意・回線が不明: 同意ダイアログに注記つきの警告を出し、同意すれば開始できる", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: false })));
+    setNetwork({ transport: "unknown", metered: "unknown" });
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, getByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect((await findByTestId("license-network-warning")).textContent).toContain("回線の種類を判定できませんでした");
+    await fireEvent.click(getByTestId("license-accept"));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("未同意で、通信種別の取得にも失敗: 不明として同意ダイアログに注記を出し、同意すれば開始できる", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: false })));
+    network.mockRejectedValue(new Error("ipc down"));
+    const start = vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue(ok(null));
+    const { findByTestId, getByTestId } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    expect((await findByTestId("license-network-warning")).textContent).toContain("回線の種類を判定できませんでした");
+    await fireEvent.click(getByTestId("license-accept"));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith("2026-11-09"));
+  });
+
+  it("回線の状態を読んでいる間の連打は、読むのも確認を出すのも1回だけ", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    let release: (n: Net) => void = () => {};
+    network.mockReturnValue(new Promise<Net>((r) => (release = r)) as never);
+    const { findByTestId, queryAllByRole } = render(LocalModelCard);
+    const button = await findByTestId("local-model-download");
+    await fireEvent.click(button);
+    await fireEvent.click(button);
+    expect(network).toHaveBeenCalledTimes(1);
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    release({ transport: "cellular", metered: "metered" });
+    await vi.waitFor(() => expect(queryAllByRole("dialog").length).toBe(1));
+  });
+
+  it("同意済み・モバイル通信で続けたあと開始に失敗したら、理由を出して確認を閉じる", async () => {
+    vi.spyOn(commands, "getLocalModelStatus").mockResolvedValue(ok(info({ licenseAccepted: true })));
+    setNetwork({ transport: "cellular", metered: "metered" });
+    vi.spyOn(commands, "startLocalModelDownload").mockResolvedValue({
+      status: "error",
+      error: { kind: "invalid", message: "LOCAL_UNSUPPORTED" },
+    } as never);
+    const { findByTestId, findByText, findByRole, queryByRole } = render(LocalModelCard);
+    await fireEvent.click(await findByTestId("local-model-download"));
+    await fireEvent.click(await findByText("ダウンロード", { selector: "[role=dialog] button" }));
+    expect((await findByRole("alert")).textContent).toContain("LOCAL_UNSUPPORTED");
+    expect(queryByRole("dialog")).toBeNull();
   });
 
   it("途中まで取得済みのファイルがあれば、再開できることを出す", async () => {

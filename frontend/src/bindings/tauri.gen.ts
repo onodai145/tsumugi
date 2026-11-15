@@ -46,6 +46,11 @@ export const commands = {
 	filePaths: string[],
 } | null>("get_pending_share"),
 	/**
+	 *  Android の回線の種類と従量制（Issue #603 段階3）。Kotlin から届いた最新の値で、まだ届いていなければ、
+	 *  および Android 以外では `Unknown / Unknown`。
+	 */
+	getNetworkStatus: () => __TAURI_INVOKE<NetworkStatus>("get_network_status"),
+	/**
 	 *  セーフモード（カスタムCSSを適用しない）で起動しているか（Issue #93）。
 	 *  CSSで設定画面を操作不能にした場合の復旧手段で、`TSUMUGI_SAFE_MODE=1` を付けて起動する。
 	 *  Androidは環境変数を渡せないため常に false。
@@ -936,6 +941,8 @@ export type McpStatus = {
 	exposedAccountIds: string[],
 };
 
+export type Metered = "metered" | "unmetered" | "unknown";
+
 /**  `start_miauth` の戻り値。フロントは `url` をブラウザで開く。 */
 export type MiAuthSession = {
 	url: string,
@@ -974,6 +981,11 @@ export type MuteConfig = {
  *  を送らないため。
  */
 export type MutePeriod = "indefinitely" | "tenMinutes" | "oneHour" | "oneDay" | "oneWeek";
+
+export type NetworkStatus = {
+	transport: Transport,
+	metered: Metered,
+};
 
 /**  docs/design/filter-dsl-design.md §7 / 設計書§5.1。フィルタ評価の対象そのもの。 */
 export type Note = {
@@ -1312,6 +1324,8 @@ export type Translation = {
 	sourceLang: string | null,
 	text: string,
 };
+
+export type Transport = "wifi" | "ethernet" | "cellular" | "other" | "unknown";
 
 /**  表示まわりのグローバル設定。テーマ・新規カラムの既定幅・キーバインド上書き・フォント・背景。 */
 export type UiPrefs = {

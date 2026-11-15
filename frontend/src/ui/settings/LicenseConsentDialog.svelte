@@ -9,10 +9,19 @@
   let {
     sizeBytes,
     busy = false,
+    networkWarning = null,
     onAccept,
     onCancel,
     onOpenLicense,
-  }: { sizeBytes: number; busy?: boolean; onAccept: () => void; onCancel: () => void; onOpenLicense: () => void } = $props();
+  }: {
+    sizeBytes: number;
+    busy?: boolean;
+    // 回線の状態からの警告（モバイル通信・従量制・判定できないとき）。無ければ出さない。
+    networkWarning?: string | null;
+    onAccept: () => void;
+    onCancel: () => void;
+    onOpenLicense: () => void;
+  } = $props();
 
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
@@ -60,6 +69,9 @@
       <li>ライセンスは PFN が一方的に改定できます。版が変わったときは、次のダウンロードの前に再度同意を求めます。</li>
       <li>取得するファイルは約 {formatBytes(sizeBytes)} です。</li>
     </ul>
+    {#if networkWarning}
+      <p class="mb-2 mt-0 rounded-lg bg-muted p-2 text-sm text-foreground" role="status" data-testid="license-network-warning">{networkWarning}</p>
+    {/if}
     <p class="mb-4 mt-0 text-sm">
       <button type="button" class="border-0 bg-transparent p-0 text-left text-sm text-primary hover:underline" onclick={onOpenLicense}>
         ライセンス全文（日本語）を開く

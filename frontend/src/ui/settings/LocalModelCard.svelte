@@ -4,7 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { commands, events, unwrap } from "../../lib/ipc";
   import type { LocalModelInfo, LocalModelStatus } from "../../lib/ipc";
-  import { formatBytes, progressPercent, statusText } from "../../lib/localModel";
+  import { downloadWarning, formatBytes, progressPercent, statusText, UNKNOWN_NETWORK } from "../../lib/localModel";
   import ConfirmDialog from "../ConfirmDialog.svelte";
   import LicenseConsentDialog from "./LicenseConsentDialog.svelte";
 
@@ -15,6 +15,11 @@
   let status = $state<LocalModelStatus>({ type: "notInstalled" });
   let err = $state<string | null>(null);
   let consentOpen = $state(false);
+  let confirmOpen = $state(false);
+  // ダウンロード前の確認の文面（モバイル通信・従量制・回線が判定できないとき）。無ければ null。確認と同意の両方のダイアログが使う。
+  let networkWarning = $state<string | null>(null);
+  // 回線の状態を読んでいる間 true（連打で二重に確認を出さない）。
+  let checking = $state(false);
   let deleteOpen = $state(false);
 
   // イベントを受けるたびに進める。refresh の応答が、それより新しいイベントの状態を古いスナップショットで上書きしないために使う。
@@ -72,18 +77,34 @@
     try {
       await unwrap(commands.startLocalModelDownload(info.licenseVersion));
       consentOpen = false;
+      confirmOpen = false;
       await refresh();
     } catch (e) {
       consentOpen = false;
+      confirmOpen = false;
       err = String(e);
     } finally {
       starting = false;
     }
   }
 
-  // 同意済みの版が現行と同じなら、ダイアログを出さずに開始する(版が変わったときだけ再同意)。
-  function onDownload() {
-    if (info?.licenseAccepted) void start();
+  // 回線の状態を読み、確認が要るとき（モバイル通信・従量制・判定できないとき）か、同意が要るときだけダイアログを出す。
+  // 状態を取得できなくても、不明として確認を出すだけで、続ければ開始できる。
+  // 同意済みの版が現行と同じで、確認も要らないなら、ダイアログを出さずに開始する(版が変わったときだけ再同意)。
+  async function onDownload() {
+    if (!info || starting || checking) return;
+    checking = true;
+    let warning: string | null;
+    try {
+      warning = downloadWarning(await commands.getNetworkStatus(), info.sizeBytes);
+    } catch {
+      warning = downloadWarning(UNKNOWN_NETWORK, info.sizeBytes);
+    } finally {
+      checking = false;
+    }
+    networkWarning = warning;
+    if (info.licenseAccepted && !warning) void start();
+    else if (info.licenseAccepted) confirmOpen = true;
     else consentOpen = true;
   }
 
@@ -131,7 +152,7 @@
       </div>
       <div class="flex gap-2">
         {#if status.type === "notInstalled" || status.type === "failed"}
-          <Button size="sm" onclick={onDownload} disabled={starting} data-testid="local-model-download">ダウンロード</Button>
+          <Button size="sm" onclick={onDownload} disabled={starting || checking} data-testid="local-model-download">ダウンロード</Button>
         {:else if status.type === "downloading"}
           <Button size="sm" variant="secondary" onclick={cancel} data-testid="local-model-cancel">キャンセル</Button>
         {:else if status.type === "ready"}
@@ -167,10 +188,20 @@
   {/if}
 </div>
 
+{#if confirmOpen && info}
+  <ConfirmDialog
+    title="モデルをダウンロード"
+    message={networkWarning ?? ""}
+    confirmLabel="ダウンロード"
+    onConfirm={start}
+    onCancel={() => (confirmOpen = false)}
+  />
+{/if}
 {#if consentOpen && info}
   <LicenseConsentDialog
     sizeBytes={info.sizeBytes}
     busy={starting}
+    {networkWarning}
     onAccept={start}
     onCancel={() => (consentOpen = false)}
     onOpenLicense={() => info && openUrl(info.licenseUrl)}
