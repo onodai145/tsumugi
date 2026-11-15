@@ -479,7 +479,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: needs.changes.outputs.code == 'true'
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         if: needs.changes.outputs.code == 'true'
@@ -517,9 +517,11 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      - name: cargo tauri android build (debug, ビルド検証のみ)
+      # リリース・nightly の Android は全 ABI(universal)をビルドする。ローカル翻訳(Issue #603)の llama.cpp は
+      # ABI ごとに C++ のコンパイル(各 約2分)が走るので、どの ABI が壊れてもリリースまで気付けないよう、ここでも全 ABI を通す。
+      - name: cargo tauri android build (debug, 全ABI, ビルド検証のみ)
         if: needs.changes.outputs.code == 'true'
         working-directory: src-tauri
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: cargo tauri android build --debug --target aarch64
+        run: cargo tauri android build --debug --target aarch64 --target armv7 --target i686 --target x86_64
