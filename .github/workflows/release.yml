@@ -223,13 +223,17 @@ jobs:
       - name: cargo tauri android build (release, 署名済み, universal)
         working-directory: src-tauri
         env:
+          # llama.cpp(ローカル翻訳、Issue #603)の build.rs は NDK_HOME / ANDROID_NDK_HOME を見ず、ANDROID_NDK / ANDROID_NDK_ROOT / NDK_ROOT が
+          # 無いと SDK 内で最新の NDK を使う。リンク先(r27c)と別の版でコンパイルすると、端末の起動時にクラッシュする。
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: cargo tauri android build
 
       - name: cargo tauri android build (release, 署名済み, per-ABI)
         working-directory: src-tauri
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: cargo tauri android build --split-per-abi
 
       # 全部入りのuniversal APKはファイルサイズが大きくなるため(Issue #69)、
