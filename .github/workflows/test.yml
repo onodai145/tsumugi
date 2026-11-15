@@ -542,3 +542,14 @@ jobs:
           for abi in aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android; do
             scripts/check-android-libcxx.sh "src-tauri/target/$abi/debug/libtsumugi_lib.so" "$nm"
           done
+
+      # 64bit の .so が 16KB でアラインされていること。4KB のままだと、16KB ページの端末で起動のたびに
+      # 「16 KB ページサイズに未対応」の警告が出る(Issue #603)。設定は src-tauri/.cargo/config.toml。
+      - name: libtsumugi_lib.so(64bit)が 16KB でアラインされていること
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          readelf="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          scripts/check-android-page-size.test.sh "$readelf"
+          for abi in aarch64-linux-android x86_64-linux-android; do
+            scripts/check-android-page-size.sh "src-tauri/target/$abi/debug/libtsumugi_lib.so" "$readelf"
+          done

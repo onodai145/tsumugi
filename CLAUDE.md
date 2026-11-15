@@ -42,7 +42,7 @@ Android build support exists (`src-tauri/tauri.android.conf.json`, `src-tauri/ge
 ```sh
 cd src-tauri && cargo tauri android build --debug --target aarch64 --target armv7 --target i686 --target x86_64
 ```
-Requires NDK r27c. The symlinks inside the NDK toolchain that `setup-ndk` extracts are relative, so they break if the extraction path changes — CI re-points them to absolute paths as a workaround (see the comment above the `Restore Android NDK symlinks` step of the `android-build` job in `test.yml`).
+Requires NDK r27c. NDK r27 aligns ELF LOAD segments to 4KB, which makes devices with 16KB pages show a "not 16 KB compatible" dialog on every launch (seen on a Pixel 8 Pro); `src-tauri/.cargo/config.toml` sets `-Wl,-z,max-page-size=16384` for the 64-bit targets (setting the `RUSTFLAGS` env var overrides it), and `scripts/check-android-page-size.sh <libtsumugi_lib.so> <NDK>/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf` checks it (CI runs it too). The symlinks inside the NDK toolchain that `setup-ndk` extracts are relative, so they break if the extraction path changes — CI re-points them to absolute paths as a workaround (see the comment above the `Restore Android NDK symlinks` step of the `android-build` job in `test.yml`).
 
 If the build fails during Gradle configuration with `A problem occurred configuring project ':buildSrc'` and a cause like `IllegalArgumentException: 26.0.2` (or any JDK version string), it's not an NDK issue — Gradle 8.14.3's bundled Kotlin DSL compiler can't parse newer JDK version strings when evaluating `buildSrc`'s `build.gradle.kts`. Build with an older JDK, e.g. `JAVA_HOME=/usr/lib/jvm/java-21-openjdk cargo tauri android build --debug --target aarch64`.
 

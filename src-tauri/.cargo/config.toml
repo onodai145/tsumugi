@@ -2,3 +2,13 @@
 # OOM になることがある（16 コアの開発機で実際に発生）。cmake に渡す並列度を抑える。
 [env]
 CMAKE_BUILD_PARALLEL_LEVEL = "4"
+
+# Android の 64bit は、LOAD セグメントを 16KB でアラインする。NDK r27 の既定は 4KB で、16KB ページの端末では
+# 起動のたびに「16 KB ページサイズに未対応」の警告が出る(実機の Pixel 8 Pro で確認、Issue #603)。
+# 32bit の ABI は対象外。`RUSTFLAGS` 環境変数を設定すると、この指定は無視される。
+# 確認は scripts/check-android-page-size.sh(CI でも実行する)。
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

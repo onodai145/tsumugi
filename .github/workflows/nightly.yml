@@ -326,6 +326,14 @@ jobs:
             scripts/check-android-libcxx.sh "src-tauri/target/$abi/release/libtsumugi_lib.so" "$nm"
           done
 
+      # 64bit の .so が 16KB でアラインされていること(4KB だと、16KB ページの端末で起動のたびに警告が出る。Issue #603)。
+      - name: libtsumugi_lib.so(64bit)が 16KB でアラインされていること
+        run: |
+          readelf="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          for abi in aarch64-linux-android x86_64-linux-android; do
+            scripts/check-android-page-size.sh "src-tauri/target/$abi/release/libtsumugi_lib.so" "$readelf"
+          done
+
       # 全部入りのuniversal APKはファイルサイズが大きくなるため(Issue #69)、
       # アーキテクチャ別APK(cargo tauri android build が productFlavor 経由で
       # 同時に生成済み。src-tauri/gen/android/buildSrc の RustPlugin.kt 参照)も
