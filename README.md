@@ -25,6 +25,7 @@
 - 1カラム内に複数タブを持たせ、タブ単位で TQL（Tsumugi Query Language）による柔軟なフィルタを設定可能
 - 複数のMisskeyアカウントを同時にログインし、投稿やカラムごとに使い分け可能
 - テーマ・フォント・背景画像などの詳細なカスタマイズに対応
+- 端末内で動く翻訳(PLaMo 3 Translate、デスクトップ版)。サーバーに翻訳機能がなくても使えます。モデルは同梱せず、設定から初回に取得します(約 573MB)。**Built with PLaMo**
 - Krileを使ってた人はなんとなく使えるはず
 
 ## ダウンロード
@@ -105,3 +106,5 @@ cd frontend  && pnpm exec svelte-check
 ## ライセンス
 
 [MIT License](LICENSE)
+
+翻訳モデル「PLaMo 3 Translate」(Preferred Networks)は本ソフトウェアに同梱していません。ユーザーが設定からダウンロードして使うもので、[PLaMo Community License](https://huggingface.co/pfnet/plamo-3-translate-0.8b-GGUF/blob/1cf96ae02133958a20074bfdfab76517bb737d00/LICENSE/ja) に従います。個人・非商用の利用は無料で、商用で利用する場合は事前の登録などの条件があります。**Built with PLaMo**
