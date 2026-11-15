@@ -33,7 +33,7 @@ impl LocalTranslate {
     /// モデルの置き場（`app_data_dir/models`）を指定して作る。対応していないビルド（`local-translate` 無効、
     /// モバイル）では `unconfigured()` と同じ。
     pub fn with_models_dir(models_dir: std::path::PathBuf) -> Self {
-        #[cfg(all(feature = "local-translate", desktop))]
+        #[cfg(llama_target)]
         {
             Self::new(Arc::new(move || {
                 let path = super::model_store::model_path(&models_dir);
@@ -47,7 +47,7 @@ impl LocalTranslate {
                 Ok(Arc::new(translator) as Arc<dyn LocalTranslator>)
             }))
         }
-        #[cfg(not(all(feature = "local-translate", desktop)))]
+        #[cfg(not(llama_target))]
         {
             let _ = models_dir;
             Self::unconfigured()

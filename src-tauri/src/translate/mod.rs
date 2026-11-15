@@ -7,7 +7,7 @@ pub mod download;
 pub mod engine;
 pub mod lang;
 pub mod local_models;
-#[cfg(all(feature = "local-translate", desktop))]
+#[cfg(llama_target)]
 pub mod llama;
 pub mod manager;
 pub mod model_store;
@@ -35,5 +35,15 @@ pub fn invalid(code: &str) -> Error {
 
 /// このビルド・プラットフォームでローカル翻訳が使えるか。
 pub const fn is_supported() -> bool {
-    cfg!(all(feature = "local-translate", desktop))
+    cfg!(llama_target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_supported_follows_the_llama_target_cfg() {
+        assert_eq!(is_supported(), cfg!(llama_target));
+    }
 }
