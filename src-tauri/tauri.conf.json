@@ -40,6 +40,9 @@
     "android": {
       "debugApplicationIdSuffix": ".debug",
       "minSdkVersion": 26
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
     }
   }
 }

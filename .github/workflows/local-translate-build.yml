@@ -9,6 +9,7 @@ on:
       - "src-tauri/Cargo.toml"
       - "src-tauri/Cargo.lock"
       - "src-tauri/.cargo/**"
+      - "src-tauri/tauri.conf.json"
       - "src-tauri/src/translate/**"
       - ".github/workflows/local-translate-build.yml"
 
@@ -58,6 +59,18 @@ jobs:
         run: |
           mkdir -p frontend/dist
           echo '<!doctype html>' > frontend/dist/index.html
+
+      # `tauri build`（nightly / release）は、tauri.conf.json の bundle.macOS.minimumSystemVersion を、
+      # 最低バージョンとして C++ のコンパイルに渡す（`-mmacosx-version-min`。未設定の既定は 10.13）。llama.cpp は
+      # std::filesystem（macOS 10.15 以降）を使うので、それを下回るとコンパイルできない（Issue #603、nightly で発覚）。
+      # この確認が既定の最低バージョンだけで走ると見逃すので、設定の値を同じように渡す。
+      - name: Use the app's minimum macOS version (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          v=$(jq -r '.bundle.macOS.minimumSystemVersion // "10.13"' src-tauri/tauri.conf.json)
+          echo "MACOSX_DEPLOYMENT_TARGET=$v" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=$v"
 
       - name: cargo check (llama.cpp のビルドを含む)
         working-directory: src-tauri
