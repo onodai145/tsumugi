@@ -227,6 +227,8 @@ jobs:
           # 無いと SDK 内で最新の NDK を使う。リンク先(r27c)と別の版でコンパイルすると、端末の起動時にクラッシュする。
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          # llama.cpp は、指定が無いと API 28 でコンパイルされる。アプリの minSdk(26)に揃える。
+          ANDROID_PLATFORM: android-26
         run: cargo tauri android build
 
       - name: cargo tauri android build (release, 署名済み, per-ABI)
@@ -234,6 +236,7 @@ jobs:
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_PLATFORM: android-26
         run: cargo tauri android build --split-per-abi
 
       # 配布する .so に、libc++ の未解決シンボルが無いこと(llama.cpp を別の版の NDK でコンパイルすると、リンクは通るが

@@ -527,6 +527,8 @@ jobs:
           # 無いと SDK 内で最新の NDK を使う。リンク先(r27c)と別の版でコンパイルすると、端末の起動時にクラッシュする。
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          # llama.cpp は、指定が無いと API 28 でコンパイルされる。アプリの minSdk(26)に揃える。
+          ANDROID_PLATFORM: android-26
         run: cargo tauri android build --debug --target aarch64 --target armv7 --target i686 --target x86_64
 
       # llama.cpp を別の版の NDK でコンパイルしていないこと。リンクは通るが、端末で起動時に
