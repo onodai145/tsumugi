@@ -11,6 +11,7 @@ mod filter;
 mod mcp;
 mod mml;
 mod mobile_intent;
+mod network_status;
 mod net_guard;
 mod scheduler;
 mod session;
@@ -36,6 +37,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::open_devtools,
             commands::app::log_frontend_event,
             commands::app::get_pending_share,
+            commands::app::get_network_status,
             commands::app::is_safe_mode,
             commands::account::start_miauth,
             commands::account::complete_miauth,

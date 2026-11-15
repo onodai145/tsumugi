@@ -23,7 +23,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 default = ["custom-protocol", "local-translate"]
 custom-protocol = ["tauri/custom-protocol"]
 # ローカル翻訳（PLaMo 3 Translate、Issue #603）。llama.cpp の C++ ビルドが走るので、重いビルドを避けたい
-# 開発時は無効にできる。無効のとき（とモバイル）は、ローカル翻訳は「非対応」を返す。
+# 開発時は無効にできる。無効のとき（と対象外のターゲット）は、ローカル翻訳は「非対応」を返す。
 local-translate = ["dep:llama-cpp-2"]
 
 [build-dependencies]
@@ -125,6 +125,9 @@ zbus-secret-service-keyring-store = { version = "1.0.0", features = ["crypto-rus
 [target.'cfg(target_os = "android")'.dependencies]
 android-native-keyring-store = "1.0.0"
 jni = "0.22"
+# ローカル翻訳（Issue #603）。Android は ABI を絞らず、ビルドできた ABI すべてで有効にする
+# （build.rs の `llama_target` と同じ条件）。OpenMP と共有 libc++ は使わない。
+llama-cpp-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "955aa2f72463c2535cc5ab894d5d52f27a38cde2", default-features = false, features = ["common", "android-static-stdcxx"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # wry が内部で無効化している IME preedit(未確定文字列インライン表示)を明示的に

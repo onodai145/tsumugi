@@ -223,14 +223,39 @@ jobs:
       - name: cargo tauri android build (release, 署名済み, universal)
         working-directory: src-tauri
         env:
+          # llama.cpp(ローカル翻訳、Issue #603)の build.rs は NDK_HOME / ANDROID_NDK_HOME を見ず、ANDROID_NDK / ANDROID_NDK_ROOT / NDK_ROOT が
+          # 無いと SDK 内で最新の NDK を使う。リンク先(r27c)と別の版でコンパイルすると、端末の起動時にクラッシュする。
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          # llama.cpp は、指定が無いと API 28 でコンパイルされる。アプリの minSdk(26)に揃える。
+          ANDROID_PLATFORM: android-26
         run: cargo tauri android build
 
       - name: cargo tauri android build (release, 署名済み, per-ABI)
         working-directory: src-tauri
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_PLATFORM: android-26
         run: cargo tauri android build --split-per-abi
+
+      # 配布する .so に、libc++ の未解決シンボルが無いこと(llama.cpp を別の版の NDK でコンパイルすると、リンクは通るが
+      # 全 Android ユーザーが起動時にクラッシュする。Issue #603)。debug ビルドは test.yml が見ているが、プロファイルも
+      # キャッシュも別なので、配布物のビルドでも確かめる。
+      - name: libtsumugi_lib.so に libc++ の未解決シンボルが無いこと
+        run: |
+          nm="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          for abi in aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android; do
+            scripts/check-android-libcxx.sh "src-tauri/target/$abi/release/libtsumugi_lib.so" "$nm"
+          done
+
+      # 64bit の .so が 16KB でアラインされていること(4KB だと、16KB ページの端末で起動のたびに警告が出る。Issue #603)。
+      - name: libtsumugi_lib.so(64bit)が 16KB でアラインされていること
+        run: |
+          readelf="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          for abi in aarch64-linux-android x86_64-linux-android; do
+            scripts/check-android-page-size.sh "src-tauri/target/$abi/release/libtsumugi_lib.so" "$readelf"
+          done
 
       # 全部入りのuniversal APKはファイルサイズが大きくなるため(Issue #69)、
       # アーキテクチャ別APK(cargo tauri android build が productFlavor 経由で

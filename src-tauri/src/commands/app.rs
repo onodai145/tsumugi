@@ -122,6 +122,14 @@ pub fn get_pending_share() -> Option<ShareReceived> {
     crate::mobile_intent::take_pending_share()
 }
 
+/// Android の回線の種類と従量制（Issue #603 段階3）。Kotlin から届いた最新の値で、まだ届いていなければ、
+/// および Android 以外では `Unknown / Unknown`。
+#[tauri::command]
+#[specta::specta]
+pub fn get_network_status() -> crate::network_status::NetworkStatus {
+    crate::network_status::current()
+}
+
 /// 環境変数 `TSUMUGI_SAFE_MODE` の値からセーフモードかを判定する。未設定・空・"0" 以外なら true。
 /// 環境変数の読み取りと切り離してあるのは、プロセス共有の環境変数を並列テストから触らないため。
 fn safe_mode_from_env(value: Option<&str>) -> bool {
@@ -148,6 +156,17 @@ mod tests {
         assert!(!is_newer("0.3.3", "0.3.3"));
         assert!(is_newer("1.0.0", "0.9.9"));
         assert!(!is_newer("0.9.9", "1.0.0"));
+    }
+
+    #[test]
+    fn get_network_status_returns_the_value_kotlin_pushed() {
+        use crate::network_status::{serialize_tests, set, NetworkStatus, Transport};
+        let _serial = serialize_tests();
+        for _ in 0..200 {
+            set(NetworkStatus::from_raw(3, 1));
+            std::thread::yield_now();
+            assert_eq!(get_network_status().transport, Transport::Cellular);
+        }
     }
 
     #[test]
