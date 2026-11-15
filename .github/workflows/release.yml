@@ -236,6 +236,16 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: cargo tauri android build --split-per-abi
 
+      # 配布する .so に、libc++ の未解決シンボルが無いこと(llama.cpp を別の版の NDK でコンパイルすると、リンクは通るが
+      # 全 Android ユーザーが起動時にクラッシュする。Issue #603)。debug ビルドは test.yml が見ているが、プロファイルも
+      # キャッシュも別なので、配布物のビルドでも確かめる。
+      - name: libtsumugi_lib.so に libc++ の未解決シンボルが無いこと
+        run: |
+          nm="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          for abi in aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android; do
+            scripts/check-android-libcxx.sh "src-tauri/target/$abi/release/libtsumugi_lib.so" "$nm"
+          done
+
       # 全部入りのuniversal APKはファイルサイズが大きくなるため(Issue #69)、
       # アーキテクチャ別APK(cargo tauri android build が productFlavor 経由で
       # 同時に生成済み。src-tauri/gen/android/buildSrc の RustPlugin.kt 参照)も

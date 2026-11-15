@@ -535,6 +535,8 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: |
           nm="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          # ガード自体のテスト(.so が無い・llvm-nm が無いときに、OK で通さず失敗すること)。
+          scripts/check-android-libcxx.test.sh "$nm"
           for abi in aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android; do
             scripts/check-android-libcxx.sh "src-tauri/target/$abi/debug/libtsumugi_lib.so" "$nm"
           done
