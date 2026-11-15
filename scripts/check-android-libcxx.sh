@@ -23,8 +23,10 @@ if ! out=$("$nm" -D --undefined-only "$so"); then
   exit 1
 fi
 
-# 未解決(U)の libc++ の記号(`std::__ndk1::` と、素の `std::__1::`)。grep の「該当なし」(終了コード 1)だけを許す。
-bad=$(grep -E ' U _ZNSt(6__ndk1|3__1)' <<<"$out" || true)
+# 未解決(U)の libc++ の記号(inline namespace `std::__ndk1::` と、素の `std::__1::`)。マングル名のどこに
+# `6__ndk1` / `St3__1` が出ても拾う(`_ZNSt…` のほか、const メンバ `_ZNKSt…`、vtable `_ZTVNSt…` など)。
+# 弱参照(w)は、無くても dlopen は失敗しないので見ない。grep の「該当なし」(終了コード 1)だけを許す。
+bad=$(grep -E ' U [^ ]*(6__ndk1|St3__1)' <<<"$out" || true)
 if [ -n "$bad" ]; then
   echo "NG: $so に、libc++ の未解決シンボルが残っています(llama.cpp を別の版の NDK でコンパイルした疑い):" >&2
   echo "$bad" | head -10 >&2
