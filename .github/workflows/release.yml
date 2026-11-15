@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Create draft release
         id: create
-        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload portable exe to release (Windows only)
         if: matrix.platform == 'windows-latest'
-        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF_NAME: ${{ github.ref_name }}
@@ -277,7 +277,7 @@ jobs:
             "tsumugi-$REF_NAME-android-x86_64.apk"
 
       - name: Upload Android artifacts to release
-        uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF_NAME: ${{ github.ref_name }}
