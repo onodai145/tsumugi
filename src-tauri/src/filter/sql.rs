@@ -309,13 +309,25 @@ impl Builder<'_> {
         Ok(match v {
             Value::Num(x) => self.push_real(*x),
             Value::Arith { lhs, op, rhs } => {
+                // 左辺 → 右辺の順に積む(バインド値の並びは SQL 中の出現順)。
+                let (l, r) = (self.num(lhs)?, self.num(rhs)?);
                 let sym = match op {
                     ArithOp::Add => "+",
                     ArithOp::Sub => "-",
                     ArithOp::Mul => "*",
-                    ArithOp::Div => "/",
+                    ArithOp::Div => {
+                        // インメモリ評価(`eval_num`)と同じ意味にする(Issue #604): 実数で割り、除数 0 は 0。
+                        // 素の `/` は、PostgreSQL がゼロ除算でクエリ全体を失敗させ、MySQL / SQLite は NULL(比較は偽)にし、
+                        // PostgreSQL / SQLite は整数列どうしを整数除算する(`5 / 2 = 2`)。NULL を作らないので `NOT` でも一致する。
+                        let real = match self.dialect {
+                            Dialect::Sqlite => "REAL",
+                            Dialect::Postgres => "DOUBLE PRECISION",
+                            Dialect::MySql => "DOUBLE",
+                        };
+                        return Ok(format!("COALESCE((CAST({l} AS {real}) / NULLIF({r}, 0)), 0)"));
+                    }
                 };
-                format!("({} {} {})", self.num(lhs)?, sym, self.num(rhs)?)
+                format!("({l} {sym} {r})")
             }
             Value::Field(f) => num_field(*f)?.to_string(),
             _ => return Err("expected numeric value".into()),
@@ -495,6 +507,36 @@ mod tests {
     fn arith_and_string() {
         let w = where_of("from cache where reactions + renotes > 5");
         assert_eq!(sq(&w).sql, "((n.reaction_count + n.renote_count) > ?)");
+    }
+
+    /// 除算(Issue #604): 除数 0 は 0 に倒し(PostgreSQL の `division by zero` エラーも、MySQL / SQLite の NULL も出さない)、
+    /// 左辺を実数にして整数除算(PostgreSQL / SQLite の `5 / 2 = 2`)も避ける。インメモリ評価(`filter/eval.rs`)と同じ意味。
+    #[test]
+    fn division_is_float_and_zero_divisor_becomes_zero_per_dialect() {
+        let w = where_of("from cache where reactions / renotes > 2");
+        let s = w.render(Dialect::Sqlite);
+        assert_eq!(s.sql, "(COALESCE((CAST(n.reaction_count AS REAL) / NULLIF(n.renote_count, 0)), 0) > ?)");
+        assert_eq!(s.params, vec![SqlParam::Real(2.0)]);
+        let p = w.render(Dialect::Postgres);
+        assert_eq!(p.sql, "(COALESCE((CAST(n.reaction_count AS DOUBLE PRECISION) / NULLIF(n.renote_count, 0)), 0) > $1)");
+        assert_eq!(p.params, vec![SqlParam::Real(2.0)]);
+        let m = w.render(Dialect::MySql);
+        assert_eq!(m.sql, "(COALESCE((CAST(n.reaction_count AS DOUBLE) / NULLIF(n.renote_count, 0)), 0) > ?)");
+        assert_eq!(m.params, vec![SqlParam::Real(2.0)]);
+    }
+
+    /// リテラルの左辺・除数でも、バインド値の並びが SQL 中の出現順(左辺 → 除数 → 比較相手)と一致する。
+    #[test]
+    fn division_binds_literals_in_textual_order() {
+        let w = where_of("from cache where 10 / renotes > 4");
+        let p = w.render(Dialect::Postgres);
+        assert_eq!(p.sql, "(COALESCE((CAST($1 AS DOUBLE PRECISION) / NULLIF(n.renote_count, 0)), 0) > $2)");
+        assert_eq!(p.params, vec![SqlParam::Real(10.0), SqlParam::Real(4.0)]);
+
+        let w = where_of("from cache where reactions / 2 > 4");
+        let p = w.render(Dialect::Postgres);
+        assert_eq!(p.sql, "(COALESCE((CAST(n.reaction_count AS DOUBLE PRECISION) / NULLIF($1, 0)), 0) > $2)");
+        assert_eq!(p.params, vec![SqlParam::Real(2.0), SqlParam::Real(4.0)]);
     }
 
     #[test]

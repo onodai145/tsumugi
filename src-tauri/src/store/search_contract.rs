@@ -3,7 +3,7 @@
 //! 同じケースを、ライブ受信のインメモリ評価(`filter/eval.rs`)にも流して、SQL と一致することを確かめる。
 
 use crate::domain::Note;
-use crate::filter::ast::{CompareOp, Expr, Field, Value};
+use crate::filter::ast::{ArithOp, CompareOp, Expr, Field, Value};
 use crate::filter::eval::{evaluate, EvalContext};
 use crate::filter::sql::{build_where, SqlCtx, SqlWhere};
 use crate::mcp::testutil::public_note;
@@ -169,6 +169,62 @@ async fn run_cases(b: &dyn NoteCacheBackend, cases: Vec<Case>) {
         assert_eq!(got, want, "SQL: {label}");
 
         // ライブ受信のインメモリ評価とも一致する。
+        let mut mem: Vec<String> = notes.iter().filter(|n| evaluate(&expr, n, &eval_ctx)).map(|n| n.id.clone()).collect();
+        mem.sort();
+        assert_eq!(mem, want, "eval: {label}");
+    }
+}
+
+/// 除算(Issue #604)が、3 backend とインメモリ評価で同じ結果になること。
+/// 除数 0 は 0 に倒す(PostgreSQL の `division by zero` エラーにも、MySQL / SQLite の NULL にもならない)。
+/// 整数列どうしの除算も実数で割る(PostgreSQL / SQLite の整数除算 `5 / 2 = 2` にならない)。
+pub(crate) async fn division_contract(b: &dyn NoteCacheBackend) {
+    use CompareOp::{Eq, Gt, Lt, Ne};
+    use Field::{Reactions, Renotes};
+
+    // (id, reactions, renotes) と `reactions / renotes`: d1=2.5, d2=0(除数 0), d3=0(0/0), d4=3, d5=0.333…
+    let counts = [("d1", 5, 2), ("d2", 5, 0), ("d3", 0, 0), ("d4", 6, 2), ("d5", 1, 3)];
+    let notes: Vec<Note> = counts
+        .iter()
+        .enumerate()
+        .map(|(i, (id, reactions, renotes))| {
+            let mut n = public_note(id, 100 + i as i64, "x");
+            n.reaction_count = *reactions;
+            n.renote_count = *renotes;
+            n
+        })
+        .collect();
+    b.cache_notes("col1", &notes).await.unwrap();
+
+    let div = |lhs: Value, rhs: Value| Value::Arith { lhs: Box::new(lhs), op: ArithOp::Div, rhs: Box::new(rhs) };
+    let ratio = || div(Value::Field(Reactions), Value::Field(Renotes));
+    let cmp = |lhs: Value, op: CompareOp, x: f64| Expr::Compare { lhs, op, rhs: Value::Num(x) };
+    let cases: Vec<(&str, Expr, Vec<&str>)> = vec![
+        // 整数除算なら d1 が 2 になって外れる。
+        ("reactions / renotes > 2", cmp(ratio(), Gt, 2.0), vec!["d1", "d4"]),
+        // 除数 0 のノートは 0 として扱われるので `< 2` に一致する。
+        ("reactions / renotes < 2", cmp(ratio(), Lt, 2.0), vec!["d2", "d3", "d5"]),
+        // 整数除算なら d5 が 0 になって一致してしまう。
+        ("reactions / renotes == 0", cmp(ratio(), Eq, 0.0), vec!["d2", "d3"]),
+        ("reactions / renotes != 0", cmp(ratio(), Ne, 0.0), vec!["d1", "d4", "d5"]),
+        // NULL を作らないので、否定でもインメモリ評価と一致する。
+        ("not (reactions / renotes > 2)", Expr::Not(Box::new(cmp(ratio(), Gt, 2.0))), vec!["d2", "d3", "d5"]),
+        // リテラルの左辺 / 除数。
+        ("10 / renotes > 4", cmp(div(Value::Num(10.0), Value::Field(Renotes)), Gt, 4.0), vec!["d1", "d4"]),
+        ("reactions / 0 == 0", cmp(div(Value::Field(Reactions), Value::Num(0.0)), Eq, 0.0), vec!["d1", "d2", "d3", "d4", "d5"]),
+        ("reactions / 0 > 0", cmp(div(Value::Field(Reactions), Value::Num(0.0)), Gt, 0.0), vec![]),
+    ];
+
+    let ctx = SqlCtx { my_ids: vec![], following_ids: None };
+    let eval_ctx = EvalContext::default();
+    for (label, expr, want) in cases {
+        let want: Vec<String> = want.iter().map(|s| s.to_string()).collect();
+
+        let w = build_where(&expr, &ctx).unwrap();
+        let mut got: Vec<String> = b.search_cache(&w, None, 100).await.unwrap().into_iter().map(|n| n.id).collect();
+        got.sort();
+        assert_eq!(got, want, "SQL: {label}");
+
         let mut mem: Vec<String> = notes.iter().filter(|n| evaluate(&expr, n, &eval_ctx)).map(|n| n.id.clone()).collect();
         mem.sort();
         assert_eq!(mem, want, "eval: {label}");

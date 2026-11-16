@@ -1501,6 +1501,14 @@ mod tests {
         crate::store::search_contract::regex_contract(&*s).await;
     }
 
+    /// 除算(Issue #604)の契約。
+    #[tokio::test]
+    #[ignore]
+    async fn search_cache_division_contract() {
+        let s = backend().await;
+        crate::store::search_contract::division_contract(&*s).await;
+    }
+
     #[tokio::test]
     #[ignore]
     async fn search_cache_paging_contract() {
