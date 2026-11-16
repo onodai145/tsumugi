@@ -280,9 +280,27 @@ fn redirect_policy(allow: FetchAllowlist) -> reqwest::redirect::Policy {
 
 /// 取得専用のHTTPクライアント。検証付きリゾルバとリダイレクトポリシーを備える。
 /// システムプロキシ設定は従来どおり尊重する(プロキシ使用時はホスト名経由のIP検証が効かない)。
+///
+/// 応答しないサーバーで `await` が永久に返らないよう、接続と読み取りにタイムアウトを持たせる(Issue #606)。
+/// 全体の上限は付けない: 添付ファイルのダウンロードは大きく、遅い回線でも進んでいる限りは続けたいので、
+/// 読み取り(最初の応答と、各チャンクの間隔)が止まったときだけ打ち切る。
 pub(crate) fn build_fetch_client(user_agent: &str, allow: FetchAllowlist) -> reqwest::Result<reqwest::Client> {
+    build_fetch_client_with(user_agent, allow, FETCH_CONNECT_TIMEOUT, FETCH_READ_TIMEOUT)
+}
+
+pub(crate) const FETCH_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+pub(crate) const FETCH_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn build_fetch_client_with(
+    user_agent: &str,
+    allow: FetchAllowlist,
+    connect_timeout: std::time::Duration,
+    read_timeout: std::time::Duration,
+) -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(user_agent)
+        .connect_timeout(connect_timeout)
+        .read_timeout(read_timeout)
         .dns_resolver(Arc::new(GuardedResolver { allow: allow.clone() }))
         .redirect(redirect_policy(allow))
         .build()
@@ -678,6 +696,28 @@ mod tests {
         allow.replace(["Mi.Home.Lan:3000"]);
         let out = filter_addrs("MI.HOME.LAN.", vec![sa("192.168.1.10")], &allow).unwrap();
         assert_eq!(out, vec![sa("192.168.1.10")]);
+    }
+
+    #[tokio::test]
+    async fn fetch_client_times_out_when_server_never_responds() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+        let http = build_fetch_client_with(
+            "tsumugi-test",
+            FetchAllowlist::default(),
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(200),
+        )
+        .unwrap();
+        let res = tokio::time::timeout(std::time::Duration::from_secs(5), http.get(format!("http://127.0.0.1:{port}/")).send()).await;
+        let err = res.expect("タイムアウトせず永久に待っている").unwrap_err();
+        assert!(err.is_timeout(), "unexpected: {err:?}");
     }
 
     fn client(allow: &FetchAllowlist) -> reqwest::Client {

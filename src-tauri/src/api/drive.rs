@@ -23,7 +23,7 @@ pub async fn upload_bytes(
         .part("file", part);
 
     let url = format!("https://{host}/api/drive/files/create");
-    let resp = http.post(&url).multipart(form).send().await?;
+    let resp = http.post(&url).timeout(crate::api::client::UPLOAD_TIMEOUT).multipart(form).send().await?;
     let status = resp.status();
     if !status.is_success() {
         let code = resp

@@ -240,10 +240,7 @@ impl AppState {
         let preview_allowlist = crate::net_guard::FetchAllowlist::default();
         preview_allowlist.replace(preview_allowlist_hosts(&accounts, secrets.as_ref(), &settings));
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(USER_AGENT)
-                .build()
-                .expect("failed to build reqwest client"),
+            http: crate::api::client::build_http_client(USER_AGENT).expect("failed to build reqwest client"),
             fetch_http: crate::net_guard::build_fetch_client(USER_AGENT, fetch_allowlist.clone())
                 .expect("failed to build fetch client"),
             fetch_allowlist,

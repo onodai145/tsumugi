@@ -2,6 +2,33 @@ use crate::error::{Error, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::time::Duration;
+
+/// REST 接続の確立(TCP/TLS)に待つ上限(Issue #606)。
+pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// REST 1 リクエスト(接続から本文の読み終わりまで)の上限。ドライブへのアップロードは
+/// 大きなファイルを送るのでリクエスト単位で [`UPLOAD_TIMEOUT`] に延ばす。
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// ドライブへのアップロード1回の上限。
+pub(crate) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// API 通信(`MisskeyClient`・MiAuth・アップロード等)用の HTTP クライアントを作る。
+/// 応答しないサーバーでコマンドの `await` が永久に返らないよう、接続と全体にタイムアウトを持たせる。
+pub fn build_http_client(user_agent: &str) -> reqwest::Result<reqwest::Client> {
+    build_http_client_with(user_agent, CONNECT_TIMEOUT, REQUEST_TIMEOUT)
+}
+
+pub(crate) fn build_http_client_with(
+    user_agent: &str,
+    connect_timeout: Duration,
+    timeout: Duration,
+) -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(user_agent)
+        .connect_timeout(connect_timeout)
+        .timeout(timeout)
+        .build()
+}
 
 /// 1 インスタンス + 1 トークンに対する REST クライアント。
 ///
@@ -211,6 +238,29 @@ mod tests {
         let dbg = format!("{c:?}");
         assert!(!dbg.contains("super-secret"), "token leaked in Debug: {dbg}");
         assert!(dbg.contains("redacted"));
+    }
+
+    /// TCP は受け付けるが応答を返さないサーバー(障害中のインスタンス相当)。接続を保持し続ける。
+    async fn silent_server() -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn post_times_out_when_server_never_responds() {
+        let port = silent_server().await;
+        let http = build_http_client_with("tsumugi-test", Duration::from_secs(5), Duration::from_millis(200)).unwrap();
+        let c = MisskeyClient::new_with_api_base(http, format!("http://127.0.0.1:{port}/api"), None);
+        let res = tokio::time::timeout(Duration::from_secs(5), c.post::<_, Value>("i", &json!({}))).await;
+        let err = res.expect("タイムアウトせず永久に待っている").unwrap_err();
+        assert!(matches!(err, Error::Network(ref m) if m.starts_with("timeout")), "unexpected: {err:?}");
     }
 
     /// 実 Misskey に対する疎通確認（token 無しで /i → 認証エラーになること）。
