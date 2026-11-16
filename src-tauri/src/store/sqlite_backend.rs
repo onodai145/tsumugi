@@ -588,6 +588,12 @@ mod tests {
         crate::store::search_contract::regex_contract(&store()).await;
     }
 
+    /// `user.acct`(Issue #599)の契約。
+    #[tokio::test]
+    async fn search_cache_acct_contract() {
+        crate::store::search_contract::acct_contract(&store()).await;
+    }
+
     /// 除算(Issue #604)の契約。
     #[tokio::test]
     async fn search_cache_division_contract() {
