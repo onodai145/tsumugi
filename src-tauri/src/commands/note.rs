@@ -18,6 +18,7 @@ use crate::domain::{
 };
 use crate::error::{Error, Result};
 use crate::state::AppState;
+use futures_util::StreamExt;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
@@ -495,20 +496,26 @@ async fn fetch_guarded_bytes(
     if !resp.status().is_success() {
         return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
     }
-    let too_large = || {
-        Error::Invalid(format!(
-            "ファイルが大きすぎます（{}MB超）",
-            MAX_SAVE_FILE_BYTES / 1024 / 1024
-        ))
-    };
-    if resp.content_length().is_some_and(|len| len > MAX_SAVE_FILE_BYTES) {
+    read_body_limited(resp, MAX_SAVE_FILE_BYTES).await
+}
+
+/// 応答の本文を `max` バイトまで読む。`Content-Length` があれば読む前に拒否し、無い(chunked 等の)応答や
+/// 嘘のヘッダでも、累計が `max` を超えた時点で読むのをやめる(全量をバッファしてから比べない。Issue #607)。
+async fn read_body_limited(resp: reqwest::Response, max: u64) -> Result<Vec<u8>> {
+    let too_large = || Error::Invalid(format!("ファイルが大きすぎます（{}MB超）", max / 1024 / 1024));
+    if resp.content_length().is_some_and(|len| len > max) {
         return Err(too_large());
     }
-    let bytes = resp.bytes().await?;
-    if bytes.len() as u64 > MAX_SAVE_FILE_BYTES {
-        return Err(too_large());
+    let mut buf = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if buf.len() as u64 + chunk.len() as u64 > max {
+            return Err(too_large());
+        }
+        buf.extend_from_slice(&chunk);
     }
-    Ok(bytes.to_vec())
+    Ok(buf)
 }
 
 #[tauri::command]
@@ -806,6 +813,58 @@ mod tests {
         let url = format!("http://localhost:{}/big", server.address().port());
         let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
         assert!(matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")), "unexpected: {err:?}");
+    }
+
+    /// `Content-Length` 無しの chunked 応答を返す生 TCP サーバー(wiremock は常に `Content-Length` を付けるため)。
+    /// `total` が `None` なら、クライアントが切断するまで書き続ける。
+    async fn chunked_server(total: Option<usize>) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut req = [0u8; 1024];
+            let _ = sock.read(&mut req).await;
+            if sock.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n").await.is_err() {
+                return;
+            }
+            let chunk = format!("400\r\n{}\r\n", "a".repeat(1024));
+            let mut sent = 0usize;
+            while total.is_none_or(|t| sent < t) {
+                if sock.write_all(chunk.as_bytes()).await.is_err() {
+                    return;
+                }
+                sent += 1024;
+            }
+            let _ = sock.write_all(b"0\r\n\r\n").await;
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn read_body_limited_aborts_chunked_body_without_content_length_over_limit() {
+        let port = chunked_server(None).await;
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}/")).await.unwrap();
+        assert!(resp.content_length().is_none());
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), read_body_limited(resp, 64 * 1024)).await;
+        let err = result.expect("上限を超えても読み続けている").unwrap_err();
+        assert!(matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")), "unexpected: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn read_body_limited_accepts_chunked_body_within_limit() {
+        let port = chunked_server(Some(8 * 1024)).await;
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}/")).await.unwrap();
+        let bytes = read_body_limited(resp, 64 * 1024).await.unwrap();
+        assert_eq!(bytes.len(), 8 * 1024);
+    }
+
+    #[tokio::test]
+    async fn read_body_limited_accepts_chunked_body_exactly_at_limit() {
+        let port = chunked_server(Some(4 * 1024)).await;
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}/")).await.unwrap();
+        let bytes = read_body_limited(resp, 4 * 1024).await.unwrap();
+        assert_eq!(bytes.len(), 4 * 1024);
     }
 
     fn state_with_summaly(url: &str, imported: bool) -> AppState {
