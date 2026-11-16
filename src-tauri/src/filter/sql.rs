@@ -340,7 +340,7 @@ impl Builder<'_> {
         Ok(match v {
             Value::Str(s) => self.push_text(s.clone()),
             Value::Account(a) => self.push_text(a.clone()),
-            Value::Field(f) => str_field(*f)?.to_string(),
+            Value::Field(f) => self.str_field(*f)?,
             _ => return Err("expected string value".into()),
         })
     }
@@ -432,24 +432,37 @@ fn num_field(f: Field) -> Result<&'static str, String> {
     })
 }
 
-fn str_field(f: Field) -> Result<&'static str, String> {
-    use Field::*;
-    Ok(match f {
-        Text => "COALESCE(n.text,'')",
-        CwText => "COALESCE(n.cw,'')",
-        Via => "COALESCE(n.via,'')",
-        Host => "COALESCE(u.host,'')",
-        VisibilityStr => "n.visibility",
-        Channel => "COALESCE(n.channel_id,'')",
-        Lang => "COALESCE(n.lang,'')",
-        ReplyId => "COALESCE(n.reply_id,'')",
-        RenoteId => "COALESCE(n.renote_id,'')",
-        UserUsername => "u.username",
-        UserAcct => "('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END)",
-        UserName => "COALESCE(u.name,'')",
-        UserId => "u.id",
-        _ => return Err(format!("field is not string: {f:?}")),
-    })
+impl Builder<'_> {
+    /// 文字列として使うフィールドの SQL 式。`acct`(`@user` / `@user@host`)の連結だけが方言で変わる。
+    /// MySQL は既定の `sql_mode`(`PIPES_AS_CONCAT` なし)で `||` が論理 OR になり、`acct == ".."` が誰にでも
+    /// 一致するので(Issue #599)`CONCAT` を使う。`sqlx` は接続ごとに `PIPES_AS_CONCAT` を足すが、接続設定に頼らない。
+    fn str_field(&self, f: Field) -> Result<String, String> {
+        use Field::*;
+        Ok(match f {
+            Text => "COALESCE(n.text,'')",
+            CwText => "COALESCE(n.cw,'')",
+            Via => "COALESCE(n.via,'')",
+            Host => "COALESCE(u.host,'')",
+            VisibilityStr => "n.visibility",
+            Channel => "COALESCE(n.channel_id,'')",
+            Lang => "COALESCE(n.lang,'')",
+            ReplyId => "COALESCE(n.reply_id,'')",
+            RenoteId => "COALESCE(n.renote_id,'')",
+            UserUsername => "u.username",
+            UserAcct => match self.dialect {
+                Dialect::MySql => {
+                    "CONCAT('@', u.username, CASE WHEN u.host IS NULL THEN '' ELSE CONCAT('@', u.host) END)"
+                }
+                Dialect::Sqlite | Dialect::Postgres => {
+                    "('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END)"
+                }
+            },
+            UserName => "COALESCE(u.name,'')",
+            UserId => "u.id",
+            _ => return Err(format!("field is not string: {f:?}")),
+        }
+        .to_string())
+    }
 }
 
 fn set_field_subquery(f: Field) -> Result<&'static str, String> {
@@ -539,6 +552,21 @@ mod tests {
         let p = w.render(Dialect::Postgres);
         assert_eq!(p.sql, "(COALESCE((CAST(n.reaction_count AS DOUBLE PRECISION) / NULLIF($1, 0)), 0) > $2)");
         assert_eq!(p.params, vec![SqlParam::Real(2.0), SqlParam::Real(4.0)]);
+    }
+
+    /// `user.acct` の連結(Issue #599): MySQL は既定の `sql_mode` で `||` が論理 OR になるので `CONCAT` を使う。
+    #[test]
+    fn user_acct_concatenation_is_rendered_per_dialect() {
+        let w = where_of("from cache where user.acct == \"@alice\"");
+        let s = w.render(Dialect::Sqlite);
+        assert_eq!(s.sql, "(('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END) = ?)");
+        let p = w.render(Dialect::Postgres);
+        assert_eq!(p.sql, "(('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END) = $1)");
+        let m = w.render(Dialect::MySql);
+        assert_eq!(m.sql, "(CONCAT('@', u.username, CASE WHEN u.host IS NULL THEN '' ELSE CONCAT('@', u.host) END) = ?)");
+        for r in [s, p, m] {
+            assert_eq!(r.params, vec![text("@alice")]);
+        }
     }
 
     #[test]

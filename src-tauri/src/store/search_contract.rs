@@ -148,8 +148,45 @@ fn regex_cases() -> Vec<Case> {
     ]
 }
 
+/// `user.acct`(Issue #599)が、3 backend とインメモリ評価で同じ結果になること。
+/// MySQL は既定の `sql_mode` で `||` が論理 OR になり、`acct == "@..."` が誰にでも一致していた。
+/// 同じユーザー名でホストが違うユーザー(`@alice` と `@alice@remote.example`)を区別できることも確かめる。
+pub(crate) async fn acct_contract(b: &dyn NoteCacheBackend) {
+    use CompareOp::{Contains, EndsWith, Eq, Ne, StartsWith};
+    use Field::UserAcct;
+    use crate::domain::Visibility;
+    use crate::mcp::testutil::{note, user};
+
+    let by = |id: &str, created_at: i64, user_id: &str, username: &str, host: Option<&str>| {
+        note(id, created_at, Visibility::Public, false, "x", user(user_id, username, host))
+    };
+    let notes = vec![
+        by("a1", 100, "ua", "alice", None),
+        by("a2", 101, "ub", "bob", None),
+        by("a3", 102, "uc", "carol", Some("remote.example")),
+        by("a4", 103, "ud", "alice", Some("remote.example")),
+    ];
+    let cases = vec![
+        c(UserAcct, Eq, "@alice", &["a1"]),
+        c(UserAcct, Eq, "@bob", &["a2"]),
+        c(UserAcct, Eq, "@carol@remote.example", &["a3"]),
+        c(UserAcct, Eq, "@alice@remote.example", &["a4"]),
+        // ホストのないユーザー名では、リモートのユーザーに一致しない。
+        c(UserAcct, Eq, "@carol", &[]),
+        c(UserAcct, Eq, "@nobody", &[]),
+        c(UserAcct, Ne, "@alice", &["a2", "a3", "a4"]),
+        c(UserAcct, StartsWith, "@alice", &["a1", "a4"]),
+        c(UserAcct, EndsWith, "@remote.example", &["a3", "a4"]),
+        c(UserAcct, Contains, "@remote", &["a3", "a4"]),
+    ];
+    run_cases_on(b, notes, cases).await;
+}
+
 async fn run_cases(b: &dyn NoteCacheBackend, cases: Vec<Case>) {
-    let notes = fixtures();
+    run_cases_on(b, fixtures(), cases).await;
+}
+
+async fn run_cases_on(b: &dyn NoteCacheBackend, notes: Vec<Note>, cases: Vec<Case>) {
     b.cache_notes("col1", &notes).await.unwrap();
     let ctx = SqlCtx { my_ids: vec![], following_ids: None };
     let eval_ctx = EvalContext::default();
