@@ -35,8 +35,15 @@ pub enum Token {
     Num(f64),
 }
 
+/// 入力の長さ(文字数)の上限(Issue #605)。保存されたカラムや設定ファイルから、際限なく長い入力が来ても
+/// 字句列の確保で大量のメモリを使わないための歯止め。実用的なフィルタは数百文字に収まる。
+pub(crate) const MAX_INPUT_CHARS: usize = 16 * 1024;
+
 /// 入力を字句列へ。失敗時はメッセージを返す。
 pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
+    if input.chars().count() > MAX_INPUT_CHARS {
+        return Err(format!("TQL is too long (max {MAX_INPUT_CHARS} characters)"));
+    }
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
     let n = chars.len();
@@ -297,5 +304,13 @@ mod tests {
         assert!(tokenize(r#""unterminated"#).is_err());
         assert!(tokenize("=").is_err()); // 単独 '=' は不可
         assert!(tokenize("a & b").is_err()); // 単独 '&' は不可
+    }
+
+    #[test]
+    fn overlong_input_is_rejected() {
+        assert!(tokenize(&" ".repeat(MAX_INPUT_CHARS)).is_ok());
+        assert!(tokenize(&" ".repeat(MAX_INPUT_CHARS + 1)).is_err());
+        // バイト数ではなく文字数で数える
+        assert!(tokenize(&format!("\"{}\"", "あ".repeat(MAX_INPUT_CHARS - 2))).is_ok());
     }
 }

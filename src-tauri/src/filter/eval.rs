@@ -410,4 +410,30 @@ mod tests {
         n.reply_user_id = Some("stranger".into());
         assert!(!matches("from home where reply_to_me", &n));
     }
+
+    #[test]
+    fn expressions_at_the_depth_limit_evaluate_within_a_small_stack() {
+        use crate::filter::parser::{MAX_AST_DEPTH, MAX_NEST_DEPTH};
+        use crate::filter::sql::{build_where, SqlCtx};
+        // tokio ワーカー(2MB)の半分でも、上限ちょうどの式を評価・SQL化・Drop できること(Issue #605)
+        let chain = |term: &str, op: &str, n: usize| vec![term; n].join(&format!(" {op} "));
+        let queries = [
+            chain("cw", "&&", MAX_AST_DEPTH - 1),
+            chain("cw", "||", MAX_AST_DEPTH - 1),
+            format!("{} > 0", chain("reactions", "+", MAX_AST_DEPTH - 1)),
+            format!("{}cw", "!".repeat(MAX_NEST_DEPTH)),
+            format!("{}cw{}", "(".repeat(MAX_NEST_DEPTH), ")".repeat(MAX_NEST_DEPTH)),
+        ];
+        for q in queries {
+            let h = std::thread::Builder::new()
+                .stack_size(1 << 20)
+                .spawn(move || {
+                    let expr = parse(&format!("from home where {q}")).unwrap().predicate.unwrap();
+                    let _ = evaluate(&expr, &base_note(), &ctx());
+                    let _ = build_where(&expr, &SqlCtx { my_ids: vec![], following_ids: None });
+                })
+                .unwrap();
+            h.join().unwrap();
+        }
+    }
 }
