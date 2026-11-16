@@ -2,7 +2,7 @@
 //! 設計書: docs/superpowers/specs/2026-11-02-issue-544-settings-import-export-design.md
 //! トークンはキーリング管轄でここには現れない。入力ファイルは信頼できない外部データとして扱う。
 
-use crate::domain::{clamp_group_width, Account, Column, ColumnGroup, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
+use crate::domain::{clamp_group_width, Account, Column, ColumnGroup, ColumnKind, FilterQuery, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
 use crate::error::{Error, Result};
 use crate::store::settings::SettingsData;
 use serde::{Deserialize, Serialize};
@@ -182,6 +182,27 @@ fn normalize_groups(groups: &mut [ColumnGroup]) {
     }
 }
 
+/// カラムの TQL を、カラムを開くときと同じ経路でパースして確かめる(Issue #605)。深い入れ子などを
+/// 取り込むと、保存されたあと、カラムを開くたびに失敗する。`ColumnKind::Tql` は `from` 節つきの全文、
+/// それ以外は where 述語だけ(`commands/column.rs::resolve_sources` と同じ)。
+/// ネットワークは使わないので、list や antenna の存在確認はしない。
+fn validate_column_filter(c: &Column) -> Result<()> {
+    let FilterQuery::Tql(text) = &c.filter else {
+        return Ok(());
+    };
+    let result = if matches!(c.kind, ColumnKind::Tql) {
+        crate::filter::parser::parse(text).map(|_| ())
+    } else if text.trim().is_empty() {
+        Ok(())
+    } else {
+        crate::filter::parser::parse_predicate(text).map(|_| ())
+    };
+    result.map_err(|e| {
+        let shown: String = e.chars().take(100).collect();
+        invalid(format!("カラムのTQLが不正です: {shown}"))
+    })
+}
+
 /// ファイルの内容と現在の設定から、インポート後の設定を組み立てる。ファイルは信頼しない。
 /// 1つでも検証に落ちたらファイル全体を拒否する(部分的に取り込まない)。
 pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPlan> {
@@ -250,6 +271,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
             return Err(invalid("カラムが存在しないグループを参照しています"));
         }
         crate::mml::validate_sound_choice(&c.notify_sound_choice)?;
+        validate_column_filter(c)?;
         let mut c = c.clone();
         c.account_id = local_id.clone();
         columns.push(c);
@@ -922,6 +944,50 @@ mod tests {
             ],
         });
         assert!(plan_err(&SettingsData::default(), file_with(data)).contains("ペイン配置が存在しないグループを参照"));
+    }
+
+    #[test]
+    fn rejects_columns_with_an_invalid_tql_filter() {
+        let setup = |kind: ColumnKind, filter: FilterQuery| {
+            let mut data = empty_data();
+            data.accounts = vec![account("a", "a.example", "u1")];
+            data.groups = vec![group("g", 0)];
+            let mut c = column("c", "a", "g");
+            c.kind = kind;
+            c.filter = filter;
+            data.columns = vec![c];
+            file_with(data)
+        };
+        let deep = "(".repeat(100_000);
+        // エキスパートモード(from 節つきの全文)
+        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Tql, FilterQuery::Tql(format!("from home where {deep}"))));
+        assert!(err.contains("TQL"), "{err}");
+        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Tql, FilterQuery::Tql("from nope".into())));
+        assert!(err.contains("TQL"), "{err}");
+        // 単一ソースのカラム(where 述語だけ)
+        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Home, FilterQuery::Tql(deep.clone())));
+        assert!(err.contains("TQL"), "{err}");
+        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Home, FilterQuery::Tql("nope == 1".into())));
+        assert!(err.contains("TQL"), "{err}");
+    }
+
+    #[test]
+    fn accepts_columns_with_valid_or_empty_filters() {
+        let mut data = empty_data();
+        data.accounts = vec![account("a", "a.example", "u1")];
+        data.groups = vec![group("g", 0)];
+        let mut full = column("c1", "a", "g");
+        full.kind = ColumnKind::Tql;
+        full.filter = FilterQuery::Tql("from home where has_files && !cw".into());
+        let mut pred = column("c2", "a", "g");
+        pred.filter = FilterQuery::Tql("has_files && !cw".into());
+        let mut blank = column("c3", "a", "g");
+        blank.filter = FilterQuery::Tql("  ".into());
+        let kw = column("c4", "a", "g");
+        data.columns = vec![full, pred, blank, kw];
+
+        let plan = plan_import(&SettingsData::default(), file_with(data)).unwrap();
+        assert_eq!(plan.data.columns.len(), 4);
     }
 
     #[test]
