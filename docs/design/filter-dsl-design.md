@@ -448,7 +448,7 @@ CREATE TABLE note_file     (note_id TEXT, mime_type TEXT, mime_category TEXT, is
 ```
 - クエリは `note n JOIN user u ON n.user_id = u.id` を基本とする。
 - `mine` / `following` / `to_me` など EvalContext 依存の値は**バインド変数**（`:my_ids` 等）で注入。
-- `match`（正規表現）は方言ごとに書く（Issue #598）。SQLite は rusqlite に `regexp()` 関数を登録（`store/db.rs`。インメモリ評価と同じ `regex` crate）して `col REGEXP :pat`、PostgreSQL は `~`、MySQL は `REGEXP_LIKE(col, :pat, 'c')`。いずれも大文字小文字を区別する（MySQL の `REGEXP` は既定の `_ci` 照合順序だと区別しないため `'c'` を付ける）。無効なパターンは不一致（インメモリ評価と同じ）。
+- `match`（正規表現）は方言ごとに書く（Issue #598）。SQLite は rusqlite に `regexp()` 関数を登録（`store/db.rs`。インメモリ評価と同じ `regex` crate）して `col REGEXP :pat`、PostgreSQL は `~`、MySQL / MariaDB は `col REGEXP CONCAT('(?-i)', :pat)`。いずれも大文字小文字を区別する（MySQL / MariaDB の `REGEXP` は既定の `_ci` 照合順序だと区別しないため、パターンの先頭の `(?-i)` で区別させる。利用者のパターンの `(?i)` は後に来るので有効のまま）。`REGEXP_LIKE(.., 'c')` は MariaDB に無いので使わない（Issue #646）。無効なパターンは不一致（インメモリ評価と同じ）。MariaDB 10.5 は、絵文字などの 4 バイト文字を含むパターンが（`(?-i)` の有無に関係なく）エラーや不一致になる（10.6 以降は問題なし。実機で確認）。
 
 ## 10. Field × 評価/SQL射影 対応表
 凡例：`n`=&Note, `ctx`=&EvalContext（インメモリ）／`n`,`u`=note,user テーブル別名（SQL）。
@@ -529,7 +529,7 @@ CREATE TABLE note_file     (note_id TEXT, mime_type TEXT, mime_category TEXT, is
 | `contains` / `->` | 文字列 | 方言ごとの関数（下記） |
 | `contains` / `->` | 集合 | `rhs IN (集合サブクエリ)` |
 | `in` / `<-` | 値∈集合 | `lhs IN (集合サブクエリ)` |
-| `match` | 文字列 | SQLite: `lhs REGEXP rhs`（`regexp()` 関数を登録） / PostgreSQL: `lhs ~ rhs` / MySQL: `REGEXP_LIKE(lhs, rhs, 'c')` |
+| `match` | 文字列 | SQLite: `lhs REGEXP rhs`（`regexp()` 関数を登録） / PostgreSQL: `lhs ~ rhs` / MySQL / MariaDB: `lhs REGEXP CONCAT('(?-i)', rhs)` |
 
 - 文字列の部分一致は `LIKE` を使わず、方言ごとの関数で書く（Issue #583）。検索語はエスケープせずバインドし、`%` `_` `\` は実文字、大文字小文字は区別する（インメモリ評価 `filter/eval.rs` と一致）。`build_where` は3方言ぶんを同時に作り（`SqlWhere`）、backend が `SqlWhere::render(Dialect)` で自分の分を選ぶ。
 

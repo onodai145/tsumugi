@@ -1369,9 +1369,10 @@ mod tests {
 
     /// 実DBテスト用のバックエンド。コンテナを一緒に持ち、drop でコンテナと匿名ボリュームを消す。
     /// フィールドは宣言順に drop されるので、接続プールを閉じてからコンテナを消す。
+    /// `TSUMUGI_TEST_MYSQL_PORT` を指定したときは、コンテナを起動せず、その `127.0.0.1` のサーバー(MariaDB など)を使う。
     struct TestBackend {
         backend: MySqlBackend,
-        _container: ContainerAsync<Mysql>,
+        _container: Option<ContainerAsync<Mysql>>,
     }
 
     impl std::ops::Deref for TestBackend {
@@ -1381,12 +1382,34 @@ mod tests {
         }
     }
 
+    /// 既存のサーバーに、テストごとの専用 DB を作って接続する(MariaDB でも契約テストを流すため、Issue #646)。
+    /// 専用 DB は消さないので、使い捨てのサーバー(`docker run --rm` など)だけを指定する。
+    /// 接続は `root`。パスワードは `TSUMUGI_TEST_MYSQL_PASSWORD`(既定は空)。
+    async fn backend_on_external_server(port: u16) -> TestBackend {
+        use sqlx::Connection;
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let password = std::env::var("TSUMUGI_TEST_MYSQL_PASSWORD").unwrap_or_default();
+        let database = format!("tsumugi_test_{}_{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+        let mut admin = sqlx::MySqlConnection::connect_with(
+            &sqlx::mysql::MySqlConnectOptions::new().host("127.0.0.1").port(port).username("root").password(&password),
+        )
+        .await
+        .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE `{database}`"))).execute(&mut admin).await.unwrap();
+        let params = MySqlConnectParams { host: "127.0.0.1".into(), port, database, user: "root".into(), password };
+        let backend = MySqlBackend::connect(&params).await.unwrap();
+        TestBackend { backend, _container: None }
+    }
+
     async fn backend() -> TestBackend {
+        if let Ok(port) = std::env::var("TSUMUGI_TEST_MYSQL_PORT") {
+            return backend_on_external_server(port.parse().unwrap()).await;
+        }
         let container = Mysql::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(3306).await.unwrap();
         let params = MySqlConnectParams { host: "127.0.0.1".into(), port, database: "test".into(), user: "root".into(), password: "".into() };
         let backend = MySqlBackend::connect(&params).await.unwrap();
-        TestBackend { backend, _container: container }
+        TestBackend { backend, _container: Some(container) }
     }
 
     fn b(idx: u32, id: &str) -> (u32, String) {
