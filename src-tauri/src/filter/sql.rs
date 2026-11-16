@@ -208,8 +208,10 @@ impl Builder<'_> {
                     Dialect::Sqlite => format!("({col} REGEXP {pat})"),
                     Dialect::Postgres => format!("({col} ~ {pat})"),
                     // MySQL の `REGEXP` は照合順序(既定の `_ci`)に従い大文字小文字を区別しない。
-                    // 第3引数 `'c'` で、インメモリ評価・PostgreSQL と同じく区別させる。
-                    Dialect::MySql => format!("REGEXP_LIKE({col}, {pat}, 'c')"),
+                    // インメモリ評価・PostgreSQL と同じく区別させるため、パターンの先頭に `(?-i)` を付ける。
+                    // `REGEXP_LIKE(.., 'c')` は MariaDB に無く(Issue #646)、`REGEXP` と `(?-i)` は MySQL(ICU)も
+                    // MariaDB(PCRE)も解釈する。利用者のパターンの `(?i)` は後に来るので、これまでどおり効く。
+                    Dialect::MySql => format!("({col} REGEXP CONCAT('(?-i)', {pat}))"),
                 }
             }
             Contains => {
@@ -630,7 +632,9 @@ mod tests {
 
         let w = where_of("from cache where text match \"(?i)mi\"");
         assert_eq!(sq(&w).sql, "(COALESCE(n.text,'') REGEXP ?)");
-        assert_eq!(w.render(Dialect::MySql).sql, "REGEXP_LIKE(COALESCE(n.text,''), ?, 'c')");
+        // MySQL / MariaDB 共通(Issue #646): `REGEXP_LIKE` は MariaDB に無い。大文字小文字は、照合順序(`_ci`)に従う
+        // `REGEXP` に、先頭の `(?-i)` で区別させる(ICU も PCRE も解釈する)。利用者の `(?i)` は後に来るので有効のまま。
+        assert_eq!(w.render(Dialect::MySql).sql, "(COALESCE(n.text,'') REGEXP CONCAT('(?-i)', ?))");
         assert_eq!(w.render(Dialect::Postgres).sql, "(COALESCE(n.text,'') ~ $1)");
     }
 
