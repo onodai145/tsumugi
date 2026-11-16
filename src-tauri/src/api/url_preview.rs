@@ -87,6 +87,8 @@ pub async fn fetch_url_preview(
     let resp = http
         .get(base)
         .query(&[("url", target_url)])
+        // 小さな JSON を受けるだけなので、取得クライアントの読み取りタイムアウトに加えて全体も区切る(Issue #606)
+        .timeout(std::time::Duration::from_secs(60))
         .send()
         .await
         .map_err(|e| {
