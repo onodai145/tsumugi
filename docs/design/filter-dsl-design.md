@@ -206,6 +206,13 @@ from cache where text match "(?i)misskey|fediverse"
   - フィルタ条件の合否が後から変わっても、**一度表示したNoteはカラムから消さない/追加もしない**
     （`deleted` のみ除去）。Krile寄りで予測しやすい挙動。
   - 購読は**カラムに載っている（見えている）Noteのみ** `sn`（subNote）購読しコストを抑える。
+- **除算の意味（Issue #604）**：`/` は**実数除算**で、**除数が 0 のときは結果を 0 とする**
+  （`reactions / renotes < 2` は `renotes = 0` のノートに一致する）。インメモリ評価（`eval.rs` の `eval_num`）と
+  SQL 射影（`sql.rs` の `COALESCE(CAST(lhs AS 実数型) / NULLIF(rhs, 0), 0)`）で同じ結果にする。
+  素の `/` だと、PostgreSQL はゼロ除算で検索全体が失敗し、MySQL / SQLite は NULL（比較は偽）になり、
+  PostgreSQL / SQLite は整数列どうしを整数除算（`5 / 2 = 2`）してしまう。NULL を作らないので、`!` を挟んでも
+  SQL とインメモリ評価が一致する。契約テストは `store/search_contract.rs` の `division_contract`。
+  MySQL の `CAST(.. AS DOUBLE)` は 8.0.17 以降。MariaDB は 10.5 / 11.4 で動くことを実機で確認した（それ以前は未確認）。
 - **入力サイズと深さの上限（Issue #605）**：再帰下降パーサと、AST を再帰で走査する `eval` / `sql` /
   Drop がスタックを使い切らないよう、次の上限を超える入力は `parse` / `parse_predicate` が
   エラー（`Result::Err`）にする。スタックオーバーフローは `Result` で捕捉できずプロセスが落ちるため。

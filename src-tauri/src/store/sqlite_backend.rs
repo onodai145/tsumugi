@@ -588,6 +588,12 @@ mod tests {
         crate::store::search_contract::regex_contract(&store()).await;
     }
 
+    /// 除算(Issue #604)の契約。
+    #[tokio::test]
+    async fn search_cache_division_contract() {
+        crate::store::search_contract::division_contract(&store()).await;
+    }
+
     #[tokio::test]
     async fn search_cache_paging_contract() {
         crate::store::search_contract::paging_contract(&store()).await;
