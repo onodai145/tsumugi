@@ -212,7 +212,7 @@ from cache where text match "(?i)misskey|fediverse"
   素の `/` だと、PostgreSQL はゼロ除算で検索全体が失敗し、MySQL / SQLite は NULL（比較は偽）になり、
   PostgreSQL / SQLite は整数列どうしを整数除算（`5 / 2 = 2`）してしまう。NULL を作らないので、`!` を挟んでも
   SQL とインメモリ評価が一致する。契約テストは `store/search_contract.rs` の `division_contract`。
-  MySQL の `CAST(.. AS DOUBLE)` は 8.0.17 以降（MariaDB は 10.4.5 以降）。
+  MySQL の `CAST(.. AS DOUBLE)` は 8.0.17 以降。MariaDB は 10.5 / 11.4 で動くことを実機で確認した（それ以前は未確認）。
 - **入力サイズと深さの上限（Issue #605）**：再帰下降パーサと、AST を再帰で走査する `eval` / `sql` /
   Drop がスタックを使い切らないよう、次の上限を超える入力は `parse` / `parse_predicate` が
   エラー（`Result::Err`）にする。スタックオーバーフローは `Result` で捕捉できずプロセスが落ちるため。
