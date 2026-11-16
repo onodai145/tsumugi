@@ -42,6 +42,13 @@
 | | | | [x86](https://github.com/onodai145/tsumugi/releases/download/v0.13.0/tsumugi-v0.13.0-android-x86.apk) |
 <!-- release-download-links:end -->
 
+動作環境:
+
+- Windows 10 以降
+- macOS 10.15（Catalina）以降
+- Linux: glibc 2.39 以降（Ubuntu 24.04 相当）と `webkit2gtk-4.1`
+- Android 8.0（API 26）以降
+
 ## 開発者向け情報
 
 以下はソースからビルド・開発する人向けの情報。単に使いたいだけなら [ダウンロード](#ダウンロード) を参照。
