@@ -3,6 +3,8 @@
 // 日時は、カレンダーの操作ではなく flatpickr のインスタンスへ直接入れる(カレンダーのクリックは
 // E2E では不安定になりやすく、この E2E の目的は予約の動作であってピッカーの操作ではないため)。
 
+import { debugLog, debugLogPath } from "./debugLog";
+
 /** 予約の日時入力を開く(開いていれば何もしない)。 */
 export async function openPicker(): Promise<void> {
   const input = await $('[data-testid="compose-schedule-input"]');
@@ -28,11 +30,55 @@ export async function scheduleAt(text: string, atMs: number): Promise<void> {
   const submit = await $('[data-testid="compose-submit"]');
   await submit.waitForClickable({ timeout: 15000 });
   await submit.click();
-  await browser.waitUntil(async () => (await (await $('[data-testid="compose-textarea"]')).getValue()) === "", {
-    timeout: 20000,
-    interval: 300,
-    timeoutMsg: `compose box did not clear after scheduling "${text}" (the app rejects a past date, so the due time may be too close — slow runner?)`,
-  });
+  try {
+    await browser.waitUntil(async () => (await (await $('[data-testid="compose-textarea"]')).getValue()) === "", {
+      timeout: 20000,
+      interval: 300,
+    });
+  } catch (e) {
+    const detail = await dumpScheduleFailure(text, atMs);
+    throw new Error(
+      `compose box did not clear after scheduling "${text}" (the app rejects a past date, so the due time may be too close — slow runner?)\n${detail}\n${String(e)}`,
+    );
+  }
+}
+
+/**
+ * 予約後に作成欄が空にならなかったとき、アプリが出したエラー(`role="dialog"` のモーダル本文)と
+ * 送信まわりの状態を集め、スクリーンショットを `e2e/wdio-logs/` に残す(Issue #641。CI は
+ * アプリ自身のログを回収しないため、画面に出たエラー文が無いと原因を追えない)。
+ * 診断の失敗で本来のエラーを隠さないよう、ここでは例外を投げない。
+ */
+async function dumpScheduleFailure(text: string, atMs: number): Promise<string> {
+  let detail = "";
+  try {
+    const state = await browser.execute(() => {
+      const val = (sel: string) => (document.querySelector(sel) as HTMLInputElement | null)?.value ?? null;
+      const submit = document.querySelector('[data-testid="compose-submit"]') as HTMLButtonElement | null;
+      return {
+        dialog: document.querySelector('[role="dialog"]')?.textContent?.trim() ?? null,
+        textareaLength: val('[data-testid="compose-textarea"]')?.length ?? null,
+        scheduleInput: val('[data-testid="compose-schedule-input"]'),
+        submitLabel: submit?.textContent?.trim() ?? null,
+        submitDisabled: submit?.disabled ?? null,
+        localHint: document.querySelector('[data-testid="compose-schedule-local-hint"]') !== null,
+        browserNow: new Date().toISOString(),
+      };
+    });
+    detail = `diagnostics: ${JSON.stringify({ ...state, requestedAt: new Date(atMs).toISOString() })}`;
+  } catch (err) {
+    detail = `diagnostics unavailable: ${String(err)}`;
+  }
+  debugLog("scheduleAt", `failed for "${text}": ${detail}`);
+  try {
+    const safe = text.replace(/[^a-zA-Z0-9_-]+/g, "_");
+    const path = debugLogPath(`schedule-failure-${safe}-${Date.now()}.png`);
+    await browser.saveScreenshot(path);
+    debugLog("scheduleAt", `saved screenshot: ${path}`);
+  } catch (err) {
+    debugLog("scheduleAt", `failed to save screenshot: ${String(err)}`);
+  }
+  return detail;
 }
 
 /** 予約一覧を開く。 */
