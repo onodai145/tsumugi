@@ -46,7 +46,7 @@
 
 - Windows 10 以降
 - macOS 10.15（Catalina）以降
-- Linux: glibc 2.39 以降（Ubuntu 24.04 相当）と `webkit2gtk-4.1`（deb は依存として入る）
+- Linux: glibc 2.39 以降（Ubuntu 24.04 相当）と `webkit2gtk-4.1`
 - Android 8.0（API 26）以降
 
 ## 開発者向け情報
