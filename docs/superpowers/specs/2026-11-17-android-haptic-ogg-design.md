@@ -13,7 +13,7 @@ tsumugi の通知音は Rust の `SoundPlayer`(rodio)で鳴らしており、触
 Pixel 8 Pro(Android 17 / SDK 37)で確認した(2026-11-17)。
 
 - `AudioManager.isHapticPlaybackSupported()` は `true`。振動子の能力に `EXTERNAL_CONTROL` と `AMPLITUDE_CONTROL` がある。
-- 3ch(L・R・触覚)で `ANDROID_HAPTIC=1` の ogg を `MediaPlayer` で再生した。
+- 3ch で `ANDROID_HAPTIC=1` の ogg を `MediaPlayer` で再生した。(実装後のレビューでの訂正: この確認で「L・R・触覚」と呼んだ ogg は、ffmpeg の libvorbis が 3ch を Vorbis の順(L・C・R)で格納するため、触覚が実際には真ん中のチャンネルに入っていた。端末に入っている Android 標準の触覚入り ogg(アラーム音)26 個は、すべて 2ch で `ANDROID_HAPTIC=1`、つまり音 1ch + 最後のチャンネルが触覚で、どれも低域だけの波形が最後のチャンネルにある。このため、推奨の作り方は 2ch に改め、fixture も 2ch にした。標準の 1 つ(Bright_morning、約 12 秒)を同じ経路で再生して、`channelMask=0x20000001` と `external` 振動 12123ms を確認した。)
 
   | 条件 | システムの振動履歴(`dumpsys vibrator_manager`) |
   |---|---|
@@ -108,7 +108,7 @@ true になる条件(すべて満たす):
 - `prepareAsync()` で準備し、`onPrepared` で `start()` して `invoke.resolve()`。`onError` や準備のタイムアウト(5 秒)では `invoke.reject(...)`。どの経路でも必ず resolve / reject のどちらか一度だけ呼ぶ(Rust 側がブロックしたままにならないようにする)。
 - 再生の終了(`onCompletion`)とエラーで `release()` する。
 - 後勝ち: 再生中の `MediaPlayer` があれば、新しい要求の処理の前に `stop()` + `release()` する。保持するのは最新の 1 つだけ。
-- `Build.VERSION.SDK_INT < 29`(`setHapticChannelsMuted` が使えない)の端末では reject する(Rust 側が beep で代替)。
+- `Build.VERSION.SDK_INT < 29`(Android 9 以前。`setHapticChannelsMuted` が使えない)では、触覚の指定をせず、通常の音声として再生する。(当初は reject して Rust 側が beep で代替する設計だったが、API 26〜28 の端末で、利用者が選んだ音が以前の rodio より後退して鳴らなくなるため、実装後のレビューで改めた。)
 
 ### 5. フロント・UI
 
@@ -144,7 +144,8 @@ true になる条件(すべて満たす):
 | 触覚入りではない音 | 今までと同じ(rodio) |
 | 触覚入りだが、設定のハプティクスが OFF | 触覚をミュートして、`MediaPlayer` で音だけ鳴らす |
 | 端末が音声連動の触覚に非対応 | 未確認(非対応端末が手元にない)。公式ドキュメントの想定では、触覚は再生されず音だけ鳴る。実機で確認できるまで、ユーザーガイドには「端末による」とだけ書く |
-| Kotlin 側の失敗(デコード不可、準備のタイムアウト、API 28 以下) | `warn` ログ + beep を rodio で再生。通知フローは止めない |
+| Kotlin 側の失敗(デコード不可、準備のタイムアウト) | `warn` ログ + beep を rodio で再生。通知フローは止めない |
+| API 28 以下(Android 9 以前) | 触覚の指定をせず、`MediaPlayer` で通常の音声として再生する(触覚は出ない。Android 9 以前の端末では未確認) |
 | `has_haptic_channel` の判定不能 | false(rodio) |
 
 `log::warn!` は、これまで通り `enable_file_logging` が有効なときだけファイルに残る。

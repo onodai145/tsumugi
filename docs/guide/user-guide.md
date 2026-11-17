@@ -169,17 +169,17 @@ Android では、触覚チャンネルを持つ ogg(Vorbis)を通知音に選ぶ
 
 - 触覚入りかどうかは、ogg の `ANDROID_HAPTIC`(触覚チャンネル数)のタグで判断します。タグが無い ogg や、ogg 以外(mp3・wav など)は、今までどおり音だけ鳴ります。
 - 振動するかどうかは、設定→モバイルの「ハプティクス(振動)を有効にする」に従います。OFF のときは、触覚入りの ogg でも音だけ鳴ります。
-- 端末が音声連動の触覚に対応している必要があります。動作は Pixel 8 Pro で確認しました。対応していない端末の挙動は確認していないので、端末によって異なります。
+- 端末が音声連動の触覚に対応している必要があります。動作は Pixel 8 Pro で確認しました。対応していない端末の挙動は確認していないので、端末によって異なります。触覚の仕組みは Android 10 以降のものです。Android 9 以前では振動せず、触覚の指定をしない通常の音声として再生します(Android 9 以前の端末では確認していません)。
 - 触覚入りの通知音が続けて鳴るときは、前の音を止めて、最新の音だけを鳴らします。
 - 音は、システムの「通知」の音量に従います。マナーモード(バイブ)でも、音は出ませんが、触覚入りの通知音は振動します。
 - 何らかの理由で触覚入りの音を再生できなかったときは、通知を止めずにビープ音で代わりに鳴らします。
-- 触覚入りの ogg は、たとえば次のように ffmpeg で作れます(ステレオの音 `sound.wav` と、モノラルの触覚用の波形 `haptic.wav` を、この順に 3 チャンネルへまとめます。触覚チャンネルは音声チャンネルの後ろに置きます)。
+- 触覚入りの ogg は、Android 標準の触覚入りの音(アラーム音など)と同じく、**2 チャンネル(1 チャンネル目が音、2 チャンネル目が触覚)**で作ります。たとえば ffmpeg では、モノラルの音 `sound.wav` と、モノラルの触覚用の波形 `haptic.wav`(低い周波数の波形)から、次のように作れます。
 
   ```
-  ffmpeg -i sound.wav -i haptic.wav -filter_complex "[0:a][1:a]amerge=inputs=2,channelmap=channel_layout=3.0" -c:a libvorbis -metadata ANDROID_HAPTIC=1 out.ogg
+  ffmpeg -i sound.wav -i haptic.wav -filter_complex "[0:a][1:a]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR" -c:a libvorbis -metadata ANDROID_HAPTIC=1 out.ogg
   ```
 
-  作ったファイルが触覚入りになっているかは、`ffprobe -show_entries stream=channels:stream_tags out.ogg` で、`channels=3` と `TAG:ANDROID_HAPTIC=1` が出ることで確かめられます。
+  作ったファイルが、この形(2 チャンネル・触覚入り)になっているかは、`ffprobe -show_entries stream=channels:stream_tags out.ogg` で、`channels=2` と `TAG:ANDROID_HAPTIC=1` が出ることで確かめられます。音をステレオにして触覚を足す 3 チャンネルの作り方は、ffmpeg が Vorbis のチャンネルの順番を並べ替えるため、触覚が意図した位置に入らないおそれがあるので、おすすめしません。
 - デスクトップ版では、触覚入りの ogg を選んでも振動しません(今までどおりの再生です)。
 
 ## 検索
