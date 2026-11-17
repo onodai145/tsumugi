@@ -295,7 +295,7 @@ mod tests {
 
     // ---- has_haptic_channel (Issue #592) ----
 
-    const HAPTIC_OGG: &[u8] = include_bytes!("../tests/fixtures/haptic_ogg/haptic_3ch.ogg");
+    const HAPTIC_OGG: &[u8] = include_bytes!("../tests/fixtures/haptic_ogg/haptic_2ch.ogg");
     const PLAIN_OGG: &[u8] = include_bytes!("../tests/fixtures/haptic_ogg/plain_2ch.ogg");
 
     /// 判定の単体テスト用に、`padding` バイトの後ろに Vorbis コメントヘッダを持つ ogg 風のバイト列を作る
@@ -320,10 +320,26 @@ mod tests {
         ogg_with_comments_after(23, comments)
     }
 
+    /// Vorbis の識別ヘッダ(`\x01vorbis` + バージョン(4 バイト) + チャンネル数(1 バイト))から、チャンネル総数を読む。
+    fn vorbis_channel_count(bytes: &[u8]) -> Option<u8> {
+        let pos = bytes.windows(7).position(|w| w == b"\x01vorbis")?;
+        bytes.get(pos + 7 + 4).copied()
+    }
+
     #[test]
     fn haptic_fixture_is_detected_and_plain_one_is_not() {
         assert!(has_haptic_channel(HAPTIC_OGG));
         assert!(!has_haptic_channel(PLAIN_OGG));
+    }
+
+    #[test]
+    fn haptic_fixture_has_the_layout_of_android_own_haptic_oggs() {
+        // 端末に入っている Android 標準の触覚入り ogg(アラーム音 26 個)は、すべて 2ch で
+        // `ANDROID_HAPTIC=1`、つまり「音 1ch + 触覚 1ch(最後のチャンネル)」。ffmpeg の libvorbis は、
+        // 3ch を Vorbis の順(L・C・R)に並べ替えて格納するので、「ステレオ + 触覚」の 3ch は
+        // 触覚が真ん中に入ってしまう。fixture もガイドの作り方も、公式と同じ 2ch にそろえる。
+        assert_eq!(vorbis_channel_count(HAPTIC_OGG), Some(2));
+        assert_eq!(vorbis_channel_count(PLAIN_OGG), Some(2));
     }
 
     #[test]
