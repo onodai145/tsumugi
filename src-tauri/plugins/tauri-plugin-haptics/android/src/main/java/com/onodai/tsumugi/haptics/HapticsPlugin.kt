@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Base64
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -17,8 +18,16 @@ class VibrateArgs {
     var pattern: String? = null
 }
 
+@InvokeArg
+class PlayHapticAudioArgs {
+    var data: String? = null
+    var hapticsEnabled: Boolean = true
+}
+
 @TauriPlugin
 class HapticsPlugin(private val activity: Activity) : Plugin(activity) {
+    private val hapticAudio = HapticAudioPlayer()
+
     private val vibrator: Vibrator by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val manager = activity.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -44,5 +53,24 @@ class HapticsPlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(VibrateArgs::class.java)
         vibrator.vibrate(effectFor(args.pattern))
         invoke.resolve()
+    }
+
+    /// 触覚入りの音声を MediaPlayer で再生する(Issue #592)。再生が始まったら resolve、失敗したら reject。
+    @Command
+    fun playHapticAudio(invoke: Invoke) {
+        val args = invoke.parseArgs(PlayHapticAudioArgs::class.java)
+        val bytes = try {
+            Base64.decode(args.data ?: "", Base64.DEFAULT)
+        } catch (e: IllegalArgumentException) {
+            invoke.reject("invalid base64 audio data")
+            return
+        }
+        if (bytes.isEmpty()) {
+            invoke.reject("empty audio data")
+            return
+        }
+        hapticAudio.play(bytes, args.hapticsEnabled) { error ->
+            if (error == null) invoke.resolve() else invoke.reject(error.message ?: "haptic audio playback failed")
+        }
     }
 }

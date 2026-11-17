@@ -32,6 +32,8 @@
 <label class="mb-2 flex items-center gap-2 text-sm"
   ><input type="checkbox" bind:checked={hapticsEnabled} /> ハプティクス(振動)を有効にする</label
 >
-<p class="mb-4 mt-0 text-xs text-muted-foreground">ノート投稿時とリアクション付与時に端末を振動させます。</p>
+<p class="mb-4 mt-0 text-xs text-muted-foreground">
+  ノート投稿時とリアクション付与時に端末を振動させます。触覚入りの ogg を通知音にしたときの振動(Android)も、この設定に従います。
+</p>
 
 <SaveBar {busy} {saved} {err} onsave={save} />

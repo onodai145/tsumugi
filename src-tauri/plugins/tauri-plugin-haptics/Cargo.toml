@@ -25,6 +25,8 @@ serde = { version = "1", features = ["derive"] }
 # (src-tauri/Cargo.toml のコメント参照。TSバインディング生成の互換性のため緩めない)。
 specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 thiserror = "2"
+# 触覚入りの通知音のバイト列を Kotlin へ JSON で渡すための base64(本体の src-tauri と同じメジャー)。
+base64 = "0.23"
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }
