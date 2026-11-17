@@ -11,7 +11,7 @@ Issue 本文は空で、タイトルのみ。以下はブレインストーミ�
 - 手動トグルのみ。回線種別・従量制による自動切り替えはしない(`network_status.rs` は使わない。別 Issue)。
 - 対象は「メディア添付」「アバター」「カスタム絵文字」「URL プレビュー」。API・ストリーミングの量や頻度は対象外。
 - 設定は 1 つの真偽値。項目ごとの個別オン・オフはしない。
-- トグルの置き場所は設定 → 表示タブのみ(クイック切り替えは作らない)。
+- トグルの置き場所は設定 → 外観のみ(クイック切り替えは作らない)。
 - 端末依存の設定として、エクスポートに含めず、インポートでは現在の値を維持する(MCP 設定・`local_model_license_version` と同じ扱い)。
 
 ## 目標 / 非目標
@@ -34,7 +34,7 @@ Issue 本文は空で、タイトルのみ。以下はブレインストーミ�
 
 | 対象 | 挙動 |
 |---|---|
-| ノート添付(画像・動画・音声) | サムネイルを含め何も取得しない。ファイル名・種類・サイズ(`DriveFile.size`)を示すプレースホルダーだけを出し、タップで読み込む。動画・音声は読み込むまで `<media-player>` を作らない(`preload` 以前に取得が起きないようにする)。タップ後は従来どおりの表示になり、画像はもう一度タップすると拡大ビューアが開く。読み込み済みの状態は `MediaGrid` インスタンスごとの一時状態で、再描画で失われてよい。 |
+| ノート添付(画像・動画・音声) | サムネイルを含め何も取得しない。ファイル名・種類・サイズ(`DriveFile.size`)を示すプレースホルダーだけを出し、タップで読み込む。動画・音声は読み込むまで `<media-player>` を作らない(`preload` 以前に取得が起きないようにする)。タップ後は従来どおりの表示になり、画像はもう一度タップすると拡大ビューアが開く。読み込み済みの状態は `MediaGrid` インスタンスごとの一時状態で、再描画で失われてよい。拡大ビューア(`MediaViewer`)も同じ「読み込み済み」の状態を共有し、ビューア内でまだ読み込んでいない添付は実画像を取得せず、同じプレースホルダーを出す(ビューアは全添付の `src` を一括で描画するため、これを塞がないと 1 枚開いただけで同じノートの全画像が取得される)。ビューア内でそのページを開いてタップしたときに読み込む。 |
 | アバター | ノート・通知・返信先・リアクションユーザー一覧では、アバター枠(猫耳などの装飾を含む)ごと描画しない。プロフィールを開く導線はアバター以外(名前・アカウント名)にもあるため、機能は失われない。 |
 | カスタム絵文字 | URL を取得せず、既存のフォールバック(`:name:` のテキスト)を表示する。 |
 | URL プレビュー | `fetchUrlPreview` を呼ばず、「プレビューを読み込む」ボタンだけを出す。押すと従来どおり取得・表示する。 |
@@ -53,12 +53,11 @@ Issue 本文は空で、タイトルのみ。以下はブレインストーミ�
 
 ### フロントエンド(`frontend/src/`)
 
-- `lib/lowBandwidth.ts`(新規): 判定の純関数をまとめる。
-  - `shouldDeferMedia(lowBandwidth, revealed)` のように「取得を保留するか」を返す小さな関数。コンポーネントはこれ経由で判定し、テストはこの関数と各コンポーネントの両方で行う。
-- `lib/store.svelte.ts`: `ui.lowBandwidth` を既存の `ui` から読む(新しい状態は持たない)。保存は既存の設定保存の経路に乗せる。
+- `lib/store.svelte.ts`: 変更しない。`ui.lowBandwidth` は既存の `ui` から読む。`#[serde(default)]` の項目はバインディングでオプショナル(`lowBandwidth?: boolean`)になり、未設定は偽として扱えるため、初期値や正規化の追加は要らない。保存は既存の設定保存の経路(`app.setUiPrefs`)に乗せる。
 - `ui/settings/AppearanceSection.svelte`: チェックボックス「低帯域幅モード」を追加する。説明文に、対象(メディア・アバター・カスタム絵文字・URL プレビュー)と、端末ごとの設定でエクスポートされないことを書く。既存の他の項目と同じ保存フロー(`SaveBar`)に従う。
-- `ui/AvatarImage.svelte`(新規): 4 か所に散らばった `<img src={avatarUrl}>`(`NoteCard`・`NotificationCard`・`ReplyTargetCard`・`ReactionUsersPopover`)の共通化。`lowBandwidth` のときは `Avatar` 枠ごと描画しないゲートを 1 か所に集約する。クリックでプロフィールを開く挙動は呼び出し側から受け取る。
-- `render/MediaGrid.svelte` と `lib/mediaViewer.svelte.ts`: `isRevealed` を拡張し、閲覧注意に加えて低帯域幅モードでも「未読み込み」とみなす。プレースホルダーは既存の `sensitive-cover` と同じ仕組みを使い、文言とサイズ表示だけ分ける。閲覧注意の挙動は変えない。
+- `ui/Avatar.svelte`: 新しい prop `deferInLowBandwidth`(既定 `false`)を追加し、`true` かつ `app.ui.lowBandwidth` のとき枠ごと描画しない。ゲートを `Avatar` 枠 1 か所に置くことで、各呼び出し側が持つ「`avatarUrl` があれば `<img>`、無ければプレースホルダー `<div>`」の分岐をそのまま保てる(`<img>` だけを共通化するとこの分岐が崩れるため、当初案の `AvatarImage.svelte` 新設はやめた)。`NoteCard`・`NotificationCard`・`ReplyTargetCard`・`ReactionUsersPopover` の 4 か所だけが `deferInLowBandwidth` を渡す。
+- `lib/mediaViewer.svelte.ts`: `isRevealed(revealed, file, lowBandwidth = false)` に拡張し、閲覧注意に加えて低帯域幅でも「未読み込み」とみなす(既定値で既存の呼び出しは変わらない)。カバーの文言を返す `coverLabel(file)`(閲覧注意なら従来の文言、そうでなければ「タップで読み込む」)を追加する。判定は別ファイルを作らず、ここに純関数として置く。
+- `render/MediaGrid.svelte`・`render/MediaViewer.svelte`: 上記を使い、未読み込みの間はカバーだけを描画する。グリッドのカバーにはファイル名とサイズ(`formatFileSize`)を添える。閲覧注意の挙動は変えない。`FileList`(非メディアの保存行)は取得を伴わないので変えない。
 - `render/CustomEmoji.svelte`: `lowBandwidth` のとき `url` が無い場合と同じフォールバック表示にする。
 - `render/UrlPreviewCard.svelte`: `lowBandwidth` のとき、ボタンが押されるまで `fetchUrlPreview` の `$effect` を走らせない。
 
@@ -73,7 +72,7 @@ Issue 本文は空で、タイトルのみ。以下はブレインストーミ�
 ## テスト
 
 - Rust: `UiPrefs` の `low_bandwidth` 既定値(古い JSON を読んで `false`)、`build_export` が値を書き出さないこと、`plan_import` が現在の値を維持すること(MCP の既存テストと同じ形)。
-- Vitest: `lib/lowBandwidth.ts` の純関数、`MediaGrid`(未読み込みでは `<img>` / `<media-player>` が無い、タップで出る、閲覧注意との併用)、`AvatarImage`(オンでは何も描画しない)、`CustomEmoji`(`<img>` が無い)、`UrlPreviewCard`(ボタンを押すまで取得しない)、`AppearanceSection`(トグルの保存)。
+- Vitest: `isRevealed` / `coverLabel`、`MediaGrid` と `MediaViewer`(未読み込みでは `<img>` / `<media-player>` / `<cropper-image>` が無い、タップで出る、閲覧注意との併用)、`Avatar` と 4 つの呼び出し側(オンでは枠ごと描画しない。プロフィール等の非対象はオンでも描画する)、`CustomEmoji`(`<img>` が無い)、`UrlPreviewCard`(ボタンを押すまで取得しない)、`AppearanceSection`(トグルの保存)。
 - 実画面の確認は、e2e の Compose Misskey 上の実描画で、オンにしてネットワーク取得が止まることを確認する(subagent のレビュー通過では代替しない)。
 
 ## 影響範囲
