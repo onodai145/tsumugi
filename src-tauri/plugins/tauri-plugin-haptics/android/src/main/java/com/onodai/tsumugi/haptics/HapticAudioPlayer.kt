@@ -13,7 +13,10 @@ import android.os.Looper
  * - 最新の 1 つだけを保持する(後勝ち)。新しい要求は、再生中のものを止めてから始める。
  * - MediaPlayer の生成・操作・コールバックは、すべてメインスレッドで行う。
  * - onResult は、要求ごとに必ず 1 回だけ呼ぶ: 再生が始まった(または後続の要求に置き換えられた)ら null、
- *   失敗(準備エラー・タイムアウト・API 28 以下)なら例外。呼び出し側(Rust)をブロックしたままにしないため。
+ *   失敗(準備エラー・タイムアウト)なら例外。呼び出し側(Rust)をブロックしたままにしないため。
+ * - API 28 以下(Android 9 以前)は触覚チャンネルの仕組み自体が無く、setHapticChannelsMuted も使えない。
+ *   その場合は触覚の指定をせず、通常の音声として再生する(拒否して beep に落とすと、利用者が選んだ音が
+ *   以前(rodio)より後退して鳴らなくなるため)。
  */
 internal class HapticAudioPlayer {
     private val main = Handler(Looper.getMainLooper())
@@ -26,11 +29,6 @@ internal class HapticAudioPlayer {
     private fun start(data: ByteArray, hapticsEnabled: Boolean, onResult: (Throwable?) -> Unit) {
         current?.release() // 後勝ち。置き換えられた要求は成功として終える
         current = null
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            // setHapticChannelsMuted は API 29(Android 10)以降
-            onResult(UnsupportedOperationException("haptic channels need API 29 or later"))
-            return
-        }
         val session = Session(data, hapticsEnabled, onResult)
         current = session
         session.begin()
@@ -51,13 +49,14 @@ internal class HapticAudioPlayer {
 
         fun begin() {
             try {
-                player.setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setHapticChannelsMuted(!hapticsEnabled)
-                        .build()
-                )
+                val attributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                // setHapticChannelsMuted は API 29(Android 10)以降。それ未満は触覚の指定なしで通常の音声として鳴らす
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    attributes.setHapticChannelsMuted(!hapticsEnabled)
+                }
+                player.setAudioAttributes(attributes.build())
                 player.setDataSource(BytesDataSource(data))
                 player.setOnPreparedListener {
                     if (!released) {

@@ -74,7 +74,7 @@ pub async fn play_notify_sound(
 
 /// 触覚入りの音を、tauri-plugin-haptics 経由で MediaPlayer で鳴らす(Android のみ)。
 /// 触覚の ON/OFF は設定のハプティクス(`UiPrefs.haptics_enabled`)に従う(読めなければ既定の true)。
-/// 失敗(Kotlin 側のエラー・タイムアウト・API 28 以下)したら、通知を無音にしないよう beep で代替する。
+/// 失敗(Kotlin 側のエラー・タイムアウト)したら、通知を無音にしないよう beep で代替する。
 #[cfg(target_os = "android")]
 async fn play_haptic_audio(app: &AppHandle, state: &AppState, bytes: Vec<u8>) {
     let haptics_enabled = state
