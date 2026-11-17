@@ -394,6 +394,10 @@ export const commands = {
 	/**
 	 *  通知音を鳴らす。choice は プリセットID / data URL(カスタム音声)。
 	 *  失敗しても通知フロー全体を止めないため、常に Ok を返す(失敗はログのみ)。
+	 * 
+	 *  Android で、触覚チャンネル入りの ogg(`has_haptic_channel`)だけは、rodio ではなく
+	 *  tauri-plugin-haptics の MediaPlayer で、音と一緒に振動させて鳴らす(Issue #592)。
+	 *  それ以外(プリセット・MML・触覚なしの音、デスクトップのすべて)は今まで通り rodio。
 	 */
 	playNotifySound: (choice: string) => typedError<null, Error>(__TAURI_INVOKE("play_notify_sound", { choice })),
 	/**  MML を解釈して、時刻解決済みのノート列を返す(Issue #75)。構文エラーは Err ではなくデータで返す。 */
