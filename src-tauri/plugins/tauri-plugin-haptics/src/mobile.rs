@@ -27,7 +27,9 @@ impl<R: Runtime> Haptics<R> {
 
     /// 触覚入りの音声(ogg)を、触覚つきで再生する(Issue #592)。
     /// `haptics_enabled` が false のときは触覚をミュートして音だけ鳴らす。
-    /// Kotlin 側が再生を始めたら `Ok`、失敗・タイムアウトなら `Err`。呼び出しは同期でブロックする。
+    /// Kotlin 側が再生を始めたら `Ok`、失敗(準備エラーや、Kotlin 側の 5 秒の準備タイムアウト)なら `Err`。
+    /// 呼び出しは同期でブロックする。Rust 側にタイムアウトはなく、Kotlin が必ず結果を返すことに依存する
+    /// (`HapticAudioPlayer` が、どの経路でも 1 回だけ返す)。
     pub fn play_haptic_audio(&self, data: &[u8], haptics_enabled: bool) -> crate::Result<()> {
         self.0
             .run_mobile_plugin(

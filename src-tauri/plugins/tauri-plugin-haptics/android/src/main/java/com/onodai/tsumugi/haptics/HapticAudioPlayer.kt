@@ -29,7 +29,14 @@ internal class HapticAudioPlayer {
     private fun start(data: ByteArray, hapticsEnabled: Boolean, onResult: (Throwable?) -> Unit) {
         current?.release() // 後勝ち。置き換えられた要求は成功として終える
         current = null
-        val session = Session(data, hapticsEnabled, onResult)
+        // MediaPlayer() の生成は Session の初期化で行われる。ここで投げると、メインスレッドで捕まらずにアプリが
+        // 落ちて、onResult も返らない。ここで捕まえて失敗として返す。
+        val session = try {
+            Session(data, hapticsEnabled, onResult)
+        } catch (e: Exception) {
+            onResult(e)
+            return
+        }
         current = session
         session.begin()
     }
@@ -60,8 +67,14 @@ internal class HapticAudioPlayer {
                 player.setDataSource(BytesDataSource(data))
                 player.setOnPreparedListener {
                     if (!released) {
-                        it.start()
-                        settle(null)
+                        try {
+                            it.start()
+                            settle(null)
+                        } catch (e: Exception) {
+                            // start() が投げても、メインスレッドで捕まらずにアプリが落ちないようにする
+                            settle(e)
+                            release()
+                        }
                     }
                 }
                 player.setOnCompletionListener { release() }
