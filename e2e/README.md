@@ -52,6 +52,13 @@ docker compose down -v
   置かれているため、この実行には含まれない(WebdriverIOの`specs`配列は`!`による
   除外パターンをサポートしないため、パターンではなくディレクトリ分けで除外している)。
   失敗時のログは `wdio-logs/` に出力される。
+  予約投稿の操作(`helpers/scheduledUi.ts`)が失敗したときは、画面の状態(エラーモーダル、各ボタンの
+  状態)を `wdio-logs/miauth-bridge-debug.log` に、スクリーンショットを
+  `wdio-logs/schedule-failure-*.png` に残す(CI では `e2e-failure-artifacts` に含まれる)。
+- `browser.execute` に渡す関数の中では、名前付きの関数(`const f = () => ...` や `function f() {}`)を
+  作らない。E2E の TS 変換(tsx/esbuild の keepNames)が `__name(...)` で包み、WebView 側には
+  `__name` が無いため `Can't find variable: __name` で失敗する(Issue #641 の診断コードで実際に起きた)。
+  `.map((x) => ...)` のように引数へ直接渡す無名関数は問題ない。
 - `pnpm e2e:persistence` — `specs-persistence/settings-persistence-restart.part1.e2e.ts` →
   `part2.e2e.ts` を `E2E_REUSE_HOME_FILE` 経由で同じ一時HOMEを再利用しながら1回の
   `wdio run` で連続実行し、設定・カラム構成がアプリ再起動後も復元されることを

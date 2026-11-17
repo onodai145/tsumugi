@@ -13,7 +13,12 @@ export async function openPicker(): Promise<void> {
     await toggle.waitForClickable({ timeout: 15000 });
     await toggle.click();
   }
-  await (await $('[data-testid="compose-schedule-input"]')).waitForDisplayed({ timeout: 10000 });
+  try {
+    await (await $('[data-testid="compose-schedule-input"]')).waitForDisplayed({ timeout: 10000 });
+  } catch (e) {
+    const detail = await dumpUiFailure("openPicker");
+    throw new Error(`schedule picker did not open after clicking the toggle\n${detail}\n${String(e)}`);
+  }
 }
 
 /** 本文と予約日時(ミリ秒)を入れて「予約」を押し、作成欄が空になる(=成功する)まで待つ。 */
@@ -36,7 +41,7 @@ export async function scheduleAt(text: string, atMs: number): Promise<void> {
       interval: 300,
     });
   } catch (e) {
-    const detail = await dumpScheduleFailure(text, atMs);
+    const detail = await dumpUiFailure(`scheduleAt-${text}`, { requestedAt: new Date(atMs).toISOString() });
     throw new Error(
       `compose box did not clear after scheduling "${text}" (the app rejects a past date, so the due time may be too close — slow runner?)\n${detail}\n${String(e)}`,
     );
@@ -44,39 +49,50 @@ export async function scheduleAt(text: string, atMs: number): Promise<void> {
 }
 
 /**
- * 予約後に作成欄が空にならなかったとき、アプリが出したエラー(`role="dialog"` のモーダル本文)と
- * 送信まわりの状態を集め、スクリーンショットを `e2e/wdio-logs/` に残す(Issue #641。CI は
- * アプリ自身のログを回収しないため、画面に出たエラー文が無いと原因を追えない)。
- * 診断の失敗で本来のエラーを隠さないよう、ここでは例外を投げない。
+ * 予約 UI の操作が失敗したとき、アプリが出したエラー(`role="dialog"` のモーダル本文)と作成欄・予約欄・
+ * ボタンの状態を集め、スクリーンショットを `e2e/wdio-logs/` に残す(Issue #641。CI はアプリ自身のログを
+ * 回収しないため、画面の状態が無いと原因を追えない)。診断の失敗で本来のエラーを隠さないよう、ここでは
+ * 例外を投げない。
+ *
+ * `browser.execute` に渡す関数の中で、名前付きの関数(`const f = () => ...` や `function f() {}`)を作らない
+ * こと。E2E の TS 変換(tsx/esbuild の keepNames)がそれを `__name(...)` で包み、WebView 側には
+ * `__name` が無いので `Can't find variable: __name` で診断ごと失敗する(2026-11-16 の CI で実際に起きた)。
+ * `.map((x) => ...)` のように引数へ直接渡す無名関数は包まれない。
  */
-async function dumpScheduleFailure(text: string, atMs: number): Promise<string> {
+async function dumpUiFailure(label: string, extra: Record<string, unknown> = {}): Promise<string> {
   let detail = "";
   try {
     const state = await browser.execute(() => {
-      const val = (sel: string) => (document.querySelector(sel) as HTMLInputElement | null)?.value ?? null;
+      const textarea = document.querySelector('[data-testid="compose-textarea"]') as HTMLTextAreaElement | null;
+      const input = document.querySelector('[data-testid="compose-schedule-input"]') as HTMLInputElement | null;
+      const toggle = document.querySelector('[data-testid="compose-schedule-toggle"]') as HTMLButtonElement | null;
       const submit = document.querySelector('[data-testid="compose-submit"]') as HTMLButtonElement | null;
       return {
         dialog: document.querySelector('[role="dialog"]')?.textContent?.trim() ?? null,
-        textareaLength: val('[data-testid="compose-textarea"]')?.length ?? null,
-        scheduleInput: val('[data-testid="compose-schedule-input"]'),
+        textareaLength: textarea?.value.length ?? null,
+        scheduleInputPresent: input !== null,
+        scheduleInputRects: input?.getClientRects().length ?? null,
+        scheduleInput: input?.value ?? null,
+        toggleDisabled: toggle?.disabled ?? null,
         submitLabel: submit?.textContent?.trim() ?? null,
         submitDisabled: submit?.disabled ?? null,
         localHint: document.querySelector('[data-testid="compose-schedule-local-hint"]') !== null,
+        activeElement: document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? null,
         browserNow: new Date().toISOString(),
       };
     });
-    detail = `diagnostics: ${JSON.stringify({ ...state, requestedAt: new Date(atMs).toISOString() })}`;
+    detail = `diagnostics: ${JSON.stringify({ ...state, ...extra })}`;
   } catch (err) {
     detail = `diagnostics unavailable: ${String(err)}`;
   }
-  debugLog("scheduleAt", `failed for "${text}": ${detail}`);
+  debugLog(label, `failed: ${detail}`);
   try {
-    const safe = text.replace(/[^a-zA-Z0-9_-]+/g, "_");
+    const safe = label.replace(/[^a-zA-Z0-9_-]+/g, "_");
     const path = debugLogPath(`schedule-failure-${safe}-${Date.now()}.png`);
     await browser.saveScreenshot(path);
-    debugLog("scheduleAt", `saved screenshot: ${path}`);
+    debugLog(label, `saved screenshot: ${path}`);
   } catch (err) {
-    debugLog("scheduleAt", `failed to save screenshot: ${String(err)}`);
+    debugLog(label, `failed to save screenshot: ${String(err)}`);
   }
   return detail;
 }
