@@ -38,7 +38,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="mb-2 flex min-w-0 gap-1.5 text-muted-foreground" data-testid="reply-card">
-  <Avatar isCat={note.user.isCat} avatarBlurhash={note.user.avatarBlurhash} class="mt-0.5 h-6 w-6 flex-none">
+  <Avatar isCat={note.user.isCat} avatarBlurhash={note.user.avatarBlurhash} deferInLowBandwidth class="mt-0.5 h-6 w-6 flex-none">
     {#if note.user.avatarUrl}
       <img
         class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover"

@@ -21,6 +21,7 @@ vi.mock("../lib/mediaDownload", () => ({ saveMediaToDisk: vi.fn() }));
 
 const { default: MediaViewer } = await import("./MediaViewer.svelte");
 const { saveMediaToDisk } = await import("../lib/mediaDownload");
+const { app } = await import("../lib/store.svelte");
 
 // jsdomはElement.scrollToを実装していないため、マウント時のスクロール同期(onMount)を含む
 // すべてのテストで安全にレンダリングできるよう既定でno-opスタブを用意しておく。
@@ -507,5 +508,78 @@ describe("MediaViewer", () => {
       },
     });
     expect(document.querySelector("media-controls")).toBeTruthy();
+  });
+});
+
+describe("MediaViewer 低帯域幅モード", () => {
+  afterEach(() => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+  });
+
+  it("未読み込みの添付は cropper-image を作らず、読み込み済みのものだけ作る", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
+        startIndex: 0,
+        revealed: { a: true },
+        onclose: () => {},
+      },
+    });
+    const images = document.querySelectorAll("cropper-image");
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute("alt")).toBe("a.png");
+    getByText("タップで読み込む");
+  });
+
+  it("開いているページのカバーをタップすると読み込む", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText } = render(MediaViewer, {
+      props: { files: [file({ id: "a", name: "a.png" })], startIndex: 0, revealed: {}, onclose: () => {} },
+    });
+    expect(document.querySelector("cropper-image")).toBeNull();
+    await fireEvent.click(getByText("タップで読み込む"));
+    expect(document.querySelector("cropper-image")).not.toBeNull();
+  });
+
+  it("未読み込みのカバーに、ファイル名と種類・サイズを添える", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "b", name: "b.png", size: 2048 })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    getByText("タップで読み込む");
+    getByText("b.png");
+    getByText("画像 · 2.0 KB");
+  });
+
+  it("オフで閲覧注意のカバーには、ファイル名を添えない(従来どおり)", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    const { queryByText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "s", name: "s.png", size: 2048, isSensitive: true })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    expect(queryByText("画像 · 2.0 KB")).toBeNull();
+  });
+
+  it("オフなら従来どおり、すべての画像を描画する", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    render(MediaViewer, {
+      props: {
+        files: [file({ id: "a", name: "a.png" }), file({ id: "b", name: "b.png" })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    expect(document.querySelectorAll("cropper-image")).toHaveLength(2);
   });
 });

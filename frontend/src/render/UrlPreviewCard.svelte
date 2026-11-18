@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { UrlPreview } from "../bindings/tauri.gen";
+  import { Button } from "$lib/components/ui/button";
+  import { app } from "../lib/store.svelte";
   import { cachedUrlPreview, fetchUrlPreview, isSafeUrl, resolvedThumbnailUrl } from "../lib/urlPreview";
 
   let { url, instanceHost }: { url: string; instanceHost: string | undefined } = $props();
@@ -8,8 +10,14 @@
   let revealed = $state(false);
   let playing = $state(false);
 
+  // 低帯域幅モード(Issue #591)。押されるまで取得もカード(サムネイル)の描画もしない。
+  // キャッシュ済みでも同じ扱いにして、キャッシュの有無で見た目を変えない。
+  let loadRequested = $state(false);
+  const lowBandwidth = $derived(app.ui.lowBandwidth ?? false);
+  const deferred = $derived(lowBandwidth && !loadRequested);
+
   $effect(() => {
-    if (preview !== undefined) return;
+    if (deferred || preview !== undefined) return;
     let cancelled = false;
     fetchUrlPreview(url).then((p) => {
       if (!cancelled) preview = p;
@@ -38,7 +46,12 @@
   {/if}
 {/snippet}
 
-{#if preview}
+{#if deferred}
+  <div class="mt-2">
+    <!-- 1 つのノートに URL が複数あるとき、同じ名前のボタンが並ぶので、title で対象の URL を示す。 -->
+    <Button type="button" variant="outline" size="sm" title={url} onclick={() => (loadRequested = true)}>プレビューを読み込む</Button>
+  </div>
+{:else if preview}
   {@const hasPlayer = preview.player && isSafeUrl(preview.player.url)}
   <div class="url-preview-card mt-2 w-full max-w-[480px] overflow-hidden rounded-md border border-border text-sm">
     {#if playing && hasPlayer && preview.player}
@@ -103,6 +116,11 @@
         {@render linkOrDiv(preview, "min-w-0 flex-1 px-2 py-1.5 text-foreground no-underline")}
       </div>
     {/if}
+  </div>
+{:else if lowBandwidth && loadRequested}
+  <!-- 低帯域幅モードでボタンを押したあと。ボタンが黙って消えないよう、取得中と結果なしを示す。 -->
+  <div class="mt-2 text-xs text-muted-foreground" role="status">
+    {preview === undefined ? "読み込み中…" : "プレビューはありません"}
   </div>
 {/if}
 

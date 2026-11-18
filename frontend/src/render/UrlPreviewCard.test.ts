@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import UrlPreviewCard from "./UrlPreviewCard.svelte";
+
+// UrlPreviewCard は低帯域幅モードの判定で store.svelte.ts を読むため、Tauri ランタイム外でも import できるようスタブする。
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/plugin-notification", () => ({
+  isPermissionGranted: vi.fn().mockResolvedValue(true),
+  requestPermission: vi.fn().mockResolvedValue("granted"),
+  sendNotification: vi.fn(),
+}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 const cachedUrlPreviewMock = vi.fn();
 const fetchUrlPreviewMock = vi.fn();
@@ -22,10 +34,13 @@ vi.mock("../lib/urlPreview", () => ({
   },
 }));
 
+const { app } = await import("../lib/store.svelte");
+
 afterEach(() => {
   cleanup();
   cachedUrlPreviewMock.mockReset();
   fetchUrlPreviewMock.mockReset();
+  app.ui = { ...app.ui, lowBandwidth: false };
 });
 
 const PREVIEW = {
@@ -188,5 +203,80 @@ describe("UrlPreviewCard", () => {
     render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
     expect(screen.queryByRole("button", { name: "再生" })).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
+  });
+});
+
+describe("UrlPreviewCard 低帯域幅モード(Issue #591)", () => {
+  it("取得せずボタンだけを出し、押すと取得して表示する", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    fetchUrlPreviewMock.mockResolvedValue(PREVIEW);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+
+    expect(fetchUrlPreviewMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("記事タイトル")).toBeNull();
+
+    await fireEvent.click(screen.getByRole("button", { name: "プレビューを読み込む" }));
+    await waitFor(() => expect(screen.getByText("記事タイトル")).toBeTruthy());
+    expect(fetchUrlPreviewMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("キャッシュ済みでも、押すまでカードを描画しない", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(PREVIEW);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+
+    expect(screen.queryByText("記事タイトル")).toBeNull();
+    await fireEvent.click(screen.getByRole("button", { name: "プレビューを読み込む" }));
+    expect(screen.getByText("記事タイトル")).toBeTruthy();
+    expect(fetchUrlPreviewMock).not.toHaveBeenCalled();
+  });
+
+  it("オフなら従来どおり、ボタンなしで取得する", async () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    fetchUrlPreviewMock.mockResolvedValue(PREVIEW);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+
+    await waitFor(() => expect(screen.getByText("記事タイトル")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "プレビューを読み込む" })).toBeNull();
+  });
+
+  it("ボタンに URL を title として添え、複数あっても見分けられる", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+    expect(screen.getByRole("button", { name: "プレビューを読み込む" }).getAttribute("title")).toBe(
+      "https://example.com/a",
+    );
+  });
+
+  it("押したあと、取得中は「読み込み中…」を出す", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    fetchUrlPreviewMock.mockReturnValue(new Promise(() => {}));
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "プレビューを読み込む" }));
+    await waitFor(() => expect(screen.getByText("読み込み中…")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "プレビューを読み込む" })).toBeNull();
+  });
+
+  it("押した結果プレビューが無ければ、黙って消えず「プレビューはありません」を出す", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    fetchUrlPreviewMock.mockResolvedValue(null);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "プレビューを読み込む" }));
+    await waitFor(() => expect(screen.getByText("プレビューはありません")).toBeTruthy());
+  });
+
+  it("オフでは、プレビューが無いときに何も出さない(従来どおり)", async () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    cachedUrlPreviewMock.mockReturnValue(null);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+    expect(screen.queryByText("プレビューはありません")).toBeNull();
+    expect(screen.queryByText("読み込み中…")).toBeNull();
   });
 });

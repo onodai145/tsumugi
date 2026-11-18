@@ -16,6 +16,7 @@
   let fontFamily = $state(app.ui.fontFamily ?? "");
   let emojiStyle = $state<EmojiStyle>((app.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   let mfmAnimationEnabled = $state(app.ui.mfmAnimationEnabled ?? true);
+  let lowBandwidth = $state(app.ui.lowBandwidth ?? false);
   let instanceTicker = $state(app.ui.instanceTicker ?? "remote");
   let catMode = $state(app.ui.catMode ?? "respect");
   let avatarRadius = $state(app.ui.avatarRadius ?? 20);
@@ -236,6 +237,7 @@
         fontFamily,
         emojiStyle,
         mfmAnimationEnabled,
+        lowBandwidth,
         instanceTicker,
         catMode,
         avatarRadius,
@@ -540,6 +542,17 @@
     {/each}
   </p>
 </div>
+
+<label class="mb-2 flex items-center gap-2 text-sm"
+  ><input type="checkbox" bind:checked={lowBandwidth} /> 低帯域幅モードを有効にする</label
+>
+<p class="mb-4 mt-0 text-xs text-muted-foreground">
+  回線が遅い・従量制のときに通信量を減らします。オンの間は、ノートの添付(画像・動画・音声)、アバター、
+  カスタム絵文字、URLプレビューを自動では取得しません。添付とURLプレビューはタップしたときだけ読み込み、
+  アバターは表示せず、カスタム絵文字は <code>:name:</code> の文字で表示します(プロフィール・フォロー一覧・
+  アカウント選択のアバターは通常どおり表示します)。端末ごとの設定で、設定のエクスポートには含まれず、
+  インポートしても変わりません。保存すると反映されます。
+</p>
 
 <label class="mb-2 flex items-center gap-2 text-sm"
   ><input type="checkbox" bind:checked={mfmAnimationEnabled} /> MFMアニメーション($[shake]等)を有効にする</label

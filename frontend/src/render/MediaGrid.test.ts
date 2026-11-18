@@ -18,6 +18,7 @@ vi.mock("vidstack/player", () => ({}));
 vi.mock("vidstack/player/ui", () => ({}));
 
 const { default: MediaGrid } = await import("./MediaGrid.svelte");
+const { app } = await import("../lib/store.svelte");
 
 function file(overrides: Partial<DriveFile>): DriveFile {
   return {
@@ -32,7 +33,10 @@ function file(overrides: Partial<DriveFile>): DriveFile {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  app.ui = { ...app.ui, lowBandwidth: false };
+});
 
 describe("MediaGrid", () => {
   it("画像はグリッドのセル、非メディアはリスト行に振り分ける", () => {
@@ -66,5 +70,82 @@ describe("MediaGrid", () => {
     await fireEvent.click(getByText("閲覧注意（クリックで表示）"));
     getByText("report.pdf");
     getByText("1.5 KB");
+  });
+});
+
+describe("MediaGrid 低帯域幅モード", () => {
+  it("画像は取得せず、ファイル名とサイズを添えたカバーを出し、タップでサムネイルを読み込む", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { container, getByText } = render(MediaGrid, {
+      files: [
+        file({
+          id: "i1",
+          mimeType: "image/png",
+          name: "a.png",
+          url: "https://example.com/full.png",
+          thumbnailUrl: "https://example.com/thumb.png",
+          size: 2048,
+        }),
+      ],
+    });
+    expect(container.querySelector("img")).toBeNull();
+    getByText("a.png");
+    getByText("画像 · 2.0 KB");
+    await fireEvent.click(getByText("タップで読み込む"));
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("https://example.com/thumb.png");
+  });
+
+  it("動画・音声もタップするまで media-player を作らない", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { container, getAllByText } = render(MediaGrid, {
+      files: [
+        file({ id: "v1", mimeType: "video/mp4", name: "a.mp4" }),
+        file({ id: "s1", mimeType: "audio/mpeg", name: "a.mp3" }),
+      ],
+    });
+    expect(container.querySelector("media-player")).toBeNull();
+    const covers = getAllByText("タップで読み込む");
+    expect(covers).toHaveLength(2);
+    await fireEvent.click(covers[0]);
+    expect(container.querySelectorAll("media-player")).toHaveLength(1);
+  });
+
+  it("サイズが無ければファイル名と種類だけ、名前も無ければ MIME タイプを出す", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText, getAllByText } = render(MediaGrid, {
+      files: [
+        file({ id: "i1", mimeType: "image/png", name: "a.png", size: null }),
+        file({ id: "i2", mimeType: "image/webp", name: undefined, size: undefined }),
+      ],
+    });
+    getByText("a.png");
+    getByText("image/webp");
+    // サイズが無い 2 枚は、種類(「画像」)だけの行になる。
+    expect(getAllByText("画像")).toHaveLength(2);
+  });
+
+  it("閲覧注意かつ低帯域幅でも、タップ 1 回で表示される(文言は閲覧注意を優先)", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { container, getByText } = render(MediaGrid, {
+      files: [file({ id: "i1", mimeType: "image/png", name: "a.png", isSensitive: true })],
+    });
+    expect(container.querySelector("img")).toBeNull();
+    await fireEvent.click(getByText("閲覧注意（クリックで表示）"));
+    expect(container.querySelector("img")).not.toBeNull();
+  });
+
+  it("オフなら従来どおり、タップなしで画像を出す", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    const { container, queryByText } = render(MediaGrid, {
+      files: [file({ id: "i1", mimeType: "image/png", name: "a.png" })],
+    });
+    expect(container.querySelector("img")).not.toBeNull();
+    expect(queryByText("タップで読み込む")).toBeNull();
+  });
+
+  it("オンでも非メディア(保存ボタンの行)は変わらない", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText } = render(MediaGrid, { files: [file({})] });
+    expect(getByText("report.pdf").closest(".file-row")).not.toBeNull();
   });
 });

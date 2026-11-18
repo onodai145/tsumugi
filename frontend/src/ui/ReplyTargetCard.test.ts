@@ -195,3 +195,26 @@ describe("ReplyTargetCard", () => {
     }
   });
 });
+
+describe("ReplyTargetCard 低帯域幅モードのアバター(Issue #591)", () => {
+  afterEach(() => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+  });
+
+  it("オンでは、アバターを描画せず、表示名からプロフィールを開ける", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { container, getByTestId } = render(ReplyTargetCard, {
+      props: { note: makeNote(), accountId: "acc1" },
+    });
+    expect(container.querySelector('[data-testid="reply-card-avatar"]')).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    await fireEvent.click(getByTestId("reply-card-name"));
+    expect(openProfile).toHaveBeenCalledWith({ userId: "u2" }, "acc1");
+  });
+
+  it("オフなら従来どおりアバターを描画する", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    const { container } = render(ReplyTargetCard, { props: { note: makeNote(), accountId: "acc1" } });
+    expect(container.querySelector('[data-testid="reply-card-avatar"]')).not.toBeNull();
+  });
+});

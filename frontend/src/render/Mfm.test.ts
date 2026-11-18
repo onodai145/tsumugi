@@ -3,6 +3,7 @@ import { cleanup, render, waitFor } from "@testing-library/svelte";
 import Mfm from "./Mfm.svelte";
 import { openProfile } from "../lib/profileModal.svelte";
 import { cachedAvatarUrl, fetchAvatarUrl } from "../lib/mentionAvatar";
+import { app } from "../lib/store.svelte";
 
 vi.mock("../lib/profileModal.svelte", () => ({ openProfile: vi.fn() }));
 
@@ -302,5 +303,45 @@ describe("Mfm", () => {
     expect((spans[1] as HTMLElement).dataset.originalText).toBe("ばなな");
     expect(container.querySelectorAll("br").length).toBe(1);
     expect(container.querySelector("span[data-original-text] br")).toBeNull();
+  });
+});
+
+describe("Mfm 低帯域幅モードのメンション(Issue #591)", () => {
+  afterEach(() => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+  });
+
+  it("オンでは、未キャッシュでもアバターを取得せず、名前だけを表示する", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    vi.mocked(cachedAvatarUrl).mockReturnValue(undefined);
+    vi.mocked(fetchAvatarUrl).mockResolvedValue("https://example.com/alice.png");
+
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+
+    expect(fetchAvatarUrl).not.toHaveBeenCalled();
+    expect(container.querySelector("img.mfm-mention-avatar")).toBeNull();
+    expect(container.querySelector("span.mfm-mention")?.textContent).toBe("@alice@example.com");
+  });
+
+  it("オンでは、キャッシュ済みでもアバターを描画せず、チップ表示にもしない", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    vi.mocked(cachedAvatarUrl).mockReturnValue("https://example.com/alice.png");
+
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+
+    expect(container.querySelector("img.mfm-mention-avatar")).toBeNull();
+    expect(container.querySelector("span.mfm-mention")?.classList.contains("mfm-mention-chip")).toBe(false);
+  });
+
+  it("オフなら従来どおり取得してアバターを表示する", async () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    vi.mocked(cachedAvatarUrl).mockReturnValue(undefined);
+    vi.mocked(fetchAvatarUrl).mockResolvedValue("https://example.com/alice.png");
+
+    const { container } = render(Mfm, { props: { text: "@alice@example.com" } });
+
+    await waitFor(() =>
+      expect(container.querySelector("img.mfm-mention-avatar")?.getAttribute("src")).toBe("https://example.com/alice.png"),
+    );
   });
 });

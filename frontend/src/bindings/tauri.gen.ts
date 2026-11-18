@@ -1503,6 +1503,12 @@ export type UiPrefs = {
 	 *  PLaMo 3 Translate）。未知の値は翻訳時に `"server"` として扱う（`commands::note::effective_translate_engine`）。
 	 */
 	translateEngine?: string,
+	/**
+	 *  低帯域幅モード(Issue #591)。オンの間、ノート添付・アバター・カスタム絵文字・URL プレビューを
+	 *  自動では取得しない。端末依存のため、設定のエクスポートには含めず、インポートでも現在の値を維持する
+	 *  (`store/settings_transfer.rs`)。
+	 */
+	lowBandwidth?: boolean,
 };
 
 /**  動画/音声プレイヤー埋め込み情報（YouTube等のoEmbed player）。 */

@@ -23,7 +23,7 @@ const { openProfile } = await import("../lib/profileModal.svelte");
 
 afterEach(() => {
   cleanup();
-  app.ui = { ...app.ui, instanceTicker: "remote", catMode: "respect" };
+  app.ui = { ...app.ui, instanceTicker: "remote", catMode: "respect", lowBandwidth: false };
 });
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -257,6 +257,25 @@ describe("NoteCard showActions", () => {
       props: { note, accountId: "a1" },
     });
     expect(getByLabelText("返信")).toBeTruthy();
+  });
+});
+
+describe("低帯域幅モードのアバター(Issue #591)", () => {
+  it("オンでは、avatarUrl があってもアバターを描画せず、名前からプロフィールを開ける", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const note = makeNote({ user: makeUser({ avatarUrl: "https://example.com/a.png" }) });
+    const { container, getByTestId } = render(NoteCard, { props: { note, accountId: "acc1" } });
+    expect(container.querySelector('[data-testid="note-avatar"]')).toBeNull();
+    expect(container.querySelector('img[src="https://example.com/a.png"]')).toBeNull();
+    await fireEvent.click(getByTestId("note-name"));
+    expect(openProfile).toHaveBeenCalledWith({ userId: note.user.id }, "acc1");
+  });
+
+  it("オフなら従来どおりアバターを描画する", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    const note = makeNote({ user: makeUser({ avatarUrl: "https://example.com/a.png" }) });
+    const { container } = render(NoteCard, { props: { note, accountId: "acc1" } });
+    expect(container.querySelector('img[data-testid="note-avatar"]')).not.toBeNull();
   });
 });
 
@@ -513,6 +532,23 @@ describe("instance ticker", () => {
       note: makeNote({ user: remoteUser() }),
     });
     expect(getByText("Remote Instance")).toBeTruthy();
+  });
+
+  it("低帯域幅モードでは、ティッカーのアイコン画像を取得せずラベルだけを出す(Issue #591)", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText } = render(NoteCard, {
+      note: makeNote({ user: remoteUser() }),
+    });
+    expect(getByText("Remote Instance")).toBeTruthy();
+    expect(document.querySelector("[data-testid='note-instance-ticker'] img")).toBeNull();
+  });
+
+  it("低帯域幅モードでなければ、ティッカーのアイコン画像を出す", async () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    render(NoteCard, { note: makeNote({ user: remoteUser() }) });
+    expect(
+      document.querySelector("[data-testid='note-instance-ticker'] img")?.getAttribute("src"),
+    ).toBe("https://remote.example/icon.png");
   });
 
   // Instance Ticker(Issue #103)実装前にキャッシュされたノートはpayloadにuser.instanceが

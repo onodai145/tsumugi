@@ -13,6 +13,8 @@
   import type { DriveFile } from "../bindings/tauri.gen";
   import MediaControlBar from "./MediaControlBar.svelte";
   import {
+    coverLabel,
+    coverMeta,
     deriveViewItems,
     fileName,
     initialImageTransform,
@@ -178,6 +180,10 @@
     else if (e.key === "ArrowRight") goNext();
     else if (e.key === "ArrowLeft") goPrev();
   }
+
+  // 低帯域幅モード(Issue #591)。ビューアは全添付の src を一括で描画するため、ここでも
+  // 未読み込みの添付はカバーのままにして、実画像の取得を保留する。
+  const lowBandwidth = $derived(app.ui.lowBandwidth ?? false);
 
   function onRevealClick() {
     revealed = reveal(revealed, current);
@@ -501,14 +507,18 @@
         class="flex h-full w-full flex-none snap-start items-center justify-center"
         data-testid="media-page"
         onclick={(e) => onPageClick(e, item)}
-        aria-label={isRevealed(revealed, item) ? `${fileName(item)}を表示中` : undefined}
+        aria-label={isRevealed(revealed, item, lowBandwidth) ? `${fileName(item)}を表示中` : undefined}
       >
-        {#if !isRevealed(revealed, item)}
+        {#if !isRevealed(revealed, item, lowBandwidth)}
           <button
-            class="border-0 bg-transparent text-base text-white"
+            class="flex max-w-full flex-col items-center gap-0.5 border-0 bg-transparent px-4 text-base text-white"
             onclick={item.id === current.id ? onRevealClick : undefined}
           >
-            閲覧注意（クリックで表示）
+            <span>{coverLabel(item)}</span>
+            {#if lowBandwidth}
+              <span class="max-w-full truncate text-sm opacity-75">{fileName(item)}</span>
+              <span class="max-w-full truncate text-sm opacity-75">{coverMeta(item)}</span>
+            {/if}
           </button>
         {:else if isImage(item)}
           {#if mediaLoadError[item.id]}
@@ -646,7 +656,7 @@
     </div>
   {/if}
 
-  {#if isRevealed(revealed, current) && isImage(current)}
+  {#if isRevealed(revealed, current, lowBandwidth) && isImage(current)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <!-- role="toolbar"はツールバー内の矢印キーによるフォーカス移動(roving tabindex)を

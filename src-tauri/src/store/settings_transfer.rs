@@ -73,6 +73,7 @@ pub fn build_export(data: &SettingsData, app_version: &str, exported_at: &str) -
     let mut ui = data.ui.clone();
     ui.background_kind = None;
     ui.background_path = None;
+    ui.low_bandwidth = false;
     ExportFile {
         format: EXPORT_FORMAT.into(),
         version: EXPORT_VERSION,
@@ -296,6 +297,8 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
     ui.note_cache_max_age_days = ui.note_cache_max_age_days.clamp(0, 3_650);
     ui.note_cache_max_size_mb = ui.note_cache_max_size_mb.clamp(0, 10_000);
     ui.gap_fill_limit = ui.gap_fill_limit.clamp(0, 1_000);
+    // 低帯域幅モードは端末依存。ファイルで勝手にオンにならないよう、現在の値を維持する。
+    ui.low_bandwidth = current.ui.low_bandwidth;
 
     // 取得先の由来: 空なら対象外、現在の値と違えばインポート由来、同じなら現在の状態を引き継ぐ。
     let summaly_proxy_imported = if ui.summaly_proxy_url.trim().is_empty() {
@@ -516,6 +519,33 @@ mod tests {
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
 
         assert_eq!(plan.data.mcp, current.mcp, "ファイルでMCPの公開が変わってはいけない");
+    }
+
+    #[test]
+    fn export_does_not_include_low_bandwidth() {
+        let mut d = settings_data();
+        d.ui.low_bandwidth = true;
+
+        let file = build_export(&d, "1.2.3", "2026-11-02T00:00:00Z");
+
+        assert!(!file.data.ui.low_bandwidth, "端末依存の設定はエクスポートに含めない");
+    }
+
+    #[test]
+    fn import_keeps_the_current_low_bandwidth() {
+        // 現在オンなら、ファイルがオフでもオンのまま。
+        let mut current = current_with_local_account();
+        current.ui.low_bandwidth = true;
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert!(plan.data.ui.low_bandwidth);
+
+        // 現在オフなら、ファイルがオンでもオフのまま(ファイルで勝手にオンにならない)。
+        let mut current = current_with_local_account();
+        current.ui.low_bandwidth = false;
+        let mut data = empty_data();
+        data.ui.low_bandwidth = true;
+        let plan = plan_import(&current, file_with(data)).unwrap();
+        assert!(!plan.data.ui.low_bandwidth);
     }
 
     #[test]
