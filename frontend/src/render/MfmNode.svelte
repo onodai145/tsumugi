@@ -64,9 +64,11 @@
 
   // mentionノードのアバターURL。未取得はundefined、解決失敗/アバター無しはnull。
   let mentionAvatarUrl = $state<string | null | undefined>(undefined);
+  // 低帯域幅モード(Issue #591)では、メンションのアバターも取得・描画しない(名前だけを出す)。
+  const showMentionAvatar = $derived(!(app.ui.lowBandwidth ?? false) && !!mentionAvatarUrl);
 
   $effect(() => {
-    if (node.type !== "mention") return;
+    if (node.type !== "mention" || (app.ui.lowBandwidth ?? false)) return;
     const username = String(p.username ?? "");
     const host = (p.host as string | null | undefined) ?? null;
     const cached = cachedAvatarUrl(username, host);
@@ -134,13 +136,13 @@
        Buttonのfocus-visibleパターン（スタイルガイド§7、border-ringは無枠のため省略）で個別に補う -->
   <span
     class="mfm-mention rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-    class:mfm-mention-chip={!!mentionAvatarUrl}
+    class:mfm-mention-chip={showMentionAvatar}
     onclick={() => openProfile({ username: p.username, host: p.host ?? null })}
     role="button"
     tabindex="0"
     onkeydown={(e) => e.key === "Enter" && openProfile({ username: p.username, host: p.host ?? null })}
     style="cursor: pointer"
-  >{#if mentionAvatarUrl}<img
+  >{#if showMentionAvatar}<img
       class="mfm-mention-avatar mr-1 inline-block h-4 w-4 rounded-[var(--avatar-radius,20%)] object-cover align-middle"
       src={mentionAvatarUrl}
       alt=""
