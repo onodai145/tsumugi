@@ -244,6 +244,11 @@ pub struct UiPrefs {
     /// PLaMo 3 Translate）。未知の値は翻訳時に `"server"` として扱う（`commands::note::effective_translate_engine`）。
     #[serde(default = "default_translate_engine")]
     pub translate_engine: String,
+    /// 低帯域幅モード(Issue #591)。オンの間、ノート添付・アバター・カスタム絵文字・URL プレビューを
+    /// 自動では取得しない。端末依存のため、設定のエクスポートには含めず、インポートでも現在の値を維持する
+    /// (`store/settings_transfer.rs`)。
+    #[serde(default)]
+    pub low_bandwidth: bool,
 }
 
 fn default_column_opacity() -> i32 {
@@ -477,6 +482,7 @@ impl Default for UiPrefs {
             ui_scale: default_ui_scale(),
             translate_target_lang: default_translate_target_lang(),
             translate_engine: default_translate_engine(),
+            low_bandwidth: false,
         }
     }
 }
@@ -484,6 +490,21 @@ impl Default for UiPrefs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn low_bandwidth_defaults_to_false_and_reads_true() {
+        // 古い JSON(フィールドなし)も既定の false で読めること(Issue #591)。
+        let legacy: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        assert!(!legacy.low_bandwidth);
+        assert!(!UiPrefs::default().low_bandwidth);
+
+        let on: UiPrefs = serde_json::from_str(
+            r#"{"theme":"dark","defaultColumnWidth":320,"lowBandwidth":true}"#,
+        )
+        .unwrap();
+        assert!(on.low_bandwidth);
+    }
 
     #[test]
     fn deserializes_legacy_json_without_new_fields() {
@@ -647,6 +668,7 @@ mod tests {
             ui_scale: 130,
             translate_target_lang: "en".into(),
             translate_engine: "local".into(),
+            low_bandwidth: true,
         };
         let s = serde_json::to_string(&p).unwrap();
         let back: UiPrefs = serde_json::from_str(&s).unwrap();
