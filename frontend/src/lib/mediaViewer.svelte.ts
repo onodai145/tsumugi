@@ -28,9 +28,19 @@ export function prevIndex(current: number, length: number): number {
   return (current - 1 + length) % length;
 }
 
-/// 閲覧注意でなければ常に表示可、閲覧注意なら revealed に登録済みかどうかで判定する。
-export function isRevealed(revealed: Record<string, boolean>, file: DriveFile): boolean {
-  return !file.isSensitive || !!revealed[file.id];
+/// 閲覧注意でなく、かつ低帯域幅モードでもなければ常に表示可。それ以外は revealed に登録済みかどうかで判定する
+/// (閲覧注意と低帯域幅が重なっても、登録は 1 回で足りる)。
+export function isRevealed(
+  revealed: Record<string, boolean>,
+  file: DriveFile,
+  lowBandwidth = false,
+): boolean {
+  return (!file.isSensitive && !lowBandwidth) || !!revealed[file.id];
+}
+
+/// 未読み込みカバーの文言。閲覧注意なら従来の文言を優先する。
+export function coverLabel(file: DriveFile): string {
+  return file.isSensitive ? "閲覧注意（クリックで表示）" : "タップで読み込む";
 }
 
 export function reveal(

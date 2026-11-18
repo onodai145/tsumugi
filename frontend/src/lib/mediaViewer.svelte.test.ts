@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DriveFile } from "../bindings/tauri.gen";
 import {
+  coverLabel,
   deriveViewItems,
   initialImageTransform,
   isImageOverflowing,
@@ -155,5 +156,34 @@ describe("isImageOverflowing", () => {
 
   it("自然サイズが未取得(0)の間は常にはみ出していない", () => {
     expect(isImageOverflowing(scale(5), { width: 0, height: 0 }, container)).toBe(false);
+  });
+});
+
+describe("isRevealed (低帯域幅モード)", () => {
+  it("低帯域幅でなければ従来どおり: 閲覧注意でなければ表示可、閲覧注意は登録済みのみ表示可", () => {
+    expect(isRevealed({}, file({ isSensitive: false }))).toBe(true);
+    expect(isRevealed({}, file({ isSensitive: true }))).toBe(false);
+    expect(isRevealed({ f1: true }, file({ isSensitive: true }))).toBe(true);
+  });
+
+  it("低帯域幅では、閲覧注意でなくても登録されるまで未読み込み", () => {
+    expect(isRevealed({}, file({ isSensitive: false }), true)).toBe(false);
+    expect(isRevealed({ f1: true }, file({ isSensitive: false }), true)).toBe(true);
+  });
+
+  it("閲覧注意かつ低帯域幅でも、登録は 1 回で足りる", () => {
+    const f = file({ isSensitive: true });
+    expect(isRevealed({}, f, true)).toBe(false);
+    expect(isRevealed(reveal({}, f), f, true)).toBe(true);
+  });
+});
+
+describe("coverLabel", () => {
+  it("閲覧注意なら従来の文言を優先する", () => {
+    expect(coverLabel(file({ isSensitive: true }))).toBe("閲覧注意（クリックで表示）");
+  });
+
+  it("閲覧注意でなければ、タップで読み込む旨を出す", () => {
+    expect(coverLabel(file({ isSensitive: false }))).toBe("タップで読み込む");
   });
 });

@@ -6,8 +6,14 @@
   import FileList from "./FileList.svelte";
   import MediaControlBar from "./MediaControlBar.svelte";
   import MediaViewer from "./MediaViewer.svelte";
-  import { deriveViewItems, fileName, playerSrc, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
+  import { app } from "../lib/store.svelte";
+  import { formatFileSize } from "../lib/fileSize";
+  import { coverLabel, deriveViewItems, fileName, playerSrc, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
   let { files }: { files: DriveFile[] } = $props();
+
+  // 低帯域幅モード(Issue #591)。オンの間は、閲覧注意と同じカバーで取得を保留する。
+  const lowBandwidth = $derived(app.ui.lowBandwidth ?? false);
+  const coverDetail = (f: DriveFile) => [fileName(f), formatFileSize(f.size)].filter(Boolean).join(" · ");
 
   const isMedia = (f: DriveFile) => isImage(f) || isVideo(f) || isAudio(f);
   const mediaFiles = $derived(files.filter(isMedia));
@@ -33,12 +39,15 @@
           ? "media-cell media-cell-audio relative flex overflow-hidden rounded-md items-center justify-center self-center"
           : "media-cell relative flex overflow-hidden rounded-md aspect-[16/10] items-center justify-center"}
       >
-        {#if !isRevealed(revealed, f)}
+        {#if !isRevealed(revealed, f, lowBandwidth)}
           <button
-            class="sensitive-cover h-full w-full border-0 text-sm text-muted-foreground"
+            class="sensitive-cover flex h-full w-full flex-col items-center justify-center gap-0.5 border-0 px-2 text-sm text-muted-foreground"
             onclick={() => (revealed = reveal(revealed, f))}
           >
-            閲覧注意（クリックで表示）
+            <span>{coverLabel(f)}</span>
+            {#if lowBandwidth}
+              <span class="max-w-full truncate text-xs">{coverDetail(f)}</span>
+            {/if}
           </button>
         {:else if isImage(f)}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
