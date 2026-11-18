@@ -81,7 +81,7 @@
   <div class="flex items-center gap-2 text-sm">
     <span class="inline-flex flex-none text-muted-foreground"><IconComp size={16} /></span>
     {#if n.user?.avatarUrl}
-      <Avatar isCat={n.user.isCat} avatarBlurhash={n.user.avatarBlurhash} class="h-6 w-6 flex-none">
+      <Avatar isCat={n.user.isCat} avatarBlurhash={n.user.avatarBlurhash} deferInLowBandwidth class="h-6 w-6 flex-none">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <img

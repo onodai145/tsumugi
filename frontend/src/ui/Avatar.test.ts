@@ -51,3 +51,33 @@ describe("Avatar catMode", () => {
     expect(container.querySelector(".ears")).toBeNull();
   });
 });
+
+describe("Avatar 低帯域幅モード", () => {
+  afterEach(() => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+  });
+
+  it("deferInLowBandwidth かつ低帯域幅モードなら、枠ごと何も描画しない", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { container, queryByTestId } = render(AvatarTestHost, {
+      props: { isCat: true, deferInLowBandwidth: true },
+    });
+    expect(container.querySelector(".avatar-frame")).toBeNull();
+    expect(container.querySelector(".ears")).toBeNull();
+    expect(queryByTestId("inner-img")).toBeNull();
+  });
+
+  it("deferInLowBandwidth でも、低帯域幅モードがオフなら描画する", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    const { queryByTestId } = render(AvatarTestHost, {
+      props: { isCat: false, deferInLowBandwidth: true },
+    });
+    expect(queryByTestId("inner-img")).not.toBeNull();
+  });
+
+  it("低帯域幅モードがオンでも、deferInLowBandwidth を渡さない呼び出し(プロフィール等)は描画する", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { queryByTestId } = render(AvatarTestHost, { props: { isCat: false } });
+    expect(queryByTestId("inner-img")).not.toBeNull();
+  });
+});

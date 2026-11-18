@@ -74,7 +74,7 @@
       <ul class="m-0 list-none p-0">
         {#each users as u (u.id)}
           <li class="flex items-center gap-1.5 px-1.5 py-[3px] text-sm">
-            <Avatar isCat={u.isCat} avatarBlurhash={u.avatarBlurhash} class="h-5 w-5 flex-shrink-0">
+            <Avatar isCat={u.isCat} avatarBlurhash={u.avatarBlurhash} deferInLowBandwidth class="h-5 w-5 flex-shrink-0">
               {#if u.avatarUrl}
                 <img class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover" src={u.avatarUrl} alt="" loading="lazy" />
               {:else}

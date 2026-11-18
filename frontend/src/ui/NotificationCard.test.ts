@@ -207,3 +207,34 @@ describe("通知時刻の自動更新", () => {
     }
   });
 });
+
+describe("NotificationCard 低帯域幅モードのアバター(Issue #591)", () => {
+  afterEach(() => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+  });
+
+  it("オンでは、通知元のアバターを描画せず、表示名からプロフィールを開ける", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const notification = makeNotification({
+      type: "follow",
+      note: null,
+      user: makeUser({ id: "u9", name: "Carol", avatarUrl: "https://example.com/carol.png" }),
+    });
+    const { container } = render(NotificationCard, { props: { notification, accountId: "a1" } });
+    expect(container.querySelector('[data-testid="notification-avatar"]')).toBeNull();
+    await fireEvent.click(container.querySelector('[data-testid="notification-actor"]') as HTMLElement);
+    expect(currentProfileTarget()).toEqual({ userId: "u9" });
+    closeProfile();
+  });
+
+  it("オフなら従来どおりアバターを描画する", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    const notification = makeNotification({
+      type: "follow",
+      note: null,
+      user: makeUser({ id: "u9", name: "Carol", avatarUrl: "https://example.com/carol.png" }),
+    });
+    const { container } = render(NotificationCard, { props: { notification, accountId: "a1" } });
+    expect(container.querySelector('[data-testid="notification-avatar"]')).not.toBeNull();
+  });
+});

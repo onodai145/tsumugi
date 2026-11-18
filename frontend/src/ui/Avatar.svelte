@@ -2,23 +2,31 @@
   import type { Snippet } from "svelte";
   import { extractAvgColorFromBlurhash } from "../lib/blurhash";
   import { effectiveIsCat } from "../lib/catMode";
+  import { app } from "../lib/store.svelte";
 
   let {
     isCat = false,
     avatarBlurhash = null,
     class: className = "",
+    /// タイムライン上のアバター(ノート・通知・返信先・リアクションユーザー)だけが true にする。
+    /// 低帯域幅モード(Issue #591)では枠ごと描画しない。ユーザーが自分で開く画面は渡さない。
+    deferInLowBandwidth = false,
     children,
   }: {
     isCat?: boolean;
     avatarBlurhash?: string | null;
     class?: string;
+    deferInLowBandwidth?: boolean;
     children: Snippet;
   } = $props();
+
+  const hidden = $derived(deferInLowBandwidth && (app.ui.lowBandwidth ?? false));
 
   const earColor = $derived(extractAvgColorFromBlurhash(avatarBlurhash) ?? "var(--border)");
   const showEars = $derived(effectiveIsCat(isCat));
 </script>
 
+{#if !hidden}
 <span class="avatar-frame relative inline-block {className}">
   <!-- 本家Misskey(MkAvatar.vue)は .inner(アバター画像側)に z-index:1 を明示することで、
        .ears(position:absoluteだがz-index未指定=auto)より確実に手前に描画されるようにしている。
@@ -35,6 +43,7 @@
     </span>
   {/if}
 </span>
+{/if}
 
 <style>
   /* Misskey本家 MkAvatar.vue の .cat > .ears 相当を移植。%ベースなので

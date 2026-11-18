@@ -409,7 +409,7 @@
   {/if}
 
   <div class="flex gap-[7px]">
-    <Avatar isCat={inner.user.isCat} avatarBlurhash={inner.user.avatarBlurhash} class="h-[34px] w-[34px] flex-none">
+    <Avatar isCat={inner.user.isCat} avatarBlurhash={inner.user.avatarBlurhash} deferInLowBandwidth class="h-[34px] w-[34px] flex-none">
       {#if inner.user.avatarUrl}
         <img
           class="h-full w-full rounded-[var(--avatar-radius,20%)] object-cover"
