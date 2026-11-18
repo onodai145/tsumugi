@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { UrlPreview } from "../bindings/tauri.gen";
+  import { Button } from "$lib/components/ui/button";
+  import { app } from "../lib/store.svelte";
   import { cachedUrlPreview, fetchUrlPreview, isSafeUrl, resolvedThumbnailUrl } from "../lib/urlPreview";
 
   let { url, instanceHost }: { url: string; instanceHost: string | undefined } = $props();
@@ -8,8 +10,13 @@
   let revealed = $state(false);
   let playing = $state(false);
 
+  // 低帯域幅モード(Issue #591)。押されるまで取得もカード(サムネイル)の描画もしない。
+  // キャッシュ済みでも同じ扱いにして、キャッシュの有無で見た目を変えない。
+  let loadRequested = $state(false);
+  const deferred = $derived((app.ui.lowBandwidth ?? false) && !loadRequested);
+
   $effect(() => {
-    if (preview !== undefined) return;
+    if (deferred || preview !== undefined) return;
     let cancelled = false;
     fetchUrlPreview(url).then((p) => {
       if (!cancelled) preview = p;
@@ -38,7 +45,11 @@
   {/if}
 {/snippet}
 
-{#if preview}
+{#if deferred}
+  <div class="mt-2">
+    <Button type="button" variant="outline" size="sm" onclick={() => (loadRequested = true)}>プレビューを読み込む</Button>
+  </div>
+{:else if preview}
   {@const hasPlayer = preview.player && isSafeUrl(preview.player.url)}
   <div class="url-preview-card mt-2 w-full max-w-[480px] overflow-hidden rounded-md border border-border text-sm">
     {#if playing && hasPlayer && preview.player}
