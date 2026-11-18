@@ -1,4 +1,5 @@
 import type { DriveFile } from "../bindings/tauri.gen";
+import { formatFileSize } from "./fileSize";
 
 export const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
 export const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
@@ -41,6 +42,19 @@ export function isRevealed(
 /// 未読み込みカバーの文言。閲覧注意なら従来の文言を優先する。
 export function coverLabel(file: DriveFile): string {
   return file.isSensitive ? "閲覧注意（クリックで表示）" : "タップで読み込む";
+}
+
+/// カバーに添える種類。ファイル名に拡張子が無くても、何を読み込むか分かるようにする。
+export function coverKind(file: DriveFile): string {
+  if (isImage(file)) return "画像";
+  if (isVideo(file)) return "動画";
+  if (isAudio(file)) return "音声";
+  return "";
+}
+
+/// カバーに添える種類とサイズ(「画像 · 2.0 KB」)。サイズが無ければ種類だけ。
+export function coverMeta(file: DriveFile): string {
+  return [coverKind(file), formatFileSize(file.size)].filter(Boolean).join(" · ");
 }
 
 export function reveal(

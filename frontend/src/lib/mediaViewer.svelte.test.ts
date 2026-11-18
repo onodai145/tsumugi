@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { DriveFile } from "../bindings/tauri.gen";
 import {
+  coverKind,
   coverLabel,
+  coverMeta,
   deriveViewItems,
   initialImageTransform,
   isImageOverflowing,
@@ -185,5 +187,20 @@ describe("coverLabel", () => {
 
   it("閲覧注意でなければ、タップで読み込む旨を出す", () => {
     expect(coverLabel(file({ isSensitive: false }))).toBe("タップで読み込む");
+  });
+});
+
+describe("coverKind / coverMeta", () => {
+  it("MIME タイプから種類を日本語で返す", () => {
+    expect(coverKind(file({ mimeType: "image/png" }))).toBe("画像");
+    expect(coverKind(file({ mimeType: "video/mp4" }))).toBe("動画");
+    expect(coverKind(file({ mimeType: "audio/mpeg" }))).toBe("音声");
+    expect(coverKind(file({ mimeType: "application/pdf" }))).toBe("");
+  });
+
+  it("種類とサイズを「 · 」でつなぐ。サイズが無ければ種類だけ", () => {
+    expect(coverMeta(file({ mimeType: "image/png", size: 2048 }))).toBe("画像 · 2.0 KB");
+    expect(coverMeta(file({ mimeType: "video/mp4", size: null }))).toBe("動画");
+    expect(coverMeta(file({ mimeType: "audio/mpeg", size: undefined }))).toBe("音声");
   });
 });

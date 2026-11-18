@@ -14,6 +14,7 @@
   import MediaControlBar from "./MediaControlBar.svelte";
   import {
     coverLabel,
+    coverMeta,
     deriveViewItems,
     fileName,
     initialImageTransform,
@@ -510,10 +511,14 @@
       >
         {#if !isRevealed(revealed, item, lowBandwidth)}
           <button
-            class="border-0 bg-transparent text-base text-white"
+            class="flex max-w-full flex-col items-center gap-0.5 border-0 bg-transparent px-4 text-base text-white"
             onclick={item.id === current.id ? onRevealClick : undefined}
           >
-            {coverLabel(item)}
+            <span>{coverLabel(item)}</span>
+            {#if lowBandwidth}
+              <span class="max-w-full truncate text-sm opacity-75">{fileName(item)}</span>
+              <span class="max-w-full truncate text-sm opacity-75">{coverMeta(item)}</span>
+            {/if}
           </button>
         {:else if isImage(item)}
           {#if mediaLoadError[item.id]}

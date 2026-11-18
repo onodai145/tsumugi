@@ -89,7 +89,8 @@ describe("MediaGrid 低帯域幅モード", () => {
       ],
     });
     expect(container.querySelector("img")).toBeNull();
-    getByText("a.png · 2.0 KB");
+    getByText("a.png");
+    getByText("画像 · 2.0 KB");
     await fireEvent.click(getByText("タップで読み込む"));
     expect(container.querySelector("img")?.getAttribute("src")).toBe("https://example.com/thumb.png");
   });
@@ -109,9 +110,9 @@ describe("MediaGrid 低帯域幅モード", () => {
     expect(container.querySelectorAll("media-player")).toHaveLength(1);
   });
 
-  it("サイズが無ければファイル名だけ、名前も無ければ MIME タイプを出す", () => {
+  it("サイズが無ければファイル名と種類だけ、名前も無ければ MIME タイプを出す", () => {
     app.ui = { ...app.ui, lowBandwidth: true };
-    const { getByText } = render(MediaGrid, {
+    const { getByText, getAllByText } = render(MediaGrid, {
       files: [
         file({ id: "i1", mimeType: "image/png", name: "a.png", size: null }),
         file({ id: "i2", mimeType: "image/webp", name: undefined, size: undefined }),
@@ -119,6 +120,8 @@ describe("MediaGrid 低帯域幅モード", () => {
     });
     getByText("a.png");
     getByText("image/webp");
+    // サイズが無い 2 枚は、種類(「画像」)だけの行になる。
+    expect(getAllByText("画像")).toHaveLength(2);
   });
 
   it("閲覧注意かつ低帯域幅でも、タップ 1 回で表示される(文言は閲覧注意を優先)", async () => {

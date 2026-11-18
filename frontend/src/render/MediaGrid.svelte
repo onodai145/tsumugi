@@ -7,13 +7,11 @@
   import MediaControlBar from "./MediaControlBar.svelte";
   import MediaViewer from "./MediaViewer.svelte";
   import { app } from "../lib/store.svelte";
-  import { formatFileSize } from "../lib/fileSize";
-  import { coverLabel, deriveViewItems, fileName, playerSrc, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
+  import { coverLabel, coverMeta, deriveViewItems, fileName, playerSrc, isAudio, isImage, isRevealed, isVideo, reveal } from "../lib/mediaViewer.svelte";
   let { files }: { files: DriveFile[] } = $props();
 
   // 低帯域幅モード(Issue #591)。オンの間は、閲覧注意と同じカバーで取得を保留する。
   const lowBandwidth = $derived(app.ui.lowBandwidth ?? false);
-  const coverDetail = (f: DriveFile) => [fileName(f), formatFileSize(f.size)].filter(Boolean).join(" · ");
 
   const isMedia = (f: DriveFile) => isImage(f) || isVideo(f) || isAudio(f);
   const mediaFiles = $derived(files.filter(isMedia));
@@ -46,7 +44,8 @@
           >
             <span>{coverLabel(f)}</span>
             {#if lowBandwidth}
-              <span class="max-w-full truncate text-xs">{coverDetail(f)}</span>
+              <span class="max-w-full truncate text-xs">{fileName(f)}</span>
+              <span class="max-w-full truncate text-xs">{coverMeta(f)}</span>
             {/if}
           </button>
         {:else if isImage(f)}

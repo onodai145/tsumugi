@@ -534,6 +534,23 @@ describe("instance ticker", () => {
     expect(getByText("Remote Instance")).toBeTruthy();
   });
 
+  it("低帯域幅モードでは、ティッカーのアイコン画像を取得せずラベルだけを出す(Issue #591)", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText } = render(NoteCard, {
+      note: makeNote({ user: remoteUser() }),
+    });
+    expect(getByText("Remote Instance")).toBeTruthy();
+    expect(document.querySelector("[data-testid='note-instance-ticker'] img")).toBeNull();
+  });
+
+  it("低帯域幅モードでなければ、ティッカーのアイコン画像を出す", async () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    render(NoteCard, { note: makeNote({ user: remoteUser() }) });
+    expect(
+      document.querySelector("[data-testid='note-instance-ticker'] img")?.getAttribute("src"),
+    ).toBe("https://remote.example/icon.png");
+  });
+
   // Instance Ticker(Issue #103)実装前にキャッシュされたノートはpayloadにuser.instanceが
   // 無いため(search機能はキャッシュのみを読み、再取得による最新化が起きない)、リモート
   // ユーザーと分かっていてもtickerが一切出ない問題があった。host名だけの簡素な表示に

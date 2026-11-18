@@ -107,6 +107,8 @@
     return { name: inner.user.host, iconUrl: null, themeColor: null };
   });
   const tickerLabel = $derived(ticker?.name ?? (inner.user.host ?? instanceHost ?? ""));
+  // 低帯域幅モード(Issue #591)では、リモートノートごとのインスタンスアイコンも取得しない(ラベルだけを出す)。
+  const showTickerIcon = $derived(!!ticker?.iconUrl && !(app.ui.lowBandwidth ?? false));
   // themeColor はリモートインスタンス管理者が任意設定できる値なので、hexカラーリテラルと
   // して妥当な場合のみ style へ渡す。不正な値は themeColor 不在時と同じ表示にフォールバック。
   const safeTickerThemeColor = $derived(
@@ -472,12 +474,12 @@
           data-testid="note-instance-ticker"
           style={`background:linear-gradient(90deg, ${safeTickerThemeColor ?? "var(--color-muted)"}, transparent);${safeTickerThemeColor ? `color:${readableTextColor(safeTickerThemeColor)}` : ""}`}
           class:text-muted-foreground={!safeTickerThemeColor}
-          class:px-1.5={!ticker.iconUrl}
+          class:px-1.5={!showTickerIcon}
         >
-          {#if ticker.iconUrl}
+          {#if showTickerIcon}
             <img src={ticker.iconUrl} alt="" class="w-4 flex-none object-cover" />
           {/if}
-          <span class="overflow-hidden py-0.5 pr-1.5 text-ellipsis whitespace-nowrap" class:pl-1.5={!ticker.iconUrl}>{tickerLabel}</span>
+          <span class="overflow-hidden py-0.5 pr-1.5 text-ellipsis whitespace-nowrap" class:pl-1.5={!showTickerIcon}>{tickerLabel}</span>
         </div>
       {/if}
 

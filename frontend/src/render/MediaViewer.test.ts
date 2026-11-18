@@ -542,6 +542,34 @@ describe("MediaViewer 低帯域幅モード", () => {
     expect(document.querySelector("cropper-image")).not.toBeNull();
   });
 
+  it("未読み込みのカバーに、ファイル名と種類・サイズを添える", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    const { getByText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "b", name: "b.png", size: 2048 })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    getByText("タップで読み込む");
+    getByText("b.png");
+    getByText("画像 · 2.0 KB");
+  });
+
+  it("オフで閲覧注意のカバーには、ファイル名を添えない(従来どおり)", () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    const { queryByText } = render(MediaViewer, {
+      props: {
+        files: [file({ id: "s", name: "s.png", size: 2048, isSensitive: true })],
+        startIndex: 0,
+        revealed: {},
+        onclose: () => {},
+      },
+    });
+    expect(queryByText("画像 · 2.0 KB")).toBeNull();
+  });
+
   it("オフなら従来どおり、すべての画像を描画する", () => {
     app.ui = { ...app.ui, lowBandwidth: false };
     render(MediaViewer, {

@@ -241,4 +241,42 @@ describe("UrlPreviewCard 低帯域幅モード(Issue #591)", () => {
     await waitFor(() => expect(screen.getByText("記事タイトル")).toBeTruthy());
     expect(screen.queryByRole("button", { name: "プレビューを読み込む" })).toBeNull();
   });
+
+  it("ボタンに URL を title として添え、複数あっても見分けられる", () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+    expect(screen.getByRole("button", { name: "プレビューを読み込む" }).getAttribute("title")).toBe(
+      "https://example.com/a",
+    );
+  });
+
+  it("押したあと、取得中は「読み込み中…」を出す", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    fetchUrlPreviewMock.mockReturnValue(new Promise(() => {}));
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "プレビューを読み込む" }));
+    await waitFor(() => expect(screen.getByText("読み込み中…")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "プレビューを読み込む" })).toBeNull();
+  });
+
+  it("押した結果プレビューが無ければ、黙って消えず「プレビューはありません」を出す", async () => {
+    app.ui = { ...app.ui, lowBandwidth: true };
+    cachedUrlPreviewMock.mockReturnValue(undefined);
+    fetchUrlPreviewMock.mockResolvedValue(null);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "プレビューを読み込む" }));
+    await waitFor(() => expect(screen.getByText("プレビューはありません")).toBeTruthy());
+  });
+
+  it("オフでは、プレビューが無いときに何も出さない(従来どおり)", async () => {
+    app.ui = { ...app.ui, lowBandwidth: false };
+    cachedUrlPreviewMock.mockReturnValue(null);
+    render(UrlPreviewCard, { props: { url: "https://example.com/a", instanceHost: undefined } });
+    expect(screen.queryByText("プレビューはありません")).toBeNull();
+    expect(screen.queryByText("読み込み中…")).toBeNull();
+  });
 });
