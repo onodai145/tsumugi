@@ -43,6 +43,7 @@ function makeTab(kind: ColumnKind, filter: FilterQuery): TabView {
     notifyDesktop: false,
     notifySound: false,
     notifySoundChoice: "",
+    speech: { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" },
     notes: [],
     notifications: [],
     state: "connected",

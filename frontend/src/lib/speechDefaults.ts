@@ -28,12 +28,24 @@ export const DEFAULT_SPEECH_SETTINGS: SpeechSettingsValue = {
 };
 
 /// 欠けた項目を既定値で補う。常に新しいオブジェクトを返す(既定値を共有しない)。
+/// 既知の項目だけを拾い、想定外のキーは混ぜない。
 export function withColumnSpeechDefaults(s: ColumnSpeech | null | undefined): ColumnSpeechValue {
-  return { ...DEFAULT_COLUMN_SPEECH, ...(s ?? {}) };
+  return {
+    enabled: s?.enabled ?? DEFAULT_COLUMN_SPEECH.enabled,
+    speakAuthor: s?.speakAuthor ?? DEFAULT_COLUMN_SPEECH.speakAuthor,
+    queueLimit: s?.queueLimit ?? DEFAULT_COLUMN_SPEECH.queueLimit,
+    voiceId: s?.voiceId ?? DEFAULT_COLUMN_SPEECH.voiceId,
+  };
 }
 
-/// 欠けた項目を既定値で補う。話速・音量の `null` も既定値に戻す。
+/// 欠けた項目を既定値で補う。話速・音量の `null` も既定値に戻す。既知の項目だけを拾う。
 export function withSpeechSettingsDefaults(s: SpeechSettings | null | undefined): SpeechSettingsValue {
-  const merged = { ...DEFAULT_SPEECH_SETTINGS, ...(s ?? {}) };
-  return { ...merged, speedScale: merged.speedScale ?? 1, volume: merged.volume ?? 1 };
+  return {
+    enabled: s?.enabled ?? DEFAULT_SPEECH_SETTINGS.enabled,
+    engine: s?.engine ?? DEFAULT_SPEECH_SETTINGS.engine,
+    externalUrl: s?.externalUrl ?? DEFAULT_SPEECH_SETTINGS.externalUrl,
+    defaultVoiceId: s?.defaultVoiceId ?? DEFAULT_SPEECH_SETTINGS.defaultVoiceId,
+    speedScale: s?.speedScale ?? DEFAULT_SPEECH_SETTINGS.speedScale,
+    volume: s?.volume ?? DEFAULT_SPEECH_SETTINGS.volume,
+  };
 }

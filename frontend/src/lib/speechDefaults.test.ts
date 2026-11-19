@@ -39,6 +39,14 @@ describe("withSpeechSettingsDefaults", () => {
     });
   });
 
+  it("既知の項目だけを拾い、想定外のキー(IPC の応答の包みなど)は混ぜない", () => {
+    const got = withSpeechSettingsDefaults({ enabled: true, status: "ok", data: null } as never);
+    expect(Object.keys(got).sort()).toEqual(["defaultVoiceId", "enabled", "engine", "externalUrl", "speedScale", "volume"]);
+    expect(got.enabled).toBe(true);
+    const col = withColumnSpeechDefaults({ enabled: true, extra: 1 } as never);
+    expect(Object.keys(col).sort()).toEqual(["enabled", "queueLimit", "speakAuthor", "voiceId"]);
+  });
+
   it("既定は、オフ・外部エンジン・URL なし・話速と音量は 1", () => {
     expect(DEFAULT_SPEECH_SETTINGS).toEqual({
       enabled: false,
