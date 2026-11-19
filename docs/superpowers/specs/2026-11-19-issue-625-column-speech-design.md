@@ -45,9 +45,9 @@
 | `queue_limit` | u8 | 5 | このカラムの待ち件数の上限(1〜20 に丸める) |
 | `voice_id` | String | "" | 空ならグローバルの既定の声を継承する |
 
-永続化は `column_def` に `speech_json TEXT NOT NULL DEFAULT ''` を1列だけ追加する(`kind_json` / `filter_json` の前例に倣う)。空文字は既定値として扱う。マイグレーションは冪等にし、「列が無ければ `ALTER TABLE`」で行う(`store/db.rs` の既存の流儀)。`Column` に項目が増えるため、リテラルで構築している箇所(`attribution.rs`、`commands/column.rs`、`commands/settings_transfer.rs`、`commands/mute.rs`、`store/settings.rs`、`store/settings_transfer.rs` のテストなど)を更新し、TS バインディングを再生成する。
+永続化: 設定は JSON ファイル(`SettingsStore` の `SettingsData.columns`)に保存されるので、`Column.speech` に `#[serde(default)]` を付けるだけでよい(`speech` を持たない旧い設定ファイルは既定値で読める)。SQLite の `column_def` は旧データの移行専用(`migrate_from_legacy_sqlite`)なので触らず、マイグレーションも要らない。`Column` に項目が増えるため、リテラルで構築している箇所(`attribution.rs`、`commands/column.rs`、`commands/settings_transfer.rs`、`commands/mute.rs`、`store/settings.rs`、`store/settings_transfer.rs` のテストなど)を更新し、TS バインディングを再生成する。
 
-グローバル設定 `SettingsData.speech: SpeechSettings`:
+グローバル設定 `SettingsData.speech: SpeechSettings`(`#[serde(default)]`。`mcp` と同じく `SettingsData` の直下に置く):
 
 | フィールド | 型 | 既定 | 意味 |
 |---|---|---|---|
@@ -151,7 +151,7 @@ IPC: `commands.speakNote({ columnId, noteId, text })`。ラッパー(`ipc.ts`)�
 
 ## テスト
 
-- Rust の単体テスト: `queue.rs`(上限による破棄、ノート ID の重複排除、カラム単位の削除)、設定のバリデーション、`ColumnSpeech` の serde 既定値(`speech_json` が空でも既定値になること)、`store/db.rs` のマイグレーションの冪等性。
+- Rust の単体テスト: `queue.rs`(上限による破棄、ノート ID の重複排除、カラム単位の削除)、設定のバリデーション、`ColumnSpeech` / `SpeechSettings` の serde 既定値(`speech` を持たない旧い設定ファイルが既定値で読めること)、設定のインポートで `SettingsData.speech` が現在の値のまま残ること。
 - 外部エンジンのクライアント: テスト内のフェイク HTTP サーバーで、`/speakers`・`/audio_query`・`/synthesis` の流れ、タイムアウト、到達不能を検証する(既存の `axum` を流用できるかは plan で確認する)。
 - `manager.rs`: フェイクのエンジンとフェイクの再生レーンを差し込み、順序、失敗したときのスキップ、連続失敗でイベントが1回だけ出ることを検証する。
 - `SoundPlayer` の読み上げレーン: デバイスなしで確認できる部分だけを単体テストにする。既存の `sound.rs` のテストが通ることを必須条件にする。
