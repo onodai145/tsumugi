@@ -9,6 +9,7 @@ import {
   type SpeechSettingsValue,
 } from "./speechDefaults";
 import { speechTextForColumnNote } from "./speechText";
+import { RecentIds } from "./recentIds";
 import { invalidateReactionUsers } from "./reactionUsersCache";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -1073,13 +1074,13 @@ class AppStore {
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
           if (wantsSound) this.#playTabSound(tab);
         }
-        // 読み上げ(Issue #625)。通知音とは別の重複排除の枠(`speak:`)を使う: 通知音が枠を消費しても読み上げは落とさない。
+        // 読み上げ(Issue #625)。通知音とは別の重複排除の枠(`#spoken`)を使う: 通知音が枠を消費しても読み上げは落とさない。
         const speechText = speechTextForColumnNote(e.payload.note, {
           isOwn: !!isOwn,
           globalEnabled: this.speech.enabled,
           column: tab.speech,
         });
-        if (speechText && this.#markNotified(`speak:${e.payload.note.id}`)) {
+        if (speechText && this.#markSpoken(e.payload.note.id)) {
           speakNote(tab.id, e.payload.note.id, speechText, (err) => this.#logDebug(`読み上げの依頼に失敗: ${String(err)}`));
         }
       }),
@@ -2172,17 +2173,15 @@ class AppStore {
   }
 
   // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。
-  #notifiedIds = new Set<string>();
-  #notifiedOrder: string[] = [];
+  #notified = new RecentIds(500);
   #markNotified(id: string): boolean {
-    if (this.#notifiedIds.has(id)) return false;
-    this.#notifiedIds.add(id);
-    this.#notifiedOrder.push(id);
-    if (this.#notifiedOrder.length > 500) {
-      const old = this.#notifiedOrder.shift();
-      if (old) this.#notifiedIds.delete(old);
-    }
-    return true;
+    return this.#notified.mark(id);
+  }
+  // 読み上げを依頼したノートIDを覚えておく(Issue #625)。通知音と枠を共有しない: どちらの重複排除の窓も、
+  // 相手に食われず 500 件ぶんある。
+  #spoken = new RecentIds(500);
+  #markSpoken(id: string): boolean {
+    return this.#spoken.mark(id);
   }
 
   /// このタブで実際に鳴らす通知音を決める。タブ側の選択があればそれを優先し、

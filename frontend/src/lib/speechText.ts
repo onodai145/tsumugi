@@ -8,6 +8,9 @@ export { DEFAULT_COLUMN_SPEECH };
 
 /// 1件の読み上げ本文の最大文字数(コードポイント)。超えたら切って「以下略」を付ける。
 export const MAX_SPEECH_CHARS = 120;
+/// 投稿者名の最大文字数(コードポイント)。本文 + 名前の合計が、Rust の受け付ける上限(300 文字)を超えて
+/// 黙って読まれなくなることを避ける。
+export const MAX_AUTHOR_CHARS = 40;
 const ELLIPSIS = "、以下略";
 
 /// MFM のノードを、読み上げ用のプレーンな文字列にする。読めないもの(絵文字・数式・検索)は空にする。
@@ -99,7 +102,9 @@ function bodyText(note: Note): string | null {
 /// 投稿者の読み名。表示名のカスタム絵文字を除き、空なら username。
 function authorName(user: User): string {
   const name = user.name ? normalize(plain(parseSimple(capSource(user.name).text))) : "";
-  return name || user.username;
+  return Array.from(name || user.username)
+    .slice(0, MAX_AUTHOR_CHARS)
+    .join("");
 }
 
 /// ノート1件の読み上げ文。読まないときは null。`speakAuthor` がオンなら `{表示名}さん、` を前置きする。

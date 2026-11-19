@@ -3,6 +3,7 @@ import type { Note, User } from "../bindings/tauri.gen";
 import {
   buildSpeechText,
   DEFAULT_COLUMN_SPEECH,
+  MAX_AUTHOR_CHARS,
   MAX_SPEECH_CHARS,
   speechTextForColumnNote,
 } from "./speechText";
@@ -177,6 +178,14 @@ describe("buildSpeechText: 投稿者名", () => {
     expect(buildSpeechText(note({ text: "おはよう", user: user({ name: "Alice:blob:" }) }), withAuthor)).toBe("Aliceさん、おはよう");
     expect(buildSpeechText(note({ text: "おはよう", user: user({ name: ":blob:" }) }), withAuthor)).toBe("aliceさん、おはよう");
     expect(buildSpeechText(note({ text: "おはよう", user: user({ name: null }) }), withAuthor)).toBe("aliceさん、おはよう");
+  });
+
+  it("長すぎる表示名は、上限(40文字)で切る(合計が Rust の上限を超えて黙って読まれなくならない)", () => {
+    const out = buildSpeechText(note({ text: "おはよう", user: user({ name: "あ".repeat(300) }) }), withAuthor)!;
+    expect(out).toBe("あ".repeat(MAX_AUTHOR_CHARS) + "さん、おはよう");
+    // 本文が上限いっぱいでも、合計は Rust の受け付ける 300 文字に収まる。
+    const long = buildSpeechText(note({ text: "い".repeat(500), user: user({ name: "あ".repeat(300) }) }), withAuthor)!;
+    expect(Array.from(long).length).toBeLessThanOrEqual(300);
   });
 
   it("読む中身がなければ、投稿者名だけを読み上げない", () => {
