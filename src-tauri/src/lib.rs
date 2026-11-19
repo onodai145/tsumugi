@@ -21,6 +21,7 @@ mod state;
 mod store;
 mod stream;
 mod translate;
+mod tts;
 
 use session::KeyringStore;
 use state::AppState;
