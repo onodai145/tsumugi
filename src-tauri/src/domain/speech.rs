@@ -119,6 +119,10 @@ pub fn parse_base_url(raw: &str) -> Result<url::Url, String> {
     if !u.username().is_empty() || u.password().is_some() {
         return Err("URL にユーザー名・パスワードは含められません".into());
     }
+    // 基準 URL にパスを連結するので、クエリやフラグメントがあると壊れた URL(`…?x=1/audio_query`)になる。
+    if u.query().is_some() || u.fragment().is_some() {
+        return Err("URL に ? や # は含められません".into());
+    }
     Ok(u)
 }
 
@@ -215,6 +219,16 @@ mod tests {
         assert!(with(&|s| s.volume = 0.0).is_err());
         assert!(with(&|s| s.volume = 2.5).is_err());
         assert!(with(&|s| s.default_voice_id = "x".repeat(VOICE_ID_MAX_LEN + 1)).is_err());
+    }
+
+    #[test]
+    fn a_base_url_with_a_query_or_fragment_is_rejected() {
+        // `http://h:1/?x=1` に `/audio_query` を連結すると、壊れた URL になる。
+        assert!(parse_base_url("http://h:1/?x=1").is_err());
+        assert!(parse_base_url("http://h:1?x=1").is_err());
+        assert!(parse_base_url("http://h:1/#frag").is_err());
+        assert!(parse_base_url("http://h:1/api/").is_ok(), "パスは許す(リバースプロキシの配下など)");
+        assert!(SpeechSettings { external_url: "http://h:1/?x=1".into(), ..Default::default() }.validate().is_err());
     }
 
     #[test]

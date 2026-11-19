@@ -14,11 +14,18 @@ use std::time::Duration;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// 1リクエスト全体のタイムアウト。長めの文の合成が間に合う程度。
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
+/// JSON の応答(`/speakers`・`/audio_query`)の最大バイト数。誤った URL や悪意のあるサーバーが、巨大な応答で
+/// メモリを圧迫しないための上限(声の一覧も、300 文字の読みも、これよりずっと小さい)。
+const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
+/// 音声(`/synthesis` の WAV)の最大バイト数。300 文字の読み上げでも数 MB なので、十分に余裕がある。
+const MAX_WAV_BYTES: usize = 32 * 1024 * 1024;
 
 pub struct ExternalEngine {
     client: reqwest::Client,
     /// 末尾のスラッシュを除いた基準 URL(例 `http://192.168.1.10:50021`)。
     base: String,
+    max_json: usize,
+    max_wav: usize,
 }
 
 impl ExternalEngine {
@@ -38,7 +45,19 @@ impl ExternalEngine {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| Error::Invalid(format!("HTTP クライアントを作れません: {e}")))?;
-        Ok(Self { client, base: u.as_str().trim_end_matches('/').to_string() })
+        Ok(Self {
+            client,
+            base: u.as_str().trim_end_matches('/').to_string(),
+            max_json: MAX_JSON_BYTES,
+            max_wav: MAX_WAV_BYTES,
+        })
+    }
+
+    /// 応答サイズの上限を指定する(テスト用に公開。本番は `new` の既定値)。
+    pub fn with_limits(mut self, max_json: usize, max_wav: usize) -> Self {
+        self.max_json = max_json;
+        self.max_wav = max_wav;
+        self
     }
 
     fn url(&self, path: &str) -> String {
@@ -58,8 +77,26 @@ fn bad_response(detail: impl std::fmt::Display) -> Error {
     invalid(format!("{ERR_BAD_RESPONSE}: {detail}"))
 }
 
-fn json_err(e: reqwest::Error) -> Error {
-    bad_response(e.without_url())
+/// 応答の本文を、`limit` バイトまでに制限して読む。`Content-Length` が上限を超えていれば読み始めず、チャンク転送などで
+/// 長さが分からなくても、上限を超えた時点で打ち切る。
+async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
+    if resp.content_length().is_some_and(|len| len > limit as u64) {
+        return Err(bad_response("応答が大きすぎます"));
+    }
+    let mut buf = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(unreachable)? {
+        if buf.len() + chunk.len() > limit {
+            return Err(bad_response("応答が大きすぎます"));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
+}
+
+/// JSON の応答を、上限つきで読んで解釈する。
+async fn read_json<T: serde::de::DeserializeOwned>(resp: reqwest::Response, limit: usize) -> Result<T> {
+    let bytes = read_limited(resp, limit).await?;
+    serde_json::from_slice(&bytes).map_err(bad_response)
 }
 
 #[derive(Deserialize)]
@@ -81,7 +118,7 @@ impl SpeechEngine for ExternalEngine {
         if !resp.status().is_success() {
             return Err(bad_response(format!("HTTP {}", resp.status())));
         }
-        let speakers: Vec<SpeakerDto> = resp.json().await.map_err(json_err)?;
+        let speakers: Vec<SpeakerDto> = read_json(resp, self.max_json).await?;
         Ok(speakers
             .into_iter()
             .flat_map(|s| {
@@ -107,7 +144,7 @@ impl SpeechEngine for ExternalEngine {
         if !resp.status().is_success() {
             return Err(bad_response(format!("audio_query: HTTP {}", resp.status())));
         }
-        let mut query: Value = resp.json().await.map_err(json_err)?;
+        let mut query: Value = read_json(resp, self.max_json).await?;
         let obj = query
             .as_object_mut()
             .ok_or_else(|| bad_response("audio_query の応答が JSON のオブジェクトではありません"))?;
@@ -126,11 +163,11 @@ impl SpeechEngine for ExternalEngine {
         if !resp.status().is_success() {
             return Err(bad_response(format!("synthesis: HTTP {}", resp.status())));
         }
-        let bytes = resp.bytes().await.map_err(unreachable)?;
+        let bytes = read_limited(resp, self.max_wav).await?;
         if !bytes.starts_with(b"RIFF") {
             return Err(bad_response("synthesis の応答が WAV ではありません"));
         }
-        Ok(bytes.to_vec())
+        Ok(bytes)
     }
 }
 
@@ -272,6 +309,49 @@ mod tests {
         let e = ExternalEngine::new(&format!("http://127.0.0.1:{port}")).unwrap();
         let err = e.voices().await.unwrap_err();
         assert!(err.to_string().contains(ERR_UNREACHABLE), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_oversized_json_response_is_rejected_by_size_not_buffered_forever() {
+        let app = Router::new().route(
+            "/speakers",
+            get(|| async { Json(json!([{ "name": "x".repeat(10_000), "styles": [] }])) }),
+        );
+        let url = serve(app).await;
+        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000, 1_000_000);
+        let err = e.voices().await.unwrap_err().to_string();
+        assert!(err.contains(ERR_BAD_RESPONSE) && err.contains("大きすぎ"), "{err}");
+        // 上限以内なら通る。
+        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000_000, 1_000_000);
+        assert!(e.voices().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_oversized_wav_is_rejected_even_without_a_content_length() {
+        use axum::body::{Body, Bytes};
+        let app = Router::new()
+            .route("/audio_query", post(|| async { Json(json!({"speedScale": 1.0, "volumeScale": 1.0})) }))
+            .route(
+                "/synthesis",
+                post(|| async {
+                    // Content-Length の無い(チャンク転送の)大きな応答。
+                    let chunks = (0..20).map(|i| {
+                        let mut c = vec![0u8; 1_000];
+                        if i == 0 {
+                            c[..4].copy_from_slice(b"RIFF");
+                        }
+                        Ok::<_, std::io::Error>(Bytes::from(c))
+                    });
+                    Body::from_stream(futures_util::stream::iter(chunks))
+                }),
+            );
+        let url = serve(app).await;
+        let p = SynthParams { speed_scale: 1.0, volume: 1.0 };
+        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000_000, 5_000);
+        let err = e.synthesize("a", "1", &p).await.unwrap_err().to_string();
+        assert!(err.contains(ERR_BAD_RESPONSE) && err.contains("大きすぎ"), "{err}");
+        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000_000, 1_000_000);
+        assert_eq!(e.synthesize("a", "1", &p).await.unwrap().len(), 20_000);
     }
 
     #[tokio::test]
