@@ -144,6 +144,24 @@ describe("buildSpeechText: 長さ", () => {
     expect(out.endsWith("、以下略")).toBe(true);
   });
 
+  it("長い空白の連続でも一瞬で終わる(正規表現が O(n²) にならない)", () => {
+    const started = performance.now();
+    const out = buildSpeechText(note({ text: " ".repeat(50_000) + "a" }), noAuthor);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(out).toBeNull(); // 先頭の上限までが空白だけ = 読む中身がない
+  });
+
+  it("上限で切った本文は、整形後が短くなっても「以下略」を付ける", () => {
+    const out = buildSpeechText(note({ text: "a" + " ".repeat(50_000) + "b" }), noAuthor);
+    expect(out).toBe("a、以下略");
+  });
+
+  it("表示名の長い空白の連続でも一瞬で終わる", () => {
+    const started = performance.now();
+    buildSpeechText(note({ text: "こんにちは", user: user({ name: " ".repeat(50_000) + "x" }) }), withAuthor);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
   it("深くネストした MFM でも落ちない", () => {
     const text = "<small>".repeat(200) + "中身" + "</small>".repeat(200);
     expect(() => buildSpeechText(note({ text }), noAuthor)).not.toThrow();

@@ -16,6 +16,38 @@ use tokio::sync::Notify;
 
 /// 連続でこの回数、合成に失敗したら、エンジンに繋がらない状態(`Error`)とみなして待ち項目を捨てる。
 pub const FAIL_THRESHOLD: u32 = 3;
+/// 音声の長さに足す余白。この時間を過ぎても再生が終わらなければ、出力が壊れたとみなして打ち切る。
+pub const PLAYBACK_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
+/// WAV の長さが読めなかったときの、再生の待ち時間の上限。
+pub const FALLBACK_PLAYBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// WAV(PCM)の再生時間をヘッダから読む。読めなければ `None`。`data` チャンクのサイズが実際のバイト数より
+/// 大きい(ストリーミングの WAV は 0xFFFFFFFF を入れることがある)ときは、残りのバイト数で数える。
+pub(crate) fn wav_duration(wav: &[u8]) -> Option<std::time::Duration> {
+    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return None;
+    }
+    let u32_at = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(wav.get(at..at + 4)?.try_into().ok()?)) };
+    let mut byte_rate: Option<u32> = None;
+    let mut pos = 12usize;
+    while pos + 8 <= wav.len() {
+        let id = &wav[pos..pos + 4];
+        let size = u32_at(pos + 4)? as usize;
+        let body = pos + 8;
+        if id == b"fmt " {
+            if size < 16 || body + 16 > wav.len() {
+                return None;
+            }
+            byte_rate = Some(u32_at(body + 8)?);
+        } else if id == b"data" {
+            let rate = byte_rate.filter(|r| *r > 0)?;
+            let len = size.min(wav.len() - body);
+            return Some(std::time::Duration::from_secs_f64(len as f64 / rate as f64));
+        }
+        pos = body.checked_add(size)?.checked_add(size & 1)?;
+    }
+    None
+}
 
 /// 読み上げの状態(設定画面に見せる)。状態が変わったときだけ `SpeechStatusChanged` で通知する。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -69,6 +101,8 @@ pub struct SpeechManager {
     wake: Notify,
     /// `stop_all` のたびに増える世代。合成中に停止されたかを、合成の前後の差で検出する。
     epoch: AtomicU64,
+    /// 音声の長さに足す、再生の待ち時間の余白(テストで短くできる)。
+    playback_margin: std::time::Duration,
 }
 
 impl Default for SpeechManager {
@@ -83,6 +117,21 @@ impl SpeechManager {
             state: Mutex::new(State { queue: SpeechQueue::new(), status: SpeechStatus::Unknown, failures: 0 }),
             wake: Notify::new(),
             epoch: AtomicU64::new(0),
+            playback_margin: PLAYBACK_MARGIN,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_playback_margin(mut self, margin: std::time::Duration) -> Self {
+        self.playback_margin = margin;
+        self
+    }
+
+    /// 再生の完了を待つ上限。音声の長さ + 余白。長さが読めなければ既定の上限。
+    fn playback_timeout(&self, wav: &[u8]) -> std::time::Duration {
+        match wav_duration(wav) {
+            Some(d) => d + self.playback_margin,
+            None => FALLBACK_PLAYBACK_TIMEOUT,
         }
     }
 
@@ -197,10 +246,18 @@ pub(crate) async fn handle_item(mgr: &SpeechManager, ctx: &dyn WorkerContext, it
         // 合成している間に停止された。できあがった音声は鳴らさない。
         return;
     }
-    match ctx.output().speak(wav).await {
-        SpeakOutcome::Finished | SpeakOutcome::Stopped => {}
+    let timeout = mgr.playback_timeout(&wav);
+    let output = ctx.output();
+    match tokio::time::timeout(timeout, output.speak(wav)).await {
+        Ok(SpeakOutcome::Finished | SpeakOutcome::Stopped) => {}
         // 出力の失敗はエンジンの失敗ではない。状態には反映せず、ログに残して次へ進む。
-        SpeakOutcome::Failed(m) => log::warn!("読み上げ: 再生に失敗しました: {m}"),
+        Ok(SpeakOutcome::Failed(m)) => log::warn!("読み上げ: 再生に失敗しました: {m}"),
+        // 出力デバイスが壊れる・切断されると、再生が終わらないまま戻らない。ワーカーが無期限に止まらないよう、
+        // 音声の長さ + 余白で打ち切って、出力を止める(再生スレッドは、次の命令でデバイスを開き直す)。
+        Err(_) => {
+            log::warn!("読み上げ: 再生が終わらないため中断しました(出力デバイスの異常の可能性)");
+            output.stop();
+        }
     }
 }
 
@@ -418,6 +475,108 @@ mod tests {
         mgr.enqueue(item("b1", "b"), 5);
         assert_eq!(mgr.remove_column("a"), 1);
         assert_eq!(mgr.pop_for_test().unwrap().note_id, "b1");
+    }
+
+    /// 再生が永遠に終わらない出力(出力デバイスが壊れた・切断されたときの再現)。
+    #[derive(Default)]
+    struct HangingOutput {
+        stops: AtomicUsize,
+    }
+    #[async_trait]
+    impl SpeechOutput for HangingOutput {
+        async fn speak(&self, _wav: Vec<u8>) -> SpeakOutcome {
+            std::future::pending().await
+        }
+        fn stop(&self) {
+            self.stops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// 1秒ぶん(8kHz・モノラル・16bit)の WAV。
+    fn wav_of_one_second() -> Vec<u8> {
+        let data = vec![0u8; 16_000];
+        let mut v = b"RIFF".to_vec();
+        v.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        v.extend_from_slice(b"WAVEfmt ");
+        v.extend_from_slice(&16u32.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        v.extend_from_slice(&1u16.to_le_bytes()); // mono
+        v.extend_from_slice(&8000u32.to_le_bytes());
+        v.extend_from_slice(&16_000u32.to_le_bytes()); // byte rate
+        v.extend_from_slice(&2u16.to_le_bytes());
+        v.extend_from_slice(&16u16.to_le_bytes());
+        v.extend_from_slice(b"data");
+        v.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        v.extend_from_slice(&data);
+        v
+    }
+
+    #[test]
+    fn wav_duration_reads_the_length_from_the_header() {
+        assert_eq!(wav_duration(&wav_of_one_second()), Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn wav_duration_uses_the_remaining_bytes_when_the_data_size_is_unknown_or_too_big() {
+        let mut w = wav_of_one_second();
+        let at = w.len() - 16_000 - 4; // data チャンクのサイズ欄
+        w[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes()); // ストリーミングの WAV は 0xFFFFFFFF を入れることがある
+        assert_eq!(wav_duration(&w), Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn wav_duration_is_none_for_garbage_or_a_truncated_header() {
+        assert_eq!(wav_duration(b""), None);
+        assert_eq!(wav_duration(b"RIFF:not a wav"), None);
+        assert_eq!(wav_duration(&wav_of_one_second()[..30]), None);
+    }
+
+    #[test]
+    fn the_playback_timeout_is_the_audio_length_plus_a_margin_and_has_a_fallback() {
+        let mgr = SpeechManager::new().with_playback_margin(Duration::from_millis(250));
+        assert_eq!(mgr.playback_timeout(&wav_of_one_second()), Duration::from_millis(1250));
+        assert_eq!(mgr.playback_timeout(b"RIFF:not a wav"), FALLBACK_PLAYBACK_TIMEOUT, "長さが読めなければ既定の上限");
+    }
+
+    #[tokio::test]
+    async fn a_playback_that_never_finishes_is_cut_off_and_stopped_instead_of_wedging_the_worker() {
+        struct WavEngine;
+        #[async_trait]
+        impl SpeechEngine for WavEngine {
+            async fn voices(&self) -> crate::error::Result<Vec<Voice>> {
+                Ok(vec![])
+            }
+            async fn synthesize(&self, _t: &str, _v: &str, _p: &SynthParams) -> crate::error::Result<Vec<u8>> {
+                // 長さ 0 の WAV: 待ち時間は余白だけになる。
+                let mut w = wav_of_one_second();
+                w.truncate(44);
+                Ok(w)
+            }
+        }
+        struct HangCtx(Arc<HangingOutput>, Arc<FakeCtx>);
+        impl WorkerContext for HangCtx {
+            fn settings(&self) -> SpeechSettings {
+                self.1.settings()
+            }
+            fn engine(&self, _s: &SpeechSettings) -> crate::error::Result<Arc<dyn SpeechEngine>> {
+                Ok(Arc::new(WavEngine))
+            }
+            fn output(&self) -> Arc<dyn SpeechOutput> {
+                self.0.clone()
+            }
+            fn emit_status(&self, s: SpeechStatus) {
+                self.1.emit_status(s)
+            }
+        }
+        let mgr = SpeechManager::new().with_playback_margin(Duration::from_millis(50));
+        let out = Arc::new(HangingOutput::default());
+        let ctx = HangCtx(out.clone(), FakeCtx::new());
+
+        // 再生が戻らなくても、余白のぶんで打ち切って `stop()` し、次へ進める。
+        tokio::time::timeout(Duration::from_secs(5), handle_item(&mgr, &ctx, item("n1", "a")))
+            .await
+            .expect("再生が終わらなくても、ワーカーは先へ進む");
+        assert_eq!(out.stops.load(Ordering::SeqCst), 1, "打ち切ったら出力を止める(再生スレッドが壊れた出力デバイスを開き直すきっかけにもなる)");
     }
 
     #[tokio::test]

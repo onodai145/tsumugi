@@ -47,6 +47,22 @@ function plain(nodes: MfmNode[]): string {
   return nodes.map(nodeText).join("");
 }
 
+/// 解析・整形に渡す入力の最大文字数(コードポイント)。読み上げは `MAX_SPEECH_CHARS` で切るので、その数倍あれば十分で、
+/// 数万文字の本文(長い空白の連続など)で、整形の正規表現と `parse` が UI スレッドを止めないための上限でもある。
+const SOURCE_CAP = MAX_SPEECH_CHARS * 8;
+
+/// 入力を `SOURCE_CAP` コードポイントまでに切る。`cut` は、実際に切ったか。O(上限)で、巨大な入力を全部は読まない。
+function capSource(s: string): { text: string; cut: boolean } {
+  if (s.length <= SOURCE_CAP) return { text: s, cut: false };
+  let i = 0;
+  let n = 0;
+  while (i < s.length && n < SOURCE_CAP) {
+    i += (s.codePointAt(i) ?? 0) > 0xffff ? 2 : 1;
+    n++;
+  }
+  return i < s.length ? { text: s.slice(0, i), cut: true } : { text: s, cut: false };
+}
+
 /// 空白・改行を読みやすく整える。改行は読点にする(句読点の直後の改行は読点を足さない)。
 function normalize(s: string): string {
   return s
@@ -69,16 +85,20 @@ function bodyText(note: Note): string | null {
   if (note.renoteId && !note.text && !note.cw) return null;
   // CW があれば CW だけ(本文は隠す意図があるので、読み上げて裏切らない)。
   const hasCw = !!note.cw && note.cw.trim() !== "";
-  const source = hasCw ? note.cw : note.text;
-  if (!source) return null;
+  const raw = hasCw ? note.cw : note.text;
+  if (!raw) return null;
+  const { text: source, cut } = capSource(raw);
   const nodes = hasCw ? parseSimple(source) : parse(source);
   const text = normalize(plain(nodes));
-  return text ? truncate(text) : null;
+  if (!text) return null;
+  const out = truncate(text);
+  // 入力を上限で切ったときは、整形後が短くなっても、続きがあることを伝える。
+  return cut && !out.endsWith(ELLIPSIS) ? out + ELLIPSIS : out;
 }
 
 /// 投稿者の読み名。表示名のカスタム絵文字を除き、空なら username。
 function authorName(user: User): string {
-  const name = user.name ? normalize(plain(parseSimple(user.name))) : "";
+  const name = user.name ? normalize(plain(parseSimple(capSource(user.name).text))) : "";
   return name || user.username;
 }
 
