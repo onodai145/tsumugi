@@ -178,7 +178,8 @@ mod tests {
             filter: FilterQuery::Keywords(vec![]),
             notify_sound: false,
             notify_desktop: false,
-            notify_sound_choice: String::new(), speech: Default::default(),
+            notify_sound_choice: String::new(),
+            speech: Default::default(),
             group_id: "g1".into(),
             title: None,
         }
