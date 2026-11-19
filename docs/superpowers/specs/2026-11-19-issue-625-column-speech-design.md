@@ -113,7 +113,7 @@ struct SynthParams { speed_scale: f32, volume: f32 }
 
 発火点は `events.columnNote` のリスナー(`store.svelte.ts`)の、通知音の判定の直後。ライブで届いたノートだけが対象で、`columnGapFill` では読まない。
 
-条件: 自分のノートではない、グローバルの `speech.enabled`、このカラムの `speech.enabled`、重複排除の通過。重複排除は `#markNotified` を使うが、キーは `speak:<noteId>` にして、通知音・デスクトップ通知とは別枠にする(通知音が枠を消費して読み上げが落ちるのを防ぐ)。
+条件: 自分のノートではない、グローバルの `speech.enabled`、このカラムの `speech.enabled`、重複排除の通過。重複排除は、通知音・デスクトップ通知(`#markNotified`)とは**別の枠**(`lib/recentIds.ts` の `RecentIds` を、用途ごとに別のインスタンスで持つ。読み上げは `#spoken`)にする(通知音が枠を消費して読み上げが落ちる、その逆も、起きないようにするため。どちらも直近 500 件)。
 
 `lib/speechText.ts`(新規の純粋関数): `buildSpeechText(note, { speakAuthor }) → string | null`。`null` は「読まない」。
 
@@ -166,6 +166,8 @@ IPC: `commands.speakNote({ columnId, noteId, text })`。ラッパー(`ipc.ts`)�
 - 段階3(別 spec・別 plan): Android の内蔵。Android 向けの CORE ビルドは arm64 と x86_64 だけ(armv7 と i686 には無い)で、ONNX Runtime は別途取得する。16KB ページへの対応には VOICEVOX ONNX Runtime 1.22 以降が必要。先に実機で速度・メモリ・16KB ページを実測するスパイクを行い、実用的なら進める。armv7 と i686 では内蔵エンジンを無効にする(CI は4つの ABI をビルドする)。
 
 ## リスクと未確認事項
+
+- **WebView の JS から、任意の URL のエンジン API を叩かせられる**: `list_speech_voices(external_url)` は、設定画面の「接続テスト」が**保存前の URL**を渡すため、保存済みの URL に限れない(限ると、保存してからでないと試せなくなる)。WebView 内で任意の JS が動かせる状況なら、ほかのコマンドも呼べるので、追加で広がる危険は小さい(叩けるのは固定のパスの `GET /speakers` と `POST /audio_query` だけ、リダイレクトは追わず、応答の大きさにも上限がある)。§2 の「`net_guard` を使わない」は、この前提(URL を入れるのはユーザー自身)による。限定したくなったら、「接続テストの前に保存する」UX に変える。
 
 - AivisSpeech の API 互換の範囲(`speedScale` / `volumeScale` の効き方など)。段階1のスパイク(a)で確認する。
 - Android で LAN 内の平文 HTTP を許可する設定(`cleartextTraffic` / `networkSecurityConfig`)の要否。スパイク(b)で確認する。
