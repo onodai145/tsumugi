@@ -11,6 +11,7 @@ mod filter;
 mod mcp;
 mod mml;
 mod mobile_intent;
+mod nav_guard;
 mod network_status;
 mod net_guard;
 mod scheduler;
@@ -219,6 +220,10 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }));
+
+    // Android ではメイン WebView が外部オリジンへ自分で遷移してしまうため、Rust 側でも止める(Issue #660)。
+    #[cfg(target_os = "android")]
+    let tauri_builder = tauri_builder.plugin(nav_guard::plugin());
 
     tauri_builder
         .plugin(tauri_plugin_os::init())
