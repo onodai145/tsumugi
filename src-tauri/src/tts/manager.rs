@@ -103,6 +103,8 @@ pub struct SpeechManager {
     epoch: AtomicU64,
     /// 音声の長さに足す、再生の待ち時間の余白(テストで短くできる)。
     playback_margin: std::time::Duration,
+    /// `stop_all` で、再生を待っているワーカーを起こす(`wait_stopped`)。
+    stopped: Notify,
 }
 
 impl Default for SpeechManager {
@@ -118,6 +120,7 @@ impl SpeechManager {
             wake: Notify::new(),
             epoch: AtomicU64::new(0),
             playback_margin: PLAYBACK_MARGIN,
+            stopped: Notify::new(),
         }
     }
 
@@ -155,6 +158,21 @@ impl SpeechManager {
     pub fn stop_all(&self) {
         self.epoch.fetch_add(1, Ordering::SeqCst);
         self.state.lock().unwrap().queue.clear();
+        self.stopped.notify_waiters();
+    }
+
+    /// `epoch` の後に `stop_all` が呼ばれる(世代が進む)まで待つ。すでに進んでいれば、すぐ戻る。
+    async fn wait_stopped(&self, epoch: u64) {
+        loop {
+            // 先に待ち受けを登録してから世代を見る(確認と待機の間に `stop_all` が入っても、取りこぼさない)。
+            let notified = self.stopped.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.epoch() != epoch {
+                return;
+            }
+            notified.await;
+        }
     }
 
     pub fn status(&self) -> SpeechStatus {
@@ -248,15 +266,39 @@ pub(crate) async fn handle_item(mgr: &SpeechManager, ctx: &dyn WorkerContext, it
     }
     let timeout = mgr.playback_timeout(&wav);
     let output = ctx.output();
-    match tokio::time::timeout(timeout, output.speak(wav)).await {
-        Ok(SpeakOutcome::Finished | SpeakOutcome::Stopped) => {}
-        // 出力の失敗はエンジンの失敗ではない。状態には反映せず、ログに残して次へ進む。
-        Ok(SpeakOutcome::Failed(m)) => log::warn!("読み上げ: 再生に失敗しました: {m}"),
-        // 出力デバイスが壊れる・切断されると、再生が終わらないまま戻らない。ワーカーが無期限に止まらないよう、
-        // 音声の長さ + 余白で打ち切って、出力を止める(再生スレッドは、次の命令でデバイスを開き直す)。
-        Err(_) => {
-            log::warn!("読み上げ: 再生が終わらないため中断しました(出力デバイスの異常の可能性)");
-            output.stop();
+    // 再生の完了と、「停止された(世代が進んだ)」を競わせる。`stop_all` と `stop_speech` が、`Speak` が再生スレッドに
+    // 届く直前に割り込むと、`StopSpeech` が先に処理されて空振りし、音声が最後まで鳴ってしまう。世代が進んだことを
+    // ここで見つけたら、`Speak` を送ったあとで、もう一度 `stop()` を送る。
+    tokio::select! {
+        r = tokio::time::timeout(timeout, output.speak(wav)) => match r {
+            Ok(SpeakOutcome::Finished | SpeakOutcome::Stopped) => {}
+            // 出力の失敗はエンジンの失敗ではない。状態には反映せず、ログに残して次へ進む。
+            Ok(SpeakOutcome::Failed(m)) => log::warn!("読み上げ: 再生に失敗しました: {m}"),
+            // 出力デバイスが壊れる・切断されると、再生が終わらないまま戻らない。ワーカーが無期限に止まらないよう、
+            // 音声の長さ + 余白で打ち切って、出力を止める(再生スレッドは、次の命令でデバイスを開き直す)。
+            Err(_) => {
+                log::warn!("読み上げ: 再生が終わらないため中断しました(出力デバイスの異常の可能性)");
+                output.stop();
+            }
+        },
+        _ = mgr.wait_stopped(epoch) => output.stop(),
+    }
+}
+
+/// ワーカーが panic で落ちたときの、再起動までの待ち(panic が続いても、busy loop にならない)。
+pub const WORKER_RESTART_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// ワーカーを監視つきで動かす。ワーカーの task が panic で落ちても、ログを残して再起動し、読み上げを続ける
+/// (処理中だった1件は失われる)。呼び出し側が spawn する。
+pub async fn run_supervised(mgr: Arc<SpeechManager>, ctx: Arc<dyn WorkerContext>, restart_delay: std::time::Duration) {
+    loop {
+        match tokio::spawn(run_loop(mgr.clone(), ctx.clone())).await {
+            // `run_loop` は戻らないので、ここに来るのは通常は panic のとき。
+            Ok(()) => return,
+            Err(e) => {
+                log::error!("読み上げ: ワーカーが異常終了しました。再起動します: {e}");
+                tokio::time::sleep(restart_delay).await;
+            }
         }
     }
 }
@@ -577,6 +619,102 @@ mod tests {
             .await
             .expect("再生が終わらなくても、ワーカーは先へ進む");
         assert_eq!(out.stops.load(Ordering::SeqCst), 1, "打ち切ったら出力を止める(再生スレッドが壊れた出力デバイスを開き直すきっかけにもなる)");
+    }
+
+    /// 「`Speak` が再生スレッドに届く直前に、停止が割り込む」競合の再現。この停止(`StopSpeech`)は `Speak` より先に
+    /// 処理されて空振りする。`Speak` の**後**に届いた `stop()` だけが、再生を止められる。
+    struct RaceOutput {
+        mgr: Arc<SpeechManager>,
+        started: std::sync::atomic::AtomicBool,
+        stopped_after_start: tokio::sync::Notify,
+    }
+    #[async_trait]
+    impl SpeechOutput for RaceOutput {
+        async fn speak(&self, _wav: Vec<u8>) -> SpeakOutcome {
+            self.mgr.stop_all(); // 世代が進む(本番では、この直後に `stop_speech` が走り、`Speak` より先に届く)
+            self.started.store(true, Ordering::SeqCst);
+            self.stopped_after_start.notified().await;
+            SpeakOutcome::Stopped
+        }
+        fn stop(&self) {
+            if self.started.load(Ordering::SeqCst) {
+                self.stopped_after_start.notify_one();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stop_that_lands_just_before_the_speak_command_still_silences_it() {
+        struct RaceCtx(Arc<RaceOutput>, Arc<FakeCtx>);
+        impl WorkerContext for RaceCtx {
+            fn settings(&self) -> SpeechSettings {
+                self.1.settings()
+            }
+            fn engine(&self, s: &SpeechSettings) -> crate::error::Result<Arc<dyn SpeechEngine>> {
+                self.1.engine(s)
+            }
+            fn output(&self) -> Arc<dyn SpeechOutput> {
+                self.0.clone()
+            }
+            fn emit_status(&self, s: SpeechStatus) {
+                self.1.emit_status(s)
+            }
+        }
+        let mgr = Arc::new(SpeechManager::new());
+        let out = Arc::new(RaceOutput {
+            mgr: mgr.clone(),
+            started: Default::default(),
+            stopped_after_start: Default::default(),
+        });
+        let ctx = RaceCtx(out, FakeCtx::new());
+        // 世代が変わったら、`Speak` の後でもう一度 `stop()` を送る。これが無いと、再生は最後まで鳴る
+        // (長さの読めない音声は、60 秒の上限まで戻らない)。
+        tokio::time::timeout(Duration::from_secs(3), handle_item(&mgr, &ctx, item("n1", "a")))
+            .await
+            .expect("停止が割り込んでも、再生を止めてワーカーは先へ進む");
+    }
+
+    /// 最初の1回だけ panic する窓口(Mutex の poison などで、ワーカーが落ちる場合の再現)。
+    struct PanicOnceCtx {
+        inner: Arc<FakeCtx>,
+        panicked: std::sync::atomic::AtomicBool,
+    }
+    impl WorkerContext for PanicOnceCtx {
+        fn settings(&self) -> SpeechSettings {
+            if !self.panicked.swap(true, Ordering::SeqCst) {
+                panic!("boom (simulated worker panic)");
+            }
+            self.inner.settings()
+        }
+        fn engine(&self, s: &SpeechSettings) -> crate::error::Result<Arc<dyn SpeechEngine>> {
+            self.inner.engine(s)
+        }
+        fn output(&self) -> Arc<dyn SpeechOutput> {
+            self.inner.output()
+        }
+        fn emit_status(&self, s: SpeechStatus) {
+            self.inner.emit_status(s)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panicking_worker_is_restarted_and_keeps_speaking() {
+        let mgr = Arc::new(SpeechManager::new());
+        let inner = FakeCtx::new();
+        let ctx = Arc::new(PanicOnceCtx { inner: inner.clone(), panicked: Default::default() });
+        let worker = tokio::spawn(run_supervised(mgr.clone(), ctx, Duration::from_millis(10)));
+        mgr.enqueue(item("n1", "a"), 5); // 最初の1件は、処理中の panic で失われる
+        mgr.enqueue(item("n2", "a"), 5);
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while inner.played().is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("panic のあとも、ワーカーが再起動して読み上げを続ける");
+        assert_eq!(inner.played(), ["RIFF:text-n2"]);
+        worker.abort();
     }
 
     #[tokio::test]

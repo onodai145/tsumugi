@@ -2,7 +2,7 @@
 
 use super::engine::SpeechEngine;
 use super::external::ExternalEngine;
-use super::manager::{run_loop, SpeechOutput, SpeechStatus, WorkerContext};
+use super::manager::{run_supervised, SpeechOutput, SpeechStatus, WorkerContext, WORKER_RESTART_DELAY};
 use super::{invalid, ERR_NOT_CONFIGURED};
 use crate::domain::SpeechSettings;
 use crate::error::Result;
@@ -58,5 +58,5 @@ impl WorkerContext for AppContext {
 pub fn spawn(app: AppHandle) {
     let mgr = app.state::<AppState>().speech.clone();
     let ctx: Arc<dyn WorkerContext> = Arc::new(AppContext::new(app));
-    tauri::async_runtime::spawn(run_loop(mgr, ctx));
+    tauri::async_runtime::spawn(run_supervised(mgr, ctx, WORKER_RESTART_DELAY));
 }
