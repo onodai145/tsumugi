@@ -47,12 +47,19 @@ impl ExternalEngine {
 }
 
 /// 通信の失敗(接続不可・タイムアウト)を識別コードつきの `Invalid` にする。
+/// reqwest のエラーはリクエスト URL(クエリに読み上げる本文が入る)を文面に出すので、`without_url` で落とす
+/// (設定画面・ログ・イベントに、ノートの本文を漏らさない)。
 fn unreachable(e: reqwest::Error) -> Error {
-    invalid(format!("{ERR_UNREACHABLE}: {e}"))
+    invalid(format!("{ERR_UNREACHABLE}: {}", e.without_url()))
 }
 
+/// 応答の形が想定外。`reqwest::Error` を渡すときは、`without_url` を通してから渡す(`json_err`)。
 fn bad_response(detail: impl std::fmt::Display) -> Error {
     invalid(format!("{ERR_BAD_RESPONSE}: {detail}"))
+}
+
+fn json_err(e: reqwest::Error) -> Error {
+    bad_response(e.without_url())
 }
 
 #[derive(Deserialize)]
@@ -74,7 +81,7 @@ impl SpeechEngine for ExternalEngine {
         if !resp.status().is_success() {
             return Err(bad_response(format!("HTTP {}", resp.status())));
         }
-        let speakers: Vec<SpeakerDto> = resp.json().await.map_err(bad_response)?;
+        let speakers: Vec<SpeakerDto> = resp.json().await.map_err(json_err)?;
         Ok(speakers
             .into_iter()
             .flat_map(|s| {
@@ -100,7 +107,7 @@ impl SpeechEngine for ExternalEngine {
         if !resp.status().is_success() {
             return Err(bad_response(format!("audio_query: HTTP {}", resp.status())));
         }
-        let mut query: Value = resp.json().await.map_err(bad_response)?;
+        let mut query: Value = resp.json().await.map_err(json_err)?;
         let obj = query
             .as_object_mut()
             .ok_or_else(|| bad_response("audio_query の応答が JSON のオブジェクトではありません"))?;
@@ -268,6 +275,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn errors_do_not_leak_the_request_url_or_the_note_text() {
+        // 接続できないエンジン。reqwest のエラーは既定でリクエスト URL(クエリの本文を含む)を文面に出す。
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let e = ExternalEngine::new(&format!("http://127.0.0.1:{port}")).unwrap();
+        let err = e.synthesize("秘密の本文", "1", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap_err().to_string();
+        assert!(err.contains(ERR_UNREACHABLE), "{err}");
+        assert!(!err.contains("audio_query") && !err.contains("秘密") && !err.contains("%E7%A7%98"), "本文や URL を含まない: {err}");
+
+        // 応答の JSON が壊れているときも同じ。
+        let app = Router::new().route("/audio_query", post(|| async { "not json" }));
+        let url = serve(app).await;
+        let e = ExternalEngine::new(&url).unwrap();
+        let err = e.synthesize("秘密の本文", "1", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap_err().to_string();
+        assert!(err.contains(ERR_BAD_RESPONSE), "{err}");
+        assert!(!err.contains("audio_query") && !err.contains("秘密") && !err.contains("%E7%A7%98"), "本文や URL を含まない: {err}");
+    }
+
+    #[tokio::test]
     async fn a_hanging_engine_times_out_instead_of_blocking_forever() {
         let app = Router::new().route(
             "/speakers",
@@ -289,5 +317,27 @@ mod tests {
         assert!(ExternalEngine::new("").is_err());
         assert!(ExternalEngine::new("ftp://example.com").is_err());
         assert!(ExternalEngine::new("http://user:pw@example.com").is_err());
+    }
+
+    /// 実際の VOICEVOX 互換エンジンに対する確認(Docker などで起動したものの URL を `TSUMUGI_TEST_SPEECH_URL` に渡す)。
+    /// 例: `docker run -d -p 127.0.0.1:50021:50021 voicevox/voicevox_engine:cpu-latest` のあと
+    /// `TSUMUGI_TEST_SPEECH_URL=http://127.0.0.1:50021 cargo test --lib tts::external -- --ignored`。
+    /// 終わったら `docker rm -fv <id>`(`-v` が無いと匿名ボリュームが孤児で残る)。
+    #[tokio::test]
+    #[ignore = "実エンジンが要る: TSUMUGI_TEST_SPEECH_URL"]
+    async fn real_voicevox_engine() {
+        let url = std::env::var("TSUMUGI_TEST_SPEECH_URL").expect("TSUMUGI_TEST_SPEECH_URL を設定してください");
+        let e = ExternalEngine::new(&url).unwrap();
+        let voices = e.voices().await.unwrap();
+        assert!(!voices.is_empty(), "声が1つ以上ある");
+        let id = voices[0].id.clone();
+
+        let normal = e.synthesize("こんにちは、読み上げのテストです", &id, &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap();
+        let fast = e.synthesize("こんにちは、読み上げのテストです", &id, &SynthParams { speed_scale: 2.0, volume: 1.0 }).await.unwrap();
+        assert!(normal.starts_with(b"RIFF") && fast.starts_with(b"RIFF"));
+        assert!(fast.len() < normal.len() * 3 / 4, "話速 2.0 は、1.0 よりだいぶ短い: {} vs {}", fast.len(), normal.len());
+        // 記号・改行・絵文字を含む本文でも合成できる(クエリの URL エンコードが壊れていない)。
+        let odd = e.synthesize("A&B=C?\nうさぎ", &id, &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap();
+        assert!(odd.starts_with(b"RIFF"));
     }
 }

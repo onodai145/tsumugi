@@ -151,11 +151,14 @@ impl SpeechManager {
         }
         s.queue.clear();
         let next = SpeechStatus::Error { message };
-        if s.status == next {
-            return None;
-        }
+        // 既に `Error` なら、通知は出さない(文面は失敗のたびに変わりうるので、種類で比べる)。最新の文面は保持する。
+        let already_error = matches!(s.status, SpeechStatus::Error { .. });
         s.status = next.clone();
-        Some(next)
+        if already_error {
+            None
+        } else {
+            Some(next)
+        }
     }
 }
 
@@ -258,7 +261,9 @@ mod tests {
                 f();
             }
             if *self.fail.lock().unwrap() {
-                return Err(crate::tts::invalid(format!("{}: down", crate::tts::ERR_UNREACHABLE)));
+                // 実際の reqwest のエラーは、リクエスト URL(= 本文を含む)を文面に含む。失敗ごとに文面が変わっても、
+                // 「状態が変わったとき」だけ通知できることを確かめるため、ここでも本文を含める。
+                return Err(crate::tts::invalid(format!("{}: down ({text})", crate::tts::ERR_UNREACHABLE)));
             }
             Ok(format!("RIFF:{text}").into_bytes())
         }

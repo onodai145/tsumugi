@@ -11,3 +11,9 @@
 
 ## (c) rodio Player の読み上げレーンが Android で動くか
 - 未実施(Task 11 で確認する)。
+
+## 結合確認(実エンジン・実アプリ。Task 11)
+- 実エンジン(VOICEVOX ENGINE 0.26.2、Docker): `#[ignore]` の `tts::external::tests::real_voicevox_engine`(`TSUMUGI_TEST_SPEECH_URL`)が PASS。声の一覧・合成・話速 2.0 で WAV が短くなること・記号と改行を含む本文の合成を確認。
+- 実アプリ(隔離した `cargo tauri dev` を Xvfb + `dbus-run-session` で起動、debug bridge から操作。アカウント・カラム無しの最小構成): `get_speech_settings` / `set_speech_settings`(不正な URL は拒否、前後の空白と末尾のスラッシュを落として保存、`settings.json` に反映)/ `list_speech_voices` / `test_speech` / `get_speech_status` が動作し、エンジンのログに `/audio_query` と `/synthesis` の要求が届いた。エンジンを止めると、3回目の失敗で `error` に変わり、`SpeechStatusChanged` が届く。再起動すると次の項目で `ok` に戻る。
+- **実環境で見つけた不具合(修正済み・テスト追加)**: (1) reqwest のエラーの文面にリクエスト URL(クエリに読み上げる本文が入る)が含まれ、設定画面・ログ・イベントにノートの本文が漏れた → `without_url()` で落とした(`errors_do_not_leak_the_request_url_or_the_note_text`)。(2) 失敗のたびに文面が変わるため、`error` イベントが毎回再通知された → 既に `Error` なら通知しない(`three_consecutive_failures_report_an_error_once…` の偽エンジンも本文入りの文面に変更)。修正後は、イベントは `ok → error(1回) → ok`。
+- 確認できていない: スピーカーからの実際の再生(Xvfb にオーディオデバイスが無い。`SoundPlayer` の再生スレッドは出力デバイスが開けないと終了し、`speak` は `Failed` で返る)。カラム単位の経路(`speak_note` → `columnNote` リスナー)は、単体テスト(`commands::speech`)で確認済みだが、実アプリでは未確認(アカウント・Misskey のストリームが要るため)。**ユーザーの環境で聞いて確認してもらう項目。**
