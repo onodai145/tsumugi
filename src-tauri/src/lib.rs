@@ -17,6 +17,7 @@ mod net_guard;
 mod scheduler;
 mod session;
 mod sound;
+mod speech_lane;
 mod state;
 mod store;
 mod stream;
