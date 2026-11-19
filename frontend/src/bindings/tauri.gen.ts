@@ -505,6 +505,17 @@ export const commands = {
 	setMcpAccountExposed: (accountId: string, exposed: boolean) => typedError<McpStatus, string>(__TAURI_INVOKE("set_mcp_account_exposed", { accountId, exposed })),
 	getMcpToken: () => typedError<string, string>(__TAURI_INVOKE("get_mcp_token")),
 	regenerateMcpToken: () => typedError<string, string>(__TAURI_INVOKE("regenerate_mcp_token")),
+	getSpeechSettings: () => typedError<SpeechSettings, Error>(__TAURI_INVOKE("get_speech_settings")),
+	setSpeechSettings: (settings: SpeechSettings) => typedError<SpeechSettings, Error>(__TAURI_INVOKE("set_speech_settings", { settings })),
+	setColumnSpeech: (columnId: string, speech: ColumnSpeech) => typedError<null, Error>(__TAURI_INVOKE("set_column_speech", { columnId, speech })),
+	/**  入力欄の URL(未保存でよい)のエンジンから、選べる声を取得する。設定画面の「接続テスト」。 */
+	listSpeechVoices: (externalUrl: string) => typedError<Voice[], Error>(__TAURI_INVOKE("list_speech_voices", { externalUrl })),
+	/**  フロントが整形した読み上げ文を依頼する。失敗しても、フロントは握りつぶす(通知音と同じ fire-and-forget)。 */
+	speakNote: (columnId: string, noteId: string, text: string) => typedError<null, Error>(__TAURI_INVOKE("speak_note", { columnId, noteId, text })),
+	testSpeech: (text: string) => typedError<null, Error>(__TAURI_INVOKE("test_speech", { text })),
+	/**  待ち行列を空にして、再生中の読み上げを止める。 */
+	stopSpeech: () => typedError<null, Error>(__TAURI_INVOKE("stop_speech")),
+	getSpeechStatus: () => typedError<SpeechStatus, Error>(__TAURI_INVOKE("get_speech_status")),
 };
 
 /** Events */
@@ -518,6 +529,7 @@ export const events = {
 	localModelStatusChanged: makeEvent<LocalModelStatusChanged>("local-model-status-changed"),
 	scheduledPostFailed: makeEvent<ScheduledPostFailed>("scheduled-post-failed"),
 	scheduledPostPosted: makeEvent<ScheduledPostPosted>("scheduled-post-posted"),
+	speechStatusChanged: makeEvent<SpeechStatusChanged>("speech-status-changed"),
 };
 
 /* Types */
@@ -599,6 +611,8 @@ export type Column = {
 	groupId: string,
 	/**  ユーザ設定のタブ名。None なら種別から自動生成した名前を使う。 */
 	title: string | null,
+	/**  このタブの読み上げ設定(Issue #625)。旧い設定ファイルには無いので既定値(オフ)で読む。 */
+	speech?: ColumnSpeech,
 };
 
 /**  カラムの接続状態（UI 表示用）。 */
@@ -670,6 +684,18 @@ export type ColumnNotification = {
 export type ColumnNotificationGapFill = {
 	columnId: string,
 	notifications: Notification[],
+};
+
+/**  カラム(タブ)単位の読み上げ設定。`Column.speech`。旧い設定ファイルには無いので、既定値(オフ)で読む。 */
+export type ColumnSpeech = {
+	/**  このカラムを読み上げる。 */
+	enabled?: boolean,
+	/**  投稿者名(`{表示名}さん、`)を前置きする。 */
+	speakAuthor?: boolean,
+	/**  このカラムの待ち件数の上限。超えたら、このカラムの最古の待ち項目を捨てる。 */
+	queueLimit?: number,
+	/**  このカラムの声。空ならグローバルの既定の声を継承する。 */
+	voiceId?: string,
 };
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";
@@ -1255,6 +1281,38 @@ export type SourceItem = {
 	name: string,
 };
 
+/**  読み上げに使うエンジンの種類。段階2で `VoicevoxCore`(内蔵)を足す。 */
+export type SpeechEngineKind = 
+/**  外部の VOICEVOX 互換エンジン(VOICEVOX ENGINE / AivisSpeech Engine)に HTTP で接続する。 */
+"external";
+
+/**  全体の読み上げ設定。`SettingsData.speech`。**エクスポートには含めない**。インポートでは現在の値を維持する。 */
+export type SpeechSettings = {
+	/**  全体のマスタースイッチ。 */
+	enabled?: boolean,
+	engine?: SpeechEngineKind,
+	/**  外部エンジンの URL(例 `http://192.168.1.10:50021`)。空は未設定。 */
+	externalUrl?: string,
+	/**  既定の声(エンジン固有の ID)。 */
+	defaultVoiceId?: string,
+	speedScale?: number | null,
+	volume?: number | null,
+};
+
+/**  読み上げの状態(設定画面に見せる)。状態が変わったときだけ `SpeechStatusChanged` で通知する。 */
+export type SpeechStatus = 
+/**  まだ一度も合成していない。 */
+{ type: "unknown" } | 
+/**  直近の合成が成功した。 */
+{ type: "ok" } | 
+/**  連続して合成に失敗している。 */
+{ type: "error"; message: string };
+
+/**  読み上げの状態が変わった(Issue #625)。状態が変わったときだけ送る(連続失敗でエラー、回復で Ok)。 */
+export type SpeechStatusChanged = {
+	status: SpeechStatus,
+};
+
 export type SplitDirection = "row" | "column";
 
 /**
@@ -1611,6 +1669,13 @@ export type Visibility = "public" | "home" | "followers" | "specified";
 export type VisibilityInput = "public" | "home" | "followers" | 
 /**  direct（Misskey では specified） */
 "specified";
+
+/**  選べる声。`id` はエンジン固有の不透明な文字列(VOICEVOX ではスタイルの数値 ID)。 */
+export type Voice = {
+	id: string,
+	/**  表示名(例 `ずんだもん（ノーマル）`)。 */
+	label: string,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

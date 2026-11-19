@@ -678,6 +678,8 @@ pub async fn close_column(state: State<'_, AppState>, column_id: String) -> Resu
 /// `close_column` の本体。`State` を引数に取らない形にして、テストできるようにしている(Issue #456)。
 async fn close_column_core(state: &AppState, column_id: &str) -> Result<()> {
     state.settings.delete_column(column_id)?;
+    // 閉じたカラムの読み上げの待ち項目は、もう読まない(Issue #625)。
+    state.speech.remove_column(column_id);
     // ストリームを閉じる処理と clear を、世代を進めるロックの中で行う。進行中の open_stream_and_fetch は、
     // ストリームを開く処理も同じロックの中なので、閉じた後に開き直すことも、書き込みを残すことも無い
     // (孤児データとリークしたストリームを作らない, Issue #446)。
@@ -4364,6 +4366,29 @@ mod tests {
         close_column_core(&state, "ghost").await.unwrap();
 
         assert!(!state.column_fence.tracks("ghost"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn close_column_core_drops_the_pending_speech_items_of_that_column_only() {
+        use crate::tts::engine::SynthParams;
+        use crate::tts::queue::SpeechItem;
+        let mock = MockServer::start().await;
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
+        let item = |note: &str, col: &str| SpeechItem {
+            note_id: note.into(),
+            column_id: col.into(),
+            text: "t".into(),
+            voice_id: "1".into(),
+            params: SynthParams { speed_scale: 1.0, volume: 1.0 },
+        };
+        state.speech.enqueue(item("n1", "c1"), 5);
+        state.speech.enqueue(item("n2", "other"), 5);
+
+        close_column_core(&state, "c1").await.unwrap();
+
+        let left: Vec<_> = std::iter::from_fn(|| state.speech.pop_for_command_test()).map(|i| i.note_id).collect();
+        assert_eq!(left, ["n2"], "閉じたカラムの読み上げの待ち項目だけが消える(Issue #625)");
     }
 
     #[tokio::test]

@@ -110,3 +110,10 @@ pub struct ScheduledPostFailed {
 pub struct LocalModelStatusChanged {
     pub status: crate::translate::model_store::LocalModelStatus,
 }
+
+/// 読み上げの状態が変わった(Issue #625)。状態が変わったときだけ送る(連続失敗でエラー、回復で Ok)。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechStatusChanged {
+    pub status: crate::tts::manager::SpeechStatus,
+}
