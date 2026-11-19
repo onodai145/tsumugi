@@ -10,7 +10,13 @@
 - 結論: **debug ビルドでは LAN の `http://` に接続できる。release ビルド(配布版)では平文 HTTP が禁止される**(Android 9 以降の既定)。配布版の Android からは、`https://` の URL が必要。UI(設定 → 読み上げ)に「Android では https:// の URL が必要なことがある」注意書きを出す(計画どおり)。LAN 内の平文を許可するには `networkSecurityConfig` の追加(CIDR 指定ができず、ドメイン単位)が必要で、このスコープ外。必要なら別 Issue にする。
 
 ## (c) rodio Player の読み上げレーンが Android で動くか
-- 未実施(Task 11 で確認する)。
+- Android エミュレーター(AVD `tsumugi-verify`、x86_64、`-read-only`)で、`--no-default-features --features custom-protocol` の debug APK(llama.cpp なし)を確認した。WebView の CDP から `window.__TAURI_INTERNALS__.invoke` でコマンドを呼んだ。エミュレーターは `-no-audio` なので**スピーカーからの音は確認していない**(出力デバイスは開かれ、ログに `PlayerBase::PlayerBase()`)。
+- アプリはクラッシュせずに起動し、`get_speech_settings` の既定値、`set_speech_settings`、`list_speech_voices`(`http://10.0.2.2:50021` = ホストの VOICEVOX ENGINE)、`test_speech`、`get_speech_status` が動作した。logcat に再生失敗(`読み上げ: 再生に失敗`)は無い。
+- **(b) の補足**: debug APK では、LAN(エミュレーターから見たホスト)への平文 HTTP に接続できた(`usesCleartextTraffic=true` の debug ビルド)。release ビルドが禁止されることは、マニフェストの設定からの推測で、release APK での実測はしていない。
+- **レーンの逐次再生**: 2件を続けて依頼したとき、1件目の合成の完了から2件目の問い合わせまで 3.36 秒。1件目の音声は 3.32 秒(同じ文をホストで合成して測定)で、レーンが再生の完了を待っている(再生が即時に失敗して素通りしていれば、数百ミリ秒)。
+- **停止**: 6.27 秒ある発話の再生中(合成の完了 +1.30 秒の後)に `stop_speech` を呼ぶと、その約 0.2 秒後(+1.72 秒)に次の項目の処理が始まった(止まらなければ +7.6 秒まで待つ)。
+- 実機の端末(Pixel など)・armv7 / i686・release APK は未確認(エミュレーターは x86_64 のみ)。
+- 確認中にホストが OOM でデスクトップごと落ちた。原因は、メモリの空きとスワップを確認せずにエミュレーター・Docker・Gradle を同時に起動したこと(メモリの記録に残した)。再実行は、`systemd-run` のスコープで `MemoryMax=6G`、`-memory 2048`、エンジンのコンテナに `--memory 2g` を付けて行った。`MemoryHigh` を低く付けるとスロットルでエミュレーターが固まる(`MemoryHigh=4G` で一度停止)ので、安全弁は `MemoryMax` だけにする。
 
 ## 結合確認(実エンジン・実アプリ。Task 11)
 - 実エンジン(VOICEVOX ENGINE 0.26.2、Docker): `#[ignore]` の `tts::external::tests::real_voicevox_engine`(`TSUMUGI_TEST_SPEECH_URL`)が PASS。声の一覧・合成・話速 2.0 で WAV が短くなること・記号と改行を含む本文の合成を確認。
