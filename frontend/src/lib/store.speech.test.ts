@@ -52,8 +52,26 @@ describe("読み上げの設定(store)", () => {
     const tab = { id: "t1", speech: { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" } } as never;
     app.groups = [{ id: "g", width: 300, auto: false, tabs: [tab], activeTabId: "t1" }] as never;
     const next = { enabled: true, speakAuthor: false, queueLimit: 3, voiceId: "9" };
+    invokeMock.mockResolvedValueOnce(next);
     await app.setColumnSpeech("t1", next);
     expect((app.groups[0].tabs[0] as { speech: unknown }).speech).toEqual(next);
     expect(invokeMock).toHaveBeenCalledWith("set_column_speech", { columnId: "t1", speech: next });
+  });
+
+  it("setColumnSpeech は、Rust が丸めて返した値を表示に反映する(50 を入れても 20)", async () => {
+    const tab = { id: "t1", speech: { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" } } as never;
+    app.groups = [{ id: "g", width: 300, auto: false, tabs: [tab], activeTabId: "t1" }] as never;
+    invokeMock.mockResolvedValueOnce({ enabled: true, speakAuthor: true, queueLimit: 20, voiceId: "" });
+    await app.setColumnSpeech("t1", { enabled: true, speakAuthor: true, queueLimit: 50, voiceId: "" });
+    expect((app.groups[0].tabs[0] as { speech: { queueLimit: number } }).speech.queueLimit).toBe(20);
+  });
+
+  it("setColumnSpeech が失敗したら、表示を元の値に戻す", async () => {
+    const before = { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" };
+    const tab = { id: "t1", speech: { ...before } } as never;
+    app.groups = [{ id: "g", width: 300, auto: false, tabs: [tab], activeTabId: "t1" }] as never;
+    invokeMock.mockRejectedValueOnce({ kind: "notFound", message: "column t1" });
+    await app.setColumnSpeech("t1", { enabled: true, speakAuthor: false, queueLimit: 9, voiceId: "7" });
+    expect((app.groups[0].tabs[0] as { speech: unknown }).speech).toEqual(before);
   });
 });

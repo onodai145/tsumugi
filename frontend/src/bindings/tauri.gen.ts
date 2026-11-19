@@ -507,7 +507,7 @@ export const commands = {
 	regenerateMcpToken: () => typedError<string, string>(__TAURI_INVOKE("regenerate_mcp_token")),
 	getSpeechSettings: () => typedError<SpeechSettings, Error>(__TAURI_INVOKE("get_speech_settings")),
 	setSpeechSettings: (settings: SpeechSettings) => typedError<SpeechSettings, Error>(__TAURI_INVOKE("set_speech_settings", { settings })),
-	setColumnSpeech: (columnId: string, speech: ColumnSpeech) => typedError<null, Error>(__TAURI_INVOKE("set_column_speech", { columnId, speech })),
+	setColumnSpeech: (columnId: string, speech: ColumnSpeech) => typedError<ColumnSpeech, Error>(__TAURI_INVOKE("set_column_speech", { columnId, speech })),
 	/**  入力欄の URL(未保存でよい)のエンジンから、選べる声を取得する。設定画面の「接続テスト」。 */
 	listSpeechVoices: (externalUrl: string) => typedError<Voice[], Error>(__TAURI_INVOKE("list_speech_voices", { externalUrl })),
 	/**  フロントが整形した読み上げ文を依頼する。失敗しても、フロントは握りつぶす(通知音と同じ fire-and-forget)。 */

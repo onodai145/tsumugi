@@ -670,13 +670,18 @@ class AppStore {
   }
 
   /// タブ単位の読み上げ設定を変更する(Issue #625)。ストリームは張り直さない。
+  /// 入力はすぐ表示に反映し(楽観的更新)、Rust が丸めて返した値で置き換える。失敗したら元の値に戻す。
   async setColumnSpeech(tabId: string, speech: ColumnSpeech) {
     const next = withColumnSpeechDefaults(speech);
     const tab = this.#findTab(tabId);
+    const before = tab?.speech;
     if (tab) tab.speech = next;
     try {
-      await unwrap(commands.setColumnSpeech(tabId, next));
+      const saved = await unwrap(commands.setColumnSpeech(tabId, next));
+      // IPC のモックが `null` を返すテストでも落ちないよう、返り値が無ければ入力のままにする。
+      if (tab && saved) tab.speech = withColumnSpeechDefaults(saved);
     } catch (e) {
+      if (tab && before) tab.speech = before;
       this.#failModal(e);
     }
   }

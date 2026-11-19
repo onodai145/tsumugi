@@ -34,17 +34,17 @@ pub(crate) fn set_settings_core(s: &AppState, mut settings: SpeechSettings) -> R
     Ok(saved)
 }
 
-/// カラムの読み上げ設定を保存する。オフにしたら、そのカラムの待ち項目だけを消す。
-pub(crate) fn set_column_speech_core(s: &AppState, column_id: &str, speech: ColumnSpeech) -> Result<()> {
+/// カラムの読み上げ設定を保存し、**丸めたあとの値**を返す(UI が保存された値を表示できるように)。
+/// オフにしたら、そのカラムの待ち項目だけを消す。
+pub(crate) fn set_column_speech_core(s: &AppState, column_id: &str, speech: ColumnSpeech) -> Result<ColumnSpeech> {
     let speech = speech.normalized();
-    let enabled = speech.enabled;
-    if !s.settings.set_column_speech(column_id, speech)? {
+    if !s.settings.set_column_speech(column_id, speech.clone())? {
         return Err(Error::NotFound(format!("column {column_id}")));
     }
-    if !enabled {
+    if !speech.enabled {
         s.speech.remove_column(column_id);
     }
-    Ok(())
+    Ok(speech)
 }
 
 fn params_of(settings: &SpeechSettings) -> SynthParams {
@@ -135,7 +135,7 @@ pub async fn set_speech_settings(state: State<'_, AppState>, settings: SpeechSet
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_column_speech(state: State<'_, AppState>, column_id: String, speech: ColumnSpeech) -> Result<()> {
+pub async fn set_column_speech(state: State<'_, AppState>, column_id: String, speech: ColumnSpeech) -> Result<ColumnSpeech> {
     set_column_speech_core(&state, &column_id, speech)
 }
 
@@ -241,9 +241,10 @@ mod tests {
         enqueue_note_core(&s, "c1", "n1", "a").unwrap();
         enqueue_note_core(&s, "c2", "n2", "b").unwrap();
 
-        set_column_speech_core(&s, "c1", ColumnSpeech { enabled: false, queue_limit: 99, ..Default::default() }).unwrap();
+        let saved = set_column_speech_core(&s, "c1", ColumnSpeech { enabled: false, queue_limit: 99, ..Default::default() }).unwrap();
 
-        assert_eq!(s.settings.load_column("c1").unwrap().speech.queue_limit, crate::domain::speech::QUEUE_LIMIT_MAX);
+        assert_eq!(saved.queue_limit, crate::domain::speech::QUEUE_LIMIT_MAX, "丸めた値を返す(UI が保存された値を表示できるように)");
+        assert_eq!(s.settings.load_column("c1").unwrap().speech, saved);
         let left = pending(&s);
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].note_id, "n2", "オフにしたカラムの待ち項目だけが消える");
