@@ -89,7 +89,7 @@ mod tests {
             filter,
             notify_sound: false,
             notify_desktop: false,
-            notify_sound_choice: String::new(),
+            notify_sound_choice: String::new(), speech: Default::default(),
             group_id: "g1".into(),
             title: None,
         }

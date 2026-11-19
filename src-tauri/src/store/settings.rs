@@ -78,6 +78,10 @@ pub(crate) struct SettingsData {
     /// インポートでは現在の値を維持する（同意は端末ごとの行為で、ファイルで同意済みにならないようにする）。
     #[serde(default)]
     pub(crate) local_model_license_version: Option<String>,
+    /// 読み上げの全体設定(Issue #625)。**エクスポートには含めない**。インポートでは現在の値を維持する
+    /// (ファイルで勝手に接続先が変わらないようにするため)。
+    #[serde(default)]
+    pub(crate) speech: crate::domain::SpeechSettings,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -328,6 +332,38 @@ impl SettingsStore {
         f(&mut guard.mcp);
         self.save(&guard)?;
         Ok(guard.mcp.clone())
+    }
+
+    /// 読み上げの全体設定(Issue #625)。
+    pub fn load_speech(&self) -> crate::domain::SpeechSettings {
+        self.data.lock().unwrap().speech.clone()
+    }
+
+    /// 読み上げの全体設定を更新して保存し、新しい値を返す。
+    pub fn update_speech(
+        &self,
+        f: impl FnOnce(&mut crate::domain::SpeechSettings),
+    ) -> Result<crate::domain::SpeechSettings> {
+        let mut guard = self.data.lock().unwrap();
+        f(&mut guard.speech);
+        self.save(&guard)?;
+        Ok(guard.speech.clone())
+    }
+
+    /// 1つのカラムを返す(無ければ `None`)。
+    pub fn load_column(&self, column_id: &str) -> Option<Column> {
+        self.data.lock().unwrap().columns.iter().find(|c| c.id == column_id).cloned()
+    }
+
+    /// カラムの読み上げ設定を更新する。カラムが無ければ何もせず `Ok(false)`。
+    pub fn set_column_speech(&self, column_id: &str, speech: crate::domain::ColumnSpeech) -> Result<bool> {
+        let mut guard = self.data.lock().unwrap();
+        let Some(c) = guard.columns.iter_mut().find(|x| x.id == column_id) else {
+            return Ok(false);
+        };
+        c.speech = speech;
+        self.save(&guard)?;
+        Ok(true)
     }
 
     pub fn local_model_license_version(&self) -> Option<String> {
@@ -702,6 +738,7 @@ pub fn migrate_from_legacy_sqlite(
             notify_sound_choice,
             group_id,
             title,
+            speech: Default::default(),
         });
     }
 
@@ -742,6 +779,7 @@ pub fn migrate_from_legacy_sqlite(
             summaly_proxy_imported: false,
             mcp: Default::default(),
             local_model_license_version: None,
+            speech: Default::default(),
         }),
     };
     store.save(&store.data.lock().unwrap())?;
@@ -822,7 +860,7 @@ mod tests {
             filter: FilterQuery::Keywords(vec!["rust".into()]),
             notify_sound: false,
             notify_desktop: true,
-            notify_sound_choice: String::new(),
+            notify_sound_choice: String::new(), speech: Default::default(),
             group_id: "g1".into(),
             title: None,
         }
@@ -1050,7 +1088,7 @@ mod tests {
         let c1 = Column {
             id: "c1".into(), account_id: "a".into(), kind: ColumnKind::Home, order: 0,
             filter: FilterQuery::Keywords(vec![]), notify_sound: false, notify_desktop: false,
-            notify_sound_choice: String::new(), group_id: "g1".into(), title: None,
+            notify_sound_choice: String::new(), speech: Default::default(), group_id: "g1".into(), title: None,
         };
         let c2 = Column { id: "c2".into(), group_id: "g2".into(), ..c1.clone() };
         s.upsert_column(&c1).unwrap();
@@ -1492,5 +1530,44 @@ mod tests {
         s.save_ui(&ui).unwrap();
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn old_settings_file_without_speech_loads_with_speech_off() {
+        let d: SettingsData = serde_json::from_str("{}").unwrap();
+        assert_eq!(d.speech, crate::domain::SpeechSettings::default());
+        let c: Column = serde_json::from_str(
+            r#"{"id":"c","accountId":"a","kind":{"type":"home"},"order":0,
+                "filter":{"kind":"keywords","value":[]},"notifySound":false,"notifyDesktop":false,
+                "notifySoundChoice":"","groupId":"g","title":null}"#,
+        )
+        .unwrap();
+        assert_eq!(c.speech, crate::domain::ColumnSpeech::default());
+    }
+
+    #[test]
+    fn update_speech_returns_and_keeps_the_new_value() {
+        let s = SettingsStore::new_in_memory();
+        let got = s
+            .update_speech(|v| {
+                v.enabled = true;
+                v.external_url = "http://h:1".into();
+            })
+            .unwrap();
+        assert!(got.enabled);
+        assert_eq!(s.load_speech().external_url, "http://h:1");
+    }
+
+    #[test]
+    fn set_column_speech_updates_only_that_column_and_reports_missing() {
+        let s = SettingsStore::new_in_memory();
+        s.upsert_column(&column("c1", "a1", 0)).unwrap();
+        s.upsert_column(&column("c2", "a1", 1)).unwrap();
+        let on = crate::domain::ColumnSpeech { enabled: true, queue_limit: 3, ..Default::default() };
+        assert!(s.set_column_speech("c1", on.clone()).unwrap());
+        assert_eq!(s.load_column("c1").unwrap().speech, on);
+        assert_eq!(s.load_column("c2").unwrap().speech, crate::domain::ColumnSpeech::default());
+        assert!(!s.set_column_speech("nope", on).unwrap(), "存在しないカラムは false");
+        assert!(s.load_column("nope").is_none());
     }
 }

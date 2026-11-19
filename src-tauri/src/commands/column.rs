@@ -141,7 +141,7 @@ pub async fn add_column(
         // 設定→通知のグローバルスイッチと両方ONのときのみ実際に発火する。
         notify_sound: is_notif,
         notify_desktop: is_notif,
-        notify_sound_choice: String::new(),
+        notify_sound_choice: String::new(), speech: Default::default(),
         group_id: group.id.clone(),
         title: None,
     };
@@ -3816,7 +3816,7 @@ mod tests {
             filter: FilterQuery::Keywords(vec![]),
             notify_sound: false,
             notify_desktop: false,
-            notify_sound_choice: String::new(),
+            notify_sound_choice: String::new(), speech: Default::default(),
             group_id: "g1".into(),
             title: None,
         }
@@ -3863,7 +3863,7 @@ mod tests {
             filter: FilterQuery::Keywords(vec![]),
             notify_sound: false,
             notify_desktop: false,
-            notify_sound_choice: String::new(),
+            notify_sound_choice: String::new(), speech: Default::default(),
             group_id: "g1".into(),
             title: None,
         }

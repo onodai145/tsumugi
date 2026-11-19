@@ -275,6 +275,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         validate_column_filter(c)?;
         let mut c = c.clone();
         c.account_id = local_id.clone();
+        c.speech = c.speech.normalized();
         columns.push(c);
     }
 
@@ -343,6 +344,8 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         summaly_proxy_imported,
         mcp,
         local_model_license_version: current.local_model_license_version.clone(),
+        // 読み上げの設定(接続先の URL を含む)はファイルで書き換えない。現在の値を維持する。
+        speech: current.speech.clone(),
     };
     Ok(ImportPlan { data, preview, accounts_needing_login })
 }
@@ -379,7 +382,7 @@ mod tests {
             filter: FilterQuery::Keywords(vec![]),
             notify_sound: false,
             notify_desktop: false,
-            notify_sound_choice: String::new(),
+            notify_sound_choice: String::new(), speech: Default::default(),
             group_id: group_id.into(),
             title: None,
         }
@@ -1223,5 +1226,46 @@ mod tests {
         assert_eq!(plan.data.ui.default_account_id, "local1");
         assert_eq!(plan.data.ui.background_path, None);
         assert!(plan.accounts_needing_login.is_empty());
+    }
+
+    #[test]
+    fn import_keeps_the_current_speech_settings_and_export_omits_them() {
+        let mut current = current_with_local_account();
+        current.speech.enabled = true;
+        current.speech.external_url = "http://192.168.1.10:50021".into();
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert!(plan.data.speech.enabled);
+        assert_eq!(plan.data.speech.external_url, "http://192.168.1.10:50021");
+
+        // 現在オフなら、ファイルに何があってもオフのまま・URL は空のまま。
+        let current = current_with_local_account();
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert!(!plan.data.speech.enabled);
+        assert_eq!(plan.data.speech.external_url, "");
+
+        let mut d = settings_data();
+        d.speech.external_url = "http://192.168.1.10:50021".into();
+        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-19T00:00:00Z")).unwrap();
+        assert!(!json.contains("192.168.1.10"), "エンジンの URL はエクスポートに含めない: {json}");
+    }
+
+    #[test]
+    fn import_clamps_the_column_speech_but_keeps_what_the_file_says() {
+        let current = current_with_local_account();
+        let mut data = empty_data();
+        data.accounts = vec![account("file1", "misskey.io", "u1")];
+        data.groups = vec![group("g1", 0)];
+        let mut c = column("c1", "file1", "g1");
+        c.speech = crate::domain::ColumnSpeech { enabled: true, speak_author: false, queue_limit: 200, voice_id: "7".into() };
+        data.columns = vec![c];
+        data.ui.default_account_id = "file1".into();
+
+        let plan = plan_import(&current, file_with(data)).unwrap();
+
+        let s = &plan.data.columns[0].speech;
+        assert!(s.enabled);
+        assert!(!s.speak_author);
+        assert_eq!(s.queue_limit, crate::domain::speech::QUEUE_LIMIT_MAX);
+        assert_eq!(s.voice_id, "7");
     }
 }
