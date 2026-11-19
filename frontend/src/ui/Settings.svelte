@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Account } from "../bindings/tauri.gen";
   import NotifySection from "./settings/NotifySection.svelte";
+  import SpeechSection from "./settings/SpeechSection.svelte";
   import MuteSection from "./settings/MuteSection.svelte";
   import LayoutSection from "./settings/LayoutSection.svelte";
   import MobileSection from "./settings/MobileSection.svelte";
@@ -30,6 +31,7 @@
     | "mcp"
     | "data"
     | "notify"
+    | "speech"
     | "mute"
     | "keys"
     | "about"
@@ -62,6 +64,7 @@
     ...(isMobilePlatform ? [] : [{ id: "mcp" as const, label: "MCPサーバー" }]),
     { id: "data" as const, label: "データ" },
     { id: "notify" as const, label: "通知" },
+    { id: "speech" as const, label: "読み上げ" },
     { id: "mute" as const, label: "NG（ミュート）" },
     { id: "keys" as const, label: "キー操作" },
     { id: "about" as const, label: "Tsumugiについて" },
@@ -108,6 +111,8 @@
     <CacheBackendSettings />
   {:else if active === "notify"}
     <NotifySection />
+  {:else if active === "speech"}
+    <SpeechSection />
   {:else if active === "mute"}
     <MuteSection />
   {:else if active === "keys"}

@@ -7,6 +7,8 @@
   import SoundChoicePicker from "./settings/SoundChoicePicker.svelte";
   import TqlCompletionField from "../input/TqlCompletionField.svelte";
   import type { ColumnKind, FilterQuery, UserList, SourceItem } from "../bindings/tauri.gen";
+  import { commands, type Voice } from "../lib/ipc";
+  import type { ColumnSpeechValue } from "../lib/speechDefaults";
   import Modal from "./Modal.svelte";
   import { Button } from "$lib/components/ui/button";
 
@@ -82,6 +84,47 @@
   // 空文字＝設定→通知のグローバル選択を継承
   let notifySoundChoice = $state(edit?.notifySoundChoice ?? "");
   let soundInvalid = $state(false);
+  // 読み上げ(Issue #625)。通知カラムは対象外(ノートのタイムラインだけを読む)。
+  let speechEnabled = $state(edit?.speech.enabled ?? false);
+  let speakAuthor = $state(edit?.speech.speakAuthor ?? true);
+  let queueLimit = $state(edit?.speech.queueLimit ?? 5);
+  let speechVoiceId = $state(edit?.speech.voiceId ?? "");
+  let speechVoices = $state<Voice[]>([]);
+  const speechShown = $derived(sourceType !== "notifications");
+  const speechSettings = $derived<ColumnSpeechValue>({
+    enabled: speechEnabled,
+    speakAuthor,
+    queueLimit: Number(queueLimit) || 5,
+    voiceId: speechVoiceId,
+  });
+
+  // 声の選択肢は、エンジンに繋がるときだけ取得する(失敗しても「既定の声を使う」だけで使える)。
+  $effect(() => {
+    if (!speechEnabled || !app.speech.externalUrl) return;
+    let cancelled = false;
+    commands
+      .listSpeechVoices(app.speech.externalUrl)
+      .then((r) => {
+        if (!cancelled && r.status === "ok") speechVoices = r.data;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  /// 読み上げの設定が変わっていれば保存する(通知設定の保存の直後に呼ぶ)。
+  async function applySpeech(tabId: string, current: ColumnSpeechValue) {
+    const next = speechSettings;
+    if (
+      next.enabled !== current.enabled ||
+      next.speakAuthor !== current.speakAuthor ||
+      next.queueLimit !== current.queueLimit ||
+      next.voiceId !== current.voiceId
+    ) {
+      await app.setColumnSpeech(tabId, next);
+    }
+  }
   // 簡単モードで通知設定ブロックを出すソース(検索・ユーザ・タグはライブ更新が無い)。
   const guidedNotifyShown = $derived(sourceType !== "search" && sourceType !== "user" && sourceType !== "tag");
   // 通知音ピッカーが描画される条件。非表示の間は入力途中(未検証)の MML 下書きを保存しないため、元の値に戻す。
@@ -273,6 +316,7 @@
         if (isEdit && edit) {
           await app.updateColumn(edit.id, kind, filter, name);
           await app.setColumnNotify(edit.id, notifyDesktop, notifySound, effectiveSoundChoice);
+          await applySpeech(edit.id, edit.speech);
         } else {
           const tab = await app.addColumn(accountId, kind, filter, groupId ?? undefined, name);
           if (
@@ -282,6 +326,7 @@
           ) {
             await app.setColumnNotify(tab.id, notifyDesktop, notifySound, effectiveSoundChoice);
           }
+          await applySpeech(tab.id, tab.speech);
         }
         onclose();
       } catch (e) {
@@ -314,6 +359,7 @@
       if (isEdit && edit) {
         await app.updateColumn(edit.id, kind, buildFilter(), name);
         await app.setColumnNotify(edit.id, notifyDesktop, notifySound, effectiveSoundChoice);
+        await applySpeech(edit.id, edit.speech);
       } else {
         const tab = await app.addColumn(accountId, kind, buildFilter(), groupId ?? undefined, name);
         // 既定値と異なる場合のみ追加で呼ぶ（既定は backend 側の add_column が設定済み）
@@ -324,6 +370,7 @@
         ) {
           await app.setColumnNotify(tab.id, notifyDesktop, notifySound, effectiveSoundChoice);
         }
+        await applySpeech(tab.id, tab.speech);
       }
       onclose();
     } catch (e) {
@@ -333,6 +380,50 @@
     }
   }
 </script>
+
+{#snippet speechFields(showDetails: boolean)}
+  {#if speechShown}
+    <div class="mb-2.5 flex flex-col gap-1 text-sm">
+      <span class="text-muted-foreground">このタブの読み上げ</span>
+      <label class="flex items-center gap-1.5 text-sm">
+        <input type="checkbox" data-testid="speech-column-enabled" bind:checked={speechEnabled} disabled={!app.speech.enabled} /> 新着ノートを読み上げる
+      </label>
+      {#if !app.speech.enabled}
+        <p class="m-0 text-xs text-muted-foreground">設定で読み上げをオンにしてください(設定 → 読み上げ)。</p>
+      {/if}
+      {#if speechEnabled && showDetails}
+        <label class="flex items-center gap-1.5 text-sm">
+          <input type="checkbox" data-testid="speech-column-author" bind:checked={speakAuthor} /> 投稿者名を読む
+        </label>
+        <label class="flex items-center gap-1.5 text-sm">
+          待ち件数の上限
+          <input
+            type="number"
+            min="1"
+            max="20"
+            data-testid="speech-column-limit"
+            class="w-16 rounded-lg border border-border bg-muted px-2 py-1 font-[inherit] text-foreground"
+            bind:value={queueLimit}
+          />
+        </label>
+        <label class="flex flex-col gap-1 text-sm">
+          <span class="text-muted-foreground">声</span>
+          <select
+            data-testid="speech-column-voice"
+            class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
+            bind:value={speechVoiceId}
+          >
+            <option value="">既定の声を使う</option>
+            {#each speechVoices as v (v.id)}<option value={v.id}>{v.label}</option>{/each}
+            {#if speechVoiceId && !speechVoices.some((v) => v.id === speechVoiceId)}
+              <option value={speechVoiceId}>現在の声: {speechVoiceId}</option>
+            {/if}
+          </select>
+        </label>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
 
 <Modal title={isEdit ? "タブを編集" : groupId ? "タブを追加" : "カラムを追加"} {onclose}>
   <div class="mb-2.5 flex flex-col gap-1 text-sm">
@@ -483,6 +574,7 @@
       {sourceType === "notifications" ? "通知カラムへの新着" : "このタブに新着ノート"}が届いたら発火します。
       設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。
     </p>
+    {@render speechFields(false)}
   {:else}
     <p class="mb-2 mt-0 text-xs text-muted-foreground">このソースはライブ更新（ストリーミング）に対応していないため通知は鳴りません。</p>
   {/if}
@@ -519,6 +611,7 @@
       </div>
     {/if}
     <p class="mb-2 mt-0 text-xs text-muted-foreground">ストリーミング対応のソースに新着があれば発火します。設定→通知のグローバルスイッチも ON の場合のみ実際に鳴ります。</p>
+    {@render speechFields(true)}
   {/if}
 
   <div class="mt-1.5 flex justify-end">
