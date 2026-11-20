@@ -7,3 +7,4 @@ pub mod archive;
 pub(crate) mod test_util;
 pub mod ffi;
 pub mod engine;
+pub mod packs;
