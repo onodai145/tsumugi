@@ -5,3 +5,4 @@ pub mod store;
 pub mod archive;
 #[cfg(test)]
 pub(crate) mod test_util;
+pub mod ffi;

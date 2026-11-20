@@ -113,6 +113,8 @@ getrandom = "0.3"
 # 公式の GGUF（tokenizer.ggml.model = plamo3）を読めない。llama.cpp v0.9.0 を同梱する git の rev を固定する。
 # crates.io の次のリリースに plamo3 が入ったら、バージョン指定へ戻す。OpenMP は使わない（default-features を切る）。
 llama-cpp-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "955aa2f72463c2535cc5ab894d5d52f27a38cde2", default-features = false, features = ["common"], optional = true }
+# 内蔵 VOICEVOX CORE(Issue #625 段階2)。取得した公式の C API ライブラリを動的ロードする。
+libloading = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # "keychain"(コード署名なしのCLI/デスクトップアプリ向け)を選択。
