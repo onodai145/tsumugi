@@ -87,6 +87,10 @@ sqlx = { version = "0.9.0", default-features = false, features = ["mysql", "post
 sea-query = { version = "1.0.2", default-features = false, features = ["backend-mysql", "backend-postgres", "derive"] }
 sha2 = "0.10"
 fs4 = "1.1.0"
+# 内蔵 VOICEVOX CORE(Issue #625 段階2)。取得物の展開(zip・tgz)。全環境でビルドする(Android では使わないが、コマンドは共通)。
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # 多重起動防止(Issue #53)。ノートキャッシュを SQLite に保存しており、複数プロセスが

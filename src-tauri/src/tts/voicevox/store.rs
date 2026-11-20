@@ -45,6 +45,11 @@ impl Store {
         self.engine_dir().join("dict")
     }
 
+    /// エンジン一式の完成の印を置く。ディレクトリの中身がそろったあと、最後に呼ぶ。
+    pub fn write_ready(dir: &Path) -> std::io::Result<()> {
+        std::fs::write(dir.join(READY_FILE), ENGINE_SET)
+    }
+
     /// エンジン一式が使える状態か。READY(最後に置く)と、必要なファイルがそろっていること。
     pub fn engine_ready(&self, a: &EngineAssets) -> bool {
         let is_file = |p: PathBuf| std::fs::metadata(p).is_ok_and(|m| m.is_file());
