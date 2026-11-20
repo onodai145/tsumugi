@@ -183,6 +183,30 @@ describe("AddColumnModal の読み上げ(Issue #625)", () => {
     expect(speechCall()).toBeUndefined();
   });
 
+  it("内蔵エンジンのときは、取得済みの声を list_speech_core_voices から取得して、選択肢に出す", async () => {
+    app.speech = { ...app.speech, enabled: true, engine: "voicevoxCore", externalUrl: "" };
+    invokeMock.mockImplementation(async (cmd: string) => (cmd === "list_speech_core_voices" ? [{ id: "3", label: "ずんだもん（ノーマル）" }] : null));
+    // 声の選択肢はエキスパートモード(TQL のタブ)でだけ出る。
+    const tab = makeTab({ type: "tql" }, { kind: "tql", value: 'from home where text -> "foo"' });
+    tab.speech = { enabled: true, speakAuthor: true, queueLimit: 5, voiceId: "" };
+    app.groups = [{ id: "group1", width: 400, auto: false, tabs: [tab], activeTabId: tab.id }];
+    const { getByTestId } = render(AddColumnModal, { onclose: vi.fn(), groupId: null, editTab: tab });
+    await waitFor(() => {
+      const options = Array.from((getByTestId("speech-column-voice") as HTMLSelectElement).options).map((o) => o.textContent?.trim());
+      expect(options).toContain("ずんだもん（ノーマル）");
+    });
+    expect(invokeMock.mock.calls.some((c) => c[0] === "list_speech_voices")).toBe(false);
+  });
+
+  it("外部エンジンで URL が空のときは、声の一覧を取得しない", async () => {
+    app.speech = { ...app.speech, enabled: true, engine: "external", externalUrl: "" };
+    invokeMock.mockResolvedValue(null);
+    const tab = setupEdit({ enabled: true, speakAuthor: true, queueLimit: 5, voiceId: "" });
+    render(AddColumnModal, { onclose: vi.fn(), groupId: null, editTab: tab });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(invokeMock.mock.calls.some((c) => c[0] === "list_speech_voices" || c[0] === "list_speech_core_voices")).toBe(false);
+  });
+
   it("通知カラムには読み上げの設定を出さない", () => {
     app.speech = { ...app.speech, enabled: true };
     const tab = makeTab({ type: "notifications" }, { kind: "keywords", value: [] });

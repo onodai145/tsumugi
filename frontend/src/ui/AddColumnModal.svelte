@@ -98,12 +98,14 @@
     voiceId: speechVoiceId,
   });
 
-  // 声の選択肢は、エンジンに繋がるときだけ取得する(失敗しても「既定の声を使う」だけで使える)。
+  // 声の選択肢は、エンジンが使えるときだけ取得する(失敗しても「既定の声を使う」だけで使える)。
+  // 内蔵は取得済みの声、外部は設定済みの URL のエンジンから。
   $effect(() => {
-    if (!speechEnabled || !app.speech.externalUrl) return;
+    if (!speechEnabled) return;
+    const core = app.speech.engine === "voicevoxCore";
+    if (!core && !app.speech.externalUrl) return;
     let cancelled = false;
-    commands
-      .listSpeechVoices(app.speech.externalUrl)
+    (core ? commands.listSpeechCoreVoices() : commands.listSpeechVoices(app.speech.externalUrl))
       .then((r) => {
         if (!cancelled && r.status === "ok") speechVoices = r.data;
       })

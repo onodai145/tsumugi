@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { app } from "../../lib/store.svelte";
-import { commands } from "../../lib/ipc";
+import { commands, events } from "../../lib/ipc";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -117,5 +117,73 @@ describe("SpeechSection", () => {
     app.speechStatus = { type: "error", message: "SPEECH_ENGINE_UNREACHABLE: connect" };
     const { getByTestId } = render(SpeechSection);
     expect(getByTestId("speech-status").textContent).toContain("接続できません");
+  });
+
+  describe("内蔵エンジン(Issue #625 段階2)", () => {
+    const pack = (type: "ready" | "notInstalled") => ({ status: { type } as never, sizeBytes: 1000, partialBytes: 0 });
+    const coreInfo = (ready = true) => ({
+      supported: true,
+      termsVersion: "v1",
+      termsAccepted: true,
+      engine: pack("ready"),
+      voices: [
+        {
+          id: "0",
+          pack: pack(ready ? "ready" : "notInstalled"),
+          characters: [{ name: "ずんだもん", credit: "VOICEVOX:ずんだもん", styles: [{ id: "3", name: "ノーマル" }] }],
+        },
+      ],
+    });
+
+    beforeEach(() => {
+      vi.spyOn(events.speechCoreStatusChanged, "listen").mockResolvedValue((() => {}) as never);
+    });
+
+    it("既定は外部エンジン。内蔵に切り替えると、URL の入力が消えて、取得の部品が出る", async () => {
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
+      const { getByTestId, queryByTestId, findByTestId } = render(SpeechSection);
+      expect((getByTestId("speech-engine-external") as HTMLInputElement).checked).toBe(true);
+      expect(queryByTestId("speech-core-section")).toBeNull();
+      await fireEvent.click(getByTestId("speech-engine-core"));
+      expect(await findByTestId("speech-core-section")).toBeTruthy();
+      expect(queryByTestId("speech-url")).toBeNull();
+    });
+
+    it("内蔵で保存すると、engine: voicevoxCore を渡す(URL は空でもよい)", async () => {
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
+      const spy = vi.spyOn(app, "setSpeechSettings").mockResolvedValue(undefined);
+      const { getByTestId, getByText } = render(SpeechSection);
+      await fireEvent.click(getByTestId("speech-engine-core"));
+      await fireEvent.click(getByText("保存"));
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledWith(expect.objectContaining({ engine: "voicevoxCore", externalUrl: "" })));
+    });
+
+    it("声の選択肢は取得済みの VVM の声だけで、選んだ声のクレジットが出る", async () => {
+      app.speech = { ...app.speech, engine: "voicevoxCore", defaultVoiceId: "3" };
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
+      const { findByTestId, getByTestId } = render(SpeechSection);
+      await vi.waitFor(() => {
+        const options = Array.from((getByTestId("speech-voice") as HTMLSelectElement).options).map((o) => o.textContent?.trim());
+        expect(options).toContain("ずんだもん（ノーマル）");
+      });
+      expect((await findByTestId("speech-core-credit")).textContent).toContain("VOICEVOX:ずんだもん");
+    });
+
+    it("取得済みの声がなければ、取得を促す(接続テストは出さない)", async () => {
+      app.speech = { ...app.speech, engine: "voicevoxCore" };
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo(false)) as never);
+      const { findByText, queryByTestId } = render(SpeechSection);
+      expect(await findByText(/声を取得してください/)).toBeTruthy();
+      expect(queryByTestId("speech-connect-test")).toBeNull();
+    });
+
+    it("内蔵のエラー状態は、識別コードではなく日本語で出す", () => {
+      app.speech = { ...app.speech, engine: "voicevoxCore" };
+      app.speechStatus = { type: "error", message: "invalid: SPEECH_CORE_NOT_READY" };
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
+      const { getByTestId } = render(SpeechSection);
+      expect(getByTestId("speech-status").textContent).toContain("未取得");
+      expect(getByTestId("speech-status").textContent).not.toContain("SPEECH_CORE_NOT_READY");
+    });
   });
 });
