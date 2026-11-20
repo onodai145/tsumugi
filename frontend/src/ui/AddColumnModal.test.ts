@@ -43,6 +43,7 @@ function makeTab(kind: ColumnKind, filter: FilterQuery): TabView {
     notifyDesktop: false,
     notifySound: false,
     notifySoundChoice: "",
+    speech: { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" },
     notes: [],
     notifications: [],
     state: "connected",
@@ -143,3 +144,51 @@ describe("AddColumnModal の通知音の種類(Issue #75)", () => {
     expect(notifyCall()?.[1]).toMatchObject({ notifySound: true, notifySoundChoice: "ping" });
   });
 });
+
+describe("AddColumnModal の読み上げ(Issue #625)", () => {
+  function setupEdit(speech = { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" }) {
+    const tab = makeTab({ type: "home" }, { kind: "keywords", value: [] });
+    tab.speech = speech;
+    app.groups = [{ id: "group1", width: 400, auto: false, tabs: [tab], activeTabId: tab.id }];
+    return tab;
+  }
+  const speechCall = () => invokeMock.mock.calls.find((c) => c[0] === "set_column_speech");
+
+  it("全体の読み上げがオフのときは、トグルが無効で案内が出る", () => {
+    app.speech = { ...app.speech, enabled: false };
+    const tab = setupEdit();
+    const { getByTestId, getByText } = render(AddColumnModal, { onclose: vi.fn(), groupId: null, editTab: tab });
+    expect((getByTestId("speech-column-enabled") as HTMLInputElement).disabled).toBe(true);
+    expect(getByText(/設定で読み上げをオンにしてください/)).toBeTruthy();
+  });
+
+  it("全体がオンで、トグルをオンにして保存すると set_column_speech を呼ぶ", async () => {
+    app.speech = { ...app.speech, enabled: true };
+    const tab = setupEdit();
+    const onclose = vi.fn();
+    const { getByTestId } = render(AddColumnModal, { onclose, groupId: null, editTab: tab });
+    await fireEvent.click(getByTestId("speech-column-enabled"));
+    await fireEvent.click(getByTestId("add-column-submit"));
+    await waitFor(() => expect(onclose).toHaveBeenCalled());
+    expect(speechCall()?.[1]).toMatchObject({ columnId: "tab1", speech: { enabled: true, speakAuthor: true, queueLimit: 5, voiceId: "" } });
+  });
+
+  it("変更がなければ set_column_speech を呼ばない", async () => {
+    app.speech = { ...app.speech, enabled: true };
+    const tab = setupEdit();
+    const onclose = vi.fn();
+    const { getByTestId } = render(AddColumnModal, { onclose, groupId: null, editTab: tab });
+    await fireEvent.click(getByTestId("add-column-submit"));
+    await waitFor(() => expect(onclose).toHaveBeenCalled());
+    expect(speechCall()).toBeUndefined();
+  });
+
+  it("通知カラムには読み上げの設定を出さない", () => {
+    app.speech = { ...app.speech, enabled: true };
+    const tab = makeTab({ type: "notifications" }, { kind: "keywords", value: [] });
+    app.groups = [{ id: "group1", width: 400, auto: false, tabs: [tab], activeTabId: tab.id }];
+    const { queryByTestId } = render(AddColumnModal, { onclose: vi.fn(), groupId: null, editTab: tab });
+    expect(queryByTestId("speech-column-enabled")).toBeNull();
+  });
+});
+

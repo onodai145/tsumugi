@@ -13,6 +13,7 @@ pub mod note;
 pub mod scheduled;
 pub mod settings_transfer;
 pub mod sound;
+pub mod speech;
 pub mod user;
 
 // lib.rs は commands::<mod>::* をフルパス参照するため、この再エクスポートは今は未使用。

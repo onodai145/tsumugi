@@ -87,6 +87,12 @@ export function playNotifySound(choice: string, onError?: (e: unknown) => void, 
   })().catch(() => {});
 }
 
+/// 読み上げを依頼する(Issue #625)。`text` は `speechText.ts` が整形した文。fire-and-forget で、
+/// 失敗(エンジン未設定・キューの拒否・IPC 自体の失敗)はノートの表示を妨げないよう握りつぶし、理由だけ onError に渡す。
+export function speakNote(columnId: string, noteId: string, text: string, onError?: (e: unknown) => void): void {
+  void unwrap(commands.speakNote(columnId, noteId, text)).catch((e) => onError?.(e));
+}
+
 /// ハプティクス(振動)を発火する(Issue #26)。isMobilePlatform && 設定ONの場合のみ呼ぶこと
 /// (このガードは呼び出し側の責務。ここでは行わない)。IPC自体の失敗(未対応デバイス等)は
 /// UXに影響しないため握りつぶす(playNotifySoundと同じfire-and-forgetパターン)。

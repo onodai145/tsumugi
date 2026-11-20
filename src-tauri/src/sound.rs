@@ -23,15 +23,33 @@
 //! なお、このファイルの `log::warn!` は `enable_file_logging` 設定(既定オフ)が有効な
 //! 場合のみファイルに残る。設定していないユーザには見えない点に注意(Issue #12 の設計上の
 //! 既知の制約。ロギング基盤自体の変更は本 Issue のスコープ外)。
+//!
+//! 読み上げ(Issue #625)は、同じ再生スレッドの中に `SpeechLane`(`speech_lane.rs`)を持つ。
+//! 通知音(`Cmd::Play`)とは別の `rodio::Player` で逐次再生し、完了・停止を `speak()` の戻り値で返す。
+//! 通知音側の挙動(`play` の即時復帰・Mixer への重畳)は変えない。
 
+use crate::speech_lane::{DoneTx, SpeakOutcome, SpeechLane};
 use rodio::buffer::SamplesBuffer;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
+/// 再生スレッドへの命令。`Play` は従来どおりの投げっぱなしの通知音、`Speak` / `StopSpeech` は読み上げレーン(Issue #625)。
+enum Cmd {
+    Play(Vec<u8>),
+    Speak { wav: Vec<u8>, done: DoneTx },
+    StopSpeech,
+}
+
+/// 読み上げレーンの完了を確認する間隔。レーンが空いている間は、これまでどおりブロッキングで待つ(ポーリングしない)。
+const LANE_POLL_INTERVAL: Duration = Duration::from_millis(40);
+
+#[derive(Clone)]
 pub struct SoundPlayer {
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: mpsc::Sender<Cmd>,
 }
 
 /// `decode_fully` の結果。
@@ -186,16 +204,35 @@ impl SoundPlayer {
     /// 再生用バックグラウンドスレッドを起動する。出力デバイスが無い等で開けない
     /// 場合はログを残してスレッドを終了する(以降の`play`はログのみで何も鳴らさない)。
     pub fn spawn() -> Self {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, rx) = mpsc::channel::<Cmd>();
         std::thread::spawn(move || {
             let healthy = Arc::new(AtomicBool::new(true));
             let mut handle = match open_sink(&healthy) {
                 Some(h) => h,
                 None => return,
             };
+            let mut lane = SpeechLane::new();
 
-            for bytes in rx {
+            loop {
+                // 読み上げ中だけ短い間隔で起きて完了を確認する。何も再生していなければ、従来どおりブロッキングで待つ。
+                let cmd = if lane.is_active() {
+                    match rx.recv_timeout(LANE_POLL_INTERVAL) {
+                        Ok(c) => Some(c),
+                        Err(RecvTimeoutError::Timeout) => None,
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
+                } else {
+                    match rx.recv() {
+                        Ok(c) => Some(c),
+                        Err(_) => break,
+                    }
+                };
+                lane.poll();
+                let Some(cmd) = cmd else { continue };
+
                 if !healthy.load(Ordering::SeqCst) {
+                    // 出力デバイスを開き直すと、古い Mixer 上の読み上げは失われる。
+                    lane.fail("出力デバイスを開き直したため読み上げを中断しました");
                     match open_sink(&healthy) {
                         Some(h) => {
                             handle = h;
@@ -209,12 +246,26 @@ impl SoundPlayer {
                     }
                 }
 
-                match decode_fully(bytes) {
-                    DecodeOutcome::Ready(buf) => handle.mixer().add(buf),
-                    DecodeOutcome::Invalid(e) => log::warn!("通知音: デコードに失敗: {e}"),
-                    DecodeOutcome::Panicked => {
-                        log::warn!("通知音: デコード処理がパニックしました(不正なファイルの可能性)。この音声はスキップします");
-                    }
+                match cmd {
+                    Cmd::Play(bytes) => match decode_fully(bytes) {
+                        DecodeOutcome::Ready(buf) => handle.mixer().add(buf),
+                        DecodeOutcome::Invalid(e) => log::warn!("通知音: デコードに失敗: {e}"),
+                        DecodeOutcome::Panicked => {
+                            log::warn!("通知音: デコード処理がパニックしました(不正なファイルの可能性)。この音声はスキップします");
+                        }
+                    },
+                    Cmd::Speak { wav, done } => match decode_fully(wav) {
+                        DecodeOutcome::Ready(buf) => {
+                            lane.start(Player::connect_new(handle.mixer()), buf, done);
+                        }
+                        DecodeOutcome::Invalid(e) => {
+                            let _ = done.send(SpeakOutcome::Failed(format!("デコードに失敗: {e}")));
+                        }
+                        DecodeOutcome::Panicked => {
+                            let _ = done.send(SpeakOutcome::Failed("デコード処理がパニックしました".into()));
+                        }
+                    },
+                    Cmd::StopSpeech => lane.stop(),
                 }
             }
         });
@@ -223,9 +274,24 @@ impl SoundPlayer {
 
     /// バイト列を非同期に再生する(デコード/再生はバックグラウンドスレッドで行うため即座に返る)。
     pub fn play(&self, bytes: Vec<u8>) {
-        if self.tx.send(bytes).is_err() {
+        if self.tx.send(Cmd::Play(bytes)).is_err() {
             log::warn!("通知音: 再生スレッドが終了しているため再生できません");
         }
+    }
+
+    /// 読み上げの音声(WAV)を、読み上げレーンで再生し、終わる(または止められる・失敗する)まで待つ(Issue #625)。
+    /// 通知音(`play`)とは Mixer 上でミックスされる。
+    pub async fn speak(&self, wav: Vec<u8>) -> SpeakOutcome {
+        let (done, rx) = tokio::sync::oneshot::channel();
+        if self.tx.send(Cmd::Speak { wav, done }).is_err() {
+            return SpeakOutcome::Failed("再生スレッドが終了しているため再生できません".into());
+        }
+        rx.await.unwrap_or_else(|_| SpeakOutcome::Failed("再生スレッドが終了しました".into()))
+    }
+
+    /// 再生中の読み上げを止める(待っている `speak` は `Stopped` で返る)。
+    pub fn stop_speech(&self) {
+        let _ = self.tx.send(Cmd::StopSpeech);
     }
 
     /// テスト用: 実際のオーディオデバイスを開かず、スレッドも立てない `SoundPlayer` を作る。
@@ -234,7 +300,7 @@ impl SoundPlayer {
     /// 実デバイスをプローブするコスト/ノイズを避けるための構成。
     #[cfg(test)]
     pub(crate) fn new_for_test() -> Self {
-        let (tx, _rx) = mpsc::channel::<Vec<u8>>();
+        let (tx, _rx) = mpsc::channel::<Cmd>();
         Self { tx }
     }
 }
@@ -437,5 +503,13 @@ mod tests {
         assert!(!has_haptic_channel(&HAPTIC_OGG[..50]));
         // 先頭 700 バイト(コメントヘッダは読めて、音声データは壊れている)。受け入れ基準 5 の壊れた ogg に使う
         assert!(has_haptic_channel(&HAPTIC_OGG[..700]));
+    }
+
+    #[tokio::test]
+    async fn speak_on_a_player_without_a_thread_fails_instead_of_hanging() {
+        let p = SoundPlayer::new_for_test();
+        let r = tokio::time::timeout(std::time::Duration::from_secs(2), p.speak(vec![0, 1, 2])).await;
+        assert!(matches!(r, Ok(crate::speech_lane::SpeakOutcome::Failed(_))), "{r:?}");
+        p.stop_speech(); // 受信側がいなくても panic しない
     }
 }

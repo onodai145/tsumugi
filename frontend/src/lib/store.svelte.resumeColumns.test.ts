@@ -38,6 +38,7 @@ function column(id: string, accountId: string): Column {
     notifySound: false,
     notifyDesktop: false,
     notifySoundChoice: "",
+    speech: { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" },
     groupId: "g1",
     title: null,
   };
@@ -58,6 +59,7 @@ function shownTab(id: string): TabView {
     notifyDesktop: false,
     notifySound: false,
     notifySoundChoice: "",
+    speech: { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" },
     notes: [],
     notifications: [],
     state: "connected",

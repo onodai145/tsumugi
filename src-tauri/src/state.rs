@@ -170,6 +170,9 @@ pub struct AppState {
     pub local_translate: std::sync::Arc<crate::translate::LocalTranslate>,
     /// ローカル翻訳のモデルの取得・状態・削除（Issue #603）。既定は非対応（`unconfigured`）で、起動時に `with_local_models` で差し替える。
     pub local_models: std::sync::Arc<crate::translate::LocalModels>,
+    /// 読み上げのキューと状態(Issue #625)。依存を持たないので、`AppState::new*` のシグネチャは変えずに
+    /// 既定値で作る。ワーカーは起動時に `tts::runtime::spawn` が走らせる。
+    pub speech: std::sync::Arc<crate::tts::manager::SpeechManager>,
     /// MCPサーバーの実行状態と、実行中のサーバーが読むトークン(Issue #557)。デスクトップのみ。
     #[cfg(desktop)]
     pub mcp: crate::mcp::server::McpRuntime,
@@ -266,6 +269,7 @@ impl AppState {
             scheduler_wakeup: std::sync::Arc::new(tokio::sync::Notify::new()),
             local_translate: std::sync::Arc::new(crate::translate::LocalTranslate::unconfigured()),
             local_models: std::sync::Arc::new(crate::translate::LocalModels::unconfigured()),
+            speech: std::sync::Arc::new(crate::tts::manager::SpeechManager::new()),
             #[cfg(desktop)]
             mcp: Default::default(),
             cache,

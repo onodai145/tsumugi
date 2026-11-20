@@ -1,6 +1,15 @@
 // アプリの ViewModel（Svelte 5 runes）。視覚カラム(GroupView)=タブ(TabView)の集合を保持し、
 // Rust からの columnNote / columnNotification / columnConnectionState を購読して更新する。
-import { commands, events, playNotifySound, unwrap, unwrapAcc, formatError, ForbiddenError, vibrate } from "./ipc";
+import { commands, events, playNotifySound, speakNote, unwrap, unwrapAcc, formatError, ForbiddenError, vibrate } from "./ipc";
+import {
+  DEFAULT_SPEECH_SETTINGS,
+  withColumnSpeechDefaults,
+  withSpeechSettingsDefaults,
+  type ColumnSpeechValue,
+  type SpeechSettingsValue,
+} from "./speechDefaults";
+import { speechTextForColumnNote } from "./speechText";
+import { RecentIds } from "./recentIds";
 import { invalidateReactionUsers } from "./reactionUsersCache";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -38,6 +47,9 @@ import type {
   DraftInput,
   MutePeriod,
   UserListMembership,
+  ColumnSpeech,
+  SpeechSettings,
+  SpeechStatus,
 } from "../bindings/tauri.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { KeyAction } from "./keymap";
@@ -84,6 +96,8 @@ export interface TabView {
   notifySound: boolean;
   /// このタブの通知音（プリセットID/data URL）。空文字なら設定→通知のグローバル選択を継承
   notifySoundChoice: string;
+  /// このタブの読み上げ設定(Issue #625)。全体(`app.speech.enabled`)と両方オンのときだけ読み上げる。
+  speech: ColumnSpeechValue;
   notes: Note[];
   notifications: Notification[];
   state: ConnectionState;
@@ -174,6 +188,10 @@ class AppStore {
   emojis = $state<Record<string, EmojiDef[]>>({});
   mute = $state<MuteConfig>({ ngWords: [], ngUsers: [], ngInstances: [] });
   notify = $state<NotifyConfig>({ desktop: false, sound: false, soundChoice: "" });
+  /// 読み上げの全体設定(Issue #625)。起動時に `getSpeechSettings` で上書きする。
+  speech = $state<SpeechSettingsValue>({ ...DEFAULT_SPEECH_SETTINGS });
+  /// 読み上げの状態(エンジンに繋がらない等)。`SpeechStatusChanged` で更新する。
+  speechStatus = $state<SpeechStatus>({ type: "unknown" });
   // TSUMUGI_SAFE_MODE で起動しているか。true の間はカスタムCSSを適用しない（Issue #93）。
   safeMode = $state(false);
   ui = $state<UiPrefs>({
@@ -320,6 +338,11 @@ class AppStore {
       const notify = await unwrap(commands.getNotify());
       this.notify = { ...notify, soundChoice: notify.soundChoice ?? "" };
       prewarmSoundChoice(this.notify.soundChoice ?? "");
+      // IPC のモックが `data: null` を返すテストでも落ちないよう、null は無視する。
+      const speech = await unwrap(commands.getSpeechSettings());
+      if (speech) this.speech = withSpeechSettingsDefaults(speech);
+      const speechStatus = await unwrap(commands.getSpeechStatus());
+      if (speechStatus && typeof speechStatus.type === "string") this.speechStatus = speechStatus;
       const ui = await unwrap(commands.getUiPrefs());
       // セーフモードは復旧手段なので、取得に失敗したら fail-closed（CSSを適用しない側）に倒す。
       this.safeMode = await commands.isSafeMode().catch(() => true);
@@ -475,6 +498,7 @@ class AppStore {
       notifyDesktop: opened.column.notifyDesktop,
       notifySound: opened.column.notifySound,
       notifySoundChoice: opened.column.notifySoundChoice,
+      speech: withColumnSpeechDefaults(opened.column.speech),
       notes: opened.notes,
       notifications: opened.notifications,
       state: this.#connState.get(opened.column.id) ?? "connecting",
@@ -644,6 +668,29 @@ class AppStore {
     } catch (e) {
       this.#failModal(e);
     }
+  }
+
+  /// タブ単位の読み上げ設定を変更する(Issue #625)。ストリームは張り直さない。
+  /// 入力はすぐ表示に反映し(楽観的更新)、Rust が丸めて返した値で置き換える。失敗したら元の値に戻す。
+  async setColumnSpeech(tabId: string, speech: ColumnSpeech) {
+    const next = withColumnSpeechDefaults(speech);
+    const tab = this.#findTab(tabId);
+    const before = tab?.speech;
+    if (tab) tab.speech = next;
+    try {
+      const saved = await unwrap(commands.setColumnSpeech(tabId, next));
+      // IPC のモックが `null` を返すテストでも落ちないよう、返り値が無ければ入力のままにする。
+      if (tab && saved) tab.speech = withColumnSpeechDefaults(saved);
+    } catch (e) {
+      if (tab && before) tab.speech = before;
+      this.#failModal(e);
+    }
+  }
+
+  /// 読み上げの全体設定を保存する。Rust が検証・整形した値を返すので、それを反映する。拒否されたら例外を投げる
+  /// (設定画面が自分で理由を表示する)。
+  async setSpeechSettings(settings: SpeechSettings) {
+    this.speech = withSpeechSettingsDefaults(await unwrap(commands.setSpeechSettings(settings)));
   }
 
   /// 音声ファイルを選んで通知音として読み込む（data URL化のみ。保存は setColumnNotify/setNotify で）。
@@ -1027,6 +1074,15 @@ class AppStore {
           if (wantsDesktop) void this.#osNotifyNote(tab, e.payload.note);
           if (wantsSound) this.#playTabSound(tab);
         }
+        // 読み上げ(Issue #625)。通知音とは別の重複排除の枠(`#spoken`)を使う: 通知音が枠を消費しても読み上げは落とさない。
+        const speechText = speechTextForColumnNote(e.payload.note, {
+          isOwn: !!isOwn,
+          globalEnabled: this.speech.enabled,
+          column: tab.speech,
+        });
+        if (speechText && this.#markSpoken(e.payload.note.id)) {
+          speakNote(tab.id, e.payload.note.id, speechText, (err) => this.#logDebug(`読み上げの依頼に失敗: ${String(err)}`));
+        }
       }),
     );
     this.#unlisten.push(
@@ -1048,6 +1104,14 @@ class AppStore {
         // もっと古い空白とは無関係な場合があるため（Issue #148）。
         if (e.payload.truncated && e.payload.boundaryId && e.payload.targetId) {
           tab.gapMarker = { boundaryId: e.payload.boundaryId, targetId: e.payload.targetId };
+        }
+      }),
+    );
+    this.#unlisten.push(
+      await events.speechStatusChanged.listen((e) => {
+        this.speechStatus = e.payload.status;
+        if (e.payload.status.type === "error") {
+          this.#log("warn", `読み上げ: エンジンに接続できません(${e.payload.status.message})`);
         }
       }),
     );
@@ -2109,17 +2173,15 @@ class AppStore {
   }
 
   // OS通知/音を出した通知IDを覚えておき、複数カラムからの重複配信を1回に抑える。
-  #notifiedIds = new Set<string>();
-  #notifiedOrder: string[] = [];
+  #notified = new RecentIds(500);
   #markNotified(id: string): boolean {
-    if (this.#notifiedIds.has(id)) return false;
-    this.#notifiedIds.add(id);
-    this.#notifiedOrder.push(id);
-    if (this.#notifiedOrder.length > 500) {
-      const old = this.#notifiedOrder.shift();
-      if (old) this.#notifiedIds.delete(old);
-    }
-    return true;
+    return this.#notified.mark(id);
+  }
+  // 読み上げを依頼したノートIDを覚えておく(Issue #625)。通知音と枠を共有しない: どちらの重複排除の窓も、
+  // 相手に食われず 500 件ぶんある。
+  #spoken = new RecentIds(500);
+  #markSpoken(id: string): boolean {
+    return this.#spoken.mark(id);
   }
 
   /// このタブで実際に鳴らす通知音を決める。タブ側の選択があればそれを優先し、

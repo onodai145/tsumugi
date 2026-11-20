@@ -19,6 +19,9 @@ pub struct Column {
     pub group_id: String,
     /// ユーザ設定のタブ名。None なら種別から自動生成した名前を使う。
     pub title: Option<String>,
+    /// このタブの読み上げ設定(Issue #625)。旧い設定ファイルには無いので既定値(オフ)で読む。
+    #[serde(default)]
+    pub speech: super::speech::ColumnSpeech,
 }
 
 /// グループ幅(px)の範囲。画面操作(`set_group_width`)・新規作成・設定インポートで共有する。

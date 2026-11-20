@@ -17,10 +17,12 @@ mod net_guard;
 mod scheduler;
 mod session;
 mod sound;
+mod speech_lane;
 mod state;
 mod store;
 mod stream;
 mod translate;
+mod tts;
 
 use session::KeyringStore;
 use state::AppState;
@@ -174,6 +176,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mcp::set_mcp_account_exposed,
             commands::mcp::get_mcp_token,
             commands::mcp::regenerate_mcp_token,
+            commands::speech::get_speech_settings,
+            commands::speech::set_speech_settings,
+            commands::speech::set_column_speech,
+            commands::speech::list_speech_voices,
+            commands::speech::speak_note,
+            commands::speech::test_speech,
+            commands::speech::stop_speech,
+            commands::speech::get_speech_status,
         ])
         .events(collect_events![
             events::ColumnNote,
@@ -185,6 +195,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ScheduledPostPosted,
             events::ScheduledPostFailed,
             events::LocalModelStatusChanged,
+            events::SpeechStatusChanged,
         ])
 }
 
@@ -441,6 +452,8 @@ pub fn run() {
                     .with_local_models(local_models),
             );
             scheduler::spawn(app.handle().clone());
+            // 読み上げのワーカー(Issue #625)。キューが空の間は待つだけで、設定がオフなら何もしない。
+            tts::runtime::spawn(app.handle().clone());
 
             // 既存の column_note から、アカウントの帰属を埋め直す(Issue #557)。`note_account` が空のときだけ
             // 動く一度きりの移行(`attribution::backfill_all`)。
