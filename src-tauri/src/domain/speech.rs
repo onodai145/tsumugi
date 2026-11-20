@@ -60,7 +60,7 @@ impl ColumnSpeech {
 }
 
 /// 読み上げに使うエンジンの種類。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum SpeechEngineKind {
     /// 外部の VOICEVOX 互換エンジン(VOICEVOX ENGINE / AivisSpeech Engine)に HTTP で接続する。
@@ -71,9 +71,15 @@ pub enum SpeechEngineKind {
 }
 
 /// 知らないエンジンの種類(将来のエンジン・手編集)は `External` として読む。設定ファイル全体が読めなくなるのを避ける。
-fn engine_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> Result<SpeechEngineKind, D::Error> {
-    let v = serde_json::Value::deserialize(d)?;
-    Ok(serde_json::from_value(v).unwrap_or_default())
+/// (`deserialize_with` は specta の TS 出力が受け付けないので、`Deserialize` を手で実装する。)
+impl<'de> Deserialize<'de> for SpeechEngineKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(match s.as_str() {
+            "voicevoxCore" => Self::VoicevoxCore,
+            _ => Self::External,
+        })
+    }
 }
 
 /// 全体の読み上げ設定。`SettingsData.speech`。**エクスポートには含めない**。インポートでは現在の値を維持する。
@@ -83,7 +89,7 @@ pub struct SpeechSettings {
     /// 全体のマスタースイッチ。
     #[serde(default)]
     pub enabled: bool,
-    #[serde(default, deserialize_with = "engine_or_default")]
+    #[serde(default)]
     pub engine: SpeechEngineKind,
     /// 外部エンジンの URL(例 `http://192.168.1.10:50021`)。空は未設定。
     #[serde(default)]

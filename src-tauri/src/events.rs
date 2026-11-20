@@ -117,3 +117,11 @@ pub struct LocalModelStatusChanged {
 pub struct SpeechStatusChanged {
     pub status: crate::tts::manager::SpeechStatus,
 }
+
+/// 内蔵 VOICEVOX CORE のエンジン一式・声(VVM)の状態が変わった(Issue #625 段階2)。
+/// 取得の進捗・完了・失敗・削除のたびに、状態の全体(スナップショット)を送る。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechCoreStatusChanged {
+    pub info: crate::tts::voicevox::packs::SpeechCoreInfo,
+}

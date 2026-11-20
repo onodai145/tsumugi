@@ -184,6 +184,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::speech::test_speech,
             commands::speech::stop_speech,
             commands::speech::get_speech_status,
+            commands::speech_core::get_speech_core_info,
+            commands::speech_core::get_speech_core_terms,
+            commands::speech_core::start_speech_core_download,
+            commands::speech_core::cancel_speech_core_download,
+            commands::speech_core::delete_speech_core_pack,
+            commands::speech_core::list_speech_core_voices,
         ])
         .events(collect_events![
             events::ColumnNote,
@@ -196,6 +202,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ScheduledPostFailed,
             events::LocalModelStatusChanged,
             events::SpeechStatusChanged,
+            events::SpeechCoreStatusChanged,
         ])
 }
 
@@ -439,7 +446,19 @@ pub fn run() {
             let model_http = net_guard::build_fetch_client(state::USER_AGENT, net_guard::FetchAllowlist::default())
                 .expect("failed to build the model download client");
             let local_models =
-                std::sync::Arc::new(translate::LocalModels::new(models_dir, model_http, local_translate.clone()));
+                std::sync::Arc::new(translate::LocalModels::new(models_dir, model_http.clone(), local_translate.clone()));
+            // 内蔵 VOICEVOX CORE(Issue #625 段階2)。取得物は app_data_dir/voicevox/ に置く。
+            // 古い版・途中のファイルは、ロードより前に掃除する。使われなくなったモデルは、アイドルで解放する。
+            let speech_core = std::sync::Arc::new(tts::voicevox::SpeechCore::new(
+                app.path().app_data_dir().expect("no app data dir").join("voicevox"),
+                model_http.clone(),
+            ));
+            speech_core.store.clean_stale();
+            tauri::async_runtime::spawn(tts::voicevox::engine::run_idle_sweeper(
+                speech_core.engine.clone(),
+                tts::voicevox::engine::IDLE_UNLOAD,
+                tts::voicevox::engine::SWEEP_INTERVAL,
+            ));
             translate::manager::spawn_idle_sweeper(
                 local_translate.clone(),
                 translate::IDLE_UNLOAD,
@@ -449,7 +468,8 @@ pub fn run() {
                 AppState::new(Box::new(KeyringStore), settings, drafts, cache, cache_dir.clone())
                     .with_scheduled_posts(scheduled_posts)
                     .with_local_translate(local_translate)
-                    .with_local_models(local_models),
+                    .with_local_models(local_models)
+                    .with_speech_core(speech_core),
             );
             scheduler::spawn(app.handle().clone());
             // 読み上げのワーカー(Issue #625)。キューが空の間は待つだけで、設定がオフなら何もしない。

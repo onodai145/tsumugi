@@ -4,7 +4,7 @@ use super::engine::SpeechEngine;
 use super::external::ExternalEngine;
 use super::manager::{run_supervised, SpeechOutput, SpeechStatus, WorkerContext, WORKER_RESTART_DELAY};
 use super::{invalid, ERR_NOT_CONFIGURED};
-use crate::domain::SpeechSettings;
+use crate::domain::{SpeechEngineKind, SpeechSettings};
 use crate::error::Result;
 use crate::events::SpeechStatusChanged;
 use crate::state::AppState;
@@ -30,6 +30,11 @@ impl WorkerContext for AppContext {
     }
 
     fn engine(&self, settings: &SpeechSettings) -> Result<Arc<dyn SpeechEngine>> {
+        // 内蔵エンジンは、`AppState` が持つ 1 つを使い回す(ロード済みのモデルを共有する)。未取得・非対応のときは、
+        // `synthesize` が `ERR_NOT_READY` / `ERR_UNSUPPORTED` を返し、失敗の連続で `Error` 状態になる。
+        if settings.engine == SpeechEngineKind::VoicevoxCore {
+            return Ok(Arc::new(self.app.state::<AppState>().speech_core.engine.clone()));
+        }
         let url = settings.external_url.trim().to_string();
         if url.is_empty() {
             return Err(invalid(ERR_NOT_CONFIGURED));

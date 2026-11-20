@@ -173,6 +173,8 @@ pub struct AppState {
     /// 読み上げのキューと状態(Issue #625)。依存を持たないので、`AppState::new*` のシグネチャは変えずに
     /// 既定値で作る。ワーカーは起動時に `tts::runtime::spawn` が走らせる。
     pub speech: std::sync::Arc<crate::tts::manager::SpeechManager>,
+    /// 内蔵 VOICEVOX CORE(Issue #625 段階2)。既定は非対応(`unconfigured`)で、起動時に `with_speech_core` で差し替える。
+    pub speech_core: std::sync::Arc<crate::tts::voicevox::SpeechCore>,
     /// MCPサーバーの実行状態と、実行中のサーバーが読むトークン(Issue #557)。デスクトップのみ。
     #[cfg(desktop)]
     pub mcp: crate::mcp::server::McpRuntime,
@@ -219,6 +221,11 @@ impl AppState {
     /// ローカル翻訳のモデル管理を差し替える(起動時にモデルの置き場つきのものへ)。
     pub fn with_local_models(mut self, local_models: std::sync::Arc<crate::translate::LocalModels>) -> Self {
         self.local_models = local_models;
+        self
+    }
+
+    pub fn with_speech_core(mut self, speech_core: std::sync::Arc<crate::tts::voicevox::SpeechCore>) -> Self {
+        self.speech_core = speech_core;
         self
     }
 
@@ -270,6 +277,7 @@ impl AppState {
             local_translate: std::sync::Arc::new(crate::translate::LocalTranslate::unconfigured()),
             local_models: std::sync::Arc::new(crate::translate::LocalModels::unconfigured()),
             speech: std::sync::Arc::new(crate::tts::manager::SpeechManager::new()),
+            speech_core: std::sync::Arc::new(crate::tts::voicevox::SpeechCore::unconfigured()),
             #[cfg(desktop)]
             mcp: Default::default(),
             cache,
