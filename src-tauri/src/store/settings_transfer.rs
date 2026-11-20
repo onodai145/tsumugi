@@ -344,6 +344,7 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         summaly_proxy_imported,
         mcp,
         local_model_license_version: current.local_model_license_version.clone(),
+        speech_core_terms_version: current.speech_core_terms_version.clone(),
         // 読み上げの設定(接続先の URL を含む)はファイルで書き換えない。現在の値を維持する。
         speech: current.speech.clone(),
     };
@@ -571,6 +572,27 @@ mod tests {
         d.local_model_license_version = Some("2026-11-09".into());
         let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-14T00:00:00Z")).unwrap().to_lowercase();
         assert!(!json.contains("local_model") && !json.contains("localmodel"), "同意はエクスポートに含めない: {json}");
+    }
+
+    #[test]
+    fn import_keeps_the_current_speech_core_terms_version_and_never_grants_consent() {
+        let mut current = current_with_local_account();
+        current.speech_core_terms_version = Some("v1".into());
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert_eq!(plan.data.speech_core_terms_version.as_deref(), Some("v1"));
+
+        let current = current_with_local_account();
+        let plan = plan_import(&current, file_with(empty_data())).unwrap();
+        assert_eq!(plan.data.speech_core_terms_version, None, "インポートで規約に同意済みになってはいけない");
+    }
+
+    #[test]
+    fn export_does_not_include_the_speech_core_terms_version_or_the_engine_choice() {
+        let mut d = settings_data();
+        d.speech_core_terms_version = Some("v1".into());
+        d.speech.engine = crate::domain::SpeechEngineKind::VoicevoxCore;
+        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-20T00:00:00Z")).unwrap().to_lowercase();
+        assert!(!json.contains("speech_core") && !json.contains("speechcore") && !json.contains("voicevoxcore"), "{json}");
     }
 
     #[test]
