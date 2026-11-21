@@ -57,7 +57,7 @@ Android の行(`("android", "aarch64")` と `("android", "x86_64")`。`std::env:
 
 SHA-256 の全文は実装で `catalog.rs` に入れる(上の値は実物から計算済みの先頭と末尾)。辞書・VVM・規約は共通。
 
-- `ORT_VERSION` と `ENGINE_SET`(定数)を、**環境ごとの値**にする。`EngineAssets` に ORT の版を持たせ、`ENGINE_SET` は `EngineAssets` から作る(デスクトップは今まで通り `core0.17.1-ort1.17.3-dict1.11`、Android は `core0.17.1-ort1.23.2-dict1.11`)。`store.rs` の `engine-<ENGINE_SET>`・`READY` の内容・古い版の掃除は、この値を使う。デスクトップのディスク上の名前は変わらない。
+- ONNX Runtime の版は **`EngineAssets.ort_version`**(環境ごと。デスクトップ 1.17.3、Android 1.23.2)で持ち、URL に使う。置き場の名前 `ENGINE_SET` は定数のまま `cfg(target_os = "android")` で値を切り替える(デスクトップは今まで通りの `core0.17.1-ort1.17.3-dict1.11`、Android は `core0.17.1-ort1.23.2-dict1.11`)。`Store` の API は変えない。`ENGINE_SET` と `ort_version` が食い違わないことは、テストで確かめる。`store.rs` の `engine-<ENGINE_SET>`・`READY` の内容・古い版の掃除は、この値を使う。デスクトップのディスク上の名前は変わらない。
 - アーカイブ内のパスは、CORE が `voicevox_core-android-<arch>-0.17.1/lib/libvoicevox_core.so`、ONNX Runtime が `voicevox_onnxruntime-android-<arch>-1.23.2/lib/libvoicevox_onnxruntime.so`(arm64 で確認済み。x86_64 は実装時に実物で確認する)。
 - カタログのテスト(「`android` は非対応」を確かめている)を、「armv7・i686 は非対応、arm64・x86_64 は対応」に直す。
 - ONNX Runtime 1.23.2 は prerelease。CORE 0.17.1 の推奨版なので組み合わせは公式の想定どおり。
@@ -79,13 +79,14 @@ SHA-256 の全文は実装で `catalog.rs` に入れる(上の値は実物から
 ### 4. UI
 
 - 設定の「内蔵」ラジオを、`supported = true` の Android で選べるようにする(コードの変更は不要。`get_speech_core_info` の結果で決まる)。armv7・i686 は今まで通り無効で、理由を出す。
-- **取得の前の確認**: エンジン一式(約 31 MB)・声(約 55〜75 MB)の取得を始める前に、`lib/localModel.ts` の `downloadWarning(net, sizeBytes)` で、モバイル通信・従量制・判定不能なら確認を出す(翻訳モデルの取得と同じ作り。回線は `get_network_status`)。デスクトップは `Unknown` なので出ない。確認の文面の「約 N MB」は、そのとき取得する物の合計(声ならその声のサイズ)。
+- **取得の前の確認**: エンジン一式(約 31 MB)・声(約 55〜75 MB)の取得を始める前に、`lib/localModel.ts` の `downloadWarning(net, sizeBytes)` で、モバイル通信・従量制・判定不能なら確認を出す(翻訳モデルの取得と同じ作り。回線は `get_network_status`)。デスクトップでは、回線を見ず、確認も出さない(`downloadWarning` は、回線が不明だと確認を返すので、スマホ(`isMobilePlatform`)のときだけ使う)。確認の文面の「約 N MB」は、そのとき取得する物の合計(声ならその声のサイズ)。
+- 「この環境では内蔵を使えません」の文面の対応環境に、Android(ARM64 と x86_64)を含める。
 - 声の管理画面(検索・スタイルの `<details>`・一覧の並び)が、スマホ幅で崩れないことを実機で確認する。崩れたら、スマホ幅の見た目だけを直す(機能は変えない)。
 - `docs/guide/user-guide.md` の「内蔵」の節に、Android でも使えること(arm64・x86_64、約 500 MB のメモリを使うこと、モバイル通信で確認が出ること)を足す。`CLAUDE.md` の `tts/voicevox` の段落を、Android を含めて更新する。
 
 ### 5. 先に確かめる関門(plan の最初のタスク)
 
-実装に入る前に、実機で次の 3 つを確かめる。どれかが通らなければ、止めて spec を見直す。
+コードの最小の変更(カタログ・cfg・libc++ の同梱)のあと、UI の変更の前に、エミュレーター(AVD のコピー)で次の 3 つを確かめる。どれかが通らなければ、止めて spec を見直す。実機(Pixel 8 Pro)への入れ替えインストールは、ユーザーの確認を取ってから行う。
 
 1. **アプリ内での dlopen**(targetSdk 36): 取得した `.so` を、アプリのデータディレクトリから `libloading` で開けるか。スパイクは `shell` 権限の `/data/local/tmp` だったので、アプリの SELinux ドメインで制限されないかは未確認。通らなければ、取得をやめて APK に同梱する方式へ切り替える(spec を改訂する)。
 2. **静的 libc++ と共有 libc++ の同居**: アプリ本体(llama.cpp を含む `libtsumugi_lib.so`)は静的 libc++、CORE は共有 `libc++_shared.so`。同じプロセスで両方が動くか(読み上げ中に翻訳も動かして確かめる)。
@@ -95,8 +96,7 @@ SHA-256 の全文は実装で `catalog.rs` に入れる(上の値は実物から
 
 自動テスト(段階2の流儀):
 
-- `catalog.rs`: Android 2 組が `Some`(URL・サイズ・SHA-256 が表のとおり)、armv7・i686・iOS が `None`、`ENGINE_SET` が環境ごとに期待どおり(デスクトップは今までの文字列のまま)、規約の写しの版が変わらない。
-- `store.rs`: `ENGINE_SET` を引数で受ける形でも、デスクトップの配置・READY・古い版の掃除が変わらない。
+- `catalog.rs`: Android 2 組が `Some`(URL・サイズ・SHA-256 が表のとおり)、armv7・i686・iOS が `None`、`ENGINE_SET` がビルド対象の `ort_version` と一致し、デスクトップは今までの文字列のまま、規約の写しの版が変わらない。
 - `engine.rs`: アイドル解放の時間が環境で切り替わる(定数のテスト)。
 - フロント: 取得の開始前に、モバイル通信・従量制で確認が出て、キャンセルすると取得が始まらない。`Unknown` では出ない。
 
