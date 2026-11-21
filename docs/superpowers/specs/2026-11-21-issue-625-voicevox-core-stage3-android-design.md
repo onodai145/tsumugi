@@ -121,6 +121,7 @@ API 36 の x86_64 エミュレーター(ページサイズ 4KB、ゲスト RAM 3
 | 取得(声 `0`、59,308,488 バイト) | 同じく約 8 秒 |
 | **関門 1: アプリ内の dlopen**(targetSdk 36) | **通った**。`/data/data/com.onodai.tsumugi.debug/voicevox/engine-core0.17.1-ort1.23.2-dict1.11/{core,ort}/*.so` を `libloading` で開けた(logcat の `avc: granted { execute }`)。`test_speech` が約 4.5 秒で `ok`(`voicevox_core::synthesizer: CPUを利用します`) |
 | **関門 2: 静的 libc++ と共有 libc++ の同居** | 通った(弱い確認)。アプリのプロセス(llama.cpp で静的 libc++ を含む + APK の `libc++_shared.so`)は、続けて 6 回の `test_speech` のあとも同じ PID で生きていて、logcat に SIGSEGV・Fatal は無し(PSS 約 450 MB)。ただし 2 回目以降は状態が既に `ok` で、合成が終わるのを待てていない。ローカル翻訳は、端末にモデルが無く動かしていない |
+| **関門 3: 16KB ページの端末** | **通った**。API 35 の x86_64 エミュレーター(`google_apis_ps16k`、`getconf PAGE_SIZE` が 16384、ゲスト RAM 3 GB)で、取得(エンジン一式 約 8 秒、声 `0` 約 8 秒)から `test_speech`(約 3.0 秒で `ok`、`CPUを利用します`)まで通った。アプリのプロセスは生きていて、PSS 約 340 MB。自分のアプリのクラッシュ・`dlopen failed` は無し(logcat の SIGABRT は別プロセスの Google Play 開発者サービス)。ONNX Runtime 1.23.2 と、16KB 整列の CORE・`libc++_shared.so` が 16KB ページで読めることを確認した |
 
 エミュレーターの注意: ゲスト RAM 2 GB では、約 490 MB のデバッグ APK を動かすと system_server が落ちた。3 GB にして安定した(エミュレーターはホストで約 4.5 GB 使う。cgroup の上限を付けて起動する)。画面が消えるとアプリが凍結されて CDP が応答しなくなるので、`svc power stayon true` で画面を点けたままにする。
 
@@ -140,7 +141,6 @@ API 36 の x86_64 エミュレーター(ページサイズ 4KB、ゲスト RAM 3
 
 未確認:
 
-- 関門 3(16KB ページの端末)。16KB のシステムイメージが入っていない(数 GB のダウンロードになる)。
 - 実機のスピーカーから実際に声が出たか(ユーザーの確認待ち。合成と再生の呼び出しは成功している)。
 - モバイル通信での確認ダイアログの実画面(単体テストでは確認済み)。実機はワイヤレス adb でつないでいて、Wi-Fi を切ると adb も切れるため、こちらからは切り替えられなかった。
 - ローカル翻訳と読み上げの同時利用(翻訳モデルが無く、動かしていない)。
