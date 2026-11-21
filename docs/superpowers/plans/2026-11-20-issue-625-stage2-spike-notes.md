@@ -38,12 +38,34 @@ plan 作成時(2026-11-20)に、上流の実物を取得して Linux x86_64 で�
 3. `cfg(desktop)` で囲むのはネイティブの呼び出し(`NativeCore`)だけ。コマンドとイベントを環境で変えると TS バインディングが環境ごとに変わる。
 4. ONNX Runtime の規約の場所は、リリース本文ではなく tgz 内の `TERMS.txt`。
 
-## Task 12 で追記する
+## 自動テストの件数(Task 12 時点)
 
-### 実アプリ(Xvfb)での確認
+- Rust: `cargo test --lib` 1347 件成功(実物・実機のものは `ignored`)。
+- フロント: `vitest` 1591 件成功(134 ファイル)。`pnpm check` はエラー 0。
 
-(Task 12 で書く)
+## 実アプリ(Xvfb)での確認
 
-### `#[ignore]` の実物のテストの結果
+Xvfb + 新しい D-Bus セッション + 隔離した XDG で `cargo tauri dev` を起動し、デバッグブリッジ(kick-and-poll)で確かめた(Linux x86_64)。
 
-(Task 12 で書く)
+- `get_speech_core_info`: `supported: true`、`termsAccepted: false`、声は 27 件。
+- `start_speech_core_download` に誤った版・空の版・`s0` を渡すと拒否される(`規約への同意が必要です`)。`termsAccepted` は `false` のまま。
+- 正しい版で `engine` を取得: イベント `SpeechCoreStatusChanged` が `downloading → verifying → ready` と遷移した(17 件)。続けて声 `0` も同様に `ready`。
+- `set_speech_settings`(`engine: "voicevoxCore"`、`defaultVoiceId: "3"`、URL 空)を保存でき、`list_speech_core_voices` が取得済みの声を返した。
+- **不具合を発見**: `test_speech` が `SPEECH_ENGINE_NOT_CONFIGURED` で拒否された(段階1の `enqueue_note_core` / `test_speech_core` が、エンジンの種類を見ずに外部 URL の空を拒否していた)。`engine_is_configured()` で直し、`commands::speech::tests::the_built_in_engine_needs_no_url_to_queue_notes_or_the_test_phrase` で RED→GREEN にした。ホットリビルド後に再確認した。
+- 声 `0` を削除すると `notInstalled` に戻り、`test_speech` を 3 回続けると、状態が `error`(`invalid: SPEECH_CORE_NOT_READY`)になった(フロントの `speechErrorText` が日本語にする)。
+- 声 `0` を取得し直して `test_speech` を呼ぶと、合成が走り(`voicevox_core::synthesizer: CPUを利用します`)、`get_speech_status` が `ok` になった。
+- 小さな挙動: 取得の開始直後の最初の `SpeechCoreStatusChanged` は `termsAccepted=false` で届く(同意の記録が開始通知より後のため)。次のイベントで `true` になる。UI は開始後に状態を引き直すので実害はない。
+
+## `#[ignore]` の実物のテストの結果
+
+- `tts::voicevox::ffi::real_tests::native_core_loads_and_synthesizes_a_real_wav`: 成功(約 3.4 秒)。
+- `tts::voicevox::real_tests::real_end_to_end`(実際の GitHub から取得): 成功(約 15 秒。エンジン一式 + 声 `0` で 181 MB)。話速 2.0 は 1.0 より十分短く、音量 0.1 は 2.0 よりピークが小さい。取得していない声は `ERR_NOT_READY`。
+- `tts::voicevox::catalog::tests::the_embedded_terms_match_upstream`: 成功(規約の写しが上流と一致)。
+
+## 未確認
+
+- スピーカーからの実際の音(Xvfb には再生デバイスがない)。
+- macOS・Windows・Linux arm64 での実行(取得物の SHA-256 とライブラリ名は、実物から表に入れたが、読み込みは未確認)。
+- release ビルドでの実行。
+- Android(段階3)。
+- ネイティブ側のクラッシュ(segfault)は、アプリごと落ちる(panic は `Err` にする)。
