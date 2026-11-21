@@ -8,13 +8,18 @@ use crate::error::Result;
 use crate::tts::engine::{SpeechEngine, SynthParams, Voice};
 use crate::tts::{invalid, ERR_BAD_RESPONSE, ERR_ENGINE_LOAD, ERR_NOT_READY, ERR_NO_VOICE, ERR_UNSUPPORTED};
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// 使われなくなってから、ロード済みのモデルを解放するまで(翻訳モデルと同じ)。
 pub const IDLE_UNLOAD: Duration = Duration::from_secs(600);
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+
+/// 汚染された Mutex(別のスレッドが panic した)でも、中身を使い続ける。解放・Drop の途中で再び panic しないため。
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 pub type BackendFactory = Arc<dyn Fn() -> std::result::Result<Arc<dyn CoreBackend>, CoreError> + Send + Sync>;
 
@@ -26,6 +31,8 @@ struct Inner {
     backend: Mutex<Option<Arc<dyn CoreBackend>>>,
     last_used: Mutex<Instant>,
     in_flight: AtomicUsize,
+    /// 声の削除の間は、合成を始めさせない(消えかけのファイルから、バックエンドを作り直さないため)。
+    paused: AtomicBool,
 }
 
 /// 合成の間だけ、解放を止める。
@@ -34,14 +41,14 @@ struct InFlight<'a>(&'a Inner);
 impl<'a> InFlight<'a> {
     fn new(inner: &'a Inner) -> Self {
         inner.in_flight.fetch_add(1, Ordering::SeqCst);
-        *inner.last_used.lock().unwrap() = Instant::now();
+        *lock(&inner.last_used) = Instant::now();
         Self(inner)
     }
 }
 
 impl Drop for InFlight<'_> {
     fn drop(&mut self) {
-        *self.0.last_used.lock().unwrap() = Instant::now();
+        *lock(&self.0.last_used) = Instant::now();
         self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
 }
@@ -49,12 +56,14 @@ impl Drop for InFlight<'_> {
 impl Inner {
     /// ロード済みのバックエンドを返す。なければ作る。失敗は覚えない(次の呼び出しで再試行する)。
     fn backend(&self) -> Result<Arc<dyn CoreBackend>> {
-        let mut slot = self.backend.lock().unwrap();
+        let mut slot = lock(&self.backend);
         if let Some(b) = slot.as_ref() {
             return Ok(b.clone());
         }
         let b = (self.factory)().map_err(|e| {
-            log::warn!("voicevox core could not be loaded: {e:?}");
+            // ログには失敗の種類だけを出す(ライブラリ・CORE のメッセージには、ホームディレクトリを含むパスが入りうる)。
+            let _ = e;
+            log::warn!("voicevox core could not be loaded");
             invalid(ERR_ENGINE_LOAD)
         })?;
         *slot = Some(b.clone());
@@ -77,28 +86,36 @@ impl CoreEngine {
                 backend: Mutex::new(None),
                 last_used: Mutex::new(Instant::now()),
                 in_flight: AtomicUsize::new(0),
+                paused: AtomicBool::new(false),
             }),
         }
     }
 
+    /// 削除の間だけ `true` にする。`true` の間の合成は `ERR_NOT_READY` で、バックエンドも作らない。
+    pub fn set_paused(&self, paused: bool) {
+        self.inner.paused.store(paused, Ordering::SeqCst);
+    }
+
     pub fn is_loaded(&self) -> bool {
-        self.inner.backend.lock().unwrap().is_some()
+        lock(&self.inner.backend).is_some()
     }
 
     /// ロード済みのモデルを解放する。ファイルを消す前に呼ぶ(Windows は使用中のファイルを消せない)。
     /// 合成の最中なら、その合成が終わったときに解放される(バックエンドの最後の参照が落ちるとき)。
     pub fn unload(&self) {
-        let b = self.inner.backend.lock().unwrap().take();
+        let b = lock(&self.inner.backend).take();
         drop(b);
     }
 
     /// `idle` 以上使われていなければ解放する。合成の最中は解放しない。解放したら `true`。
     pub fn unload_if_idle(&self, now: Instant, idle: Duration) -> bool {
+        // スロットのロックを持ったまま、合成の最中かを見る(合成の開始は `InFlight::new` → `backend()` の順なので、
+        // 数えたあとに割り込まれて、始まったばかりの合成の足もとを外すことがない)。
+        let mut slot = lock(&self.inner.backend);
         if self.inner.in_flight.load(Ordering::SeqCst) > 0 {
             return false;
         }
-        let last = *self.inner.last_used.lock().unwrap();
-        let mut slot = self.inner.backend.lock().unwrap();
+        let last = *lock(&self.inner.last_used);
         if slot.is_some() && now.saturating_duration_since(last) >= idle {
             *slot = None;
             true
@@ -118,12 +135,12 @@ pub async fn run_idle_sweeper(engine: CoreEngine, idle: Duration, interval: Dura
 
 fn core_err(e: CoreError) -> crate::error::Error {
     match e {
-        CoreError::Load(m) => {
-            log::warn!("voicevox core load error: {m}");
+        CoreError::Load(_) => {
+            log::warn!("voicevox core load error");
             invalid(ERR_ENGINE_LOAD)
         }
-        CoreError::Synthesis(m) => {
-            log::warn!("voicevox core synthesis error: {m}");
+        CoreError::Synthesis(_) => {
+            log::warn!("voicevox core synthesis error");
             invalid(ERR_BAD_RESPONSE)
         }
     }
@@ -161,7 +178,7 @@ impl SpeechEngine for CoreEngine {
         let style: u32 = voice_id.trim().parse().map_err(|_| invalid(ERR_NO_VOICE))?;
         let (vvm, _, _) = catalog().voice(style).ok_or_else(|| invalid(ERR_NO_VOICE))?;
         let assets = self.inner.assets.as_ref().ok_or_else(|| invalid(ERR_UNSUPPORTED))?;
-        if !self.inner.store.engine_ready(assets) || !self.inner.store.vvm_ready(vvm) {
+        if self.inner.paused.load(Ordering::SeqCst) || !self.inner.store.engine_ready(assets) || !self.inner.store.vvm_ready(vvm) {
             return Err(invalid(ERR_NOT_READY));
         }
         let vvm_path = self.inner.store.vvm_path(&vvm.id);
@@ -344,6 +361,41 @@ mod tests {
         assert!(voices.iter().any(|v| v.id == "3" && v.label == "ずんだもん（ノーマル）"));
         assert!(!voices.iter().any(|v| v.id == "14"), "VVM 1 は未取得");
         assert_eq!(voices.len(), catalog().vvm("0").unwrap().characters.iter().map(|c| c.styles.len()).sum::<usize>());
+    }
+
+    #[tokio::test]
+    async fn a_paused_engine_reports_not_ready_and_never_loads_until_resumed() {
+        let s = setup(true);
+        s.engine.set_paused(true);
+        assert_eq!(code(s.engine.synthesize("a", "3", &params()).await), crate::tts::ERR_NOT_READY);
+        assert_eq!(s.factory_calls.load(Ordering::SeqCst), 0);
+        s.engine.set_paused(false);
+        assert!(s.engine.synthesize("a", "3", &params()).await.is_ok());
+    }
+
+    #[test]
+    fn a_poisoned_lock_does_not_stop_the_engine_from_unloading() {
+        let s = setup(true);
+        let e = s.engine.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = e.inner.backend.lock().unwrap();
+            panic!("poison");
+        })
+        .join();
+        s.engine.unload();
+        assert!(!s.engine.is_loaded());
+        assert!(!s.engine.unload_if_idle(Instant::now(), Duration::ZERO));
+    }
+
+    #[tokio::test]
+    async fn the_backend_is_not_unloaded_while_a_synthesis_is_in_flight() {
+        let s = setup(true);
+        s.engine.synthesize("a", "3", &params()).await.unwrap();
+        let busy = InFlight::new(&s.engine.inner);
+        let idle = Duration::from_secs(1);
+        assert!(!s.engine.unload_if_idle(Instant::now() + idle * 10, idle), "合成の最中は解放しない");
+        drop(busy);
+        assert!(s.engine.unload_if_idle(Instant::now() + idle * 10, idle));
     }
 
     #[tokio::test]

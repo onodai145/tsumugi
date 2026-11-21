@@ -28,6 +28,27 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 const CORE_LIMITS: Limits = Limits { max_file: 64 << 20, max_total: 64 << 20 };
 const ORT_LIMITS: Limits = Limits { max_file: 64 << 20, max_total: 64 << 20 };
 const DICT_LIMITS: Limits = Limits { max_file: 160 << 20, max_total: 192 << 20 };
+const ENGINE_ARCHIVES: [&str; 3] = ["core.zip", "ort.tgz", "dict.tgz"];
+
+/// 取得済みのアーカイブが、期待どおりか(サイズとハッシュが一致するか)。
+fn archive_matches(path: &Path, spec: &ModelSpec) -> bool {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    if !std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == spec.size) {
+        return false;
+    }
+    let Ok(mut f) = std::fs::File::open(path) else { return false };
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        match f.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => h.update(&buf[..n]),
+            Err(_) => return false,
+        }
+    }
+    format!("{:x}", h.finalize()) == spec.sha256
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PackKey {
@@ -237,6 +258,10 @@ impl Packs {
             return Err(invalid(ERR_UNSUPPORTED));
         }
         if let PackKey::Voice(id) = &key {
+            // 非対応の環境では、使えない声を取得させない(UI にはボタンが出ないが、IPC からは呼べる)。
+            if self.assets.is_none() {
+                return Err(invalid(ERR_UNSUPPORTED));
+            }
             if !self.vvm_specs.contains_key(id) {
                 return Err(Error::Invalid("不明な取得対象です".into()));
             }
@@ -338,10 +363,18 @@ impl Packs {
         let tmp = self.store.engine_tmp_dir();
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(self.store.downloads_dir()).map_err(io_dl)?;
-        let r = self.engine_steps(&a, total, &tmp, cancel, notify).await.and_then(|()| self.commit_engine(&tmp));
-        if r.is_err() {
-            // 途中のディレクトリは残さない(`.part` は残す。再開できる)。
-            let _ = std::fs::remove_dir_all(&tmp);
+        let r = self.engine_steps(&a, total, &tmp, cancel, notify).await.and_then(|()| self.commit_engine(&a, &tmp));
+        match &r {
+            // 完成したら、取得済みのアーカイブはもう要らない。
+            Ok(()) => {
+                for name in ENGINE_ARCHIVES {
+                    let _ = std::fs::remove_file(self.store.downloads_dir().join(name));
+                }
+            }
+            // 途中のディレクトリは残さない。取得済みのアーカイブと `.part` は残す(次の取得で、取り直さない)。
+            Err(_) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+            }
         }
         r
     }
@@ -354,7 +387,12 @@ impl Packs {
             let spec = ModelSpec { url: asset.url.clone(), size: asset.size, sha256: asset.sha256.clone() };
             let part = self.store.part_path(name, &asset.sha256);
             let archive = self.store.downloads_dir().join(name);
-            self.fetch(&PackKey::Engine, &spec, &part, &archive, base, total, cancel, notify).await?;
+            // 前回の取得で完了していたアーカイブは、取り直さない。
+            let (a_path, a_spec) = (archive.clone(), spec.clone());
+            let have = tokio::task::spawn_blocking(move || archive_matches(&a_path, &a_spec)).await.unwrap_or(false);
+            if !have {
+                self.fetch(&PackKey::Engine, &spec, &part, &archive, base, total, cancel, notify).await?;
+            }
             self.set_status(&PackKey::Engine, LocalModelStatus::Verifying, notify); // 展開中
             let (archive_c, tmp_c) = (archive.clone(), tmp.to_path_buf());
             let (core_lib, ort_lib) = (a.core_lib, a.ort_lib);
@@ -371,15 +409,28 @@ impl Packs {
             })
             .await
             .map_err(|e| PackError::Extract(ExtractError::Io(e.to_string())))?;
-            let _ = std::fs::remove_file(&archive);
-            r.map_err(PackError::Extract)?;
+            if let Err(e) = r {
+                // 展開できないアーカイブは、残しても同じ結果になるので捨てる(取り直しになる)。
+                let _ = std::fs::remove_file(&archive);
+                return Err(PackError::Extract(e));
+            }
             base += asset.size;
+            if cancel.load(Ordering::SeqCst) {
+                return Err(PackError::Download(DownloadError::Cancelled));
+            }
         }
         Ok(())
     }
 
     /// 展開が全部済んだ `tmp` に READY を置き、本来の場所へリネームする(これが完了の瞬間)。
-    fn commit_engine(&self, tmp: &Path) -> std::result::Result<(), PackError> {
+    fn commit_engine(&self, a: &EngineAssets, tmp: &Path) -> std::result::Result<(), PackError> {
+        // 必要なファイルがそろっていなければ、READY を置かずに失敗にする(取得は成功、状態は未取得のまま、を防ぐ)。
+        let required = [("core", a.core_lib), ("ort", a.ort_lib), ("dict", "sys.dic")];
+        for (dir, name) in required {
+            if !std::fs::metadata(tmp.join(dir).join(name)).is_ok_and(|m| m.is_file()) {
+                return Err(PackError::Extract(ExtractError::Missing(name.to_string())));
+            }
+        }
         Store::write_ready(tmp).map_err(io_dl)?;
         let dir = self.store.engine_dir();
         let _ = std::fs::remove_dir_all(&dir);
@@ -399,8 +450,15 @@ impl Packs {
             }
             g.deleting = true;
         }
+        // 削除の間は、合成にバックエンドを作り直させない(消えかけのファイルを読ませない)。
+        self.engine.set_paused(true);
         self.engine.unload();
-        let r = self.delete_files(&key);
+        // 辞書など大きなファイルの削除は、非同期のスレッドを止めないよう、専用のスレッドで行う。
+        let (store, k) = (self.store.clone(), key.clone());
+        let r = tokio::task::spawn_blocking(move || Self::delete_files(&store, &k))
+            .await
+            .unwrap_or_else(|_| Err(Error::Invalid("ファイルを削除できませんでした。アプリを再起動してから、もう一度お試しください".into())));
+        self.engine.set_paused(false);
         let mut g = self.inner.lock().unwrap();
         g.deleting = false;
         if r.is_ok() {
@@ -409,20 +467,20 @@ impl Packs {
         r
     }
 
-    fn delete_files(&self, key: &PackKey) -> Result<()> {
+    fn delete_files(store: &Store, key: &PackKey) -> Result<()> {
         let mut targets = vec![];
         let mut dirs = vec![];
         match key {
             PackKey::Engine => {
-                dirs.extend([self.store.engine_dir(), self.store.engine_tmp_dir()]);
-                for name in ["core.zip", "ort.tgz", "dict.tgz"] {
-                    targets.push(self.store.downloads_dir().join(name));
-                    targets.extend(self.store.part_files(name));
+                dirs.extend([store.engine_dir(), store.engine_tmp_dir()]);
+                for name in ENGINE_ARCHIVES {
+                    targets.push(store.downloads_dir().join(name));
+                    targets.extend(store.part_files(name));
                 }
             }
             PackKey::Voice(id) => {
-                targets.push(self.store.vvm_path(id));
-                targets.extend(self.store.part_files(&Self::voice_file(id)));
+                targets.push(store.vvm_path(id));
+                targets.extend(store.part_files(&Self::voice_file(id)));
             }
         }
         let fail = |kind: std::io::ErrorKind| {
@@ -541,7 +599,7 @@ mod tests {
         let server = MockServer::start().await;
         let body: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
         serve(&server, "/0.vvm", body.clone()).await;
-        let t = build(None, Some(("0", voice_spec(&server, &body))));
+        let t = build(engine_assets_for("linux", "x86_64"), Some(("0", voice_spec(&server, &body))));
         assert_eq!(voice_status(&t, "0"), LocalModelStatus::NotInstalled);
 
         t.packs.start(PackKey::Voice("0".into()), t.notify.clone()).unwrap();
@@ -560,7 +618,7 @@ mod tests {
         serve(&server, "/0.vvm", body.clone()).await;
         let mut spec = voice_spec(&server, &body);
         spec.sha256 = "a".repeat(64);
-        let t = build(None, Some(("0", spec)));
+        let t = build(engine_assets_for("linux", "x86_64"), Some(("0", spec)));
         t.packs.start(PackKey::Voice("0".into()), t.notify.clone()).unwrap();
         wait_idle(&t.packs).await;
         assert!(matches!(voice_status(&t, "0"), LocalModelStatus::Failed { .. }));
@@ -574,7 +632,7 @@ mod tests {
         let body = vec![5u8; 1024];
         Mock::given(method("GET")).and(path("/0.vvm")).respond_with(ResponseTemplate::new(500)).up_to_n_times(1).mount(&server).await;
         serve(&server, "/0.vvm", body.clone()).await;
-        let t = build(None, Some(("0", voice_spec(&server, &body))));
+        let t = build(engine_assets_for("linux", "x86_64"), Some(("0", voice_spec(&server, &body))));
         t.packs.start(PackKey::Voice("0".into()), t.notify.clone()).unwrap();
         wait_idle(&t.packs).await;
         assert!(matches!(voice_status(&t, "0"), LocalModelStatus::Failed { ref reason } if reason.contains("500")), "{:?}", voice_status(&t, "0"));
@@ -594,7 +652,7 @@ mod tests {
         let server = MockServer::start().await;
         let body = vec![9u8; 1024];
         Mock::given(method("GET")).and(path("/0.vvm")).respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()).set_delay(Duration::from_millis(400))).mount(&server).await;
-        let t = build(None, Some(("0", voice_spec(&server, &body))));
+        let t = build(engine_assets_for("linux", "x86_64"), Some(("0", voice_spec(&server, &body))));
         t.packs.start(PackKey::Voice("0".into()), t.notify.clone()).unwrap();
         assert!(t.packs.start(PackKey::Voice("0".into()), t.notify.clone()).is_err(), "同時に走るのは 1 つ");
         assert!(t.packs.delete(PackKey::Voice("0".into())).await.is_err(), "取得中は削除できない");
@@ -607,7 +665,7 @@ mod tests {
         let server = MockServer::start().await;
         let body = vec![3u8; 1024];
         Mock::given(method("GET")).and(path("/0.vvm")).respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()).set_delay(Duration::from_secs(5))).mount(&server).await;
-        let t = build(None, Some(("0", voice_spec(&server, &body))));
+        let t = build(engine_assets_for("linux", "x86_64"), Some(("0", voice_spec(&server, &body))));
         t.packs.start(PackKey::Voice("0".into()), t.notify.clone()).unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(matches!(voice_status(&t, "0"), LocalModelStatus::Downloading { .. }));
@@ -667,6 +725,52 @@ mod tests {
         wait_idle(&t.packs).await;
         assert!(matches!(engine_status(&t), LocalModelStatus::Failed { .. }));
         assert!(!t.store.engine_dir().exists());
+    }
+
+    #[tokio::test]
+    async fn a_voice_pack_is_rejected_where_the_engine_is_unsupported() {
+        let t = build(None, None);
+        match t.packs.start(PackKey::Voice("0".into()), t.notify.clone()) {
+            Err(Error::Invalid(m)) => assert_eq!(m, ERR_UNSUPPORTED),
+            other => panic!("{other:?}"),
+        }
+        assert!(t.store.part_files("0.vvm").is_empty() && !t.store.vvm_dir().exists());
+    }
+
+    #[tokio::test]
+    async fn an_engine_archive_missing_a_required_file_fails_instead_of_looking_done() {
+        let server = MockServer::start().await;
+        let (core, ort, _) = archives();
+        let dict = make_tgz(&[("open_jtalk_dic_utf_8-1.11/char.bin", b"C")]); // sys.dic がない
+        serve_engine(&server, &core, &ort, &dict).await;
+        let t = build(Some(fake_assets(&server.uri(), &core, &ort, &dict)), None);
+        t.packs.start(PackKey::Engine, t.notify.clone()).unwrap();
+        wait_idle(&t.packs).await;
+        assert!(matches!(engine_status(&t), LocalModelStatus::Failed { .. }), "{:?}", engine_status(&t));
+        assert!(!t.store.engine_dir().exists() && !t.store.engine_tmp_dir().exists());
+    }
+
+    #[tokio::test]
+    async fn a_retry_after_an_interruption_does_not_download_finished_archives_again() {
+        let server = MockServer::start().await;
+        let (core, ort, dict) = archives();
+        let once = |p: &'static str, body: Vec<u8>| {
+            Mock::given(method("GET")).and(path(p)).respond_with(ResponseTemplate::new(200).set_body_bytes(body)).expect(1)
+        };
+        once("/core.zip", core.clone()).mount(&server).await;
+        once("/ort.tgz", ort.clone()).mount(&server).await;
+        Mock::given(method("GET")).and(path("/dict.tgz")).respond_with(ResponseTemplate::new(500)).up_to_n_times(1).mount(&server).await;
+        serve(&server, "/dict.tgz", dict.clone()).await;
+        let t = build(Some(fake_assets(&server.uri(), &core, &ort, &dict)), None);
+
+        t.packs.start(PackKey::Engine, t.notify.clone()).unwrap();
+        wait_idle(&t.packs).await;
+        assert!(matches!(engine_status(&t), LocalModelStatus::Failed { .. }));
+        t.packs.start(PackKey::Engine, t.notify.clone()).unwrap();
+        wait_idle(&t.packs).await;
+        assert_eq!(engine_status(&t), LocalModelStatus::Ready, "{:?}", engine_status(&t));
+        // core.zip / ort.tgz は 1 回ずつしか取得していない(`expect(1)` は、サーバーの drop 時に検証される)。
+        assert!(std::fs::read_dir(t.store.downloads_dir()).unwrap().next().is_none(), "完了後はアーカイブも残らない");
     }
 
     #[tokio::test]

@@ -39,7 +39,11 @@ pub(crate) fn start_core(s: &AppState, pack: &str, accepted_terms_version: &str,
     }
     let key = PackKey::parse(pack)?;
     s.speech_core.packs.start(key, notify)?;
-    s.settings.set_speech_core_terms_version(&terms_version())
+    // 取得はもう始まっている。同意の保存に失敗しても、取得は止めずに成功として返す(次回の取得の前に、また確認が出るだけ)。
+    if let Err(e) = s.settings.set_speech_core_terms_version(&terms_version()) {
+        log::warn!("speech core terms consent could not be saved: {e}");
+    }
+    Ok(())
 }
 
 pub(crate) async fn list_voices_core(s: &AppState) -> Result<Vec<Voice>> {
@@ -127,7 +131,7 @@ mod tests {
     fn with_server(server: &MockServer, body: &[u8]) -> AppState {
         let store = Arc::new(Store::new(temp_root()));
         let engine = CoreEngine::new(store.clone(), None, Arc::new(|| Err(CoreError::Load("n/a".into()))));
-        let mut packs = Packs::new(store.clone(), None, reqwest::Client::new(), engine.clone());
+        let mut packs = Packs::new(store.clone(), crate::tts::voicevox::catalog::engine_assets_for("linux", "x86_64"), reqwest::Client::new(), engine.clone());
         packs.override_voice_spec("0", ModelSpec { url: format!("{}/0.vvm", server.uri()), size: body.len() as u64, sha256: sha256_hex(body) });
         let core = SpeechCore { store, engine, packs: Arc::new(packs) };
         unconfigured().with_speech_core(Arc::new(core))

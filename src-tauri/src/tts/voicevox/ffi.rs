@@ -169,6 +169,11 @@ mod native {
     unsafe impl Sync for NativeCore {}
 
     impl NativeCore {
+        /// 汚染された Mutex でも使い続ける(`Drop` の中で再び panic して、ネイティブの解放を飛ばさないため)。
+        fn lock_state(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, [u8; 16]>> {
+            self.state.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
         pub fn load(core_lib: &Path, ort_lib: &Path, dict_dir: &Path, cpu_threads: u16) -> Result<Self, CoreError> {
             let api = api(core_lib)?;
             let ort_path = c_path(ort_lib)?;
@@ -196,7 +201,7 @@ mod native {
 
     impl CoreBackend for NativeCore {
         fn load_voice_model(&self, vvm: &Path) -> Result<(), CoreError> {
-            let mut loaded = self.state.lock().unwrap();
+            let mut loaded = self.lock_state();
             if loaded.contains_key(vvm) {
                 return Ok(());
             }
@@ -219,7 +224,7 @@ mod native {
         }
 
         fn audio_query(&self, text: &str, style_id: u32) -> Result<String, CoreError> {
-            let _serial = self.state.lock().unwrap();
+            let _serial = self.lock_state();
             let text = CString::new(text).map_err(|_| CoreError::Synthesis("text contains NUL".into()))?;
             let mut out: *mut c_char = std::ptr::null_mut();
             // SAFETY: `text` は呼び出しの間生きている。
@@ -232,7 +237,7 @@ mod native {
         }
 
         fn synthesis(&self, query_json: &str, style_id: u32) -> Result<Vec<u8>, CoreError> {
-            let _serial = self.state.lock().unwrap();
+            let _serial = self.lock_state();
             let q = CString::new(query_json).map_err(|_| CoreError::Synthesis("query contains NUL".into()))?;
             let mut len: usize = 0;
             let mut wav: *mut u8 = std::ptr::null_mut();
@@ -248,7 +253,7 @@ mod native {
         }
 
         fn unload_all(&self) {
-            let mut loaded = self.state.lock().unwrap();
+            let mut loaded = self.lock_state();
             for (_, id) in loaded.drain() {
                 // SAFETY: `synthesizer` は有効で、`id` は、ロード時に CORE から得たモデル ID。失敗は無視する。
                 let _ = unsafe { (self.api.synthesizer_unload_voice_model)(self.synthesizer, &id) };

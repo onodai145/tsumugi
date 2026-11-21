@@ -45,6 +45,9 @@ fn io(e: std::io::Error) -> ExtractError {
     ExtractError::Io(e.to_string())
 }
 
+/// アーカイブのエントリ数の上限(0 バイトのファイルを大量に入れて、inode を使い切る攻撃を防ぐ)。公式の取得物は数十個。
+pub const MAX_ENTRIES: usize = 10_000;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
     /// 1 ファイルの展開後の最大バイト数。
@@ -136,6 +139,9 @@ fn found_slots(select: &Select<'_>) -> Vec<bool> {
 pub fn extract_zip(archive: &Path, dest_dir: &Path, select: Select<'_>, limits: Limits) -> Result<(), ExtractError> {
     let file = std::fs::File::open(archive).map_err(io)?;
     let mut z = zip::ZipArchive::new(file).map_err(|_| ExtractError::Format)?;
+    if z.len() > MAX_ENTRIES {
+        return Err(ExtractError::TooLarge);
+    }
     let mut found = found_slots(&select);
     let mut budget = Budget { max_file: limits.max_file, left: limits.max_total };
     for i in 0..z.len() {
@@ -162,7 +168,12 @@ pub fn extract_tgz(archive: &Path, dest_dir: &Path, select: Select<'_>, limits: 
     let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(file));
     let mut found = found_slots(&select);
     let mut budget = Budget { max_file: limits.max_file, left: limits.max_total };
+    let mut seen = 0usize;
     for entry in ar.entries().map_err(|_| ExtractError::Format)? {
+        seen += 1;
+        if seen > MAX_ENTRIES {
+            return Err(ExtractError::TooLarge);
+        }
         let mut e = entry.map_err(|_| ExtractError::Format)?;
         let path = e.path().map_err(|_| ExtractError::Format)?.into_owned();
         let Some(rel) = relative(&path)? else { continue };
@@ -297,6 +308,17 @@ mod tests {
         assert_eq!(extract_tgz(&a, &d.join("o1"), Select::All, Limits { max_file: 10, max_total: 100 }), Err(ExtractError::TooLarge));
         let bad = put(&d, "b.tgz", b"not gzip at all");
         assert_eq!(extract_tgz(&bad, &d.join("o2"), Select::All, LIM), Err(ExtractError::Format));
+    }
+
+    #[test]
+    fn archives_with_too_many_entries_are_rejected() {
+        let d = temp_root();
+        let names: Vec<String> = (0..=MAX_ENTRIES).map(|i| format!("top/f{i}")).collect();
+        let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b""[..])).collect();
+        let z = put(&d, "a.zip", &make_zip(&entries));
+        assert_eq!(extract_zip(&z, &d.join("o1"), Select::All, LIM), Err(ExtractError::TooLarge));
+        let t = put(&d, "a.tgz", &make_tgz(&entries));
+        assert_eq!(extract_tgz(&t, &d.join("o2"), Select::All, LIM), Err(ExtractError::TooLarge));
     }
 
     #[test]
