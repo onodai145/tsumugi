@@ -139,6 +139,23 @@ describe("SpeechSection", () => {
       vi.spyOn(events.speechCoreStatusChanged, "listen").mockResolvedValue((() => {}) as never);
     });
 
+    it("保存前にラジオを内蔵へ切り替えても、外部エンジンの古い状態を内蔵の状態として出さない", async () => {
+      app.speechStatus = { type: "ok" };
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
+      const { getByTestId, queryByTestId } = render(SpeechSection);
+      expect(getByTestId("speech-status").textContent).toContain("接続できています");
+      await fireEvent.click(getByTestId("speech-engine-core"));
+      expect(queryByTestId("speech-status")).toBeNull();
+    });
+
+    it("外部エンジンの声の ID が内蔵に無いときは、内蔵に切り替えた時点で、取得済みの声を選び直す", async () => {
+      app.speech = { ...app.speech, defaultVoiceId: "999" };
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
+      const { getByTestId } = render(SpeechSection);
+      await fireEvent.click(getByTestId("speech-engine-core"));
+      await vi.waitFor(() => expect((getByTestId("speech-voice") as HTMLSelectElement).value).toBe("3"));
+    });
+
     it("対応しない環境では、内蔵のラジオを選べない(外部エンジンのまま)", async () => {
       vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok({ ...coreInfo(), supported: false }) as never);
       const { getByTestId } = render(SpeechSection);

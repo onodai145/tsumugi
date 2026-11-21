@@ -46,6 +46,8 @@
 
   const statusText = $derived.by(() => {
     const s = app.speechStatus;
+    // 状態は、保存済みのエンジンのもの。保存前にラジオを切り替えただけなら、出さない(別のエンジンの状態になる)。
+    if (engine !== app.speech.engine) return "";
     if (engine === "voicevoxCore") {
       if (s.type === "ok") return "内蔵エンジンで読み上げられています";
       if (s.type === "error") return `読み上げに失敗しています(${speechErrorText(s.message)})`;
@@ -57,6 +59,12 @@
   });
   /// 声の選択肢。外部は接続テストで取得したもの、内蔵は取得済みの VVM の声。
   const voiceOptions = $derived(engine === "voicevoxCore" ? installedVoices(coreInfo) : voices);
+  // 内蔵に切り替えたとき、いまの声の ID(外部エンジンのもの)が取得済みの声に無ければ、取得済みの声の先頭にする。
+  $effect(() => {
+    if (engine !== "voicevoxCore" || !coreInfo) return;
+    const options = installedVoices(coreInfo);
+    if (options.length > 0 && !options.some((v) => v.id === defaultVoiceId)) defaultVoiceId = options[0].id;
+  });
   const credit = $derived(engine === "voicevoxCore" ? creditFor(coreInfo, defaultVoiceId) : null);
 
   /// 入力欄の URL(未保存でよい)でエンジンに接続し、選べる声を取得する。
