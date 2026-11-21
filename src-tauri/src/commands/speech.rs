@@ -2,7 +2,7 @@
 //! `#[tauri::command]` はそれを呼ぶ薄い殻にする(`commands/mcp.rs` と同じ流儀)。
 
 use crate::domain::speech::{QUEUE_LIMIT_DEFAULT, QUEUE_LIMIT_MAX};
-use crate::domain::{ColumnSpeech, SpeechSettings};
+use crate::domain::{ColumnSpeech, SpeechEngineKind, SpeechSettings};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 use crate::tts::engine::{SpeechEngine, SynthParams, Voice};
@@ -47,6 +47,12 @@ pub(crate) fn set_column_speech_core(s: &AppState, column_id: &str, speech: Colu
     Ok(speech)
 }
 
+/// エンジンを使える設定か。外部は URL が要る。内蔵は URL を使わない(未取得・非対応は、合成のときに
+/// `ERR_NOT_READY` / `ERR_UNSUPPORTED` になる)。
+fn engine_is_configured(settings: &SpeechSettings) -> bool {
+    settings.engine == SpeechEngineKind::VoicevoxCore || !settings.external_url.trim().is_empty()
+}
+
 fn params_of(settings: &SpeechSettings) -> SynthParams {
     SynthParams { speed_scale: settings.speed_scale, volume: settings.volume }
 }
@@ -69,7 +75,7 @@ pub(crate) fn enqueue_note_core(s: &AppState, column_id: &str, note_id: &str, te
     if text.chars().count() > SPEECH_TEXT_MAX_CHARS {
         return Err(invalid(ERR_TEXT_TOO_LONG));
     }
-    if settings.external_url.trim().is_empty() {
+    if !engine_is_configured(&settings) {
         return Err(invalid(ERR_NOT_CONFIGURED));
     }
     let voice_id = if column.speech.voice_id.is_empty() { settings.default_voice_id.clone() } else { column.speech.voice_id.clone() };
@@ -99,7 +105,7 @@ pub(crate) fn test_speech_core(s: &AppState, text: &str) -> Result<()> {
     if text.chars().count() > SPEECH_TEXT_MAX_CHARS {
         return Err(invalid(ERR_TEXT_TOO_LONG));
     }
-    if settings.external_url.trim().is_empty() {
+    if !engine_is_configured(&settings) {
         return Err(invalid(ERR_NOT_CONFIGURED));
     }
     if settings.default_voice_id.is_empty() {
@@ -302,6 +308,21 @@ mod tests {
         let s = state_with(SpeechSettings { default_voice_id: String::new(), ..on() }, vec![column("c1", col_on())]);
         let e = enqueue_note_core(&s, "c1", "n", "a").unwrap_err();
         assert!(e.to_string().contains(ERR_NO_VOICE), "{e}");
+    }
+
+    #[test]
+    fn the_built_in_engine_needs_no_url_to_queue_notes_or_the_test_phrase() {
+        // 実アプリの確認(Task 12)で、内蔵エンジンなのに ERR_NOT_CONFIGURED になった不具合の再現。
+        let core = SpeechSettings { engine: crate::domain::SpeechEngineKind::VoicevoxCore, external_url: String::new(), ..on() };
+        let s = state_with(core, vec![column("c1", col_on())]);
+        enqueue_note_core(&s, "c1", "n1", "こんにちは").unwrap();
+        test_speech_core(&s, "テストです").unwrap();
+        assert_eq!(pending(&s).len(), 2, "内蔵エンジンは URL が空でも積める");
+
+        // 外部エンジンで URL が空なら、従来どおり未設定。
+        let ext = SpeechSettings { external_url: String::new(), ..on() };
+        let s = state_with(ext, vec![column("c1", col_on())]);
+        assert!(test_speech_core(&s, "テストです").unwrap_err().to_string().contains(ERR_NOT_CONFIGURED));
     }
 
     #[test]

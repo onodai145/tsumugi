@@ -1,12 +1,32 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import SaveBar from "./SaveBar.svelte";
   import { Button } from "$lib/components/ui/button";
   import { app } from "../../lib/store.svelte";
-  import { commands, unwrap, type Voice } from "../../lib/ipc";
+  import { commands, unwrap, type SpeechCoreInfo, type SpeechEngineKind, type Voice } from "../../lib/ipc";
   import { isMobilePlatform } from "../../lib/platform";
+  import { creditFor, installedVoices, speechErrorText } from "../../lib/speechCore";
+  import SpeechCoreSection from "./SpeechCoreSection.svelte";
+  import Dropdown from "../Dropdown.svelte";
 
-  // 読み上げの全体設定(Issue #625)。外部の VOICEVOX 互換エンジン(VOICEVOX ENGINE / AivisSpeech Engine)に接続する。
+  // 読み上げの全体設定(Issue #625)。外部の VOICEVOX 互換エンジン(VOICEVOX ENGINE / AivisSpeech Engine)に接続するか、
+  // 内蔵の VOICEVOX CORE(段階2。デスクトップのみ)を使う。
   let enabled = $state(app.speech.enabled);
+  let engine = $state<SpeechEngineKind>(app.speech.engine);
+  /// 内蔵エンジンの状態(`SpeechCoreSection` が埋める)。取得済みの声の選択肢とクレジットに使う。
+  let coreInfo = $state<SpeechCoreInfo | null>(null);
+  /// この環境が内蔵エンジンに対応しているか。外部エンジンを選んでいる間は `SpeechCoreSection` が無いので、マウント時に引く。
+  let coreSupportedAtMount = $state(true);
+  const coreUnsupported = $derived(!coreSupportedAtMount || coreInfo?.supported === false);
+
+  onMount(() => {
+    commands
+      .getSpeechCoreInfo()
+      .then((r) => {
+        if (r.status === "ok" && r.data && r.data.supported === false) coreSupportedAtMount = false;
+      })
+      .catch(() => {});
+  });
   let externalUrl = $state(app.speech.externalUrl);
   let defaultVoiceId = $state(app.speech.defaultVoiceId);
   let speedScale = $state(app.speech.speedScale);
@@ -27,10 +47,26 @@
 
   const statusText = $derived.by(() => {
     const s = app.speechStatus;
+    // 状態は、保存済みのエンジンのもの。保存前にラジオを切り替えただけなら、出さない(別のエンジンの状態になる)。
+    if (engine !== app.speech.engine) return "";
+    if (engine === "voicevoxCore") {
+      if (s.type === "ok") return "内蔵エンジンで読み上げられています";
+      if (s.type === "error") return `読み上げに失敗しています(${speechErrorText(s.message)})`;
+      return "";
+    }
     if (s.type === "ok") return "エンジンに接続できています";
     if (s.type === "error") return `エンジンに接続できません(${s.message})`;
     return "";
   });
+  /// 声の選択肢。外部は接続テストで取得したもの、内蔵は取得済みの VVM の声。
+  const voiceOptions = $derived(engine === "voicevoxCore" ? installedVoices(coreInfo) : voices);
+  // 内蔵に切り替えたとき、いまの声の ID(外部エンジンのもの)が取得済みの声に無ければ、取得済みの声の先頭にする。
+  $effect(() => {
+    if (engine !== "voicevoxCore" || !coreInfo) return;
+    const options = installedVoices(coreInfo);
+    if (options.length > 0 && !options.some((v) => v.id === defaultVoiceId)) defaultVoiceId = options[0].id;
+  });
+  const credit = $derived(engine === "voicevoxCore" ? creditFor(coreInfo, defaultVoiceId) : null);
 
   /// 入力欄の URL(未保存でよい)でエンジンに接続し、選べる声を取得する。
   async function connectTest() {
@@ -55,7 +91,7 @@
     try {
       await app.setSpeechSettings({
         enabled,
-        engine: "external",
+        engine,
         externalUrl: externalUrl.trim(),
         defaultVoiceId,
         speedScale: Number(speedScale),
@@ -103,36 +139,55 @@
   ここは全カラム共通のマスタースイッチです(両方オンのときだけ読み上げます)。
 </p>
 
-<label class="mb-2 flex flex-col gap-1 text-sm">
-  <span class="text-muted-foreground">音声合成エンジンの URL(VOICEVOX ENGINE / AivisSpeech Engine)</span>
-  <input class={inputClass} data-testid="speech-url" placeholder="http://192.168.1.10:50021" bind:value={externalUrl} />
-</label>
-<div class="mb-2 flex items-center gap-2 text-sm">
-  <Button variant="outline" disabled={connecting || !externalUrl.trim()} onclick={connectTest} data-testid="speech-connect-test">
-    {connecting ? "接続中…" : "接続テスト"}
-  </Button>
-  {#if connectResult}<span class="break-words text-xs text-muted-foreground" data-testid="speech-connect-result">{connectResult}</span>{/if}
-</div>
+<fieldset class="mb-3 mt-0 flex flex-wrap gap-x-4 gap-y-1 border-0 p-0 text-sm">
+  <legend class="mb-1 text-muted-foreground">音声合成エンジン</legend>
+  <label class="flex items-center gap-1.5">
+    <input type="radio" name="speech-engine" value="external" data-testid="speech-engine-external" bind:group={engine} /> 外部のエンジン(VOICEVOX ENGINE / AivisSpeech Engine)
+  </label>
+  <label class="flex items-center gap-1.5">
+    <input type="radio" name="speech-engine" value="voicevoxCore" data-testid="speech-engine-core" bind:group={engine} disabled={coreUnsupported} /> 内蔵の VOICEVOX CORE{coreUnsupported ? "(この環境では使えません)" : ""}
+  </label>
+</fieldset>
+
+{#if engine === "external"}
+  <label class="mb-2 flex flex-col gap-1 text-sm">
+    <span class="text-muted-foreground">音声合成エンジンの URL(VOICEVOX ENGINE / AivisSpeech Engine)</span>
+    <input class={inputClass} data-testid="speech-url" placeholder="http://192.168.1.10:50021" bind:value={externalUrl} />
+  </label>
+  <div class="mb-2 flex items-center gap-2 text-sm">
+    <Button variant="outline" disabled={connecting || !externalUrl.trim()} onclick={connectTest} data-testid="speech-connect-test">
+      {connecting ? "接続中…" : "接続テスト"}
+    </Button>
+    {#if connectResult}<span class="break-words text-xs text-muted-foreground" data-testid="speech-connect-result">{connectResult}</span>{/if}
+  </div>
+{:else}
+  <SpeechCoreSection bind:info={coreInfo} />
+{/if}
 {#if statusText}
   <p class="my-1 mb-3 text-xs {app.speechStatus.type === 'error' ? 'text-destructive' : 'text-muted-foreground'}" data-testid="speech-status">{statusText}</p>
 {/if}
-<p class="my-1 mb-4 text-xs text-muted-foreground">
-  エンジンは別途起動してください。LAN 内のサーバーに接続する場合は、そのアドレスを指定します。
-  {#if isMobilePlatform}
-    Android では、端末の設定によって LAN 内の平文(http://)のサーバーに接続できないことがあります。接続テストが失敗する場合は、https:// の URL を指定してください。
-  {/if}
-</p>
-
-<label class="mb-2 flex flex-col gap-1 text-sm">
-  <span class="text-muted-foreground">既定の声(カラムごとに上書きできます)</span>
-  <select class={inputClass} data-testid="speech-voice" bind:value={defaultVoiceId}>
-    {#if voices.length === 0}
-      <option value={defaultVoiceId}>{defaultVoiceId ? `現在の声: ${defaultVoiceId}` : "接続テストで声を取得してください"}</option>
-    {:else}
-      {#each voices as v (v.id)}<option value={v.id}>{v.label}</option>{/each}
+{#if engine === "external"}
+  <p class="my-1 mb-4 text-xs text-muted-foreground">
+    エンジンは別途起動してください。LAN 内のサーバーに接続する場合は、そのアドレスを指定します。
+    {#if isMobilePlatform}
+      Android では、端末の設定によって LAN 内の平文(http://)のサーバーに接続できないことがあります。接続テストが失敗する場合は、https:// の URL を指定してください。
     {/if}
-  </select>
-</label>
+  </p>
+{/if}
+
+<div class="mb-2 flex flex-col gap-1 text-sm">
+  <span class="text-muted-foreground">既定の声(カラムごとに上書きできます)</span>
+  <!-- OSネイティブの<select>は一覧をWebKitGTK/OSが描画してテーマが効かないため、Dropdownを使う(スタイルガイド)。 -->
+  <Dropdown
+    bind:value={defaultVoiceId}
+    options={voiceOptions.map((v) => ({ value: v.id, label: v.label }))}
+    placeholder={defaultVoiceId ? `現在の声: ${defaultVoiceId}` : engine === "voicevoxCore" ? "声を取得してください" : "接続テストで声を取得してください"}
+    testid="speech-voice"
+  />
+</div>
+{#if credit}
+  <p class="my-1 mb-3 text-xs text-muted-foreground" data-testid="speech-core-credit">クレジット表記: {credit}</p>
+{/if}
 
 <label class="mb-2 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">話速({speedScale})</span>

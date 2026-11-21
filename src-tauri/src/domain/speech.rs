@@ -59,13 +59,27 @@ impl ColumnSpeech {
     }
 }
 
-/// 読み上げに使うエンジンの種類。段階2で `VoicevoxCore`(内蔵)を足す。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+/// 読み上げに使うエンジンの種類。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum SpeechEngineKind {
     /// 外部の VOICEVOX 互換エンジン(VOICEVOX ENGINE / AivisSpeech Engine)に HTTP で接続する。
     #[default]
     External,
+    /// 内蔵の VOICEVOX CORE(デスクトップのみ。エンジン一式と声は、設定画面から取得する)。Issue #625 段階2。
+    VoicevoxCore,
+}
+
+/// 知らないエンジンの種類(将来のエンジン・手編集)は `External` として読む。設定ファイル全体が読めなくなるのを避ける。
+/// (`deserialize_with` は specta の TS 出力が受け付けないので、`Deserialize` を手で実装する。)
+impl<'de> Deserialize<'de> for SpeechEngineKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(match s.as_str() {
+            "voicevoxCore" => Self::VoicevoxCore,
+            _ => Self::External,
+        })
+    }
 }
 
 /// 全体の読み上げ設定。`SettingsData.speech`。**エクスポートには含めない**。インポートでは現在の値を維持する。
@@ -173,6 +187,22 @@ mod tests {
         let s = ColumnSpeech { queue_limit: 200, voice_id: "12".into(), ..ColumnSpeech::default() }.normalized();
         assert_eq!(s.queue_limit, QUEUE_LIMIT_MAX);
         assert_eq!(s.voice_id, "12");
+    }
+
+    #[test]
+    fn the_engine_kind_round_trips_as_camel_case() {
+        assert_eq!(serde_json::to_string(&SpeechEngineKind::VoicevoxCore).unwrap(), "\"voicevoxCore\"");
+        let s: SpeechSettings = serde_json::from_str(r#"{"engine":"voicevoxCore"}"#).unwrap();
+        assert_eq!(s.engine, SpeechEngineKind::VoicevoxCore);
+        assert!(s.validate().is_ok(), "内蔵は URL が空でも有効");
+    }
+
+    #[test]
+    fn an_unknown_engine_kind_falls_back_to_external_instead_of_failing_the_whole_file() {
+        // 将来のエンジンや、設定ファイルの手編集で、知らない値が入っていても、設定ファイル全体を読めなくしない。
+        let s: SpeechSettings = serde_json::from_str(r#"{"enabled":true,"engine":"someFutureEngine"}"#).unwrap();
+        assert_eq!(s.engine, SpeechEngineKind::External);
+        assert!(s.enabled, "ほかの項目は読める");
     }
 
     #[test]

@@ -82,6 +82,10 @@ pub(crate) struct SettingsData {
     /// (ファイルで勝手に接続先が変わらないようにするため)。
     #[serde(default)]
     pub(crate) speech: crate::domain::SpeechSettings,
+    /// 内蔵 VOICEVOX CORE の規約(VOICEVOX 音声モデル・ONNX Runtime)に同意した版(Issue #625 段階2)。
+    /// **エクスポートには含めない**。インポートでは現在の値を維持する(取り込みで同意済みにならない)。
+    #[serde(default)]
+    pub(crate) speech_core_terms_version: Option<String>,
 }
 
 /// 保存先。テスト用に `Memory`(ディスクI/Oなし)を持つ。
@@ -373,6 +377,16 @@ impl SettingsStore {
     pub fn set_local_model_license_version(&self, version: &str) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
         guard.local_model_license_version = Some(version.to_string());
+        self.save(&guard)
+    }
+
+    pub fn speech_core_terms_version(&self) -> Option<String> {
+        self.data.lock().unwrap().speech_core_terms_version.clone()
+    }
+
+    pub fn set_speech_core_terms_version(&self, version: &str) -> Result<()> {
+        let mut guard = self.data.lock().unwrap();
+        guard.speech_core_terms_version = Some(version.to_string());
         self.save(&guard)
     }
 
@@ -780,6 +794,7 @@ pub fn migrate_from_legacy_sqlite(
             mcp: Default::default(),
             local_model_license_version: None,
             speech: Default::default(),
+            speech_core_terms_version: None,
         }),
     };
     store.save(&store.data.lock().unwrap())?;
@@ -808,6 +823,16 @@ mod tests {
         assert_eq!(s.local_model_license_version(), None);
         s.set_local_model_license_version("2026-11-09").unwrap();
         assert_eq!(s.local_model_license_version().as_deref(), Some("2026-11-09"));
+    }
+
+    #[test]
+    fn speech_core_terms_version_is_none_until_set_and_then_kept() {
+        let d: SettingsData = serde_json::from_str("{}").unwrap();
+        assert_eq!(d.speech_core_terms_version, None, "旧い設定ファイルは未同意として読む");
+        let s = SettingsStore::new_in_memory();
+        assert_eq!(s.speech_core_terms_version(), None);
+        s.set_speech_core_terms_version("abc").unwrap();
+        assert_eq!(s.speech_core_terms_version().as_deref(), Some("abc"));
     }
 
     #[test]

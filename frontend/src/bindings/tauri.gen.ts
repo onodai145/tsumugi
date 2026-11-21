@@ -516,6 +516,21 @@ export const commands = {
 	/**  待ち行列を空にして、再生中の読み上げを止める。 */
 	stopSpeech: () => typedError<null, Error>(__TAURI_INVOKE("stop_speech")),
 	getSpeechStatus: () => typedError<SpeechStatus, Error>(__TAURI_INVOKE("get_speech_status")),
+	/**  内蔵エンジンの状態(エンジン一式・声ごと・対応可否・規約の版と同意済みか)。 */
+	getSpeechCoreInfo: () => typedError<SpeechCoreInfo, Error>(__TAURI_INVOKE("get_speech_core_info")),
+	/**  規約の全文(確認画面用)。 */
+	getSpeechCoreTerms: () => typedError<SpeechCoreTerms, Error>(__TAURI_INVOKE("get_speech_core_terms")),
+	/**
+	 *  取得を始める。`pack` は `"engine"` か、声(VVM)の ID。`accepted_terms_version` が現行の版と一致しなければ拒否する。
+	 *  進捗は Event `SpeechCoreStatusChanged`。設定画面を閉じても続く。
+	 */
+	startSpeechCoreDownload: (pack: string, acceptedTermsVersion: string) => typedError<null, Error>(__TAURI_INVOKE("start_speech_core_download", { pack, acceptedTermsVersion })),
+	/**  実行中の取得を止める。途中までのファイルは残り、次回は続きから再開する。 */
+	cancelSpeechCoreDownload: () => typedError<null, Error>(__TAURI_INVOKE("cancel_speech_core_download")),
+	/**  取得済みのものと、途中までのファイルを削除する。取得中は拒否する。 */
+	deleteSpeechCorePack: (pack: string) => typedError<null, Error>(__TAURI_INVOKE("delete_speech_core_pack", { pack })),
+	/**  取得済みの声(設定画面・カラムの声の選択肢)。 */
+	listSpeechCoreVoices: () => typedError<Voice[], Error>(__TAURI_INVOKE("list_speech_core_voices")),
 };
 
 /** Events */
@@ -529,6 +544,7 @@ export const events = {
 	localModelStatusChanged: makeEvent<LocalModelStatusChanged>("local-model-status-changed"),
 	scheduledPostFailed: makeEvent<ScheduledPostFailed>("scheduled-post-failed"),
 	scheduledPostPosted: makeEvent<ScheduledPostPosted>("scheduled-post-posted"),
+	speechCoreStatusChanged: makeEvent<SpeechCoreStatusChanged>("speech-core-status-changed"),
 	speechStatusChanged: makeEvent<SpeechStatusChanged>("speech-status-changed"),
 };
 
@@ -573,6 +589,13 @@ export type BackgroundMedia = {
  *  OS keyringへ別途保存する(`session`モジュール参照。Postgres/MySQLで単一スロットを共用)。
  */
 export type CacheBackendConfig = { type: "sqlite" } | { type: "postgres"; host: string; port: number; database: string; user: string } | { type: "mySql"; host: string; port: number; database: string; user: string };
+
+export type CharacterInfo = {
+	name: string,
+	/**  クレジット表記(例 `VOICEVOX:ずんだもん`)。 */
+	credit: string,
+	styles: StyleInfo[],
+};
 
 /**
  *  Misskey のクリップ（名前付きノート集合）。今回のスコープでは一覧表示と
@@ -1157,6 +1180,13 @@ export type OpenedColumn = {
 	notifications: Notification[],
 };
 
+export type PackInfo = {
+	status: LocalModelStatus,
+	sizeBytes: number,
+	/**  途中まで取得済みで、再開できるファイルのバイト数(無ければ 0)。 */
+	partialBytes: number,
+};
+
 export type PaneChild = {
 	node: PaneNode,
 	size: number | null,
@@ -1281,10 +1311,39 @@ export type SourceItem = {
 	name: string,
 };
 
-/**  読み上げに使うエンジンの種類。段階2で `VoicevoxCore`(内蔵)を足す。 */
+/**  設定画面に出す、内蔵エンジンの状態の全体。 */
+export type SpeechCoreInfo = {
+	/**  この環境が内蔵エンジンに対応しているか。 */
+	supported: boolean,
+	/**  現行の規約の版(`start_speech_core_download` の引数に渡す)。 */
+	termsVersion: string,
+	/**  現行の版に同意済みか。 */
+	termsAccepted: boolean,
+	engine: PackInfo,
+	voices: VoicePackInfo[],
+};
+
+/**
+ *  内蔵 VOICEVOX CORE のエンジン一式・声(VVM)の状態が変わった(Issue #625 段階2)。
+ *  取得の進捗・完了・失敗・削除のたびに、状態の全体(スナップショット)を送る。
+ */
+export type SpeechCoreStatusChanged = {
+	info: SpeechCoreInfo,
+};
+
+/**  規約の確認画面に出す 2 つの規約の全文と、現行の版。 */
+export type SpeechCoreTerms = {
+	version: string,
+	voiceModels: string,
+	onnxruntime: string,
+};
+
+/**  読み上げに使うエンジンの種類。 */
 export type SpeechEngineKind = 
 /**  外部の VOICEVOX 互換エンジン(VOICEVOX ENGINE / AivisSpeech Engine)に HTTP で接続する。 */
-"external";
+"external" | 
+/**  内蔵の VOICEVOX CORE(デスクトップのみ。エンジン一式と声は、設定画面から取得する)。Issue #625 段階2。 */
+"voicevoxCore";
 
 /**  全体の読み上げ設定。`SettingsData.speech`。**エクスポートには含めない**。インポートでは現在の値を維持する。 */
 export type SpeechSettings = {
@@ -1314,6 +1373,12 @@ export type SpeechStatusChanged = {
 };
 
 export type SplitDirection = "row" | "column";
+
+export type StyleInfo = {
+	/**  スタイル ID の数値の文字列(声の ID と同じ)。 */
+	id: string,
+	name: string,
+};
 
 /**
  *  `sync_server_mutes` の戻り値。ユーザ/ブロックミュート数とワードミュートのルール数を
@@ -1675,6 +1740,12 @@ export type Voice = {
 	id: string,
 	/**  表示名(例 `ずんだもん（ノーマル）`)。 */
 	label: string,
+};
+
+export type VoicePackInfo = {
+	id: string,
+	pack: PackInfo,
+	characters: CharacterInfo[],
 };
 
 /* Tauri Specta runtime */
