@@ -191,9 +191,12 @@ describe("AddColumnModal の読み上げ(Issue #625)", () => {
     tab.speech = { enabled: true, speakAuthor: true, queueLimit: 5, voiceId: "" };
     app.groups = [{ id: "group1", width: 400, auto: false, tabs: [tab], activeTabId: tab.id }];
     const { getByTestId } = render(AddColumnModal, { onclose: vi.fn(), groupId: null, editTab: tab });
-    await waitFor(() => {
-      const options = Array.from((getByTestId("speech-column-voice") as HTMLSelectElement).options).map((o) => o.textContent?.trim());
-      expect(options).toContain("ずんだもん（ノーマル）");
+    const trigger = getByTestId("speech-column-voice");
+    expect(trigger.tagName, "テーマの効く Dropdown(ネイティブの <select> ではない)").toBe("BUTTON");
+    expect(trigger.textContent).toContain("既定の声を使う");
+    await waitFor(async () => {
+      await fireEvent.click(trigger);
+      expect(getByTestId("speech-column-voice-option-3").textContent).toContain("ずんだもん（ノーマル）");
     });
     expect(invokeMock.mock.calls.some((c) => c[0] === "list_speech_voices")).toBe(false);
   });

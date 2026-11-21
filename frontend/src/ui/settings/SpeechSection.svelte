@@ -7,6 +7,7 @@
   import { isMobilePlatform } from "../../lib/platform";
   import { creditFor, installedVoices, speechErrorText } from "../../lib/speechCore";
   import SpeechCoreSection from "./SpeechCoreSection.svelte";
+  import Dropdown from "../Dropdown.svelte";
 
   // 読み上げの全体設定(Issue #625)。外部の VOICEVOX 互換エンジン(VOICEVOX ENGINE / AivisSpeech Engine)に接続するか、
   // 内蔵の VOICEVOX CORE(段階2。デスクトップのみ)を使う。
@@ -174,16 +175,16 @@
   </p>
 {/if}
 
-<label class="mb-2 flex flex-col gap-1 text-sm">
+<div class="mb-2 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">既定の声(カラムごとに上書きできます)</span>
-  <select class={inputClass} data-testid="speech-voice" bind:value={defaultVoiceId}>
-    {#if voiceOptions.length === 0}
-      <option value={defaultVoiceId}>{defaultVoiceId ? `現在の声: ${defaultVoiceId}` : engine === "voicevoxCore" ? "声を取得してください" : "接続テストで声を取得してください"}</option>
-    {:else}
-      {#each voiceOptions as v (v.id)}<option value={v.id}>{v.label}</option>{/each}
-    {/if}
-  </select>
-</label>
+  <!-- OSネイティブの<select>は一覧をWebKitGTK/OSが描画してテーマが効かないため、Dropdownを使う(スタイルガイド)。 -->
+  <Dropdown
+    bind:value={defaultVoiceId}
+    options={voiceOptions.map((v) => ({ value: v.id, label: v.label }))}
+    placeholder={defaultVoiceId ? `現在の声: ${defaultVoiceId}` : engine === "voicevoxCore" ? "声を取得してください" : "接続テストで声を取得してください"}
+    testid="speech-voice"
+  />
+</div>
 {#if credit}
   <p class="my-1 mb-3 text-xs text-muted-foreground" data-testid="speech-core-credit">クレジット表記: {credit}</p>
 {/if}

@@ -49,9 +49,12 @@ describe("SpeechSection", () => {
 
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith("http://192.168.1.10:50021"));
     expect((await findByTestId("speech-connect-result")).textContent).toContain("2");
-    const select = getByTestId("speech-voice") as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.textContent?.trim())).toContain("ずんだもん（ノーマル）");
-    expect(select.value, "声が未選択なら先頭を選ぶ").toBe("3");
+    // OS ネイティブの <select> ではなく、テーマの効く Dropdown(スタイルガイド §選択式の入力)。
+    const trigger = getByTestId("speech-voice");
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.textContent, "声が未選択なら先頭を選ぶ").toContain("ずんだもん（ノーマル）");
+    await fireEvent.click(trigger);
+    expect(getByTestId("speech-voice-option-2").textContent).toContain("四国めたん（ノーマル）");
   });
 
   it("URL が空のあいだは、接続テストを押せない", () => {
@@ -153,7 +156,7 @@ describe("SpeechSection", () => {
       vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
       const { getByTestId } = render(SpeechSection);
       await fireEvent.click(getByTestId("speech-engine-core"));
-      await vi.waitFor(() => expect((getByTestId("speech-voice") as HTMLSelectElement).value).toBe("3"));
+      await vi.waitFor(() => expect(getByTestId("speech-voice").textContent).toContain("ずんだもん（ノーマル）"));
     });
 
     it("対応しない環境では、内蔵のラジオを選べない(外部エンジンのまま)", async () => {
@@ -187,10 +190,10 @@ describe("SpeechSection", () => {
       app.speech = { ...app.speech, engine: "voicevoxCore", defaultVoiceId: "3" };
       vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
       const { findByTestId, getByTestId } = render(SpeechSection);
-      await vi.waitFor(() => {
-        const options = Array.from((getByTestId("speech-voice") as HTMLSelectElement).options).map((o) => o.textContent?.trim());
-        expect(options).toContain("ずんだもん（ノーマル）");
-      });
+      await vi.waitFor(() => expect(getByTestId("speech-voice").textContent).toContain("ずんだもん（ノーマル）"));
+      await fireEvent.click(getByTestId("speech-voice"));
+      expect(getByTestId("speech-voice-option-3").textContent).toContain("ずんだもん（ノーマル）");
+      expect(document.querySelector('[data-testid="speech-voice-option-14"]'), "未取得の声は選択肢に出ない").toBeNull();
       expect((await findByTestId("speech-core-credit")).textContent).toContain("VOICEVOX:ずんだもん");
     });
 

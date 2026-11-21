@@ -90,6 +90,12 @@
   let queueLimit = $state(edit?.speech.queueLimit ?? 5);
   let speechVoiceId = $state(edit?.speech.voiceId ?? "");
   let speechVoices = $state<Voice[]>([]);
+  /// 声の選択肢。先頭は「既定の声を使う」。選択中の声が一覧に無いときは、その ID を「現在の声」として足す。
+  const speechVoiceOptions = $derived([
+    { value: "", label: "既定の声を使う" },
+    ...speechVoices.map((v) => ({ value: v.id, label: v.label })),
+    ...(speechVoiceId && !speechVoices.some((v) => v.id === speechVoiceId) ? [{ value: speechVoiceId, label: `現在の声: ${speechVoiceId}` }] : []),
+  ]);
   const speechShown = $derived(sourceType !== "notifications");
   const speechSettings = $derived<ColumnSpeechValue>({
     enabled: speechEnabled,
@@ -408,20 +414,11 @@
             bind:value={queueLimit}
           />
         </label>
-        <label class="flex flex-col gap-1 text-sm">
+        <div class="flex flex-col gap-1 text-sm">
           <span class="text-muted-foreground">声</span>
-          <select
-            data-testid="speech-column-voice"
-            class="rounded-lg border border-border bg-muted px-2.5 py-2 font-[inherit] text-foreground"
-            bind:value={speechVoiceId}
-          >
-            <option value="">既定の声を使う</option>
-            {#each speechVoices as v (v.id)}<option value={v.id}>{v.label}</option>{/each}
-            {#if speechVoiceId && !speechVoices.some((v) => v.id === speechVoiceId)}
-              <option value={speechVoiceId}>現在の声: {speechVoiceId}</option>
-            {/if}
-          </select>
-        </label>
+          <!-- OSネイティブの<select>は一覧をWebKitGTK/OSが描画してテーマが効かないため、Dropdownを使う(スタイルガイド)。 -->
+          <Dropdown bind:value={speechVoiceId} options={speechVoiceOptions} testid="speech-column-voice" />
+        </div>
       {/if}
     </div>
   {/if}
