@@ -75,6 +75,33 @@ android {
     }
 }
 
+// 内蔵 VOICEVOX CORE(Issue #625 段階3)の libvoicevox_core.so は、共有の libc++_shared.so を要求する。
+// アプリ本体は静的 libc++ なので、NDK のものを、ビルド時にコピーして APK に入れる(バイナリはリポジトリに入れない)。
+// 64bit の ABI だけ(内蔵は arm64 と x86_64 でだけ使える)。NDK は CI・ローカルとも、環境変数で r27c を指す(CLAUDE.md)。
+val voicevoxLibcxxDir = layout.buildDirectory.dir("generated/voicevoxLibcxx")
+val copyLibcxxShared by tasks.registering {
+    val outDir = voicevoxLibcxxDir
+    outputs.dir(outDir)
+    doLast {
+        val ndkFromEnv = listOf("ANDROID_NDK_ROOT", "ANDROID_NDK_HOME", "NDK_HOME")
+            .firstNotNullOfOrNull { System.getenv(it)?.takeIf { v -> v.isNotBlank() } }
+        val ndk = if (ndkFromEnv != null) File(ndkFromEnv) else android.ndkDirectory
+        val prebuilt = File(ndk, "toolchains/llvm/prebuilt").listFiles()?.firstOrNull()
+            ?: throw GradleException("NDK の toolchains/llvm/prebuilt が見つかりません: $ndk")
+        val out = outDir.get().asFile
+        mapOf("arm64-v8a" to "aarch64-linux-android", "x86_64" to "x86_64-linux-android").forEach { (abi, triple) ->
+            val src = File(prebuilt, "sysroot/usr/lib/$triple/libc++_shared.so")
+            if (!src.isFile) throw GradleException("libc++_shared.so が見つかりません: $src")
+            File(out, abi).mkdirs()
+            src.copyTo(File(out, "$abi/libc++_shared.so"), overwrite = true)
+        }
+    }
+}
+android.sourceSets.getByName("main").jniLibs.srcDir(voicevoxLibcxxDir)
+tasks.configureEach {
+    if (name.startsWith("merge") && name.endsWith("JniLibFolders")) dependsOn(copyLibcxxShared)
+}
+
 rust {
     rootDirRel = "../../../"
 }
