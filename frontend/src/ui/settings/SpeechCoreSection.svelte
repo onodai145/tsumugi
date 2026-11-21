@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import { commands, events, unwrap } from "../../lib/ipc";
-  import type { PackInfo, SpeechCoreInfo, SpeechCoreTerms } from "../../lib/ipc";
+  import type { PackInfo, SpeechCoreInfo, SpeechCoreTerms, VoicePackInfo } from "../../lib/ipc";
   import { formatBytes, statusText } from "../../lib/localModel";
   import { voiceCharactersLabel } from "../../lib/speechCore";
   import SpeechCoreTermsDialog from "./SpeechCoreTermsDialog.svelte";
@@ -113,6 +113,21 @@
     }
   }
 
+  /// 声のモデルの絞り込み(キャラクター名の部分一致。前後の空白と大文字小文字は無視する)。
+  let search = $state("");
+  /// 取得済み・取得中のものを上にまとめる(それ以外は元の順)。
+  const visibleVoices = $derived.by(() => {
+    if (!info) return [];
+    const q = search.trim().toLowerCase();
+    const hit = (v: VoicePackInfo) => q === "" || v.characters.some((c) => c.name.toLowerCase().includes(q));
+    const rank = (v: VoicePackInfo) => (["ready", "downloading", "verifying"].includes(v.pack.status.type) ? 0 : 1);
+    return info.voices
+      .map((v, i) => ({ v, i }))
+      .filter(({ v }) => hit(v))
+      .sort((a, b) => rank(a.v) - rank(b.v) || a.i - b.i)
+      .map(({ v }) => v);
+  });
+
   const canGet = (p: PackInfo) => p.status.type === "notInstalled" || p.status.type === "failed";
 </script>
 
@@ -137,21 +152,45 @@
     {#if !engineReady}
       <p class="mb-2 mt-0 text-xs text-muted-foreground" data-testid="speech-core-voices-hint">声の取得は、エンジン一式を取得してからできます。</p>
     {/if}
+    <p class="mb-1 mt-2 text-sm font-medium">声のモデル</p>
+    <p class="mb-2 mt-0 text-xs text-muted-foreground" data-testid="speech-core-voices-intro">
+      1 つのファイルに複数のキャラクターが入っています。使いたいキャラクターが入っているものを取得してください(同じキャラクターが、複数のファイルに入っていることもあります)。
+    </p>
+    <input
+      class="mb-2 w-full rounded-lg border border-border bg-muted px-2.5 py-1.5 font-[inherit] text-sm text-foreground"
+      placeholder="キャラクター名で絞り込む"
+      aria-label="キャラクター名で絞り込む"
+      data-testid="speech-core-search"
+      bind:value={search}
+    />
+    {#if visibleVoices.length === 0}
+      <p class="m-0 text-sm text-muted-foreground" data-testid="speech-core-no-match">該当する声がありません。</p>
+    {/if}
     <ul class="m-0 list-none p-0">
-      {#each info.voices as v (v.id)}
-        <li class="flex flex-wrap items-center gap-2 border-t border-border py-1.5 text-sm">
-          <span class="min-w-0 flex-1 break-words" data-testid="speech-core-voice-{v.id}-label">
-            {voiceCharactersLabel(v)}
-            <span class="text-xs text-muted-foreground">(約 {formatBytes(v.pack.sizeBytes)})</span>
-          </span>
-          <span class="text-xs text-muted-foreground" data-testid="speech-core-voice-{v.id}-status">{statusText(v.pack.status)}</span>
-          {#if canGet(v.pack)}
-            <Button variant="outline" size="sm" disabled={!engineReady || busy || starting} onclick={() => onGet(v.id, v.pack.sizeBytes)} data-testid="speech-core-voice-{v.id}-get">取得</Button>
-          {:else if v.pack.status.type === "downloading"}
-            <Button variant="outline" size="sm" onclick={cancel} data-testid="speech-core-voice-{v.id}-cancel">キャンセル</Button>
-          {:else if v.pack.status.type === "ready"}
-            <Button variant="outline" size="sm" disabled={busy} onclick={() => remove(v.id)} data-testid="speech-core-voice-{v.id}-delete">削除</Button>
-          {/if}
+      {#each visibleVoices as v (v.id)}
+        <li class="border-t border-border py-1.5 text-sm" data-testid="speech-core-row-{v.id}">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="min-w-0 flex-1 break-words" data-testid="speech-core-voice-{v.id}-label">
+              <span class="font-medium">{voiceCharactersLabel(v)}</span>
+              <span class="text-xs text-muted-foreground">(約 {formatBytes(v.pack.sizeBytes)})</span>
+            </span>
+            <span class="text-xs text-muted-foreground" data-testid="speech-core-voice-{v.id}-status">{statusText(v.pack.status)}</span>
+            {#if canGet(v.pack)}
+              <Button variant="outline" size="sm" disabled={!engineReady || busy || starting} onclick={() => onGet(v.id, v.pack.sizeBytes)} data-testid="speech-core-voice-{v.id}-get">取得</Button>
+            {:else if v.pack.status.type === "downloading"}
+              <Button variant="outline" size="sm" onclick={cancel} data-testid="speech-core-voice-{v.id}-cancel">キャンセル</Button>
+            {:else if v.pack.status.type === "ready"}
+              <Button variant="outline" size="sm" disabled={busy} onclick={() => remove(v.id)} data-testid="speech-core-voice-{v.id}-delete">削除</Button>
+            {/if}
+          </div>
+          <details class="mt-1 text-xs text-muted-foreground">
+            <summary class="cursor-pointer">含まれるスタイル</summary>
+            <ul class="my-1 list-none pl-3" data-testid="speech-core-voice-{v.id}-styles">
+              {#each v.characters as c, ci (ci)}
+                <li>{c.name}: {c.styles.map((st) => st.name).join("・")}</li>
+              {/each}
+            </ul>
+          </details>
         </li>
       {/each}
     </ul>

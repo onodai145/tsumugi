@@ -145,6 +145,45 @@ describe("SpeechCoreSection", () => {
     await vi.waitFor(() => expect(del).toHaveBeenCalledWith("0"));
   });
 
+  it("声のモデルの説明が出る(1 つのファイルに複数のキャラクターが入っている)", async () => {
+    vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(info()));
+    const { findByTestId } = render(SpeechCoreSection);
+    expect((await findByTestId("speech-core-voices-intro")).textContent).toContain("複数のキャラクター");
+  });
+
+  it("キャラクター名で絞り込める。該当がなければ、その旨を出す", async () => {
+    vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(info()));
+    const { findByTestId, getByTestId, queryByTestId } = render(SpeechCoreSection);
+    await findByTestId("speech-core-voice-0-label");
+    await fireEvent.input(getByTestId("speech-core-search"), { target: { value: "ずんだ" } });
+    expect(queryByTestId("speech-core-voice-0-label")).not.toBeNull();
+    expect(queryByTestId("speech-core-voice-1-label"), "冥鳴ひまりの行は消える").toBeNull();
+    await fireEvent.input(getByTestId("speech-core-search"), { target: { value: "  いない  " } });
+    expect(queryByTestId("speech-core-voice-0-label")).toBeNull();
+    expect(getByTestId("speech-core-no-match").textContent).toContain("該当する声がありません");
+    await fireEvent.input(getByTestId("speech-core-search"), { target: { value: "" } });
+    expect(queryByTestId("speech-core-voice-1-label")).not.toBeNull();
+  });
+
+  it("取得済み・取得中の行は上にまとめる(それ以外は元の順)", async () => {
+    const i = info({ termsAccepted: true, engine: pack({ type: "ready" }) });
+    i.voices[1].pack = pack({ type: "ready" });
+    vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(i));
+    const { findByTestId } = render(SpeechCoreSection);
+    await findByTestId("speech-core-voice-0-label");
+    const ids = Array.from(document.querySelectorAll('[data-testid^="speech-core-row-"]')).map((e) => e.getAttribute("data-testid"));
+    expect(ids).toEqual(["speech-core-row-1", "speech-core-row-0"]);
+  });
+
+  it("行を開くと、含まれるキャラクターごとのスタイルが見られる", async () => {
+    vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(info()));
+    const { findByTestId } = render(SpeechCoreSection);
+    const t = (await findByTestId("speech-core-voice-0-styles")).textContent ?? "";
+    expect(t).toContain("四国めたん");
+    expect(t).toContain("ずんだもん");
+    expect(t).toContain("ノーマル");
+  });
+
   it("購読を解除して閉じる。取得の応答より新しい Event を、古い応答で上書きしない", async () => {
     let resolveInfo: (v: unknown) => void = () => {};
     const getInfo = vi.spyOn(commands, "getSpeechCoreInfo").mockReturnValue(new Promise((r) => (resolveInfo = r)) as never);
