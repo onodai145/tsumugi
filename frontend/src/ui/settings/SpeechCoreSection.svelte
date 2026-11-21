@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import { commands, events, unwrap } from "../../lib/ipc";
   import type { PackInfo, SpeechCoreInfo, SpeechCoreTerms, VoicePackInfo } from "../../lib/ipc";
@@ -22,6 +22,8 @@
   /// スマホで、回線の確認を出している間だけ非 null。
   let networkConfirm = $state<{ pack: string; sizeBytes: number; message: string } | null>(null);
   let checking = $state(false);
+  /// 確認を取りやめたときに、フォーカスを戻す先(押した取得ボタン)。
+  let confirmTrigger: HTMLElement | null = null;
 
   // Event を受けるたびに進める。refresh の応答が、それより新しい Event の状態を古いスナップショットで上書きしないために使う。
   let eventSeq = 0;
@@ -86,8 +88,8 @@
 
   /// スマホで、モバイル通信・従量制・判定できないときは、同意の前に回線の確認を出す(翻訳モデルの取得と同じ流儀)。
   /// デスクトップは回線を見ない(従来どおり)。状態を取得できなくても、不明として確認を出すだけで、続ければ開始できる。
-  async function onGet(pack: string, sizeBytes: number) {
-    if (!info || starting || checking) return;
+  async function onGet(pack: string, sizeBytes: number, trigger: HTMLElement | null = null) {
+    if (!info || starting || checking || networkConfirm) return;
     err = null;
     if (isMobilePlatform) {
       checking = true;
@@ -100,11 +102,21 @@
         checking = false;
       }
       if (warning) {
+        confirmTrigger = trigger;
         networkConfirm = { pack, sizeBytes, message: warning };
         return;
       }
     }
     await proceed(pack, sizeBytes);
+  }
+
+  /// 回線の確認を取りやめる。閉じたダイアログの分、フォーカスが body に落ちるので、押した取得ボタンに戻す。
+  async function cancelNetworkConfirm() {
+    networkConfirm = null;
+    const trigger = confirmTrigger;
+    confirmTrigger = null;
+    await tick();
+    trigger?.focus();
   }
 
   /// 同意済みの版なら、そのまま開始する。未同意(規約が変わったときを含む)なら、規約を出して同意を取る。
@@ -168,7 +180,7 @@
       <span class="font-medium" data-testid="speech-core-engine-label">エンジン一式(約 {formatBytes(info.engine.sizeBytes)})</span>
       <span class="text-xs text-muted-foreground" data-testid="speech-core-engine-status">{statusText(info.engine.status)}</span>
       {#if canGet(info.engine)}
-        <Button variant="outline" size="sm" disabled={busy || starting} onclick={() => onGet("engine", info!.engine.sizeBytes)} data-testid="speech-core-engine-get">取得</Button>
+        <Button variant="outline" size="sm" disabled={busy || starting || checking || !!networkConfirm} onclick={(e) => onGet("engine", info!.engine.sizeBytes, e.currentTarget)} data-testid="speech-core-engine-get">取得</Button>
       {:else if info.engine.status.type === "downloading"}
         <Button variant="outline" size="sm" onclick={cancel} data-testid="speech-core-engine-cancel">キャンセル</Button>
       {:else if info.engine.status.type === "ready"}
@@ -203,7 +215,7 @@
             </span>
             <span class="text-xs text-muted-foreground" data-testid="speech-core-voice-{v.id}-status">{statusText(v.pack.status)}</span>
             {#if canGet(v.pack)}
-              <Button variant="outline" size="sm" disabled={!engineReady || busy || starting} onclick={() => onGet(v.id, v.pack.sizeBytes)} data-testid="speech-core-voice-{v.id}-get">取得</Button>
+              <Button variant="outline" size="sm" disabled={!engineReady || busy || starting || checking || !!networkConfirm} onclick={(e) => onGet(v.id, v.pack.sizeBytes, e.currentTarget)} data-testid="speech-core-voice-{v.id}-get">取得</Button>
             {:else if v.pack.status.type === "downloading"}
               <Button variant="outline" size="sm" onclick={cancel} data-testid="speech-core-voice-{v.id}-cancel">キャンセル</Button>
             {:else if v.pack.status.type === "ready"}
@@ -237,7 +249,7 @@
       networkConfirm = null;
       void proceed(c.pack, c.sizeBytes);
     }}
-    onCancel={() => (networkConfirm = null)}
+    onCancel={cancelNetworkConfirm}
   />
 {/if}
 

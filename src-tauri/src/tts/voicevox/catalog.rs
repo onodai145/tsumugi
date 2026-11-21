@@ -293,9 +293,10 @@ mod tests {
         assert_eq!(ENGINE_SET, "core0.17.1-ort1.17.3-dict1.11", "デスクトップの置き場の名前は変えない");
         #[cfg(target_os = "android")]
         assert_eq!(ENGINE_SET, "core0.17.1-ort1.23.2-dict1.11");
-        // ビルド対象の環境の取得物の ORT の版と、置き場の名前が食い違わないこと。
-        let a = engine_assets().expect("このテストを走らせる環境は対応している");
-        assert_eq!(ENGINE_SET, format!("core{CORE_VERSION}-ort{}-dict{DICT_VERSION}", a.ort_version));
+        // ビルド対象の環境の取得物の ORT の版と、置き場の名前が食い違わないこと(非対応の環境では、取得物が無いので見ない)。
+        if let Some(a) = engine_assets() {
+            assert_eq!(ENGINE_SET, format!("core{CORE_VERSION}-ort{}-dict{DICT_VERSION}", a.ort_version));
+        }
     }
 
     #[test]

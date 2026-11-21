@@ -249,6 +249,30 @@ describe("SpeechCoreSection", () => {
       expect(start).not.toHaveBeenCalled();
     });
 
+    it("確認を出している間は、取得ボタンを押せない(再入を防ぐ)", async () => {
+      mobile.value = true;
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(ready()));
+      vi.spyOn(commands, "getNetworkStatus").mockResolvedValue(cellular);
+      vi.spyOn(commands, "startSpeechCoreDownload").mockResolvedValue(ok(null));
+      const { findByTestId, findByText } = render(SpeechCoreSection);
+      await fireEvent.click(await findByTestId("speech-core-voice-0-get"));
+      await findByText(/モバイル通信を使用中です/);
+      expect((await findByTestId("speech-core-voice-0-get") as HTMLButtonElement).disabled).toBe(true);
+      expect((await findByTestId("speech-core-voice-1-get") as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("確認でキャンセルすると、フォーカスが押した取得ボタンに戻る", async () => {
+      mobile.value = true;
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(ready()));
+      vi.spyOn(commands, "getNetworkStatus").mockResolvedValue(cellular);
+      const { findByTestId, findByText, getByRole } = render(SpeechCoreSection);
+      const get = (await findByTestId("speech-core-voice-1-get")) as HTMLButtonElement;
+      await fireEvent.click(get);
+      await findByText(/モバイル通信を使用中です/);
+      await fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "キャンセル" }));
+      await vi.waitFor(() => expect(document.activeElement).toBe(get));
+    });
+
     it("未同意なら、確認を承認したあとに規約が出る。Wi-Fi(非従量制)なら確認は出ずに規約へ", async () => {
       mobile.value = true;
       vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(info()));
