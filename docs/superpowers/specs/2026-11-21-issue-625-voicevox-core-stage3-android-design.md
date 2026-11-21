@@ -109,6 +109,28 @@ SHA-256 の全文は実装で `catalog.rs` に入れる(上の値は実物から
 
 CI: `android-build`(コンパイル・リンク)が通ること。`scripts/check-android-page-size.sh` は APK の `libtsumugi_lib.so` だけを見る(取得するライブラリは APK に入らない)ので、変更しない。
 
+## 実機・エミュレーターでの確認(段階3の実装時)
+
+API 36 の x86_64 エミュレーター(ページサイズ 4KB、ゲスト RAM 3 GB)で、`cargo tauri android build --debug --target x86_64` の APK(`com.onodai.tsumugi.debug`)を動かし、WebView のリモートデバッグ(CDP)から `invoke` で確かめた(画面操作はしていない)。
+
+| 項目 | 結果 |
+|---|---|
+| APK の中身 | `lib/x86_64/libc++_shared.so` が入っていて、LOAD の整列は 16KB(0x4000) |
+| `supported` | `true`(Android x86_64) |
+| 取得(エンジン一式 32,128,402 バイト) | `downloading → verifying → ready`。約 8 秒(SHA-256 検証・展開を含む) |
+| 取得(声 `0`、59,308,488 バイト) | 同じく約 8 秒 |
+| **関門 1: アプリ内の dlopen**(targetSdk 36) | **通った**。`/data/data/com.onodai.tsumugi.debug/voicevox/engine-core0.17.1-ort1.23.2-dict1.11/{core,ort}/*.so` を `libloading` で開けた(logcat の `avc: granted { execute }`)。`test_speech` が約 4.5 秒で `ok`(`voicevox_core::synthesizer: CPUを利用します`) |
+| **関門 2: 静的 libc++ と共有 libc++ の同居** | 通った(弱い確認)。アプリのプロセス(llama.cpp で静的 libc++ を含む + APK の `libc++_shared.so`)は、続けて 6 回の `test_speech` のあとも同じ PID で生きていて、logcat に SIGSEGV・Fatal は無し(PSS 約 450 MB)。ただし 2 回目以降は状態が既に `ok` で、合成が終わるのを待てていない。ローカル翻訳は、端末にモデルが無く動かしていない |
+
+エミュレーターの注意: ゲスト RAM 2 GB では、約 490 MB のデバッグ APK を動かすと system_server が落ちた。3 GB にして安定した(エミュレーターはホストで約 4.5 GB 使う。cgroup の上限を付けて起動する)。画面が消えるとアプリが凍結されて CDP が応答しなくなるので、`svc power stayon true` で画面を点けたままにする。
+
+未確認(この spec を書いた時点):
+
+- 関門 3(16KB ページの端末)。16KB のシステムイメージが入っていない(数 GB のダウンロードになる)。
+- Pixel 8 Pro の実機での、実アプリの確認(音が実際に出ること、モバイル通信の確認、スマホ幅の見た目)。ユーザーの `com.onodai.tsumugi.debug` を上書きするため、確認を取ってから行う。
+- arm64 の APK(`lib/arm64-v8a/libc++_shared.so` の同梱)。
+- UI(確認ダイアログ、非対応の文面)の実画面。単体テストだけ。
+
 ## リスクと未確認事項
 
 - **アプリ内の dlopen**(関門 1): 最大のリスク。通らなければ APK 同梱へ。
