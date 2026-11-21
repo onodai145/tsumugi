@@ -1,5 +1,5 @@
 //! VOICEVOX CORE の C API(公式の `libvoicevox_core`)を `libloading` で呼ぶ薄いラッパ(Issue #625 段階2)。
-//! **`unsafe` はこのファイルに閉じ込める**。ネイティブの呼び出し(`NativeCore`)は `cfg(desktop)` だけ。
+//! **`unsafe` はこのファイルに閉じ込める**。ネイティブの呼び出し(`NativeCore`)は iOS 以外(デスクトップと Android)だけ。
 //! 背後の `CoreBackend` trait は全環境にあり、`engine.rs` のテストでは偽の実装に差し替える。
 //! 関数の宣言は、公式ヘッダ `voicevox_core.h`(0.17.1)に合わせてある。
 
@@ -31,10 +31,10 @@ pub fn default_cpu_threads() -> u16 {
     (cores / 2).clamp(1, u16::MAX as usize) as u16
 }
 
-#[cfg(desktop)]
+#[cfg(not(target_os = "ios"))]
 pub use native::NativeCore;
 
-#[cfg(desktop)]
+#[cfg(not(target_os = "ios"))]
 mod native {
     use super::{CoreBackend, CoreError};
     use libloading::Library;
