@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, within } from "@testing-library/svelte";
 import { commands, events } from "../../lib/ipc";
 import type { PackInfo, SpeechCoreInfo } from "../../lib/ipc";
 
@@ -13,6 +13,13 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+
+const mobile = vi.hoisted(() => ({ value: false }));
+vi.mock("../../lib/platform", () => ({
+  get isMobilePlatform() {
+    return mobile.value;
+  },
+}));
 
 const { default: SpeechCoreSection } = await import("./SpeechCoreSection.svelte");
 
@@ -44,6 +51,7 @@ let emit: (i: SpeechCoreInfo) => void = () => {};
 const unlisten = vi.fn();
 
 beforeEach(() => {
+  mobile.value = false;
   unlisten.mockReset();
   vi.spyOn(commands, "getSpeechCoreTerms").mockResolvedValue(ok(TERMS) as never);
   vi.spyOn(events.speechCoreStatusChanged, "listen").mockImplementation((async (cb: (e: { payload: { info: SpeechCoreInfo } }) => void) => {
@@ -197,5 +205,70 @@ describe("SpeechCoreSection", () => {
     await vi.waitFor(() => expect(getByTestId("speech-core-engine-status").textContent).toContain("取得済み"));
     unmount();
     expect(unlisten).toHaveBeenCalled();
+  });
+
+  describe("回線の確認(スマホのみ)", () => {
+    const ready = () => info({ termsAccepted: true, engine: pack({ type: "ready" }) });
+    const cellular = { transport: "cellular", metered: "metered" } as never;
+
+    it("デスクトップでは、回線を読まず、確認も出さずに開始する", async () => {
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(ready()));
+      const net = vi.spyOn(commands, "getNetworkStatus");
+      const start = vi.spyOn(commands, "startSpeechCoreDownload").mockResolvedValue(ok(null));
+      const { findByTestId, queryByText } = render(SpeechCoreSection);
+      await fireEvent.click(await findByTestId("speech-core-voice-0-get"));
+      await vi.waitFor(() => expect(start).toHaveBeenCalledWith("0", "v1"));
+      expect(net).not.toHaveBeenCalled();
+      expect(queryByText(/モバイル通信/)).toBeNull();
+    });
+
+    it("スマホのモバイル通信では、確認が先に出て、承認するまで開始しない", async () => {
+      mobile.value = true;
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(ready()));
+      vi.spyOn(commands, "getNetworkStatus").mockResolvedValue(cellular);
+      const start = vi.spyOn(commands, "startSpeechCoreDownload").mockResolvedValue(ok(null));
+      const { findByTestId, findByText, getByRole } = render(SpeechCoreSection);
+      await fireEvent.click(await findByTestId("speech-core-voice-0-get"));
+      expect(await findByText(/モバイル通信を使用中です。約 59.3 MB/)).toBeTruthy();
+      expect(start).not.toHaveBeenCalled();
+      await fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "取得" }));
+      await vi.waitFor(() => expect(start).toHaveBeenCalledWith("0", "v1"));
+    });
+
+    it("確認でキャンセルすると、取得も規約の画面も始まらない", async () => {
+      mobile.value = true;
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(info()));
+      vi.spyOn(commands, "getNetworkStatus").mockResolvedValue(cellular);
+      const start = vi.spyOn(commands, "startSpeechCoreDownload").mockResolvedValue(ok(null));
+      const { findByTestId, findByText, getByRole, queryByText, queryByTestId } = render(SpeechCoreSection);
+      await fireEvent.click(await findByTestId("speech-core-engine-get"));
+      await findByText(/モバイル通信を使用中です/);
+      await fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "キャンセル" }));
+      expect(queryByText(/モバイル通信を使用中です/)).toBeNull();
+      expect(queryByTestId("speech-terms-dialog")).toBeNull();
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it("未同意なら、確認を承認したあとに規約が出る。Wi-Fi(非従量制)なら確認は出ずに規約へ", async () => {
+      mobile.value = true;
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(info()));
+      const net = vi.spyOn(commands, "getNetworkStatus").mockResolvedValue(cellular);
+      const { findByTestId, findByText, getByRole, queryByText } = render(SpeechCoreSection);
+      await fireEvent.click(await findByTestId("speech-core-engine-get"));
+      await findByText(/モバイル通信を使用中です/);
+      await fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "取得" }));
+      expect(await findByTestId("speech-terms-dialog")).toBeTruthy();
+      await fireEvent.click(await findByTestId("speech-terms-cancel"));
+      net.mockResolvedValue({ transport: "wifi", metered: "unmetered" } as never);
+      await fireEvent.click(await findByTestId("speech-core-engine-get"));
+      expect(await findByTestId("speech-terms-dialog")).toBeTruthy();
+      expect(queryByText(/モバイル通信を使用中です/)).toBeNull();
+    });
+  });
+
+  it("対応しない環境の文面に、Android の対応も含まれる", async () => {
+    vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(info({ supported: false })));
+    const { findByTestId } = render(SpeechCoreSection);
+    expect((await findByTestId("speech-core-unsupported")).textContent).toContain("Android");
   });
 });
