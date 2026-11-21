@@ -553,3 +553,12 @@ jobs:
           for abi in aarch64-linux-android x86_64-linux-android; do
             scripts/check-android-page-size.sh "src-tauri/target/$abi/debug/libtsumugi_lib.so" "$readelf"
           done
+
+      # 内蔵 VOICEVOX CORE(Issue #625 段階3)の libvoicevox_core.so が要る libc++_shared.so が、APK に入っていること。
+      # app/build.gradle.kts のタスクの紐付けが外れても、ビルドは成功し、利用者には取得し直しても直らない
+      # SPEECH_CORE_LOAD_FAILED が出るだけになるため、APK の中身で確かめる。
+      - name: APK(64bit)に libc++_shared.so が入っていること
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          scripts/check-apk-libcxx-shared.test.sh
+          scripts/check-apk-libcxx-shared.sh src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
