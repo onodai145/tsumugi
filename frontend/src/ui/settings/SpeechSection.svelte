@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import SaveBar from "./SaveBar.svelte";
   import { Button } from "$lib/components/ui/button";
   import { app } from "../../lib/store.svelte";
@@ -13,6 +14,18 @@
   let engine = $state<SpeechEngineKind>(app.speech.engine);
   /// 内蔵エンジンの状態(`SpeechCoreSection` が埋める)。取得済みの声の選択肢とクレジットに使う。
   let coreInfo = $state<SpeechCoreInfo | null>(null);
+  /// この環境が内蔵エンジンに対応しているか。外部エンジンを選んでいる間は `SpeechCoreSection` が無いので、マウント時に引く。
+  let coreSupportedAtMount = $state(true);
+  const coreUnsupported = $derived(!coreSupportedAtMount || coreInfo?.supported === false);
+
+  onMount(() => {
+    commands
+      .getSpeechCoreInfo()
+      .then((r) => {
+        if (r.status === "ok" && r.data && r.data.supported === false) coreSupportedAtMount = false;
+      })
+      .catch(() => {});
+  });
   let externalUrl = $state(app.speech.externalUrl);
   let defaultVoiceId = $state(app.speech.defaultVoiceId);
   let speedScale = $state(app.speech.speedScale);
@@ -123,7 +136,7 @@
     <input type="radio" name="speech-engine" value="external" data-testid="speech-engine-external" bind:group={engine} /> 外部のエンジン(VOICEVOX ENGINE / AivisSpeech Engine)
   </label>
   <label class="flex items-center gap-1.5">
-    <input type="radio" name="speech-engine" value="voicevoxCore" data-testid="speech-engine-core" bind:group={engine} /> 内蔵の VOICEVOX CORE
+    <input type="radio" name="speech-engine" value="voicevoxCore" data-testid="speech-engine-core" bind:group={engine} disabled={coreUnsupported} /> 内蔵の VOICEVOX CORE{coreUnsupported ? "(この環境では使えません)" : ""}
   </label>
 </fieldset>
 

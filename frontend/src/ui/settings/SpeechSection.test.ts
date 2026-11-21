@@ -139,6 +139,14 @@ describe("SpeechSection", () => {
       vi.spyOn(events.speechCoreStatusChanged, "listen").mockResolvedValue((() => {}) as never);
     });
 
+    it("対応しない環境では、内蔵のラジオを選べない(外部エンジンのまま)", async () => {
+      vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok({ ...coreInfo(), supported: false }) as never);
+      const { getByTestId } = render(SpeechSection);
+      await vi.waitFor(() => expect((getByTestId("speech-engine-core") as HTMLInputElement).disabled).toBe(true));
+      expect((getByTestId("speech-engine-external") as HTMLInputElement).disabled).toBe(false);
+      expect((getByTestId("speech-engine-external") as HTMLInputElement).checked).toBe(true);
+    });
+
     it("既定は外部エンジン。内蔵に切り替えると、URL の入力が消えて、取得の部品が出る", async () => {
       vi.spyOn(commands, "getSpeechCoreInfo").mockResolvedValue(ok(coreInfo()) as never);
       const { getByTestId, queryByTestId, findByTestId } = render(SpeechSection);
