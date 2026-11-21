@@ -79,13 +79,30 @@ android {
 // アプリ本体は静的 libc++ なので、NDK のものを、ビルド時にコピーして APK に入れる(バイナリはリポジトリに入れない)。
 // 64bit の ABI だけ(内蔵は arm64 と x86_64 でだけ使える)。NDK は CI・ローカルとも、環境変数で r27c を指す(CLAUDE.md)。
 val voicevoxLibcxxDir = layout.buildDirectory.dir("generated/voicevoxLibcxx")
+// コピー元の NDK。環境変数があればそれ、無ければ AGP の既定の NDK。ただし後者は、r27c(27.x)でなければ止める
+// (別の版の libc++_shared.so が黙って入るのを防ぐ。llama.cpp の NDK の件と同じ種類の不一致)。
+// プロバイダーにして、タスクが要るときにだけ評価する(NDK が無くても、`gradlew tasks` などは動く)。
+val voicevoxNdkRoot = providers.provider {
+    val fromEnv = listOf("ANDROID_NDK_ROOT", "ANDROID_NDK_HOME", "NDK_HOME")
+        .firstNotNullOfOrNull { System.getenv(it)?.takeIf { v -> v.isNotBlank() } }
+    if (fromEnv != null) {
+        File(fromEnv).absolutePath
+    } else {
+        val dir = try { android.ndkDirectory } catch (e: Exception) { null }
+        if (dir == null || !dir.name.startsWith("27.")) {
+            throw GradleException("NDK が r27c(27.x)として見つかりません(AGP の既定: ${dir ?: "未インストール"})。ANDROID_NDK_ROOT で r27c を指してください(CLAUDE.md の Android の節)")
+        }
+        dir.absolutePath
+    }
+}
 val copyLibcxxShared by tasks.registering {
     val outDir = voicevoxLibcxxDir
+    val ndkRoot = voicevoxNdkRoot
     outputs.dir(outDir)
+    // NDK を替えたら、コピーし直す(入力に無いと、出力が残っている間は UP-TO-DATE のまま、古い版の libc++ が入り続ける)。
+    inputs.property("ndkRoot", ndkRoot)
     doLast {
-        val ndkFromEnv = listOf("ANDROID_NDK_ROOT", "ANDROID_NDK_HOME", "NDK_HOME")
-            .firstNotNullOfOrNull { System.getenv(it)?.takeIf { v -> v.isNotBlank() } }
-        val ndk = if (ndkFromEnv != null) File(ndkFromEnv) else android.ndkDirectory
+        val ndk = File(ndkRoot.get())
         val prebuilt = File(ndk, "toolchains/llvm/prebuilt").listFiles()?.firstOrNull()
             ?: throw GradleException("NDK の toolchains/llvm/prebuilt が見つかりません: $ndk")
         val out = outDir.get().asFile
