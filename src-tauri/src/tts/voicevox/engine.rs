@@ -13,6 +13,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// 使われなくなってから、ロード済みのモデルを解放するまで(翻訳モデルと同じ)。
+/// Android は、合成のピークが約 500 MB(Pixel 8 Pro の実測)でメモリが厳しいので短くする。
+#[cfg(target_os = "android")]
+pub const IDLE_UNLOAD: Duration = Duration::from_secs(180);
+#[cfg(not(target_os = "android"))]
 pub const IDLE_UNLOAD: Duration = Duration::from_secs(600);
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -412,5 +416,17 @@ mod tests {
         assert_eq!(s.factory_calls.load(Ordering::SeqCst), 2, "必要になったら、また作る");
         s.engine.unload();
         assert!(!s.engine.is_loaded());
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn idle_unload_is_three_minutes_on_android() {
+        assert_eq!(IDLE_UNLOAD, Duration::from_secs(180));
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn idle_unload_is_ten_minutes_on_desktop() {
+        assert_eq!(IDLE_UNLOAD, Duration::from_secs(600));
     }
 }

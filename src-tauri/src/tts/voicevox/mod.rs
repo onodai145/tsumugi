@@ -1,5 +1,5 @@
 //! 内蔵 VOICEVOX CORE(Issue #625 段階2)。設計は `docs/superpowers/specs/2026-11-20-issue-625-voicevox-core-stage2-design.md`。
-//! ネイティブの呼び出し(`ffi::NativeCore`)だけ `cfg(desktop)`。ほかは全環境でビルドし、Android などでは `supported = false`。
+//! ネイティブの呼び出し(`ffi::NativeCore`)は iOS 以外(デスクトップと Android)。ほかは全環境でビルドし、armv7・i686 の Android などでは `supported = false`。
 
 pub mod archive;
 pub mod catalog;
@@ -12,7 +12,7 @@ pub(crate) mod test_util;
 
 use catalog::EngineAssets;
 use engine::{BackendFactory, CoreEngine};
-#[cfg_attr(not(desktop), allow(unused_imports))]
+#[cfg_attr(target_os = "ios", allow(unused_imports))]
 use ffi::{CoreBackend, CoreError};
 use packs::Packs;
 use std::path::PathBuf;
@@ -46,7 +46,7 @@ impl SpeechCore {
     }
 }
 
-#[cfg(desktop)]
+#[cfg(not(target_os = "ios"))]
 fn native_factory(store: Arc<Store>, assets: Option<EngineAssets>) -> BackendFactory {
     Arc::new(move || {
         let a = assets.as_ref().ok_or_else(|| CoreError::Load("unsupported platform".into()))?;
@@ -55,7 +55,7 @@ fn native_factory(store: Arc<Store>, assets: Option<EngineAssets>) -> BackendFac
     })
 }
 
-#[cfg(not(desktop))]
+#[cfg(target_os = "ios")]
 fn native_factory(_store: Arc<Store>, _assets: Option<EngineAssets>) -> BackendFactory {
     Arc::new(|| Err(CoreError::Load("unsupported platform".into())))
 }

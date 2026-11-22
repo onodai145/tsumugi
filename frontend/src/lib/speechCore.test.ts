@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SpeechCoreInfo } from "../bindings/tauri.gen";
-import { creditFor, installedVoices, speechErrorText, voiceCharactersLabel } from "./speechCore";
+import type { NetworkStatus, SpeechCoreInfo } from "../bindings/tauri.gen";
+import { coreDownloadWarning, creditFor, installedVoices, speechErrorText, voiceCharactersLabel } from "./speechCore";
 
 const pack = (status: SpeechCoreInfo["engine"]["status"] = { type: "notInstalled" }) => ({ status, sizeBytes: 1000, partialBytes: 0 });
 
@@ -73,5 +73,26 @@ describe("voiceCharactersLabel", () => {
     const v = info().voices[0];
     v.characters.push({ ...v.characters[0] });
     expect(voiceCharactersLabel(v)).toBe("四国めたん、ずんだもん");
+  });
+});
+
+describe("coreDownloadWarning", () => {
+  const cellular: NetworkStatus = { transport: "cellular", metered: "metered" };
+  const wifi: NetworkStatus = { transport: "wifi", metered: "unmetered" };
+  const unknown: NetworkStatus = { transport: "unknown", metered: "unknown" };
+
+  it("デスクトップ(mobile=false)は、回線がどうでも確認を出さない", () => {
+    expect(coreDownloadWarning(cellular, 59_000_000, false)).toBeNull();
+    expect(coreDownloadWarning(unknown, 59_000_000, false)).toBeNull();
+  });
+
+  it("スマホでモバイル通信なら、取得するサイズ入りの確認を返す", () => {
+    expect(coreDownloadWarning(cellular, 59_308_488, true)).toContain("59.3 MB");
+    expect(coreDownloadWarning(cellular, 59_308_488, true)).toContain("モバイル通信");
+  });
+
+  it("スマホで Wi-Fi(非従量制)なら確認なし、判定できないときは注記つきの確認", () => {
+    expect(coreDownloadWarning(wifi, 59_308_488, true)).toBeNull();
+    expect(coreDownloadWarning(unknown, 59_308_488, true)).toContain("判定できませんでした");
   });
 });

@@ -1,5 +1,6 @@
 // 内蔵 VOICEVOX CORE(Issue #625 段階2)の、表示用の純粋な関数。状態は Rust が持ち、ここは文面とクレジットの引き当てだけ。
-import type { SpeechCoreInfo, Voice, VoicePackInfo } from "../bindings/tauri.gen";
+import type { NetworkStatus, SpeechCoreInfo, Voice, VoicePackInfo } from "../bindings/tauri.gen";
+import { downloadWarning } from "./localModel";
 
 /// 読み上げの状態のエラー文(識別コードを含む)を、利用者向けの日本語にする。知らない文面はそのまま返す。
 const ERROR_TEXT: [string, string][] = [
@@ -35,4 +36,10 @@ export function installedVoices(info: SpeechCoreInfo | null | undefined): Voice[
 /// 1 つの VVM に入っているキャラ名(重複なし)。
 export function voiceCharactersLabel(v: VoicePackInfo): string {
   return [...new Set(v.characters.map((c) => c.name))].join("、");
+}
+
+/// 内蔵エンジンの取得の前の、回線の確認の文面。スマホ(Android)だけで出し、デスクトップは従来どおり確認しない。
+/// `downloadWarning` は、回線を判定できないとき(デスクトップはこれ)にも確認を返すので、`mobile` で先に分ける。
+export function coreDownloadWarning(net: NetworkStatus, sizeBytes: number, mobile: boolean): string | null {
+  return mobile ? downloadWarning(net, sizeBytes) : null;
 }
