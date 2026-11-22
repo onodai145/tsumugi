@@ -588,6 +588,12 @@ mod tests {
         crate::store::search_contract::regex_contract(&store()).await;
     }
 
+    /// 空集合リテラル(Issue #608)の契約。
+    #[tokio::test]
+    async fn search_cache_empty_set_contract() {
+        crate::store::search_contract::empty_set_contract(&store()).await;
+    }
+
     /// `user.acct`(Issue #599)の契約。
     #[tokio::test]
     async fn search_cache_acct_contract() {
