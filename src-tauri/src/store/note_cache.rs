@@ -333,6 +333,8 @@ fn self_heal_node(conn: &Connection, node: &mut serde_json::Value) -> Result<boo
 /// ため(Issue #228)。
 /// 戻り値は削除したノート件数。
 fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<i64> {
+    // 接続は長命なので、万一 prune_ids が残っていても詰まらないよう先に消す(Issue #619)。
+    conn.execute("DROP TABLE IF EXISTS prune_ids", [])?;
     conn.execute(&format!("CREATE TEMP TABLE prune_ids AS {select_sql}"), params)?;
     let deleted = conn.execute("DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)", [])? as i64;
 
@@ -424,11 +426,17 @@ fn shrink_to_size(conn: &Connection, budget_bytes: i64) -> Result<i64> {
         let over_ratio = (size - budget_bytes) as f64 / size as f64;
         let to_delete = ((total as f64) * over_ratio).ceil() as i64;
         let to_delete = to_delete.clamp(1, total);
+        // delete_matching は複数文の削除なので、裸の接続では文ごとに自動コミットされ、途中で
+        // 失敗すると部分削除と prune_ids の残留が起きる。1ラウンドを1トランザクションにする
+        // (トランザクションの中に更にBEGINは張れないので、包むのは delete_matching の呼び出し側)。
+        // incremental_vacuum はトランザクションの外で行う(Issue #619)。
+        let tx = conn.unchecked_transaction()?;
         deleted += delete_matching(
-            conn,
+            &tx,
             "SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?1",
             params![to_delete],
         )?;
+        tx.commit()?;
     }
     Ok(deleted)
 }
@@ -777,5 +785,75 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM user WHERE id IN ('u1','u2')", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 2);
+    }
+
+    /// カスケード途中(note 削除後)で失敗するよう、note_tag の削除を TEMP トリガーで落とす。
+    fn inject_cascade_failure(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER fail_cascade BEFORE DELETE ON note_tag
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+    }
+
+    fn prune_ids_exists(conn: &Connection) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_temp_master WHERE type = 'table' AND name = 'prune_ids'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+            > 0
+    }
+
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+    }
+
+    /// Issue #619: サイズ上限の縮小(`shrink_to_size`)が途中で失敗しても、部分削除にならず、
+    /// TEMP テーブル `prune_ids` も残らない。
+    #[test]
+    fn shrink_to_size_failure_rolls_back_and_leaves_no_prune_ids() {
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
+        upsert_note(&conn, &note("n1", 100)).unwrap();
+        conn.execute(
+            "INSERT INTO column_note (column_id, note_id, received_at, created_at) VALUES ('c1', 'n1', 1, 100)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO column_source_boundary (column_id, source_idx, oldest_fetched_id) VALUES ('c1', 0, 'n1')",
+            [],
+        )
+        .unwrap();
+        inject_cascade_failure(&conn);
+
+        // 予算 1 バイトなので必ず削除に入る
+        assert!(shrink_to_size(&conn, 1).is_err());
+
+        assert_eq!(count(&conn, "note"), 1, "note が消えて関連だけ残る部分削除になってはいけない");
+        assert_eq!(count(&conn, "column_note"), 1);
+        assert_eq!(count(&conn, "column_source_boundary"), 1);
+        assert!(!prune_ids_exists(&conn), "失敗後に prune_ids が残ってはいけない");
+
+        // 原因が取り除かれれば、再実行でそのまま成功する(`already exists` で詰まらない)。
+        conn.execute_batch("DROP TRIGGER fail_cascade").unwrap();
+        assert_eq!(shrink_to_size(&conn, 1).unwrap(), 1);
+        assert_eq!(count(&conn, "note"), 0);
+        assert_eq!(count(&conn, "column_note"), 0);
+    }
+
+    /// Issue #619: 何らかの理由で `prune_ids` が残っていても、次の削除は詰まらない。
+    #[test]
+    fn delete_matching_tolerates_a_leftover_prune_ids_table() {
+        let conn = crate::store::db::open_cache_in_memory().unwrap();
+        upsert_note(&conn, &note("n1", 100)).unwrap();
+        conn.execute_batch("CREATE TEMP TABLE prune_ids (id TEXT)").unwrap();
+
+        let deleted = prune_sync(&conn, 0, 1, 0).unwrap();
+
+        assert_eq!(deleted, 1);
+        assert_eq!(count(&conn, "note"), 0);
+        assert!(!prune_ids_exists(&conn));
     }
 }
