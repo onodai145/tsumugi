@@ -471,7 +471,14 @@
   // (上の$effectのクリーンアップはキーストローク毎の再実行時にも走るため、そこでflushすると
   // デバウンスがキーストローク毎保存になってしまい使えない。onDestroyは実際のアンマウント時
   // にしか走らないため、ここでのみflushする)。
+  //
+  // 貼り付けた画像のプレビュー用 blob: URL もここで解放する(Issue #617)。revoke するのは
+  // removeAttached と投稿成功時だけなので、投稿せずにモーダルを閉じると URL がページの寿命まで
+  // 残ってしまう。上の早期 return より前に行う(自動保存の有無に関わらず必要)。
   onDestroy(() => {
+    for (const a of attachments) {
+      if (a.kind === "clipboard") URL.revokeObjectURL(a.previewUrl);
+    }
     if (autoSaveTimer === undefined) return;
     clearTimeout(autoSaveTimer);
     if (!accountId) return;

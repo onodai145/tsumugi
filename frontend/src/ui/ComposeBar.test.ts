@@ -491,6 +491,65 @@ describe("ComposeBar 貼り付け(Issue #117)", () => {
     await paste(getByTestId("compose-textarea"), []);
     await waitFor(() => expect(clipboardCalls()).toContain("read_clipboard_image"));
   });
+
+  // Issue #617: モバイルの投稿モーダルは ComposeBar を都度マウント/アンマウントするため、
+  // 貼り付けた画像を投稿せずに閉じると blob: URL がページの寿命まで残る。
+  describe("貼り付け画像の blob URL(Issue #617)", () => {
+    const g = URL as unknown as { createObjectURL?: unknown; revokeObjectURL?: unknown };
+    const original = { create: g.createObjectURL, revoke: g.revokeObjectURL };
+    let created: string[];
+    let revoked: string[];
+
+    beforeEach(() => {
+      created = [];
+      revoked = [];
+      // jsdom には URL.createObjectURL / revokeObjectURL が無いため差し替える
+      g.createObjectURL = () => {
+        const url = `blob:test/${created.length}`;
+        created.push(url);
+        return url;
+      };
+      g.revokeObjectURL = (url: string) => {
+        revoked.push(url);
+      };
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "list_drafts") return Promise.resolve([]);
+        if (cmd === "read_clipboard_files") return Promise.resolve([]);
+        if (cmd === "read_clipboard_image") return Promise.resolve({ bytes: [137, 80, 78, 71], filename: "image.png" });
+        return Promise.resolve(null);
+      });
+    });
+
+    afterEach(() => {
+      g.createObjectURL = original.create;
+      g.revokeObjectURL = original.revoke;
+    });
+
+    it("貼り付けた画像を投稿せずにアンマウントすると、保持している blob URL をすべて revoke する", async () => {
+      const { getByTestId, unmount } = render(ComposeBar);
+      await paste(getByTestId("compose-textarea"), []);
+      await waitFor(() => expect(created).toHaveLength(1));
+      await paste(getByTestId("compose-textarea"), []);
+      await waitFor(() => expect(created).toHaveLength(2));
+      expect(revoked).toEqual([]);
+
+      unmount();
+
+      expect([...revoked].sort()).toEqual([...created].sort());
+    });
+
+    it("削除済みの添付の blob URL は、アンマウント時に二重に revoke しない", async () => {
+      const { getByTestId, unmount } = render(ComposeBar);
+      await paste(getByTestId("compose-textarea"), []);
+      await waitFor(() => expect(created).toHaveLength(1));
+      await fireEvent.click(screen.getByTitle("削除"));
+      expect(revoked).toEqual([created[0]]);
+
+      unmount();
+
+      expect(revoked).toEqual([created[0]]);
+    });
+  });
 });
 
 // 日時入力は flatpickr(読み取り専用のテキスト入力)なので、fireEvent.input ではなく
