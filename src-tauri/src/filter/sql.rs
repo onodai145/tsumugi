@@ -201,6 +201,15 @@ impl Builder<'_> {
             StartsWith => self.text_match(TextMatch::StartsWith, lhs, rhs)?,
             EndsWith => self.text_match(TextMatch::EndsWith, lhs, rhs)?,
             Match => {
+                // 不正なリテラルのパターンは、インメモリ評価(`eval.rs`)・SQLite(`store/db.rs` の `regexp()`)と同じく
+                // 不一致にする(Issue #608)。PostgreSQL の `~` / MySQL の `REGEXP` は、不正なパターンでクエリ全体が
+                // サーバーエラーになる。値を積む前に返すので、他の述語のバインド値の並びは崩れない。
+                // (`text match cw_text` のように、パターンが列のときは、行ごとにしか分からないので対象外。)
+                if let Value::Str(p) = rhs {
+                    if regex::Regex::new(p).is_err() {
+                        return Ok(ALWAYS_FALSE.to_string());
+                    }
+                }
                 let col = self.str(lhs)?;
                 let pat = self.str(rhs)?;
                 match self.dialect {
@@ -214,6 +223,10 @@ impl Builder<'_> {
                     Dialect::MySql => format!("({col} REGEXP CONCAT('(?-i)', {pat}))"),
                 }
             }
+            // 空集合リテラルは何も含まない。`IN ()` は PostgreSQL / MySQL の構文エラーで、`IN (NULL)` は
+            // `NOT` を付けると NULL になって否定が一致しなくなる(インメモリ評価は真)ので、恒偽の式にする(Issue #608)。
+            Contains if is_empty_set(lhs) => ALWAYS_FALSE.to_string(),
+            In if is_empty_set(rhs) => ALWAYS_FALSE.to_string(),
             Contains => {
                 if set_capable(lhs) {
                     // 集合が要素を含む: rhs IN (集合サブクエリ)
@@ -404,6 +417,12 @@ impl Builder<'_> {
 fn numeric(v: &Value) -> bool {
     matches!(v, Value::Num(_) | Value::Arith { .. })
         || matches!(v, Value::Field(f) if f.supports(FilterType::Numeric))
+}
+/// 3 方言とも真偽値として書ける恒偽。PostgreSQL は `0` を真偽値として受け付けない。
+const ALWAYS_FALSE: &str = "(1=0)";
+
+fn is_empty_set(v: &Value) -> bool {
+    matches!(v, Value::Set(items) if items.is_empty())
 }
 fn set_capable(v: &Value) -> bool {
     matches!(v, Value::Set(_)) || matches!(v, Value::Field(f) if f.supports(FilterType::Set))
@@ -664,6 +683,46 @@ mod tests {
         // `REGEXP` に、先頭の `(?-i)` で区別させる(ICU も PCRE も解釈する)。利用者の `(?i)` は後に来るので有効のまま。
         assert_eq!(w.render(Dialect::MySql).sql, "(COALESCE(n.text,'') REGEXP CONCAT('(?-i)', ?))");
         assert_eq!(w.render(Dialect::Postgres).sql, "(COALESCE(n.text,'') ~ $1)");
+    }
+
+    /// 空集合リテラル(Issue #608): `IN ()` は PostgreSQL / MySQL の構文エラーになるので、3 方言とも恒偽にする。
+    /// NULL ではなく偽にするのは、`NOT` を付けてもインメモリ評価(空集合に含まれない = 真)と一致させるため。
+    #[test]
+    fn empty_set_literal_is_constant_false_in_every_dialect() {
+        for query in [
+            "from cache where \"a\" <- []",
+            "from cache where [] -> \"a\"",
+            "from cache where !(\"a\" <- [])",
+        ] {
+            let w = where_of(query);
+            for d in [Dialect::Sqlite, Dialect::Postgres, Dialect::MySql] {
+                let r = w.render(d);
+                assert!(!r.sql.contains("IN ()"), "{query} / {d:?}: {}", r.sql);
+                assert!(r.sql.contains("(1=0)"), "{query} / {d:?}: {}", r.sql);
+                assert!(r.params.is_empty(), "{query} / {d:?}: 束縛値が残っている");
+            }
+        }
+    }
+
+    /// 不正な `match` パターン(Issue #608): PostgreSQL の `~` / MySQL の `REGEXP` はサーバーエラーになるので、
+    /// インメモリ評価・SQLite と同じく不一致(恒偽)にする。
+    #[test]
+    fn invalid_match_pattern_is_constant_false_in_every_dialect() {
+        let w = where_of("from cache where text match \"(\"");
+        for d in [Dialect::Sqlite, Dialect::Postgres, Dialect::MySql] {
+            let r = w.render(d);
+            assert_eq!(r.sql, "(1=0)", "{d:?}");
+            assert!(r.params.is_empty(), "{d:?}: 束縛値が残っている");
+        }
+    }
+
+    /// 他の述語と並べたとき、恒偽にした `match` の前後でバインド値の並びが崩れない。
+    #[test]
+    fn invalid_match_pattern_keeps_other_placeholders_aligned() {
+        let w = where_of("from cache where text startswith \"a\" && text match \"(\" && cw_text startswith \"b\"");
+        let p = w.render(Dialect::Postgres);
+        assert_eq!(p.params, vec![text("a"), text("a"), text("b"), text("b")]);
+        assert!(p.sql.contains("$4") && !p.sql.contains("$5"), "{}", p.sql);
     }
 
     #[test]

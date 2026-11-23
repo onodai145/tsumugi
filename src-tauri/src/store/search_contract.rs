@@ -145,7 +145,42 @@ fn regex_cases() -> Vec<Case> {
         c(Text, Match, "^$", &["t10"]),
         c(CwText, Match, "^Spoiler$", &["t11"]),
         c(CwText, Match, "^spoiler$", &[]),
+        // 不正なパターンはエラーにせず不一致として扱う(Issue #608)。PostgreSQL / MySQL はサーバーエラーにしがち。
+        c(Text, Match, "(", &[]),
+        c(Text, Match, "[", &[]),
+        c(Text, Match, "*a", &[]),
+        c(Text, Match, "(?=a)", &[]), // regex crate は先読みを持たない。インメモリ評価と SQLite は不一致。
     ]
+}
+
+/// 空集合リテラル `[]`(Issue #608)が、3 backend とインメモリ評価で同じ結果になること。
+/// `IN ()` は PostgreSQL / MySQL の構文エラー。空集合は何も含まないので、肯定は 0 件、否定は全件。
+pub(crate) async fn empty_set_contract(b: &dyn NoteCacheBackend) {
+    let notes = fixtures();
+    b.cache_notes("col1", &notes).await.unwrap();
+    let ctx = SqlCtx { my_ids: vec![], following_ids: None };
+    let eval_ctx = EvalContext::default();
+
+    let member = || Expr::Compare { lhs: Value::Str("a".into()), op: CompareOp::In, rhs: Value::Set(vec![]) };
+    let contains = || Expr::Compare { lhs: Value::Set(vec![]), op: CompareOp::Contains, rhs: Value::Str("a".into()) };
+    let cases: Vec<(&str, Expr, &[&str])> = vec![
+        ("\"a\" <- []", member(), &[]),
+        ("[] -> \"a\"", contains(), &[]),
+        ("!(\"a\" <- [])", Expr::Not(Box::new(member())), ALL),
+        ("!([] -> \"a\")", Expr::Not(Box::new(contains())), ALL),
+    ];
+    for (label, expr, want) in cases {
+        let want: Vec<String> = want.iter().map(|s| s.to_string()).collect();
+
+        let w = build_where(&expr, &ctx).unwrap();
+        let mut got: Vec<String> = b.search_cache(&w, None, 100).await.unwrap().into_iter().map(|n| n.id).collect();
+        got.sort();
+        assert_eq!(got, want, "SQL: {label}");
+
+        let mut mem: Vec<String> = notes.iter().filter(|n| evaluate(&expr, n, &eval_ctx)).map(|n| n.id.clone()).collect();
+        mem.sort();
+        assert_eq!(mem, want, "eval: {label}");
+    }
 }
 
 /// `user.acct`(Issue #599)が、3 backend とインメモリ評価で同じ結果になること。

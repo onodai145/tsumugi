@@ -1535,6 +1535,14 @@ mod tests {
         crate::store::search_contract::regex_contract(&*s).await;
     }
 
+    /// 空集合リテラル(Issue #608)の契約。
+    #[tokio::test]
+    #[ignore]
+    async fn search_cache_empty_set_contract() {
+        let s = backend().await;
+        crate::store::search_contract::empty_set_contract(&*s).await;
+    }
+
     /// `user.acct`(Issue #599)の契約。
     #[tokio::test]
     #[ignore]
