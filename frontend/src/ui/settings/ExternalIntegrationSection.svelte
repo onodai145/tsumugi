@@ -73,10 +73,8 @@
     }
     busy = true;
     try {
-      // このセクションが編集しないフィールド(外観・データ等)を保存で消さないよう、
-      // 現在の app.ui をベースに編集項目だけ上書きする。
-      await app.setUiPrefs({
-        ...app.ui,
+      // 編集した項目だけを渡す。保存は直列化され、最新の app.ui にマージされる(Issue #614)。
+      await app.updateUiPrefs({
         searchEngineUrl: searchUrl,
         urlPreviewEnabled,
         summalyProxyUrl: proxyUrl,

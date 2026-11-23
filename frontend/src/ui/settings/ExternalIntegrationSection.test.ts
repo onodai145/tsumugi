@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { app } from "../../lib/store.svelte";
+import type { UiPrefs } from "../../bindings/tauri.gen";
 import { commands, events } from "../../lib/ipc";
 import type { LocalModelInfo } from "../../lib/ipc";
 
@@ -37,7 +38,7 @@ describe("ExternalIntegrationSection 翻訳先言語", () => {
 
   it("変更して保存すると translateTargetLang だけが変わり、他の項目は保持される", async () => {
     app.ui = { ...app.ui, translateTargetLang: "ja", searchEngineUrl: "https://example.com/?q={query}" };
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByTestId, getByText } = render(ExternalIntegrationSection);
 
     getByTestId("translate-target-lang").click();
@@ -46,20 +47,20 @@ describe("ExternalIntegrationSection 翻訳先言語", () => {
     getByText("保存").click();
 
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    const saved = spy.mock.calls[0][0];
+    const saved = (spy.mock.calls[0][0] as Partial<UiPrefs>);
     expect(saved.translateTargetLang).toBe("en");
     expect(saved.searchEngineUrl).toBe("https://example.com/?q={query}");
   });
 
   it("プリセットに無い保存値(手編集した設定ファイル等)も選択肢に出して保持する", async () => {
     app.ui = { ...app.ui, translateTargetLang: "pt-BR" };
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByTestId, getByText } = render(ExternalIntegrationSection);
     expect(getByTestId("translate-target-lang").textContent).toContain("pt-BR");
 
     getByText("保存").click();
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    expect(spy.mock.calls[0][0].translateTargetLang).toBe("pt-BR");
+    expect((spy.mock.calls[0][0] as Partial<UiPrefs>).translateTargetLang).toBe("pt-BR");
   });
 });
 
@@ -73,7 +74,7 @@ describe("ExternalIntegrationSection 外部サービスのURL", () => {
 
   it("javascript: の検索URLは保存できず、エラーが出る", async () => {
     mockImported(false);
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByPlaceholderText, getByText } = render(ExternalIntegrationSection);
 
     await fireEvent.input(getByPlaceholderText(SEARCH_PLACEHOLDER), { target: { value: "javascript:alert({query})" } });
@@ -85,7 +86,7 @@ describe("ExternalIntegrationSection 外部サービスのURL", () => {
 
   it("http/https 以外のURLプレビュー取得先は保存できず、エラーが出る", async () => {
     mockImported(false);
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByPlaceholderText, getByText } = render(ExternalIntegrationSection);
 
     await fireEvent.input(getByPlaceholderText(SUMMALY_PLACEHOLDER), { target: { value: "ftp://example.com/url" } });
@@ -97,19 +98,19 @@ describe("ExternalIntegrationSection 外部サービスのURL", () => {
 
   it("手入力のLANの取得先は保存できる", async () => {
     mockImported(false);
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByPlaceholderText, getByText } = render(ExternalIntegrationSection);
 
     await fireEvent.input(getByPlaceholderText(SUMMALY_PLACEHOLDER), { target: { value: "http://192.168.1.10:3030/url" } });
     getByText("保存").click();
 
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    expect(spy.mock.calls[0][0].summalyProxyUrl).toBe("http://192.168.1.10:3030/url");
+    expect((spy.mock.calls[0][0] as Partial<UiPrefs>).summalyProxyUrl).toBe("http://192.168.1.10:3030/url");
   });
 
   it("インポート由来の取得先では注意文が出て、保存すると保存した取得先を渡して信頼し、注意文が消える", async () => {
     mockImported(true);
-    vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const trust = vi.spyOn(commands, "trustSummalyProxy").mockResolvedValue({ status: "ok", data: null });
     const { getByPlaceholderText, getByTestId, queryByTestId, getByText } = render(ExternalIntegrationSection);
 
@@ -125,7 +126,7 @@ describe("ExternalIntegrationSection 外部サービスのURL", () => {
 
   it("インポート由来でなければ注意文は出ず、信頼のコマンドも呼ばれない", async () => {
     mockImported(false);
-    vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const trust = vi.spyOn(commands, "trustSummalyProxy").mockResolvedValue({ status: "ok", data: null });
     const { queryByTestId, getByText } = render(ExternalIntegrationSection);
 
@@ -138,7 +139,7 @@ describe("ExternalIntegrationSection 外部サービスのURL", () => {
 
   it("検証に落ちて保存しなかったときは、信頼のコマンドを呼ばない", async () => {
     mockImported(true);
-    vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const trust = vi.spyOn(commands, "trustSummalyProxy").mockResolvedValue({ status: "ok", data: null });
     const { getByPlaceholderText, getByTestId, getByText } = render(ExternalIntegrationSection);
 
@@ -189,7 +190,7 @@ describe("ExternalIntegrationSection 翻訳エンジン", () => {
   it("PLaMo を選んで保存すると translateEngine=local になり、他の項目は保持される", async () => {
     mockLocalModel();
     app.ui = { ...app.ui, translateEngine: "server", searchEngineUrl: "https://example.com/?q={query}", translateTargetLang: "en" };
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByTestId, getByText } = render(ExternalIntegrationSection);
     getByTestId("translate-engine").click();
     await vi.waitFor(() => expect(getByTestId("translate-engine-option-local")).toBeTruthy());
@@ -197,7 +198,7 @@ describe("ExternalIntegrationSection 翻訳エンジン", () => {
     getByText("保存").click();
 
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    const saved = spy.mock.calls[0][0];
+    const saved = (spy.mock.calls[0][0] as Partial<UiPrefs>);
     expect(saved.translateEngine).toBe("local");
     expect(saved.searchEngineUrl).toBe("https://example.com/?q={query}");
     expect(saved.translateTargetLang).toBe("en");
@@ -206,12 +207,12 @@ describe("ExternalIntegrationSection 翻訳エンジン", () => {
   it("エンジンを変えずに保存すると、保存値を local/server に整えて書く(手編集の値も壊さない)", async () => {
     mockLocalModel();
     app.ui = { ...app.ui, translateEngine: " Local " };
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { findByTestId, getByText } = render(ExternalIntegrationSection);
     expect(await findByTestId("local-model-card")).toBeTruthy();
     getByText("保存").click();
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    expect(spy.mock.calls[0][0].translateEngine).toBe("local");
+    expect((spy.mock.calls[0][0] as Partial<UiPrefs>).translateEngine).toBe("local");
   });
 
   it("エンジンが PLaMo で翻訳先が非対応の言語なら、注記を出す", async () => {

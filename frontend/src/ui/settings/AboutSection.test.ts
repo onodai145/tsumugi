@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn().mockResolvedValue("9
 const invokeMock = vi.fn().mockResolvedValue(null);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
-// jsdomはmatchMediaを未実装のため、setUiPrefs内の#applyTheme("auto")が参照できるスタブを用意する
+// jsdomはmatchMediaを未実装のため、updateUiPrefs内の#applyTheme("auto")が参照できるスタブを用意する
 // (frontend/src/lib/store.svelte.test.tsのmockPrefersColorSchemeDarkと同じ理由)。
 vi.stubGlobal("matchMedia", (query: string) => ({
   matches: false,

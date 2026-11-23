@@ -30,14 +30,14 @@ describe("LayoutSection 投稿欄の位置(Issue #548)", () => {
   });
 
   it("「下」を選んで保存すると composePosition: bottom が他の設定を保ったまま保存される", async () => {
-    const setUiPrefs = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const updateUiPrefs = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByRole } = render(LayoutSection);
 
     await fireEvent.click(within(getByRole("group", { name: "投稿欄の位置" })).getByRole("button", { name: "下" }));
     await fireEvent.click(getByRole("button", { name: /保存/ }));
 
-    expect(setUiPrefs).toHaveBeenCalledTimes(1);
-    expect(setUiPrefs.mock.calls[0][0]).toMatchObject({
+    expect(updateUiPrefs).toHaveBeenCalledTimes(1);
+    expect(updateUiPrefs.mock.calls[0][0]).toMatchObject({
       composePosition: "bottom",
       defaultColumnWidth: app.ui.defaultColumnWidth,
     });
@@ -64,14 +64,14 @@ describe("LayoutSection タブバーの位置(Issue #577)", () => {
   });
 
   it("「下」を選んで保存すると tabBarPosition: bottom が他の設定を保ったまま保存される", async () => {
-    const setUiPrefs = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const updateUiPrefs = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByRole } = render(LayoutSection);
 
     await fireEvent.click(within(getByRole("group", { name: "タブバーの位置" })).getByRole("button", { name: "下" }));
     await fireEvent.click(getByRole("button", { name: /保存/ }));
 
-    expect(setUiPrefs).toHaveBeenCalledTimes(1);
-    expect(setUiPrefs.mock.calls[0][0]).toMatchObject({
+    expect(updateUiPrefs).toHaveBeenCalledTimes(1);
+    expect(updateUiPrefs.mock.calls[0][0]).toMatchObject({
       tabBarPosition: "bottom",
       composePosition: app.ui.composePosition,
       defaultColumnWidth: app.ui.defaultColumnWidth,

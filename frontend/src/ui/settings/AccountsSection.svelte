@@ -33,7 +33,7 @@
   async function makeDefault(id: string) {
     err = null;
     try {
-      await app.setUiPrefs({ ...app.ui, defaultAccountId: id });
+      await app.updateUiPrefs({ defaultAccountId: id });
     } catch (e) {
       err = String(e);
     }

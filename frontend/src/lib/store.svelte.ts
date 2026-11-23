@@ -64,6 +64,10 @@ import { applyCustomCss } from "./customCss";
 import { isMobilePlatform } from "./platform";
 import { adjacentColumnId, canMoveAdjacentColumn, type AdjacentDirection } from "./swipeNav";
 
+/// `updateUiPrefs` の引数。オブジェクトは変更したいキーだけ。関数は、実行時点の最新の値を受け取って
+/// 変更したいキーを返す(最新の値から派生する更新や、条件付きの更新に使う。空のオブジェクトを返すと何もしない)。
+export type UiPrefsPatch = Partial<UiPrefs> | ((cur: UiPrefs) => Partial<UiPrefs>);
+
 const MAX_NOTES = 300; // タブあたり DOM に保持する上限（仮想化-lite）
 const GAP_CONTINUE_MAX_PAGES = 10; // 「省略された投稿を表示」1クリックあたりの取得ページ上限（Issue #148）
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 新バージョン確認の間隔（4時間）
@@ -1844,43 +1848,64 @@ class AppStore {
     this.#log("info", "通知設定を保存しました");
   }
 
-  /// 表示設定（テーマ・既定カラム幅・フォント）を保存し、即時反映。
-  async setUiPrefs(prefs: UiPrefs) {
-    await unwrap(commands.setUiPrefs(prefs));
-    this.ui = {
-      ...prefs,
-      keymap: prefs.keymap ?? {},
-      fontFamily: prefs.fontFamily ?? "",
-      backgroundKind: prefs.backgroundKind ?? null,
-      backgroundPath: prefs.backgroundPath ?? null,
-      backgroundDim: prefs.backgroundDim ?? 0,
-      backgroundBlur: prefs.backgroundBlur ?? 0,
-      columnOpacity: prefs.columnOpacity ?? 100,
-      pinnedEmojis: prefs.pinnedEmojis ?? DEFAULT_PINNED_EMOJIS,
-      recentEmojis: prefs.recentEmojis ?? [],
-      defaultAccountId: prefs.defaultAccountId ?? "",
-      emojiStyle: prefs.emojiStyle ?? "twemoji",
-      gapFillLimit: prefs.gapFillLimit ?? 200,
-      customThemes: prefs.customThemes ?? [],
-      codeHighlightTheme: prefs.codeHighlightTheme ?? "auto",
-      customSyntaxThemes: prefs.customSyntaxThemes ?? [],
-      mediaThumbnailHeight: prefs.mediaThumbnailHeight ?? 200,
-      noteCacheLimit: prefs.noteCacheLimit ?? 10000,
-      noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
-      noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
-      avatarRadius: prefs.avatarRadius ?? 20,
-      uiScale: normalizeUiScale(prefs.uiScale),
-      customCss: prefs.customCss ?? "",
+  #uiPrefsQueue: Promise<void> = Promise.resolve();
+
+  /// 表示設定（テーマ・既定カラム幅・フォント）を保存し、即時反映する(Issue #614)。
+  /// 保存は呼び出し順に 1 件ずつ実行し、実行時点の最新の `this.ui` に `patch` をマージして送る。
+  /// `commands.setUiPrefs` は全量置換なので、呼び出し時点のスナップショット(`{...app.ui, 変更分}`)を
+  /// 送ると、IPC の往復中に始まった別の保存を消してしまう。
+  updateUiPrefs(patch: UiPrefsPatch): Promise<void> {
+    return this.#enqueueUiPrefs(patch, true);
+  }
+
+  /// `applyEffects` が偽なら、保存と `this.ui` の更新だけを行う(キー割り当て・絵文字の更新が、
+  /// 背景やテーマの再適用とログを出さない現状の挙動を保つため)。
+  #enqueueUiPrefs(patch: UiPrefsPatch, applyEffects: boolean): Promise<void> {
+    const run = async () => {
+      const delta = typeof patch === "function" ? patch(this.ui) : patch;
+      if (Object.keys(delta).length === 0) return;
+      const prefs: UiPrefs = { ...this.ui, ...delta };
+      await unwrap(commands.setUiPrefs(prefs));
+      this.ui = {
+        ...prefs,
+        keymap: prefs.keymap ?? {},
+        fontFamily: prefs.fontFamily ?? "",
+        backgroundKind: prefs.backgroundKind ?? null,
+        backgroundPath: prefs.backgroundPath ?? null,
+        backgroundDim: prefs.backgroundDim ?? 0,
+        backgroundBlur: prefs.backgroundBlur ?? 0,
+        columnOpacity: prefs.columnOpacity ?? 100,
+        pinnedEmojis: prefs.pinnedEmojis ?? DEFAULT_PINNED_EMOJIS,
+        recentEmojis: prefs.recentEmojis ?? [],
+        defaultAccountId: prefs.defaultAccountId ?? "",
+        emojiStyle: prefs.emojiStyle ?? "twemoji",
+        gapFillLimit: prefs.gapFillLimit ?? 200,
+        customThemes: prefs.customThemes ?? [],
+        codeHighlightTheme: prefs.codeHighlightTheme ?? "auto",
+        customSyntaxThemes: prefs.customSyntaxThemes ?? [],
+        mediaThumbnailHeight: prefs.mediaThumbnailHeight ?? 200,
+        noteCacheLimit: prefs.noteCacheLimit ?? 10000,
+        noteCacheMaxAgeDays: prefs.noteCacheMaxAgeDays ?? 0,
+        noteCacheMaxSizeMb: prefs.noteCacheMaxSizeMb ?? 0,
+        avatarRadius: prefs.avatarRadius ?? 20,
+        uiScale: normalizeUiScale(prefs.uiScale),
+        customCss: prefs.customCss ?? "",
+      };
+      if (!applyEffects) return;
+      this.#applyTheme(prefs.theme);
+      this.#applySyntaxTheme(prefs.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
+      this.#applyFont(prefs.fontFamily ?? "");
+      this.#applyBackground(this.ui);
+      this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
+      this.#applyUiScale(this.ui.uiScale);
+      this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
+      this.#applyCustomCss();
+      this.#log("info", "表示設定を保存しました");
     };
-    this.#applyTheme(prefs.theme);
-    this.#applySyntaxTheme(prefs.codeHighlightTheme ?? "auto", this.ui.customSyntaxThemes ?? []);
-    this.#applyFont(prefs.fontFamily ?? "");
-    this.#applyBackground(this.ui);
-    this.#applyAvatarRadius(this.ui.avatarRadius ?? 20);
-    this.#applyUiScale(this.ui.uiScale);
-    this.#applyMediaThumbnailHeight(this.ui.mediaThumbnailHeight ?? 200);
-    this.#applyCustomCss();
-    this.#log("info", "表示設定を保存しました");
+    const result = this.#uiPrefsQueue.then(run);
+    // 失敗は呼び出し元にだけ返し、後続の保存は止めない。
+    this.#uiPrefsQueue = result.catch(() => {});
+    return result;
   }
 
   /// 既定アカウントの id。未設定/削除済みならアカウント一覧の先頭にフォールバック。
@@ -1904,7 +1929,7 @@ class AppStore {
     return unicodeEmojiUrl(char, (this.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   }
 
-  /// 画像/動画ファイルを選んで backgrounds/ へコピーする（保存は setUiPrefs で）。
+  /// 画像/動画ファイルを選んで backgrounds/ へコピーする（保存は updateUiPrefs で）。
   /// 戻り値は種類とコピー後の絶対パス。旧ファイルの削除は行わない(未保存で閉じた場合に
   /// 備えて残しておき、起動時のGCでまとめて掃除する。Issue #46 I1)。
   async pickBackgroundMedia(): Promise<{ kind: "image" | "video"; absolutePath: string } | null> {
@@ -1922,24 +1947,23 @@ class AppStore {
 
   /// キーバインドの上書きを保存（他の表示設定は据え置き）。
   async setKeymap(overrides: Record<string, string>) {
-    await unwrap(commands.setUiPrefs({ ...this.ui, keymap: overrides }));
-    this.ui = { ...this.ui, keymap: overrides };
+    await this.#enqueueUiPrefs({ keymap: overrides }, false);
     this.#log("info", "キー割り当てを更新しました");
   }
 
   /// リアクションピッカーのピン留め絵文字リストを丸ごと差し替える（Issue #19、設定→リアクションで編集）。
   /// key は Unicode絵文字はそのまま、カスタム絵文字は ":name:" 形式。
   async setPinnedEmojis(list: string[]) {
-    await unwrap(commands.setUiPrefs({ ...this.ui, pinnedEmojis: list }));
-    this.ui = { ...this.ui, pinnedEmojis: list };
+    await this.#enqueueUiPrefs({ pinnedEmojis: list }, false);
   }
 
   /// リアクションピッカーで絵文字を使ったことを記録する（Issue #108）。
   /// キーは pinnedEmojis と同じ形式（カスタム絵文字はホスト付き ":name@host:"）で渡すこと。
   async recordEmojiUsage(key: string) {
-    const list = withRecentEmojiUsage(this.ui.recentEmojis ?? [], key);
-    await unwrap(commands.setUiPrefs({ ...this.ui, recentEmojis: list }));
-    this.ui = { ...this.ui, recentEmojis: list };
+    await this.#enqueueUiPrefs(
+      (cur) => ({ recentEmojis: withRecentEmojiUsage(cur.recentEmojis ?? [], key) }),
+      false,
+    );
   }
 
   /// テーマ(auto/light/dark)またはプリセット/カスタムテーマの配色を <html> に反映する。
@@ -1979,7 +2003,7 @@ class AppStore {
       } else {
         // 選択中のカスタムテーマが削除済み: auto にフォールバックして保存し直す
         applyThemeColors(null);
-        void this.setUiPrefs({ ...this.ui, theme: "auto" });
+        void this.updateUiPrefs((cur) => (cur.theme === theme ? { theme: "auto" } : {}));
       }
       return;
     }
@@ -1999,7 +2023,9 @@ class AppStore {
       }
       // 選択中のカスタムシンタックステーマが削除済み: autoにフォールバックして保存し直す
       applySyntaxColors(null);
-      void this.setUiPrefs({ ...this.ui, codeHighlightTheme: "auto" });
+      void this.updateUiPrefs((cur) =>
+        cur.codeHighlightTheme === codeHighlightTheme ? { codeHighlightTheme: "auto" } : {},
+      );
       return;
     }
     applySyntaxColors(null);

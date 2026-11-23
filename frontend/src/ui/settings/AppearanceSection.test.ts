@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
 import { app } from "../../lib/store.svelte";
+import type { UiPrefs } from "../../bindings/tauri.gen";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -36,14 +37,14 @@ describe("AppearanceSection 低帯域幅モード", () => {
 
   it("チェックして保存すると lowBandwidth だけが変わり、他の項目は保持される", async () => {
     app.ui = { ...app.ui, lowBandwidth: false, fontFamily: "Meiryo, sans-serif" };
-    const spy = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const spy = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByLabelText, getByText } = render(AppearanceSection);
 
     await fireEvent.click(getByLabelText("低帯域幅モードを有効にする"));
     getByText("保存").click();
 
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    const saved = spy.mock.calls[0][0];
+    const saved = (spy.mock.calls[0][0] as Partial<UiPrefs>);
     expect(saved.lowBandwidth).toBe(true);
     expect(saved.fontFamily).toBe("Meiryo, sans-serif");
   });
