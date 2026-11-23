@@ -179,16 +179,15 @@ mod tests {
         let f = CompiledFilter::compile(&FilterQuery::Tql("text match \"(\"".into())).unwrap();
         assert!(matches!(tql_regexes(&f).get("("), Some(None)));
         assert!(!f.matches(&note("(", 0), &ctx));
-        let not =
-            CompiledFilter::compile(&FilterQuery::Tql("!(text match \"(\")".into())).unwrap();
+        let not = CompiledFilter::compile(&FilterQuery::Tql("!(text match \"(\")".into())).unwrap();
         assert!(not.matches(&note("(", 0), &ctx));
     }
 
     #[test]
     fn tql_dynamic_match_pattern_is_still_evaluated_per_note() {
         let ctx = EvalContext::default();
-        let f = CompiledFilter::compile(&FilterQuery::Tql("text match user.username".into()))
-            .unwrap();
+        let f =
+            CompiledFilter::compile(&FilterQuery::Tql("text match user.username".into())).unwrap();
         assert!(tql_regexes(&f).is_empty());
         assert!(f.matches(&note("xax", 0), &ctx)); // username は "a"
         assert!(!f.matches(&note("xyz", 0), &ctx));

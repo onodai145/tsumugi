@@ -8,7 +8,28 @@ use std::collections::{HashMap, HashSet};
 
 /// `match` の右辺がリテラルのパターンを、事前にコンパイルした結果(Issue #609)。
 /// 不正なパターンは `None`(評価は常に不一致)。
-pub type RegexTable = HashMap<String, Option<Regex>>;
+/// 作れるのは `compile_regexes` だけ(中身を非公開にして、空の表を `CompiledFilter` に
+/// 持たせて事前コンパイルを取りこぼす構築を、この module の外から書けないようにする)。
+#[derive(Clone)]
+pub struct RegexTable(HashMap<String, Option<Regex>>);
+
+impl RegexTable {
+    fn empty() -> Self {
+        RegexTable(HashMap::new())
+    }
+
+    pub(crate) fn get(&self, pattern: &str) -> Option<&Option<Regex>> {
+        self.0.get(pattern)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 /// `mine` / `following` / `to_me` 等の解決に要る文脈（§7）。
 #[derive(Debug, Clone, Default)]
@@ -35,13 +56,14 @@ pub fn compile_regexes(expr: &Expr) -> RegexTable {
             Expr::Compare { op, rhs, .. } => {
                 if let (CompareOp::Match, Value::Str(p)) = (op, rhs) {
                     table
+                        .0
                         .entry(p.clone())
                         .or_insert_with(|| Regex::new(p).ok());
                 }
             }
         }
     }
-    let mut table = RegexTable::new();
+    let mut table = RegexTable::empty();
     walk(expr, &mut table);
     table
 }
@@ -49,7 +71,7 @@ pub fn compile_regexes(expr: &Expr) -> RegexTable {
 /// predicate が None のクエリは常に true（呼び出し側で扱う）。ここでは Expr を評価。
 /// 事前コンパイルなしで評価する(`match` はノートごとにコンパイルする)。
 pub fn evaluate(expr: &Expr, note: &Note, ctx: &EvalContext) -> bool {
-    evaluate_with(expr, note, ctx, &RegexTable::new())
+    evaluate_with(expr, note, ctx, &RegexTable::empty())
 }
 
 /// `compile_regexes` で作った表を使って評価する。表に無いパターンは、その場でコンパイルする。
@@ -506,14 +528,12 @@ mod tests {
 
     #[test]
     fn compile_regexes_keeps_invalid_patterns_as_none_and_case_variants_apart() {
-        let q = parse(
-            "from home where text match \"(\" || text match \"A\" || text match \"a\"",
-        )
-        .unwrap();
+        let q = parse("from home where text match \"(\" || text match \"A\" || text match \"a\"")
+            .unwrap();
         let table = compile_regexes(q.predicate.as_ref().unwrap());
         assert_eq!(table.len(), 3);
         assert!(matches!(table.get("("), Some(None))); // 不正なパターンは None
-        assert!(table.contains_key("A") && table.contains_key("a")); // 正規化しない
+        assert!(table.get("A").is_some() && table.get("a").is_some()); // 正規化しない
     }
 
     #[test]
@@ -529,14 +549,14 @@ mod tests {
         let expr = q.predicate.as_ref().unwrap();
 
         // 表の値が使われる: 同じパターンを None にした表では不一致になる
-        let mut poisoned = RegexTable::new();
-        poisoned.insert("^hello".to_string(), None);
+        let mut poisoned = RegexTable::empty();
+        poisoned.0.insert("^hello".to_string(), None);
         assert!(!evaluate_with(expr, &n, &ctx(), &poisoned));
 
         // 事前コンパイルした表でも、空の表(その場でコンパイル)でも、`evaluate` と同じ結果
         let table = compile_regexes(expr);
         assert!(evaluate_with(expr, &n, &ctx(), &table));
-        assert!(evaluate_with(expr, &n, &ctx(), &RegexTable::new()));
+        assert!(evaluate_with(expr, &n, &ctx(), &RegexTable::empty()));
         assert!(evaluate(expr, &n, &ctx()));
     }
 

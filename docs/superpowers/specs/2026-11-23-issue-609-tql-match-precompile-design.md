@@ -35,7 +35,10 @@
 ```rust
 /// `match` の右辺がリテラルのパターンを、事前にコンパイルした結果。
 /// 不正なパターンは `None`(評価は常に不一致)。
-pub type RegexTable = HashMap<String, Option<Regex>>;
+/// 作れるのは `compile_regexes` だけ(中身は非公開の newtype)。空の表を持つ `CompiledFilter::Tql` を
+/// `filter::eval` の外から書けないようにして、事前コンパイルの取りこぼしを防ぐ。
+#[derive(Clone)]
+pub struct RegexTable(HashMap<String, Option<Regex>>);
 
 pub fn compile_regexes(expr: &Expr) -> RegexTable;
 pub fn evaluate(expr: &Expr, note: &Note, ctx: &EvalContext) -> bool;          // 既存。表なしで評価する
