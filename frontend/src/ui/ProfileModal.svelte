@@ -79,6 +79,7 @@
     notesBusy = false;
     notesErr = null;
     followErr = null;
+    followBusy = false; // 切り替え前の応答待ちは toggleFollow 側で世代を見て捨てるので、busy も引き継がない
     followListKind = null;
     actionErr = null;
     actionBusy = false;
@@ -119,21 +120,24 @@
 
   async function toggleFollow() {
     if (profileState.status !== "ready" || profileState.profile.isFollowing === null) return;
+    const gen = requestGen;
+    const profile = profileState.profile;
     followBusy = true;
     followErr = null;
-    const wasFollowing = profileState.profile.isFollowing;
-    profileState.profile.isFollowing = !wasFollowing;
+    const wasFollowing = profile.isFollowing;
+    profile.isFollowing = !wasFollowing;
     try {
       if (wasFollowing) {
-        await app.unfollowUser(accountId, profileState.profile.user.id);
+        await app.unfollowUser(accountId, profile.user.id);
       } else {
-        await app.followUser(accountId, profileState.profile.user.id);
+        await app.followUser(accountId, profile.user.id);
       }
     } catch (e) {
-      profileState.profile.isFollowing = wasFollowing;
+      if (gen !== requestGen) return; // 切り替え後は、別ユーザーの表示を巻き戻さない
+      profile.isFollowing = wasFollowing;
       followErr = String(e);
     } finally {
-      followBusy = false;
+      if (gen === requestGen) followBusy = false;
     }
   }
 

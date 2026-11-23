@@ -32,6 +32,7 @@
     const seq = ++requestSeq;
     err = null;
     loading = true;
+    loadingMore = false; // 進行中の追加読み込みは下の seq で無効になるので、そのbusyも引き継がない
     noMoreFiles = false;
     try {
       const [f, fl] = await Promise.all([
@@ -52,18 +53,21 @@
 
   async function loadMore() {
     if (files.length === 0 || loadingMore || noMoreFiles) return;
+    const seq = requestSeq; // refresh と同じ世代。フォルダ移動で進むので、古い続きのページを捨てられる
     loadingMore = true;
     err = null;
     try {
       const older = await unwrap(
         commands.listDriveFiles(accountId, currentFolderId, files[files.length - 1].id),
       );
+      if (seq !== requestSeq) return;
       files = [...files, ...older];
       if (older.length < FILES_LIMIT) noMoreFiles = true;
     } catch (e) {
+      if (seq !== requestSeq) return;
       err = String(e);
     } finally {
-      loadingMore = false;
+      if (seq === requestSeq) loadingMore = false;
     }
   }
 

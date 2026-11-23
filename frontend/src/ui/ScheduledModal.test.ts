@@ -172,6 +172,34 @@ describe("ScheduledModal(サーバー予約)", () => {
   });
 });
 
+describe("ScheduledModal 再読み込みの重なり(Issue #616)", () => {
+  it("再読み込みを続けて2回押しても、先の応答は捨てて同じ予約を重複させない", async () => {
+    const resolvers: ((v: ScheduledNote[]) => void)[] = [];
+    let call = 0;
+    mockCommands({
+      list_scheduled_notes: () => {
+        if (call++ === 0) throw { kind: "network", message: "offline" };
+        return new Promise<ScheduledNote[]>((resolve) => resolvers.push(resolve));
+      },
+    });
+    const { findByTestId } = render(ScheduledModal, props());
+    const retry = await findByTestId("scheduled-retry");
+    // 画面が更新される前に2回起動された状況(DOM 更新前の連続操作)
+    retry.click();
+    retry.click();
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+
+    // 後の応答 → 先の応答の順に解決する(先の応答が遅れて届く)
+    resolvers[1]([note("fresh")]);
+    await findByTestId("scheduled-item-fresh");
+    resolvers[0]([note("stale")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.querySelector('[data-testid="scheduled-item-stale"]')).toBeNull();
+    expect(document.querySelectorAll('[data-testid="scheduled-item-fresh"]')).toHaveLength(1);
+  });
+});
+
 describe("ScheduledModal(ローカル予約)", () => {
   it("サーバー予約とローカル予約を、予約日時の昇順で 1 つの一覧にする", async () => {
     const now = Math.floor(Date.now() / 1000);
