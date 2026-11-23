@@ -126,7 +126,7 @@
     const next = exists
       ? customThemes.map((t) => (t.id === editingTheme!.id ? editingTheme! : t))
       : [...customThemes, editingTheme];
-    await app.setUiPrefs({ ...app.ui, customThemes: next });
+    await app.updateUiPrefs({ customThemes: next });
     editingTheme = null;
     editErr = null;
   }
@@ -135,7 +135,7 @@
     // 削除対象が選択中のテーマなら、この1回の保存でthemeもautoへ戻す。
     // (theme はそのままにすると #applyTheme のフォールバックが二重保存を起こすため)
     const clearing = theme === `custom:${id}`;
-    await app.setUiPrefs({ ...app.ui, customThemes: next, theme: clearing ? "auto" : app.ui.theme });
+    await app.updateUiPrefs({ customThemes: next, ...(clearing ? { theme: "auto" } : {}) });
     if (clearing) theme = "auto";
   }
 
@@ -204,17 +204,16 @@
     const next = exists
       ? customSyntaxThemes.map((t) => (t.id === editingSyntaxTheme!.id ? editingSyntaxTheme! : t))
       : [...customSyntaxThemes, editingSyntaxTheme];
-    await app.setUiPrefs({ ...app.ui, customSyntaxThemes: next });
+    await app.updateUiPrefs({ customSyntaxThemes: next });
     editingSyntaxTheme = null;
     syntaxEditErr = null;
   }
   async function removeCustomSyntaxTheme(id: string) {
     const next = customSyntaxThemes.filter((t) => t.id !== id);
     const clearing = codeHighlightTheme === `custom:${id}`;
-    await app.setUiPrefs({
-      ...app.ui,
+    await app.updateUiPrefs({
       customSyntaxThemes: next,
-      codeHighlightTheme: clearing ? "auto" : app.ui.codeHighlightTheme,
+      ...(clearing ? { codeHighlightTheme: "auto" } : {}),
     });
     if (clearing) codeHighlightTheme = "auto";
   }
@@ -228,10 +227,8 @@
     }
     busy = true;
     try {
-      // このセクションが編集しないフィールド(レイアウト・背景等)を保存で消さないよう、
-      // 現在の app.ui をベースに編集項目だけ上書きする。
-      await app.setUiPrefs({
-        ...app.ui,
+      // 編集した項目だけを渡す。保存は直列化され、最新の app.ui にマージされる(Issue #614)。
+      await app.updateUiPrefs({
         theme,
         codeHighlightTheme,
         fontFamily,

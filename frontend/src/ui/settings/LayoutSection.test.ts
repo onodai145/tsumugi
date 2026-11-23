@@ -30,7 +30,7 @@ describe("LayoutSection 投稿欄の位置(Issue #548)", () => {
   });
 
   it("「下」を選んで保存すると composePosition: bottom が他の設定を保ったまま保存される", async () => {
-    const setUiPrefs = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const setUiPrefs = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByRole } = render(LayoutSection);
 
     await fireEvent.click(within(getByRole("group", { name: "投稿欄の位置" })).getByRole("button", { name: "下" }));
@@ -64,7 +64,7 @@ describe("LayoutSection タブバーの位置(Issue #577)", () => {
   });
 
   it("「下」を選んで保存すると tabBarPosition: bottom が他の設定を保ったまま保存される", async () => {
-    const setUiPrefs = vi.spyOn(app, "setUiPrefs").mockResolvedValue(undefined);
+    const setUiPrefs = vi.spyOn(app, "updateUiPrefs").mockResolvedValue(undefined);
     const { getByRole } = render(LayoutSection);
 
     await fireEvent.click(within(getByRole("group", { name: "タブバーの位置" })).getByRole("button", { name: "下" }));

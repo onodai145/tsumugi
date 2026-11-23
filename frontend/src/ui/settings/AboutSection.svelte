@@ -28,7 +28,7 @@
     if (versionTapCount < DEVELOPER_OPTIONS_TAP_THRESHOLD) return;
     unlocking = true;
     try {
-      await app.setUiPrefs({ ...app.ui, developerOptionsEnabled: true });
+      await app.updateUiPrefs({ developerOptionsEnabled: true });
       developerOptionsJustUnlocked = true;
     } catch (e) {
       err = String(e);
