@@ -236,6 +236,10 @@ pub fn spawn(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
             let state = app.state::<AppState>();
+            // 送信結果の保存に失敗していたら、ここで書き直す(Issue #620)。
+            if let Err(e) = state.scheduled_posts.flush() {
+                log::warn!("scheduled posts: still cannot save: {e}");
+            }
             for outcome in process_due(&state, now_sec()).await {
                 emit_outcome(&app, &outcome);
             }

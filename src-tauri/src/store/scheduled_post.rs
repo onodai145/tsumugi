@@ -10,6 +10,7 @@ use crate::error::{Error, Result};
 use crate::store::draft::DraftInput;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// 起動時に `Posting` のまま残っていた予約に付ける理由(送信後に終了した可能性があり、再送しない)。
@@ -49,6 +50,9 @@ enum Backing {
 pub struct ScheduledPostStore {
     backing: Backing,
     data: Mutex<Data>,
+    /// 送信結果の記録(`finish_*`)の保存に失敗し、メモリがディスクより新しいとき true(Issue #620)。
+    /// 次に保存が成功する(`save`)か、`flush` が書けると false に戻る。
+    dirty: AtomicBool,
 }
 
 impl ScheduledPostEntry {
@@ -88,13 +92,13 @@ impl ScheduledPostStore {
         } else {
             Data::default()
         };
-        Ok(Self { backing: Backing::File(path), data: Mutex::new(data) })
+        Ok(Self { backing: Backing::File(path), data: Mutex::new(data), dirty: AtomicBool::new(false) })
     }
 
     /// メモリだけの版。`AppState::new*` の既定(起動時に `with_scheduled_posts` で永続版へ差し替える)と、
     /// テストで使う。
     pub(crate) fn new_in_memory() -> Self {
-        Self { backing: Backing::Memory, data: Mutex::new(Data::default()) }
+        Self { backing: Backing::Memory, data: Mutex::new(Data::default()), dirty: AtomicBool::new(false) }
     }
 
     fn save(&self, data: &Data) -> Result<()> {
@@ -104,17 +108,41 @@ impl ScheduledPostStore {
             std::fs::write(&tmp_path, json)?;
             std::fs::rename(&tmp_path, path)?;
         }
+        // 全体を書き出すので、成功すればそれまでの未保存分も追いつく。
+        self.dirty.store(false, Ordering::SeqCst);
         Ok(())
     }
 
-    /// `id` の予約に `f` を適用して保存する。無ければ None。
+    /// 送信結果をメモリに反映済みのまま保存する。失敗しても、メモリは巻き戻さない(送信は終わっていて、
+    /// 巻き戻すと再送・二重投稿の元になる)。代わりに `dirty` を立て、`flush` で追いつかせる(Issue #620)。
+    fn save_recorded(&self, data: &Data) -> Result<()> {
+        self.save(data).inspect_err(|_| self.dirty.store(true, Ordering::SeqCst))
+    }
+
+    /// 保存できていない送信結果があるか。
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::SeqCst)
+    }
+
+    /// 保存できていない送信結果があれば、もう一度書く。書いたら true、何もなければ false。
+    pub fn flush(&self) -> Result<bool> {
+        if !self.is_dirty() {
+            return Ok(false);
+        }
+        let g = self.data.lock().unwrap();
+        self.save_recorded(&g)?;
+        Ok(true)
+    }
+
+    /// `id` の予約に `f` を適用して保存する。無ければ None。送信結果の記録に使うので、保存に失敗しても
+    /// メモリは戻さない(`save_recorded`)。
     fn with_entry<R>(&self, id: &str, f: impl FnOnce(&mut ScheduledPostEntry) -> R) -> Result<Option<R>> {
         let mut g = self.data.lock().unwrap();
         let Some(entry) = g.posts.iter_mut().find(|e| e.id == id) else {
             return Ok(None);
         };
         let out = f(entry);
-        self.save(&g)?;
+        self.save_recorded(&g)?;
         Ok(Some(out))
     }
 
@@ -184,6 +212,7 @@ impl ScheduledPostStore {
 
     /// 送信を始める。`Pending` / `Expired` / `Failed` を `Posting` にして返す。既に `Posting` か、無ければ None。
     /// `Mutex` を保持したまま遷移するので、同じ予約の送信は 1 回しか始まらない。
+    /// 送信の前なので、保存に失敗したらメモリを元に戻して Err を返す(`Posting` で固着させず、送信もしない)。
     pub fn begin_post(&self, id: &str) -> Result<Option<ScheduledPostEntry>> {
         let mut g = self.data.lock().unwrap();
         let Some(entry) = g.posts.iter_mut().find(|e| e.id == id) else {
@@ -192,17 +221,25 @@ impl ScheduledPostStore {
         if entry.status == LocalScheduleStatus::Posting {
             return Ok(None);
         }
+        let before = entry.clone();
         entry.status = LocalScheduleStatus::Posting;
         entry.error = None;
         let started = entry.clone();
-        self.save(&g)?;
+        if let Err(e) = self.save(&g) {
+            if let Some(entry) = g.posts.iter_mut().find(|e| e.id == id) {
+                *entry = before;
+            }
+            return Err(e);
+        }
         Ok(Some(started))
     }
 
+    /// 送信に成功した予約を消す。保存に失敗しても、メモリでは消したままにする(同じ実行中は再送されない)。
+    /// ディスクは `flush` が追いつかせる。追いつく前に終了すると、起動時に `Failed`(結果不明)になる。
     pub fn finish_posted(&self, id: &str) -> Result<()> {
         let mut g = self.data.lock().unwrap();
         g.posts.retain(|e| e.id != id);
-        self.save(&g)
+        self.save_recorded(&g)
     }
 
     pub fn finish_failed(&self, id: &str, message: &str) -> Result<()> {
@@ -481,6 +518,111 @@ mod tests {
         assert_eq!(got.status, LocalScheduleStatus::Posting);
         assert_eq!(got.input.text, "hello");
         std::fs::remove_file(&path).unwrap();
+    }
+
+    /// 保存先のディレクトリを消して、保存を失敗させる(`repair_dir` で直る)。
+    struct BrokenDisk {
+        dir: PathBuf,
+    }
+
+    impl BrokenDisk {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("tsumugi-scheduled-dir-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self { dir }
+        }
+        fn path(&self) -> PathBuf {
+            self.dir.join("scheduled_posts.json")
+        }
+        fn break_dir(&self) {
+            std::fs::remove_dir_all(&self.dir).unwrap();
+        }
+        fn repair_dir(&self) {
+            std::fs::create_dir_all(&self.dir).unwrap();
+        }
+    }
+
+    impl Drop for BrokenDisk {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// Issue #620: 送信前の遷移は、保存に失敗したらメモリを変えない(`Posting` で固着させない)。
+    #[test]
+    fn begin_post_leaves_the_entry_untouched_when_saving_fails() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        let e = s.add("acc1", 1_000, test_input("a"), 0).unwrap();
+
+        disk.break_dir();
+        assert!(s.begin_post(&e.id).is_err());
+        assert_eq!(s.get(&e.id).unwrap().status, LocalScheduleStatus::Pending, "memory not changed");
+        assert_eq!(s.due(1_000).len(), 1, "still due, so it is retried later");
+
+        disk.repair_dir();
+        assert!(s.begin_post(&e.id).unwrap().is_some());
+    }
+
+    /// Issue #620: 送信済みの記録は、保存に失敗してもメモリでは消えたままにし(同じ実行中に再送されない)、
+    /// 保存できるようになった時点で `flush` がディスクへ追いつかせる。
+    #[test]
+    fn finish_posted_is_flushed_to_disk_after_a_failed_save() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        let e = s.add("acc1", 1_000, test_input("a"), 0).unwrap();
+        s.begin_post(&e.id).unwrap();
+
+        disk.break_dir();
+        assert!(s.finish_posted(&e.id).is_err());
+        assert!(s.get(&e.id).is_none(), "memory keeps the posted state");
+        assert!(s.is_dirty());
+        assert!(s.flush().is_err(), "still cannot save");
+        assert!(s.is_dirty());
+
+        disk.repair_dir();
+        assert!(s.flush().unwrap());
+        assert!(!s.is_dirty());
+        assert!(!s.flush().unwrap(), "nothing left to write");
+        let reloaded = ScheduledPostStore::new(disk.path()).unwrap();
+        assert!(reloaded.get(&e.id).is_none(), "a restart no longer sees a posting entry");
+    }
+
+    /// Issue #620: 失敗・再試行の記録も同じ(送信結果はメモリが正で、後から保存を追いつかせる)。
+    #[test]
+    fn finish_failed_is_flushed_to_disk_after_a_failed_save() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        let e = s.add("acc1", 1_000, test_input("a"), 0).unwrap();
+        s.begin_post(&e.id).unwrap();
+
+        disk.break_dir();
+        assert!(s.finish_failed(&e.id, "理由").is_err());
+        assert_eq!(s.get(&e.id).unwrap().status, LocalScheduleStatus::Failed);
+        assert!(s.is_dirty());
+
+        disk.repair_dir();
+        assert!(s.flush().unwrap());
+        let reloaded = ScheduledPostStore::new(disk.path()).unwrap();
+        assert_eq!(reloaded.get(&e.id).unwrap().status, LocalScheduleStatus::Failed);
+    }
+
+    /// 無関係な保存が成功すれば、ディスクは追いつく(`dirty` も下りる)。
+    #[test]
+    fn a_later_successful_save_clears_the_dirty_flag() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        let e = s.add("acc1", 1_000, test_input("a"), 0).unwrap();
+        s.begin_post(&e.id).unwrap();
+        disk.break_dir();
+        assert!(s.finish_posted(&e.id).is_err());
+        assert!(s.is_dirty());
+
+        disk.repair_dir();
+        s.add("acc1", 2_000, test_input("b"), 1).unwrap();
+        assert!(!s.is_dirty());
+        let reloaded = ScheduledPostStore::new(disk.path()).unwrap();
+        assert!(reloaded.get(&e.id).is_none());
     }
 
     #[test]
