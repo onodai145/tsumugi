@@ -136,7 +136,7 @@ fn is_bare_host(host: &str) -> bool {
 
 /// アカウントの `host` として妥当か。素のホスト名に、任意で `:<1..=65535>` のポートが付いた形だけ通す
 /// (ログイン経路がポート付きホストを保存するため)。IPv6リテラル・認証情報・スキーム・パスは通さない。
-fn is_valid_account_host(host: &str) -> bool {
+pub(crate) fn is_valid_account_host(host: &str) -> bool {
     match host.split_once(':') {
         None => is_bare_host(host),
         Some((name, port)) => {

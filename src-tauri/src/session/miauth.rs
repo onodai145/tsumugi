@@ -31,14 +31,18 @@ pub const APP_NAME: &str = "tsumugi";
 
 /// 認可URL（ブラウザで開く）を組み立てる。callback は使わず、ユーザが認可後に
 /// アプリへ戻り `check` を叩く運用（デスクトップのローカルサーバ不要）。
-pub fn build_miauth_url(host: &str, session_id: &str) -> String {
+///
+/// `host` が URL として解釈できないときは [`Error::Invalid`] を返す(Issue #610)。
+/// 上流の `normalize_host` が検証するが、Unicode を含むホストなど `Url::parse` だけが
+/// 拒否する入力が残りうるため、panic させずにフロントへエラーを返す。
+pub fn build_miauth_url(host: &str, session_id: &str) -> Result<String> {
     let permission = PERMISSIONS.join(",");
     let mut url = url::Url::parse(&format!("https://{host}/miauth/{session_id}"))
-        .expect("host/session are validated upstream");
+        .map_err(|e| Error::Invalid(format!("invalid host: {host} ({e})")))?;
     url.query_pairs_mut()
         .append_pair("name", APP_NAME)
         .append_pair("permission", &permission);
-    url.to_string()
+    Ok(url.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,12 +88,21 @@ mod tests {
 
     #[test]
     fn builds_url_with_name_and_permissions() {
-        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555");
+        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555").unwrap();
         assert!(u.starts_with("https://misskey.io/miauth/11111111-2222-3333-4444-555555555555?"));
         assert!(u.contains("name=tsumugi"));
         // permission はカンマが URL エンコードされる（%2C）
         assert!(u.contains("write%3Anotes") || u.contains("write:notes"));
         assert!(u.contains("read%3Aaccount") || u.contains("read:account"));
+    }
+
+    #[test]
+    fn build_url_returns_error_instead_of_panicking_on_bad_host() {
+        // Issue #610: 上流の検証をすり抜けても panic せず Error::Invalid を返す。
+        for bad in ["mis key.io", "misskey.io:abc", "misskey.io|x"] {
+            let r = build_miauth_url(bad, "11111111-2222-3333-4444-555555555555");
+            assert!(matches!(r, Err(Error::Invalid(_))), "{bad}: {r:?}");
+        }
     }
 
     #[test]
@@ -106,7 +119,7 @@ mod tests {
     #[test]
     fn requests_write_mutes_for_timed_mutes() {
         assert!(PERMISSIONS.contains(&"write:mutes"));
-        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555");
+        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555").unwrap();
         assert!(u.contains("write%3Amutes") || u.contains("write:mutes"));
     }
 
@@ -115,7 +128,7 @@ mod tests {
         for permission in ["write:blocks", "write:report-abuse", "write:account", "write:mutes"] {
             assert!(PERMISSIONS.contains(&permission), "{permission} が無い");
         }
-        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555");
+        let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555").unwrap();
         assert!(u.contains("write%3Ablocks") || u.contains("write:blocks"));
         assert!(u.contains("write%3Areport-abuse") || u.contains("write:report-abuse"));
     }
