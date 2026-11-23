@@ -6,6 +6,7 @@ use crate::domain::{Account, User};
 use crate::error::{Error, Result};
 use crate::session::miauth::{build_miauth_url, check_miauth};
 use crate::state::{AppState, PendingMiAuth};
+use crate::store::settings_transfer::is_valid_account_host;
 use serde::Serialize;
 use specta::Type;
 use tauri::State;
@@ -24,7 +25,7 @@ pub struct MiAuthSession {
 pub async fn start_miauth(state: State<'_, AppState>, host: String) -> Result<MiAuthSession> {
     let host = normalize_host(&host)?;
     let session_id = uuid::Uuid::new_v4().to_string();
-    let url = build_miauth_url(&host, &session_id);
+    let url = build_miauth_url(&host, &session_id)?;
     state
         .pending
         .lock()
@@ -143,7 +144,10 @@ fn normalize_host(input: &str) -> Result<String> {
     let s = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
     let s = s.split('/').next().unwrap_or(s);
     let s = s.rsplit('@').next().unwrap_or(s); // "@user@host" -> "host"
-    if s.is_empty() || !s.contains('.') {
+    // 厳密な検証は設定インポートと共通(Issue #610)。ポート付きは通す。`.` を要求するのは、
+    // `localhost` などの単一ラベルと IPv6 リテラルを弾くため(net_guard はこれに依存する)。
+    let name = s.split(':').next().unwrap_or(s);
+    if !name.contains('.') || !is_valid_account_host(s) {
         return Err(Error::Invalid(format!("invalid host: {input}")));
     }
     Ok(s.to_string())
@@ -175,6 +179,19 @@ mod tests {
         assert_eq!(normalize_host("@alice@mi.example.com").unwrap(), "mi.example.com");
         assert!(normalize_host("").is_err());
         assert!(normalize_host("localhost").is_err());
+    }
+
+    #[test]
+    fn normalize_host_accepts_port() {
+        assert_eq!(normalize_host("https://mi.example.com:8443/").unwrap(), "mi.example.com:8443");
+    }
+
+    #[test]
+    fn normalize_host_rejects_unparsable_hosts() {
+        // Issue #610: `.` を含むだけの入力を通すと、後段の `Url::parse` が失敗する。
+        for bad in ["mis key.io", "misskey.io:abc", "misskey.io|x", "misskey.io:0", "misskey.io:99999", "a..b", ".misskey.io", "misskey.io."] {
+            assert!(normalize_host(bad).is_err(), "{bad} が通ってしまった");
+        }
     }
 
     #[test]
