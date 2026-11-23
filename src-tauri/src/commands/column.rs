@@ -469,7 +469,7 @@ async fn resume_column_core<R: Runtime>(
                 if gap_result.notes.is_empty() {
                     return;
                 }
-                // キャッシュへは書き終えている。UI へ出すコピーだけ除去する(Issue #486)。
+                // キャッシュへの書き込みは済んでいる(失敗時は境界を動かしていない。Issue #611)。UI へ出すコピーだけ除去する(Issue #486)。
                 let mut gap_notes = gap_result.notes;
                 state.strip_muted_replies(&account_id, &mut gap_notes);
                 let _ = crate::events::ColumnGapFill {
@@ -1358,7 +1358,7 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
     if gap_result.notes.is_empty() {
         return;
     }
-    // キャッシュへは書き終えている。UI へ出すコピーだけ除去する(Issue #486)。
+    // キャッシュへの書き込みは済んでいる(失敗時は境界を動かしていない。Issue #611)。UI へ出すコピーだけ除去する(Issue #486)。
     let mut gap_notes = gap_result.notes;
     state.strip_muted_replies(&column.account_id, &mut gap_notes);
     let _ = crate::events::ColumnGapFill {
@@ -1706,6 +1706,11 @@ async fn commit_initial_writes(
 /// 境界の世代が古くても、引き上げは飛ばさない: 引き上げは、ロックの中で読んだ最新の境界の既存の行を
 /// 保守的な方向へ動かすだけで、`set_mute` が捨てた後の空の状態からは何も書かない。飛ばすと、
 /// 打ち切られたギャップが境界で覆われないまま残る(Issue #452)。
+///
+/// ノートのキャッシュを**先に**書く。境界は「`id > b` のノートは揃っている」と主張するので、
+/// ノートの書き込みが失敗したら、境界を引き上げず(ノートが無いまま範囲に穴が残るため)、
+/// 帰属の記録も飛ばす(Issue #611)。その場合も `true` を返す: 世代は現在のままで、UI へはノートを
+/// 出してよい(キャッシュに無いだけで、境界は動いていないので、再取得の対象から外れない)。
 async fn commit_gap_fill_writes(
     fence: &ColumnFence,
     cache: &NoteCacheStore,
@@ -1716,13 +1721,16 @@ async fn commit_gap_fill_writes(
 ) -> bool {
     fence
         .write_if_current(column_id, epoch, |_boundaries_ok| async {
-            apply_gap_fill_boundaries(cache, column_id, gap).await;
             if !gap.notes.is_empty() {
-                let _ = cache.cache_notes(column_id, &gap.notes).await;
+                if let Err(e) = cache.cache_notes(column_id, &gap.notes).await {
+                    log::warn!("skipping the gap-fill boundary raise: failed to cache the notes of column {column_id}: {e}");
+                    return;
+                }
                 if let Some(account_id) = attribute_to {
                     crate::attribution::record(cache, account_id, &gap.notes).await;
                 }
             }
+            apply_gap_fill_boundaries(cache, column_id, gap).await;
         })
         .await
         .is_some()
@@ -3716,6 +3724,28 @@ mod tests {
         assert!(!written);
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
         assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+    }
+
+    /// `cache_notes` だけが失敗するキャッシュ(`column_note` が無い)。境界の読み書きは動く。
+    fn cache_failing_on_note_writes() -> NoteCacheStore {
+        let backend = std::sync::Arc::new(crate::store::SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        ));
+        backend.conn().lock().unwrap().execute_batch("DROP TABLE column_note;").unwrap();
+        NoteCacheStore::new_from_arc(backend)
+    }
+
+    #[tokio::test]
+    async fn commit_gap_fill_writes_does_not_raise_boundaries_when_caching_the_notes_fails() {
+        let (fence, cache) = (ColumnFence::default(), cache_failing_on_note_writes());
+        cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
+        let epoch = fence.begin("c1");
+
+        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), Some("acc1")).await;
+
+        assert!(written, "世代は現在のままなので、書き込みの試行は行われた");
+        // ノートが無いまま境界だけが n450 へ進むと、範囲に穴が残る(Issue #611)
+        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n400")]);
     }
 
     /// `set_mute` が行うこと(境界の書きロックの中で、全カラムの境界を捨てる)を模す。
