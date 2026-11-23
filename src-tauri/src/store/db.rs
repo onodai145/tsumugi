@@ -278,26 +278,35 @@ fn migrate(conn: &Connection) -> Result<()> {
 /// 既存DBには列が無いため、`note` から逆算してバックフィルしてからインデックスを張る。
 /// 新規DBでは `column_exists` が true を返しバックフィルはスキップされ、インデックス作成のみ行う。
 fn migrate_cache(conn: &Connection) -> Result<()> {
+    // 列追加とバックフィルは1つのトランザクションにする(Issue #618)。ガードが
+    // `created_at` 列の存在なので、別々にコミットされると ADD の後で中断した場合に
+    // 次回は移行済みと見なされ、`created_at = 0` が永続化する。
     if !column_exists(conn, "column_note", "created_at")? {
-        conn.execute_batch("ALTER TABLE column_note ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")?;
-        conn.execute_batch(
-            "UPDATE column_note SET created_at = (
-                SELECT created_at FROM note WHERE note.id = column_note.note_id
-            )
-            WHERE EXISTS (SELECT 1 FROM note WHERE note.id = column_note.note_id)",
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "ALTER TABLE column_note ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+             UPDATE column_note SET created_at = (
+                 SELECT created_at FROM note WHERE note.id = column_note.note_id
+             )
+             WHERE EXISTS (SELECT 1 FROM note WHERE note.id = column_note.note_id);",
         )?;
+        tx.commit()?;
     }
     // Issue #263: user テーブルをフル正規化テーブルに格上げする列を追加。
     // note.payload に埋め込まれていたユーザー情報をここへ集約する。
     // instance_* は Issue #409 で instance テーブルへ移したため追加しない
     // (判定を instance_name にすると、旧列 DROP 後の再起動で全列を再追加してしまう)。
+    // 判定の列 `emojis` は最後に追加するので、4列を1つのトランザクションにしないと、
+    // 途中で中断した次回に `duplicate column name` で失敗して起動できなくなる(Issue #618)。
     if !column_exists(conn, "user", "emojis")? {
-        conn.execute_batch(
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
             "ALTER TABLE user ADD COLUMN avatar_url TEXT;
              ALTER TABLE user ADD COLUMN bio TEXT;
              ALTER TABLE user ADD COLUMN banner_url TEXT;
              ALTER TABLE user ADD COLUMN emojis TEXT NOT NULL DEFAULT '{}';",
         )?;
+        tx.commit()?;
     }
     // Issue #41: 猫耳表示の色抽出用。avatarBlurhash を正規化テーブルにも保持する。
     if !column_exists(conn, "user", "avatar_blurhash")? {
@@ -599,6 +608,65 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("db-wal"));
         let _ = std::fs::remove_file(path.with_extension("db-shm"));
+    }
+
+    /// Issue #618: `created_at` の追加とバックフィルは一体で、途中で失敗したら列追加ごと戻る。
+    /// 戻らないと、次回は「移行済み」と見なされ `created_at = 0` が永続化する。
+    #[test]
+    fn migrate_cache_rolls_back_created_at_column_when_backfill_fails() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE note (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+             CREATE TABLE user (id TEXT PRIMARY KEY, username TEXT NOT NULL);
+             CREATE TABLE column_note (
+                 column_id TEXT NOT NULL, note_id TEXT NOT NULL, received_at INTEGER NOT NULL,
+                 PRIMARY KEY (column_id, note_id)
+             );
+             INSERT INTO note (id, created_at) VALUES ('n1', 12345);
+             INSERT INTO column_note (column_id, note_id, received_at) VALUES ('c1', 'n1', 999);
+             -- バックフィルの UPDATE を失敗させる(中断の代わり)
+             CREATE TRIGGER fail_backfill BEFORE UPDATE ON column_note
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+
+        assert!(migrate_cache(&conn).is_err());
+        assert!(
+            !column_exists(&conn, "column_note", "created_at").unwrap(),
+            "失敗後に created_at 列が残ると、次回は移行済みと見なされて 0 のままになる"
+        );
+
+        // 失敗の原因が消えれば、次回の起動で正しくバックフィルされる
+        conn.execute_batch("DROP TRIGGER fail_backfill").unwrap();
+        migrate_cache(&conn).unwrap();
+        let created_at: i64 = conn
+            .query_row("SELECT created_at FROM column_note WHERE note_id='n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(created_at, 12345);
+    }
+
+    /// Issue #618: user の4列追加は一体で、途中で失敗したら先に追加した列も戻る。
+    /// 戻らないと、次回は `duplicate column name` で `open_cache` が失敗して起動できなくなる。
+    #[test]
+    fn migrate_cache_rolls_back_user_columns_when_an_alter_fails() {
+        let conn = Connection::open_in_memory().unwrap();
+        // `bio` だけ既にある中途半端な状態を作り、2本目の ALTER を失敗させる
+        conn.execute_batch(
+            "CREATE TABLE user (id TEXT PRIMARY KEY, username TEXT NOT NULL, bio TEXT);
+             CREATE TABLE note (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+             CREATE TABLE column_note (
+                 column_id TEXT NOT NULL, note_id TEXT NOT NULL, received_at INTEGER NOT NULL,
+                 created_at INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (column_id, note_id)
+             );",
+        )
+        .unwrap();
+
+        assert!(migrate_cache(&conn).is_err());
+        assert!(
+            !column_exists(&conn, "user", "avatar_url").unwrap(),
+            "失敗後に avatar_url だけ残ると、次回の ALTER が duplicate column name で失敗する"
+        );
     }
 
     #[test]
