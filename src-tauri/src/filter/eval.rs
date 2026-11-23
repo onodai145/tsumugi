@@ -3,7 +3,33 @@
 
 use super::ast::*;
 use crate::domain::{Note, Visibility};
-use std::collections::HashSet;
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
+
+/// `match` の右辺がリテラルのパターンを、事前にコンパイルした結果(Issue #609)。
+/// 不正なパターンは `None`(評価は常に不一致)。
+/// 作れるのは `compile_regexes` だけ(中身を非公開にして、空の表を `CompiledFilter` に
+/// 持たせて事前コンパイルを取りこぼす構築を、この module の外から書けないようにする)。
+#[derive(Clone)]
+pub struct RegexTable(HashMap<String, Option<Regex>>);
+
+impl RegexTable {
+    fn empty() -> Self {
+        RegexTable(HashMap::new())
+    }
+
+    pub(crate) fn get(&self, pattern: &str) -> Option<&Option<Regex>> {
+        self.0.get(pattern)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 /// `mine` / `following` / `to_me` 等の解決に要る文脈（§7）。
 #[derive(Debug, Clone, Default)]
@@ -16,18 +42,70 @@ pub struct EvalContext {
     pub local_host: Option<String>,
 }
 
+/// 式木のうち、右辺がリテラルの `match` のパターンを一度だけコンパイルする。
+/// 右辺がフィールドなどの動的な `match` は対象外(ノートごとに値が変わるため)。
+pub fn compile_regexes(expr: &Expr) -> RegexTable {
+    fn walk(expr: &Expr, table: &mut RegexTable) {
+        match expr {
+            Expr::Or(a, b) | Expr::And(a, b) => {
+                walk(a, table);
+                walk(b, table);
+            }
+            Expr::Not(a) => walk(a, table),
+            Expr::Bare(_) => {}
+            Expr::Compare { op, rhs, .. } => {
+                if let (CompareOp::Match, Value::Str(p)) = (op, rhs) {
+                    table
+                        .0
+                        .entry(p.clone())
+                        .or_insert_with(|| Regex::new(p).ok());
+                }
+            }
+        }
+    }
+    let mut table = RegexTable::empty();
+    walk(expr, &mut table);
+    table
+}
+
 /// predicate が None のクエリは常に true（呼び出し側で扱う）。ここでは Expr を評価。
+/// 事前コンパイルなしで評価する(`match` はノートごとにコンパイルする)。
 pub fn evaluate(expr: &Expr, note: &Note, ctx: &EvalContext) -> bool {
+    evaluate_with(expr, note, ctx, &RegexTable::empty())
+}
+
+/// `compile_regexes` で作った表を使って評価する。表に無いパターンは、その場でコンパイルする。
+pub fn evaluate_with(expr: &Expr, note: &Note, ctx: &EvalContext, re: &RegexTable) -> bool {
     match expr {
-        Expr::Or(a, b) => evaluate(a, note, ctx) || evaluate(b, note, ctx),
-        Expr::And(a, b) => evaluate(a, note, ctx) && evaluate(b, note, ctx),
-        Expr::Not(a) => !evaluate(a, note, ctx),
+        Expr::Or(a, b) => evaluate_with(a, note, ctx, re) || evaluate_with(b, note, ctx, re),
+        Expr::And(a, b) => evaluate_with(a, note, ctx, re) && evaluate_with(b, note, ctx, re),
+        Expr::Not(a) => !evaluate_with(a, note, ctx, re),
         Expr::Bare(v) => eval_bool(v, note, ctx),
-        Expr::Compare { lhs, op, rhs } => eval_compare(lhs, *op, rhs, note, ctx),
+        Expr::Compare { lhs, op, rhs } => eval_compare(lhs, *op, rhs, note, ctx, re),
     }
 }
 
-fn eval_compare(lhs: &Value, op: CompareOp, rhs: &Value, n: &Note, ctx: &EvalContext) -> bool {
+fn eval_match(lhs: &Value, rhs: &Value, n: &Note, ctx: &EvalContext, table: &RegexTable) -> bool {
+    if let Value::Str(p) = rhs {
+        if let Some(re) = table.get(p) {
+            return re
+                .as_ref()
+                .is_some_and(|re| re.is_match(&eval_str(lhs, n, ctx)));
+        }
+    }
+    Regex::new(&eval_str(rhs, n, ctx))
+        .map(|re| re.is_match(&eval_str(lhs, n, ctx)))
+        .unwrap_or(false)
+}
+
+fn eval_compare(
+    lhs: &Value,
+    op: CompareOp,
+    rhs: &Value,
+    n: &Note,
+    ctx: &EvalContext,
+    re: &RegexTable,
+) -> bool {
     use CompareOp::*;
     match op {
         Lt | Gt | Le | Ge => {
@@ -56,9 +134,7 @@ fn eval_compare(lhs: &Value, op: CompareOp, rhs: &Value, n: &Note, ctx: &EvalCon
         }
         StartsWith => eval_str(lhs, n, ctx).starts_with(&eval_str(rhs, n, ctx)),
         EndsWith => eval_str(lhs, n, ctx).ends_with(&eval_str(rhs, n, ctx)),
-        Match => regex::Regex::new(&eval_str(rhs, n, ctx))
-            .map(|re| re.is_match(&eval_str(lhs, n, ctx)))
-            .unwrap_or(false),
+        Match => eval_match(lhs, rhs, n, ctx, re),
         // `->`: 集合が要素を含む、または文字列が部分文字列を含む
         Contains => {
             if set_capable(lhs) {
@@ -435,5 +511,61 @@ mod tests {
                 .unwrap();
             h.join().unwrap();
         }
+    }
+
+    #[test]
+    fn compile_regexes_collects_literal_patterns_once() {
+        let q = parse(
+            "from home where text match \"^a\" || (!(text match \"^a\") && cw_text match \"b$\")",
+        )
+        .unwrap();
+        let table = compile_regexes(q.predicate.as_ref().unwrap());
+        // 同じパターンは一つにまとまり、Not / And / Or の下も走査される
+        assert_eq!(table.len(), 2);
+        assert!(matches!(table.get("^a"), Some(Some(_))));
+        assert!(matches!(table.get("b$"), Some(Some(_))));
+    }
+
+    #[test]
+    fn compile_regexes_keeps_invalid_patterns_as_none_and_case_variants_apart() {
+        let q = parse("from home where text match \"(\" || text match \"A\" || text match \"a\"")
+            .unwrap();
+        let table = compile_regexes(q.predicate.as_ref().unwrap());
+        assert_eq!(table.len(), 3);
+        assert!(matches!(table.get("("), Some(None))); // 不正なパターンは None
+        assert!(table.get("A").is_some() && table.get("a").is_some()); // 正規化しない
+    }
+
+    #[test]
+    fn compile_regexes_skips_dynamic_right_hand_sides() {
+        let q = parse("from home where text match user.username").unwrap();
+        assert!(compile_regexes(q.predicate.as_ref().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn evaluate_with_uses_the_table_and_falls_back_when_the_pattern_is_missing() {
+        let n = base_note(); // text = "hello https://ex.com #rust @bob"
+        let q = parse("from home where text match \"^hello\"").unwrap();
+        let expr = q.predicate.as_ref().unwrap();
+
+        // 表の値が使われる: 同じパターンを None にした表では不一致になる
+        let mut poisoned = RegexTable::empty();
+        poisoned.0.insert("^hello".to_string(), None);
+        assert!(!evaluate_with(expr, &n, &ctx(), &poisoned));
+
+        // 事前コンパイルした表でも、空の表(その場でコンパイル)でも、`evaluate` と同じ結果
+        let table = compile_regexes(expr);
+        assert!(evaluate_with(expr, &n, &ctx(), &table));
+        assert!(evaluate_with(expr, &n, &ctx(), &RegexTable::empty()));
+        assert!(evaluate(expr, &n, &ctx()));
+    }
+
+    #[test]
+    fn empty_literal_pattern_matches_every_note() {
+        let n = base_note();
+        let q = parse("from home where text match \"\"").unwrap();
+        let expr = q.predicate.as_ref().unwrap();
+        assert!(evaluate_with(expr, &n, &ctx(), &compile_regexes(expr)));
+        assert!(evaluate(expr, &n, &ctx()));
     }
 }

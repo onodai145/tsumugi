@@ -395,6 +395,7 @@ pub struct Query { pub sources: Vec<Source>, pub predicate: Option<Expr> }
 - 各 `Field` は `supported_types() -> &[FilterType]` を返す（例：`Reactions` は `[Numeric, Set]`）。
 - `Compare` は演算子と両辺の型から評価関数を決定：
   数値比較 / 文字列比較（`==`は完全一致, `Contains`は部分一致）/ 集合包含（`In`/`Contains`）/ 正規表現(`Match`)。
+  右辺がリテラルの `match` は、カラム生成時（`CompiledFilter::from_expr`）に正規表現を一度だけコンパイルして保持する（Issue #609）。右辺がフィールドのときは、ノートごとにコンパイルする。不正なパターンは、どちらの場合も不一致になる。
 - `Bare(Value)` は Value が Boolean を返せる場合のみ許可。
 - 型不一致・未対応の組合せは**パース時にエラー**（実行時に落とさない）。
 - `reactions` の Set 面は §3.4 の正規化を通してから包含判定。
