@@ -300,51 +300,51 @@ describe("#applyTheme (Issue #170: data-theme属性から.darkクラスへ移行
 
   it("theme='dark'のとき<html>にdarkクラスが付与される", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, theme: "dark" });
+    await app.updateUiPrefs({ theme: "dark" });
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.classList.contains("light")).toBe(false);
   });
 
   it("theme='light'のとき<html>にlightクラスが付与される", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, theme: "light" });
+    await app.updateUiPrefs({ theme: "light" });
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
   it("theme='auto'のときOSがdark選好なら<html>にdarkクラスが付与される", async () => {
     mockPrefersColorSchemeDark(true);
-    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    await app.updateUiPrefs({ theme: "auto" });
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.classList.contains("light")).toBe(false);
   });
 
   it("theme='auto'のときOSがdark選好でなければ<html>にdark/lightどちらのクラスも付与されない", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, theme: "dark" });
-    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    await app.updateUiPrefs({ theme: "dark" });
+    await app.updateUiPrefs({ theme: "auto" });
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(document.documentElement.classList.contains("light")).toBe(false);
   });
 
   it("theme='preset:*'のとき<html>にdark/lightどちらのクラスも付与されない(プリセット/カスタムテーマは既存動作を維持)", async () => {
     mockPrefersColorSchemeDark(true);
-    await app.setUiPrefs({ ...app.ui, theme: "preset:tokyo-night" });
+    await app.updateUiPrefs({ theme: "preset:tokyo-night" });
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(document.documentElement.classList.contains("light")).toBe(false);
   });
 
   it("light→darkへの直接遷移でdarkが付与されlightは外れる", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, theme: "light" });
-    await app.setUiPrefs({ ...app.ui, theme: "dark" });
+    await app.updateUiPrefs({ theme: "light" });
+    await app.updateUiPrefs({ theme: "dark" });
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.classList.contains("light")).toBe(false);
   });
 
   it("theme='auto'適用中にOS設定がライブでdarkに変わると<html>にdarkクラスが付与される", async () => {
     const { dispatchChange } = mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    await app.updateUiPrefs({ theme: "auto" });
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     dispatchChange(true);
     expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -352,16 +352,16 @@ describe("#applyTheme (Issue #170: data-theme属性から.darkクラスへ移行
 
   it("#applyThemeを繰り返し呼んでもmatchMediaのchangeリスナーは多重登録されない", async () => {
     const { listenerCount } = mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, theme: "auto" });
-    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    await app.updateUiPrefs({ theme: "auto" });
+    await app.updateUiPrefs({ theme: "auto" });
     expect(listenerCount()).toBe(1);
   });
 
   it("theme='auto'から他テーマへ切り替えるとmatchMediaのchangeリスナーが解除される", async () => {
     const { listenerCount } = mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, theme: "auto" });
+    await app.updateUiPrefs({ theme: "auto" });
     expect(listenerCount()).toBe(1);
-    await app.setUiPrefs({ ...app.ui, theme: "light" });
+    await app.updateUiPrefs({ theme: "light" });
     expect(listenerCount()).toBe(0);
   });
 });
@@ -903,21 +903,21 @@ describe("#applyAvatarRadius (Issue #94: アイコンの丸みカスタマイズ
     vi.unstubAllGlobals();
   });
 
-  it("setUiPrefsでavatarRadiusを指定すると--avatar-radius CSS変数に反映される", async () => {
+  it("updateUiPrefsでavatarRadiusを指定すると--avatar-radius CSS変数に反映される", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, avatarRadius: 65 });
+    await app.updateUiPrefs({ avatarRadius: 65 });
     expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("65%");
   });
 
   it("avatarRadiusが範囲外(100超)でも100%にクランプされる", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, avatarRadius: 150 });
+    await app.updateUiPrefs({ avatarRadius: 150 });
     expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("100%");
   });
 
   it("avatarRadiusが範囲外(負数)でも0%にクランプされる", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, avatarRadius: -10 });
+    await app.updateUiPrefs({ avatarRadius: -10 });
     expect(document.documentElement.style.getPropertyValue("--avatar-radius")).toBe("0%");
   });
 });
@@ -933,33 +933,33 @@ describe("UIスケール(Issue #40)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("setUiPrefsでuiScaleを指定するとapplyUiScaleに渡される", async () => {
+  it("updateUiPrefsでuiScaleを指定するとapplyUiScaleに渡される", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, uiScale: 130 });
+    await app.updateUiPrefs({ uiScale: 130 });
     expect(applyUiScaleMock).toHaveBeenCalledWith(130);
     expect(app.ui.uiScale).toBe(130);
   });
 
   it("uiScaleが未設定(旧データ)なら100で適用される", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, uiScale: undefined });
+    await app.updateUiPrefs({ uiScale: undefined });
     expect(applyUiScaleMock).toHaveBeenCalledWith(100);
     expect(app.ui.uiScale).toBe(100);
   });
 
   it("範囲外のuiScaleは正規化されてapp.uiに保持され、正規化後の値が適用される", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, uiScale: 1000 });
+    await app.updateUiPrefs({ uiScale: 1000 });
     expect(app.ui.uiScale).toBe(200);
     expect(applyUiScaleMock).toHaveBeenLastCalledWith(200);
   });
 
   it("同じ倍率の保存ではapplyUiScaleを繰り返し呼ばない", async () => {
     mockPrefersColorSchemeDark(false);
-    await app.setUiPrefs({ ...app.ui, uiScale: 170 });
-    await app.setUiPrefs({ ...app.ui, uiScale: 170 });
+    await app.updateUiPrefs({ uiScale: 170 });
+    await app.updateUiPrefs({ uiScale: 170 });
     expect(applyUiScaleMock.mock.calls.filter(([v]) => v === 170)).toHaveLength(1);
-    await app.setUiPrefs({ ...app.ui, uiScale: 180 });
+    await app.updateUiPrefs({ uiScale: 180 });
     expect(applyUiScaleMock).toHaveBeenLastCalledWith(180);
   });
 
@@ -968,16 +968,16 @@ describe("UIスケール(Issue #40)", () => {
     const warnCount = () => app.logs.filter((l) => l.level === "warn" && l.text.includes("UIスケール")).length;
     const before = warnCount();
     applyUiScaleMock.mockRejectedValueOnce(new Error("unsupported"));
-    await app.setUiPrefs({ ...app.ui, uiScale: 190 });
+    await app.updateUiPrefs({ uiScale: 190 });
     await vi.waitFor(() => expect(warnCount()).toBe(before + 1));
-    await app.setUiPrefs({ ...app.ui, uiScale: 190 });
+    await app.updateUiPrefs({ uiScale: 190 });
     expect(applyUiScaleMock.mock.calls.filter(([v]) => v === 190)).toHaveLength(2);
   });
 
   it("applyUiScaleが失敗しても設定の保存は成功し、警告ログが残る", async () => {
     mockPrefersColorSchemeDark(false);
     applyUiScaleMock.mockRejectedValue(new Error("unsupported"));
-    await expect(app.setUiPrefs({ ...app.ui, uiScale: 150 })).resolves.toBeUndefined();
+    await expect(app.updateUiPrefs({ uiScale: 150 })).resolves.toBeUndefined();
     await vi.waitFor(() => {
       expect(app.logs.some((l) => l.level === "warn" && l.text.includes("UIスケール"))).toBe(true);
     });

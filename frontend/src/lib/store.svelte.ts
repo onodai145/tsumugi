@@ -1858,11 +1858,6 @@ class AppStore {
     return this.#enqueueUiPrefs(patch, true);
   }
 
-  /// 旧API(全量置換)。呼び出し側の移行が済むまでの間だけ残す。
-  async setUiPrefs(prefs: UiPrefs) {
-    await this.#enqueueUiPrefs(prefs, true);
-  }
-
   /// `applyEffects` が偽なら、保存と `this.ui` の更新だけを行う(キー割り当て・絵文字の更新が、
   /// 背景やテーマの再適用とログを出さない現状の挙動を保つため)。
   #enqueueUiPrefs(patch: UiPrefsPatch, applyEffects: boolean): Promise<void> {
@@ -1934,7 +1929,7 @@ class AppStore {
     return unicodeEmojiUrl(char, (this.ui.emojiStyle as EmojiStyle) ?? "twemoji");
   }
 
-  /// 画像/動画ファイルを選んで backgrounds/ へコピーする（保存は setUiPrefs で）。
+  /// 画像/動画ファイルを選んで backgrounds/ へコピーする（保存は updateUiPrefs で）。
   /// 戻り値は種類とコピー後の絶対パス。旧ファイルの削除は行わない(未保存で閉じた場合に
   /// 備えて残しておき、起動時のGCでまとめて掃除する。Issue #46 I1)。
   async pickBackgroundMedia(): Promise<{ kind: "image" | "video"; absolutePath: string } | null> {
