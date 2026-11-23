@@ -36,6 +36,8 @@
   let actionErr = $state<string | null>(null);
   // カーソルは表示順(予約日時の昇順)ではなくサーバーが返した順の最後の ID。
   let cursor: string | null = null;
+  // reloadAll で進む世代。進行中の loadServer が古い応答を、読み直した一覧へ追記しないようにする。
+  let serverGen = 0;
   let seenToken = untrack(() => reloadToken);
 
   const rows = $derived<ScheduledListItem[]>(
@@ -51,17 +53,20 @@
 
   async function loadServer() {
     if (!serverSide) return;
+    const gen = serverGen;
     serverLoading = true;
     serverErr = null;
     try {
       const page = await unwrapAcc(accountId, commands.listScheduledNotes(accountId, cursor, PAGE_SIZE));
+      if (gen !== serverGen) return;
       serverItems = [...serverItems, ...(page ?? [])];
       hasMore = (page?.length ?? 0) >= PAGE_SIZE;
       if (page && page.length > 0) cursor = page[page.length - 1].id;
     } catch (e) {
+      if (gen !== serverGen) return;
       serverErr = String(e);
     } finally {
-      serverLoading = false;
+      if (gen === serverGen) serverLoading = false;
     }
   }
 
@@ -78,6 +83,7 @@
   }
 
   function reloadAll() {
+    serverGen++; // 進行中の loadServer を無効にする
     serverItems = [];
     cursor = null;
     void loadServer();

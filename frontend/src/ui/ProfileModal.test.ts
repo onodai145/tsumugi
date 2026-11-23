@@ -750,6 +750,57 @@ describe("ProfileModal", () => {
   });
 });
 
+describe("ProfileModal フォローの応答待ち中にプロフィールが切り替わった場合(Issue #616)", () => {
+  /// u1 は未フォロー、u2 はフォロー中。follow_user は手動で失敗させる。
+  function setup() {
+    let rejectFollow!: (e: Error) => void;
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "follow_user") return new Promise((_, rej) => (rejectFollow = rej));
+      if (cmd === "get_user_profile") {
+        const userId = args?.userId as string;
+        return Promise.resolve(
+          profileResponse({
+            user: { ...profileResponse().user, id: userId, username: userId },
+            isFollowing: userId === "u2",
+          }),
+        );
+      }
+      if (cmd === "get_user_notes") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+    return { rejectFollow: (e: Error) => rejectFollow(e) };
+  }
+  const renderModal = () =>
+    render(ProfileModal, { props: { target: { userId: "u1" }, accountId: "acc1", onclose: () => {} } });
+
+  it("フォローの失敗が、切り替え後の別ユーザーの isFollowing 表示を巻き戻さない", async () => {
+    const { rejectFollow } = setup();
+    const r = renderModal();
+    await fireEvent.click(await r.findByRole("button", { name: "フォロー" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("follow_user", expect.anything()));
+
+    await r.rerender({ target: { userId: "u2" }, accountId: "acc1", onclose: () => {} });
+    await waitFor(() => expect(r.getByText("@u2")).toBeTruthy());
+    rejectFollow(new Error("following/create: failed"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(r.getByRole("button", { name: "フォロー解除" })).toBeTruthy();
+    expect(r.queryByText(/following\/create/)).toBeNull();
+  });
+
+  it("フォローの応答待ち中に切り替えても、新しいプロフィールのフォローボタンは押せる", async () => {
+    setup();
+    const r = renderModal();
+    await fireEvent.click(await r.findByRole("button", { name: "フォロー" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("follow_user", expect.anything()));
+
+    await r.rerender({ target: { userId: "u2" }, accountId: "acc1", onclose: () => {} });
+
+    const btn = await r.findByRole("button", { name: "フォロー解除" });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
 describe("ProfileModal モバイル(Issue #450)", () => {
   function mockProfileWithNote() {
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {

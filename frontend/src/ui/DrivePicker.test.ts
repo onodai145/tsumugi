@@ -65,4 +65,62 @@ describe("DrivePicker", () => {
     await fireEvent.click(getByText("添付"));
     expect(onSelect).toHaveBeenCalledWith([expect.objectContaining({ id: "file1" })]);
   });
+
+  describe("古い応答の破棄(Issue #616)", () => {
+    const file = (id: string) => ({
+      id,
+      name: `${id}.png`,
+      mimeType: "image/png",
+      url: `https://example.com/${id}.png`,
+      thumbnailUrl: null,
+      isSensitive: false,
+    });
+    const page = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => file(`${prefix}${i}`));
+
+    /// ルートに1ページ満杯(30件)+フォルダ f1、追加読み込みだけ手動で解決する。f1 の中も満杯(30件)。
+    function setup() {
+      let resolveOlder!: (v: unknown) => void;
+      const older = new Promise((resolve) => (resolveOlder = resolve));
+      invokeMock.mockImplementation((cmd: string, args?: { folderId: string | null; untilId: string | null }) => {
+        if (cmd === "list_drive_folders") {
+          return Promise.resolve(args?.folderId == null ? [{ id: "f1", name: "写真" }] : []);
+        }
+        if (cmd === "list_drive_files") {
+          if (args?.untilId != null) return older;
+          return Promise.resolve(args?.folderId === "f1" ? page("new", 30) : page("root", 30));
+        }
+        return Promise.resolve(null);
+      });
+      return { resolveOlder };
+    }
+
+    it("追加読み込みの応答が返る前にフォルダを移動したら、旧フォルダの続きを新フォルダに混ぜない", async () => {
+      const { resolveOlder } = setup();
+      const { getByText, findByText } = render(DrivePicker, {
+        props: { accountId: "acc1", onSelect: vi.fn(), onclose: () => {} },
+      });
+      await fireEvent.click(await findByText("もっと見る"));
+      await fireEvent.click(getByText(/写真/));
+      await waitFor(() => expect(document.querySelector('img[alt="new0.png"]')).toBeTruthy());
+
+      resolveOlder([file("stale0"), file("stale1")]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(document.querySelector('img[alt="stale0.png"]')).toBeNull();
+      // 旧フォルダの短いページ(30件未満)で、新フォルダ側が「これで終端」と誤判定されない
+      expect(getByText("もっと見る")).toBeTruthy();
+    });
+
+    it("追加読み込みの応答が返る前にフォルダを移動しても、新フォルダの「もっと見る」は押せる", async () => {
+      setup();
+      const { getByText, findByText } = render(DrivePicker, {
+        props: { accountId: "acc1", onSelect: vi.fn(), onclose: () => {} },
+      });
+      await fireEvent.click(await findByText("もっと見る"));
+      await fireEvent.click(getByText(/写真/));
+      await waitFor(() => expect(document.querySelector('img[alt="new0.png"]')).toBeTruthy());
+
+      expect(getByText("もっと見る").closest("button")!.disabled).toBe(false);
+    });
+  });
 });
