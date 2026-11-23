@@ -1470,11 +1470,18 @@ class AppStore {
         );
         // groupId未指定(新規グループ作成)の場合、バックエンドはpane_layoutにも
         // 追加している(Issue #31)ので、こちらも取り直しておく。
-        const paneRoot = await unwrap(commands.loadPaneLayout());
+        // ここまでで追加は確定している。取り直しに失敗しても例外にはしない(呼び出し側の
+        // モーダルが開いたままになり、再試行で同じカラムが重複する。Issue #615)。
+        let paneRoot: PaneNode | null = null;
+        try {
+          paneRoot = await unwrap(commands.loadPaneLayout());
+        } catch (e) {
+          this.#failModal(e);
+        }
         return { opened, paneRoot };
       });
       const tab = this.#insertTab(opened);
-      this.paneRoot = paneRoot;
+      if (paneRoot) this.paneRoot = paneRoot;
       const g = this.groups.find((x) => x.id === opened.group.id);
       if (g) g.activeTabId = tab.id;
       this.#captureInitial(opened.column.id, opened.notes);

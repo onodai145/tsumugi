@@ -219,3 +219,45 @@ describe("AddColumnModal の読み上げ(Issue #625)", () => {
   });
 });
 
+
+describe("AddColumnModal の2段階処理の途中失敗(Issue #615)", () => {
+  const opened = {
+    column: { id: "tabNew", accountId: ACCOUNT_ID, kind: { type: "home" }, order: 0, filter: { kind: "keywords", value: [] }, notifySound: false, notifyDesktop: false, notifySoundChoice: "", groupId: "g1", title: null },
+    group: { id: "g1", width: 400, auto: false },
+    notes: [],
+    notifications: [],
+  };
+  const calls = (cmd: string) => invokeMock.mock.calls.filter((c) => c[0] === cmd);
+
+  function mockBackend(fail: string) {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "add_column") return Promise.resolve(opened);
+      if (cmd === fail) return Promise.reject("失敗");
+      return Promise.resolve(null);
+    });
+  }
+
+  it("カラム追加後に通知設定の保存が失敗しても、モーダルは閉じて再試行の余地を残さない(重複しない)", async () => {
+    mockBackend("set_column_notify");
+    const onclose = vi.fn();
+    const { getByTestId, getByLabelText } = render(AddColumnModal, { onclose, groupId: null });
+    await fireEvent.click(getByLabelText("通知音"));
+    await fireEvent.click(getByTestId("add-column-submit"));
+    await waitFor(() => expect(onclose).toHaveBeenCalled());
+
+    expect(calls("add_column")).toHaveLength(1);
+    expect(app.errorModal).not.toBeNull();
+  });
+
+  it("カラム追加後にペイン配置の取得が失敗しても、作成済みのカラムを残してモーダルを閉じ、エラーを出す", async () => {
+    mockBackend("load_pane_layout");
+    const onclose = vi.fn();
+    const { getByTestId } = render(AddColumnModal, { onclose, groupId: null });
+    await fireEvent.click(getByTestId("add-column-submit"));
+    await waitFor(() => expect(onclose).toHaveBeenCalled());
+
+    expect(calls("add_column")).toHaveLength(1);
+    expect(app.errorModal).not.toBeNull();
+    expect(app.groups.flatMap((g) => g.tabs).map((t) => t.id)).toContain("tabNew");
+  });
+});
