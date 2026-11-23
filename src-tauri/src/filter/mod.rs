@@ -24,11 +24,21 @@ pub enum CompiledFilter {
     PassAll,
     /// 部分一致キーワード（OR、小文字化して比較）
     Keywords(Vec<String>),
-    /// TQL の where 述語
-    Tql(ast::Expr),
+    /// TQL の where 述語。`regexes` は右辺がリテラルの `match` を事前コンパイルした表(Issue #609)。
+    /// 直接構築せず、`CompiledFilter::from_expr` を使う(事前コンパイルを一箇所に集めるため)。
+    Tql {
+        expr: ast::Expr,
+        regexes: eval::RegexTable,
+    },
 }
 
 impl CompiledFilter {
+    /// AST から TQL のフィルタを作る。正規表現の事前コンパイルはここだけで行う。
+    pub fn from_expr(expr: ast::Expr) -> Self {
+        let regexes = eval::compile_regexes(&expr);
+        CompiledFilter::Tql { expr, regexes }
+    }
+
     /// `FilterQuery` をコンパイルする。TQL のパース失敗はエラー文字列で返す。
     pub fn compile(fq: &FilterQuery) -> Result<Self, String> {
         Ok(match fq {
@@ -42,7 +52,7 @@ impl CompiledFilter {
                     .collect(),
             ),
             FilterQuery::Tql(q) if q.trim().is_empty() => CompiledFilter::PassAll,
-            FilterQuery::Tql(q) => CompiledFilter::Tql(parser::parse_predicate(q)?),
+            FilterQuery::Tql(q) => CompiledFilter::from_expr(parser::parse_predicate(q)?),
         })
     }
 
@@ -54,7 +64,7 @@ impl CompiledFilter {
                 let text = note.text.as_deref().unwrap_or("").to_lowercase();
                 ks.iter().any(|k| text.contains(k))
             }
-            CompiledFilter::Tql(expr) => eval::evaluate(expr, note, ctx),
+            CompiledFilter::Tql { expr, regexes } => eval::evaluate_with(expr, note, ctx, regexes),
         }
     }
 }
@@ -141,6 +151,58 @@ mod tests {
         let f = CompiledFilter::compile(&FilterQuery::Tql("has_files && !cw".into())).unwrap();
         assert!(f.matches(&note("x", 1), &ctx));
         assert!(!f.matches(&note("x", 0), &ctx));
+    }
+
+    fn tql_regexes(f: &CompiledFilter) -> &eval::RegexTable {
+        match f {
+            CompiledFilter::Tql { regexes, .. } => regexes,
+            _ => panic!("TQL ではない"),
+        }
+    }
+
+    #[test]
+    fn tql_literal_match_pattern_is_precompiled_once() {
+        let ctx = EvalContext::default();
+        let f = CompiledFilter::compile(&FilterQuery::Tql(
+            "text match \"^ab+c$\" || text match \"^ab+c$\" || text match \"zzz\"".into(),
+        ))
+        .unwrap();
+        // 同じパターンは1つにまとまり、リテラルごとに1回だけコンパイルされる(Issue #609)
+        assert_eq!(tql_regexes(&f).len(), 2);
+        assert!(f.matches(&note("abbc", 0), &ctx));
+        assert!(!f.matches(&note("xyz", 0), &ctx));
+    }
+
+    #[test]
+    fn tql_invalid_literal_pattern_never_matches_and_negation_does() {
+        let ctx = EvalContext::default();
+        let f = CompiledFilter::compile(&FilterQuery::Tql("text match \"(\"".into())).unwrap();
+        assert!(matches!(tql_regexes(&f).get("("), Some(None)));
+        assert!(!f.matches(&note("(", 0), &ctx));
+        let not =
+            CompiledFilter::compile(&FilterQuery::Tql("!(text match \"(\")".into())).unwrap();
+        assert!(not.matches(&note("(", 0), &ctx));
+    }
+
+    #[test]
+    fn tql_dynamic_match_pattern_is_still_evaluated_per_note() {
+        let ctx = EvalContext::default();
+        let f = CompiledFilter::compile(&FilterQuery::Tql("text match user.username".into()))
+            .unwrap();
+        assert!(tql_regexes(&f).is_empty());
+        assert!(f.matches(&note("xax", 0), &ctx)); // username は "a"
+        assert!(!f.matches(&note("xyz", 0), &ctx));
+    }
+
+    #[test]
+    fn from_expr_precompiles_like_compile() {
+        // `commands/column.rs` の `from … where …` 経路は `compile` を通らず `from_expr` で作る
+        let ctx = EvalContext::default();
+        let q = parser::parse("from home where text match \"^ab\"").unwrap();
+        let f = CompiledFilter::from_expr(q.predicate.unwrap());
+        assert_eq!(tql_regexes(&f).len(), 1);
+        assert!(f.matches(&note("abc", 0), &ctx));
+        assert!(!f.matches(&note("xab", 0), &ctx));
     }
 
     #[test]

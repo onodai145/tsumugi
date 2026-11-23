@@ -918,7 +918,7 @@ async fn resolve_sources(
         return Err(Error::Invalid("有効なソースがありません".into()));
     }
     let filter = match q.predicate {
-        Some(expr) => CompiledFilter::Tql(expr),
+        Some(expr) => CompiledFilter::from_expr(expr),
         None => CompiledFilter::PassAll,
     };
     Ok(ResolvedSources { kinds, use_cache, filter })
@@ -1950,7 +1950,7 @@ async fn search_cache_core(
         following_ids: None,
     };
     let where_sql = match &compiled {
-        CompiledFilter::Tql(expr) => sql::build_where(expr, &sql_ctx).map_err(Error::Invalid)?,
+        CompiledFilter::Tql { expr, .. } => sql::build_where(expr, &sql_ctx).map_err(Error::Invalid)?,
         _ => sql::SqlWhere::always_true(),
     };
     let raw = cache.search_cache(&where_sql, until_id, limit).await?;
@@ -2274,7 +2274,7 @@ async fn fetch_backfill_pass(
             following_ids: None,
         };
         let expr = match &resolved.filter {
-            CompiledFilter::Tql(e) => Some(e),
+            CompiledFilter::Tql { expr: e, .. } => Some(e),
             _ => None,
         };
         let where_sql = match expr {
