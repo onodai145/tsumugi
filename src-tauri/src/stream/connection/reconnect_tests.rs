@@ -637,6 +637,8 @@ async fn a_non_401_handshake_rejection_keeps_retrying() {
     // 500 や 403 は止めない: バックオフ後に、同じサーバーへ再び接続が来る。
     server.reject_with_status(500).await;
     server.reject_with_status(403).await;
+    // 403 のあとにも、もう一度接続が来る(403 で止まっていたら、ここで待ち切れず失敗する)。
+    server.reject_with_status(500).await;
 
     assert!(!h.task.is_finished());
 }
