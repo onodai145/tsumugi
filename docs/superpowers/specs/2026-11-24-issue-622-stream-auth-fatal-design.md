@@ -50,9 +50,11 @@
 `Fatal` を受けたら、次の順で処理してタスクを終える。
 
 1. `subs` に登録済みのカラム全てへ `ConnectionState::Error` を emit する(従来の `emit_state_all`)。
-2. `cmd_rx` に溜まっている未処理の `AddChannel` を `try_recv` で全て取り出し、そのカラムにも `Error` を emit する(`connect_async` の最中に積まれたコマンドは `subs` に入っておらず、放っておくと `Connecting` のまま残るため)。
-3. `cmd_rx.close()` を呼ぶ。以降の送信は即座に失敗し、`UnboundedSender::is_closed()` が `true` になる。
+2. `cmd_rx.close()` を呼ぶ。以降の送信は即座に失敗し、`UnboundedSender::is_closed()` が `true` になる。
+3. `cmd_rx` に溜まっている未処理の `AddChannel` を `try_recv` で全て取り出し、そのカラムにも `Error` を emit する(`connect_async` の最中に積まれたコマンドは `subs` に入っておらず、放っておくと `Connecting` のまま残るため)。
 4. `return` する。バックオフ待ちには入らない。
+
+**close を回収より先にする理由**: 回収してから close すると、その間に届いたコマンドは、回収にも漏れ、送信にも成功して捨てられる(失われる)。先に close すれば、コマンドは「バッファに入って回収される」か「送信が失敗して呼び出し側へ返る(§3 の作り直し)」のどちらかになる。
 
 ### 3. 止まったタスクの後始末 (`ConnectionManager`)
 
@@ -73,11 +75,15 @@
 
 テストのため、本体は `AppHandle` と `AppState` を引数に取る `reconnect_column_core` にする(`resume_column_core` と同じ形)。
 
+**古い定義のストリームは開かない(世代の確認)**: `reconnect_column_core` は `begin_and_load_column` で世代(epoch)を控え(`begin` は世代を進めないので、進行中の取得を無効にしない)、本体の `reconnect_column_with(app, state, column, epoch)` が、ストリームを開く部分を `ColumnFence::write_if_current` で守る。世代を控えたあとに `update_column` / `close_column` が走った(世代が変わった)なら、何も開かず `Ok(())` を返す(開き直し・閉じる責任は、その呼び出し側にある)。開くと、旧い定義の購読(例: 増えすぎたソース)が残って、別のノートをカラムへ流し込みうる。
+
 ### 5. フロント (`lib/store.svelte.ts`)
 
 - `columnConnectionState` で `error` を受けたとき、ログを `接続エラー` から次の文面へ変える: `認証に失敗しました: <アカウント> のトークンが失効している可能性があります`。`reauthAccountId` にタブの `accountId` を渡して、Backstage の「再認証」ボタンを出す。
-- 同じアカウントのカラムが複数同時に `Error` になるので、ログは**アカウントごとに 1 回**だけ出す(`#authErrorLogged: Set<string>`)。そのアカウントの再認証が成功したら、集合から外す。
+- 同じアカウントのカラムが複数同時に `Error` になるので、ログは**アカウントごとに、そのログが残っている間は 1 回**だけ出す。アカウント ID → 出したログの id の `Map`(`#authErrorLogId`)を持ち、そのログがまだ `logs` に残っているときだけ抑止する(ログが上限で流れ落ちた・クリアされたあとの次の `Error` では、もう一度出す)。そのアカウントの再認証が成功したら(`completeAccount`)、エントリを外す。
+- `Error` が、タブの挿入より先に届くことがある(`#connState` に記録されるだけで、タブが無いのでログを出せない)。`#insertTab` が、作ったタブの状態が `error` なら、同じ導線(`#logAuthError`)を出す。
 - `completeAccount` の最後(`#resumeAccountColumns` の後)に、`#reconnectErrorColumns(accountId)` を呼ぶ。そのアカウントのタブのうち `state === "error"` のものへ `commands.reconnectColumn(tab.id)` を呼ぶ。失敗はログのみ(再認証自体の成否には影響させない。`#resumeAccountColumns` と同じ)。
+- `reconnectColumn` が成功したタブは、表示中のノートを `captureNotes` で張り直す(`#captureInitial`)。止まったタスクの購読(キャプチャ)は一緒に消えているので、張り直さないと、表示中のノートのリアクション・投票・削除が、アプリを再起動するまで反映されない。通常の再接続は、タスクが購読を保持して再購読するので、これは不要。
 
 ### 6. Rust 側のエラー通知は増やさない
 
