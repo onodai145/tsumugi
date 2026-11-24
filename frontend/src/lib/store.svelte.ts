@@ -285,10 +285,11 @@ class AppStore {
   // (reconnecting→connecting→connected と必ず connecting を経由するため、
   // 直前状態が connecting かどうかでは区別できない)。
   #wasReconnecting = new Set<string>();
-  // 認証失敗(接続の Error)のログを出したアカウントの集合。同じアカウントの複数カラムが
+  // 認証失敗(接続の Error)のログを出したアカウント -> そのログの id。同じアカウントの複数カラムが
   // 同時に Error になるので、ログと「再認証」ボタンはアカウントごとに 1 回だけ出す(Issue #622)。
+  // ログが残っている間だけ抑止する(上限で流れ落ちた・クリアされた後は、次の Error でもう一度出す)。
   // そのアカウントの再認証が成功したら外す(再認証したのにまた失敗したら、もう一度出す)。
-  #authErrorLogged = new Set<string>();
+  #authErrorLogId = new Map<string, number>();
 
   /// Tauri イベント購読をすべて解除する。dev の HMR で古いインスタンスの
   /// リスナーが残り通知が多重化するのを防ぐために使う（本番では未使用）。
@@ -528,6 +529,8 @@ class AppStore {
       this.groups = [...this.groups, g];
     }
     const tab = this.#makeTab(opened);
+    // タブが挿入される前に Error が届いていた場合(#connState から拾った)は、ここで再認証の導線を出す。
+    if (tab.state === "error") this.#logAuthError(tab.accountId);
     g.tabs = [...g.tabs, tab];
     if (!g.activeTabId) g.activeTabId = tab.id;
     if (!this.focusedGroupId) this.focusedGroupId = g.id;
@@ -1058,6 +1061,16 @@ class AppStore {
     });
   }
 
+  /// 認証失敗のログ(「再認証」ボタン付き)を、アカウントごとに、ログが残っている間は 1 回だけ出す。
+  #logAuthError(accountId: string) {
+    const prev = this.#authErrorLogId.get(accountId);
+    if (prev !== undefined && this.logs.some((l) => l.id === prev)) return;
+    const acc = this.accounts.find((a) => a.id === accountId);
+    const who = acc ? `@${acc.username}@${acc.host}` : accountId;
+    this.#log("error", `認証に失敗しました: ${who} のトークンが失効している可能性があります`, accountId);
+    this.#authErrorLogId.set(accountId, this.#logSeq);
+  }
+
   /// ColumnConnectionState イベントの本体。`Error` は、ストリームのハンドシェイクが認証失敗(401)で
   /// 拒否されて Rust 側が再接続を止めたことを表す(他に Error になる経路は無い。Issue #622)。
   applyConnectionState(p: ColumnConnectionState) {
@@ -1070,11 +1083,7 @@ class AppStore {
     // 状態遷移を Backstage に記録（起動時の connecting→connected は除外）
     const name = tab.title;
     if (p.state === "error") {
-      if (this.#authErrorLogged.has(tab.accountId)) return;
-      this.#authErrorLogged.add(tab.accountId);
-      const acc = this.accounts.find((a) => a.id === tab.accountId);
-      const who = acc ? `@${acc.username}@${acc.host}` : tab.accountId;
-      this.#log("error", `認証に失敗しました: ${who} のトークンが失効している可能性があります`, tab.accountId);
+      this.#logAuthError(tab.accountId);
     } else if (p.state === "reconnecting") {
       this.#wasReconnecting.add(p.columnId);
       this.#log("warn", `再接続中: ${name}`);
@@ -1366,7 +1375,7 @@ class AppStore {
       this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
     this.#clearNeedsLogin(account.id); // 認証が通ったので、通信の対象に戻す
-    this.#authErrorLogged.delete(account.id); // 再認証したのにまた失敗したら、ログをもう一度出す
+    this.#authErrorLogId.delete(account.id); // 再認証したのにまた失敗したら、ログをもう一度出す
     // 起動時に取らなかった(トークンなしだった)インスタンス情報を取る。再認証自体は待たせない。
     void this.#refreshInstanceMeta([account]);
     await this.#syncServerMutes(account.id);

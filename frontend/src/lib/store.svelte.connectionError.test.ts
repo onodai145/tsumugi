@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Account } from "../bindings/tauri.gen";
+import type { Account, Column, OpenedColumn } from "../bindings/tauri.gen";
 import type { TabView } from "./store.svelte";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
@@ -92,6 +92,50 @@ describe("認証失敗でカラムがErrorになったとき(Issue #622)", () =>
       "認証に失敗しました: @me@misskey.test のトークンが失効している可能性があります",
     );
     expect(app.groups[0].tabs.map((t) => t.state)).toEqual(["error", "error", "error"]);
+  });
+
+  it("ログが消えた(上限で流れ落ちた・クリアした)あとに別のカラムが Error になったら、もう一度ログを出す", () => {
+    setTabs(tab("c1", "acc1", "connected"), tab("c2", "acc1", "connected"));
+    app.applyConnectionState({ columnId: "c1", state: "error" });
+    expect(authLogs()).toHaveLength(1);
+
+    app.clearLogs();
+    app.applyConnectionState({ columnId: "c2", state: "error" });
+
+    expect(authLogs()).toHaveLength(1);
+  });
+
+  it("タブが挿入される前に届いた error でも、タブが挿入された時に再認証ボタン付きのログを出す", async () => {
+    app.groups = [];
+    const col: Column = {
+      id: "c9",
+      accountId: "acc1",
+      kind: { type: "home" },
+      order: 0,
+      filter: { kind: "keywords", value: [] },
+      notifySound: false,
+      notifyDesktop: false,
+      notifySoundChoice: "",
+      speech: { enabled: false, speakAuthor: true, queueLimit: 5, voiceId: "" },
+      groupId: "g1",
+      title: null,
+    };
+    const opened: OpenedColumn = {
+      column: col,
+      group: { id: "g1", order: 0, width: 300, auto: false },
+      notes: [],
+      notifications: [],
+    };
+    app.applyConnectionState({ columnId: "c9", state: "error" }); // まだタブが無い
+    expect(authLogs()).toHaveLength(0);
+    vi.spyOn(commands, "listColumns").mockResolvedValue({ status: "ok", data: [col] } as never);
+    vi.spyOn(commands, "resumeColumn").mockResolvedValue({ status: "ok", data: opened } as never);
+    vi.spyOn(commands, "reconnectColumn").mockResolvedValue({ status: "ok", data: null } as never);
+
+    await app.completeAccount("session1"); // 再認証後の再表示で、タブが挿入される
+
+    expect(authLogs()).toHaveLength(1);
+    expect(authLogs()[0].reauthAccountId).toBe("acc1");
   });
 
   it("Error以外の状態ではログを出さない", () => {
