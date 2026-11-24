@@ -126,6 +126,35 @@ describe("再認証したあとのストリームの再接続(Issue #622)", () =
     expect(authLogs()).toHaveLength(2);
   });
 
+  it("再接続したカラムの表示中ノートを、新しいタスクでキャプチャし直す", async () => {
+    // 止まったタスクの購読(キャプチャ)は一緒に消えているので、そのままだと表示中のノートの
+    // リアクション・投票・削除が、アプリを再起動するまで反映されなくなる。
+    const errored = tab("c1", "acc1", "error");
+    errored.notes = [{ id: "n2" }, { id: "n1" }] as never;
+    setTabs(errored);
+    vi.spyOn(commands, "reconnectColumn").mockResolvedValue({ status: "ok", data: null } as never);
+    const capture = vi.spyOn(commands, "captureNotes").mockResolvedValue({ status: "ok", data: null } as never);
+
+    await app.completeAccount("session1");
+
+    expect(capture).toHaveBeenCalledWith("c1", ["n2", "n1"]);
+  });
+
+  it("再接続に失敗したカラムは、キャプチャし直さない", async () => {
+    const errored = tab("c1", "acc1", "error");
+    errored.notes = [{ id: "n1" }] as never;
+    setTabs(errored);
+    vi.spyOn(commands, "reconnectColumn").mockResolvedValue({
+      status: "error",
+      error: { kind: "unauthorized", message: "no token" },
+    } as never);
+    const capture = vi.spyOn(commands, "captureNotes").mockResolvedValue({ status: "ok", data: null } as never);
+
+    await app.completeAccount("session1");
+
+    expect(capture).not.toHaveBeenCalled();
+  });
+
   it("reconnectColumn が失敗しても、再認証自体は成功のままにする", async () => {
     setTabs(tab("c1", "acc1", "error"));
     vi.spyOn(commands, "reconnectColumn").mockResolvedValue({

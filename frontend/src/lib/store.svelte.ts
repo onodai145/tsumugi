@@ -1346,6 +1346,9 @@ class AppStore {
     for (const t of targets) {
       try {
         await unwrap(commands.reconnectColumn(t.id));
+        // 止まったタスクの購読(キャプチャ)は一緒に消えている。表示中のノートを張り直さないと、
+        // そのリアクション・投票・削除が、アプリを再起動するまで反映されない。
+        this.#captureInitial(t.id, t.notes);
       } catch (e) {
         this.#logFailure(e);
       }
