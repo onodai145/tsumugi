@@ -120,7 +120,7 @@ enum AccountCommand {
 }
 
 struct AccountCtl {
-    cmd: mpsc::Sender<AccountCommand>,
+    cmd: mpsc::UnboundedSender<AccountCommand>,
     cancel: watch::Sender<bool>,
     handle: tauri::async_runtime::JoinHandle<()>,
 }
@@ -220,14 +220,18 @@ impl ConnectionManager {
         let ctl = accounts.entry(account_id.clone()).or_insert_with(|| {
             spawn_account(app, account_id.clone(), host, token)
         });
-        let _ = ctl.cmd.try_send(AccountCommand::AddChannel {
-            sub_key,
-            column_id,
-            channel,
-            params,
-            initial_last_seen_id,
-            mode,
-        });
+        send_command(
+            &account_id,
+            &ctl.cmd,
+            AccountCommand::AddChannel {
+                sub_key,
+                column_id,
+                channel,
+                params,
+                initial_last_seen_id,
+                mode,
+            },
+        );
     }
 
     /// 指定カラムで note をキャプチャ購読する（表示中ノートのリアクションを追う）。
@@ -255,7 +259,7 @@ impl ConnectionManager {
             None => return,
         };
         if let Some(ctl) = self.accounts.lock().unwrap().get(&account_id) {
-            let _ = ctl.cmd.try_send(make(column_id.to_string()));
+            send_command(&account_id, &ctl.cmd, make(column_id.to_string()));
         }
     }
 
@@ -276,9 +280,13 @@ impl ConnectionManager {
         let mut accounts = self.accounts.lock().unwrap();
         if remaining {
             if let Some(ctl) = accounts.get(&account_id) {
-                let _ = ctl.cmd.try_send(AccountCommand::RemoveChannel {
-                    column_id: column_id.to_string(),
-                });
+                send_command(
+                    &account_id,
+                    &ctl.cmd,
+                    AccountCommand::RemoveChannel {
+                        column_id: column_id.to_string(),
+                    },
+                );
             }
         } else if let Some(ctl) = accounts.remove(&account_id) {
             let _ = ctl.cancel.send(true);
@@ -293,6 +301,23 @@ impl ConnectionManager {
     }
 }
 
+/// アカウント接続タスクへコマンドを送る。チャネルは無制限にしてある: 受信側は
+/// `connect_and_run` の `select!` 内でしか待たないため、`connect_async` 中や再接続の
+/// バックオフ待ち(最大30秒)の間はコマンドが溜まる。有界だと溢れた購読の追加・解除が
+/// 無言で失われる(Issue #621)。コマンドは UI 操作由来で量が小さい。
+/// 受信側が既に無い(タスクが終了済み)ときだけ送れず、ログに残して false を返す。
+fn send_command(
+    account_id: &str,
+    tx: &mpsc::UnboundedSender<AccountCommand>,
+    cmd: AccountCommand,
+) -> bool {
+    if tx.send(cmd).is_err() {
+        log::warn!("[{account_id}] stream command dropped: account task is gone");
+        return false;
+    }
+    true
+}
+
 fn spawn_account<R: Runtime>(
     app: AppHandle<R>,
     account_id: String,
@@ -300,7 +325,7 @@ fn spawn_account<R: Runtime>(
     token: String,
 ) -> AccountCtl {
     let (cancel_tx, cancel_rx) = watch::channel(false);
-    let (cmd_tx, cmd_rx) = mpsc::channel(128);
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let handle = tauri::async_runtime::spawn(async move {
         run_account(
             app,
@@ -450,7 +475,7 @@ async fn run_account<R: Runtime>(
     token: String,
     config: StreamConfig,
     mut cancel: watch::Receiver<bool>,
-    mut cmd_rx: mpsc::Receiver<AccountCommand>,
+    mut cmd_rx: mpsc::UnboundedReceiver<AccountCommand>,
 ) {
     let mut subs: HashMap<String, ChannelSub> = HashMap::new(); // sub_key -> ChannelSub
     let mut sub_index: HashMap<String, String> = HashMap::new(); // sub_id -> sub_key
@@ -524,7 +549,7 @@ async fn connect_and_run<R: Runtime>(
     captures: &mut CaptureSet,
     reaction_event_dedup: &mut Dedup,
     cancel: &mut watch::Receiver<bool>,
-    cmd_rx: &mut mpsc::Receiver<AccountCommand>,
+    cmd_rx: &mut mpsc::UnboundedReceiver<AccountCommand>,
     connected: &mut bool,
     is_reconnect: bool,
 ) -> RunOutcome {
@@ -1332,5 +1357,33 @@ mod tests {
         assert_eq!(n.my_reaction.as_deref(), Some("👍"));
         assert_eq!(n.reactions.get("👍"), Some(&1));
         assert_eq!(n.reaction_count, 1);
+    }
+
+    fn remove_cmd(i: usize) -> AccountCommand {
+        AccountCommand::RemoveChannel {
+            column_id: format!("col{i}"),
+        }
+    }
+
+    // Issue #621: 接続中・バックオフ中は受信側が止まっているので、コマンドが溜まる。
+    // 以前は容量 128 の有界チャネルで、溢れた購読の追加・解除が無言で捨てられていた。
+    #[tokio::test]
+    async fn send_command_does_not_drop_commands_while_the_receiver_is_stalled() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        for i in 0..1000 {
+            assert!(send_command("acc1", &tx, remove_cmd(i)));
+        }
+        let mut received = 0;
+        while rx.try_recv().is_ok() {
+            received += 1;
+        }
+        assert_eq!(received, 1000);
+    }
+
+    #[tokio::test]
+    async fn send_command_reports_failure_when_the_receiver_is_gone() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        drop(rx);
+        assert!(!send_command("acc1", &tx, remove_cmd(0)));
     }
 }

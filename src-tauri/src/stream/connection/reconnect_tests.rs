@@ -119,7 +119,7 @@ impl MockConn {
 }
 
 struct Harness {
-    cmd_tx: mpsc::Sender<AccountCommand>,
+    cmd_tx: mpsc::UnboundedSender<AccountCommand>,
     cancel_tx: watch::Sender<bool>,
     task: tokio::task::JoinHandle<()>,
     states: UnboundedReceiver<ColumnConnectionState>,
@@ -152,7 +152,7 @@ impl Harness {
         });
 
         let (cancel_tx, cancel_rx) = watch::channel(false);
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let host = server.host();
         let task = tokio::spawn(async move {
             run_account(
@@ -189,7 +189,6 @@ impl Harness {
                 },
                 initial_last_seen_id: None,
             })
-            .await
             .unwrap();
     }
 
@@ -208,7 +207,6 @@ impl Harness {
                 },
                 initial_last_seen_id: None,
             })
-            .await
             .unwrap();
     }
 
@@ -218,7 +216,6 @@ impl Harness {
                 column_id: column_id.into(),
                 note_ids: note_ids.iter().map(|s| s.to_string()).collect(),
             })
-            .await
             .unwrap();
     }
 
