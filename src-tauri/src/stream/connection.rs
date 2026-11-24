@@ -457,13 +457,21 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 enum RunOutcome {
     Cancelled,
     Disconnected,
-    #[allow(dead_code)]
+    /// 認証失敗(ハンドシェイクが HTTP 401)。再試行しても直らないので、アカウントのタスクを
+    /// 止める(Issue #622)。
     Fatal,
 }
 
 /// 次回の再接続待ち時間。倍々に伸ばし、`max` で頭打ちにする。
 fn next_backoff(current: Duration, max: Duration) -> Duration {
     (current * 2).min(max)
+}
+
+/// ハンドシェイクの失敗が、トークンの失効・取り消し(HTTP 401)によるものか。
+/// 403 は含めない: リバースプロキシや WAF の一時的な拒否でも出るので、止めると自動では戻らない。
+fn is_auth_failure(e: &tokio_tungstenite::tungstenite::Error) -> bool {
+    use tokio_tungstenite::tungstenite::{http::StatusCode, Error};
+    matches!(e, Error::Http(resp) if resp.status() == StatusCode::UNAUTHORIZED)
 }
 
 /// アカウント接続ループ（再接続込み）。購読チャンネルとキャプチャ集合は再接続をまたいで
@@ -526,7 +534,19 @@ async fn run_account<R: Runtime>(
             RunOutcome::Disconnected => {
                 emit_state_all(&app, &subs, ConnectionState::Reconnecting)
             }
-            RunOutcome::Fatal => emit_state_all(&app, &subs, ConnectionState::Error),
+            RunOutcome::Fatal => {
+                emit_state_all(&app, &subs, ConnectionState::Error);
+                // 接続中に積まれて、まだ `subs` に入っていない購読にも Error を伝える。
+                // 受信側を閉じてから回収するので、以降の送信は失敗する(= 呼び出し側が
+                // タスクの停止を検出して作り直せる)。
+                cmd_rx.close();
+                while let Ok(cmd) = cmd_rx.try_recv() {
+                    if let AccountCommand::AddChannel { column_id, .. } = cmd {
+                        emit_state(&app, &column_id, ConnectionState::Error);
+                    }
+                }
+                return;
+            }
         }
 
         tokio::select! {
@@ -572,6 +592,10 @@ async fn connect_and_run<R: Runtime>(
     };
     let ws = match tokio_tungstenite::connect_async(request).await {
         Ok((ws, _resp)) => ws,
+        Err(e) if is_auth_failure(&e) => {
+            log::warn!("[{account_id}] ws handshake rejected as unauthorized: {e}");
+            return RunOutcome::Fatal;
+        }
         Err(e) => {
             log::warn!("[{account_id}] ws connect failed: {e}");
             return RunOutcome::Disconnected;
