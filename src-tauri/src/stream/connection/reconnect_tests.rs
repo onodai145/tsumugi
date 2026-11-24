@@ -640,3 +640,89 @@ async fn a_non_401_handshake_rejection_keeps_retrying() {
 
     assert!(!h.task.is_finished());
 }
+
+#[tokio::test]
+async fn try_send_hands_the_command_back_when_the_receiver_is_gone() {
+    let (tx, rx) = mpsc::unbounded_channel();
+    drop(rx);
+
+    match try_send(&tx, AccountCommand::RemoveChannel { column_id: "c1".into() }) {
+        Err(AccountCommand::RemoveChannel { column_id }) => assert_eq!(column_id, "c1"),
+        _ => panic!("the command must be handed back"),
+    }
+}
+
+/// `acc1` のタスクが止まる(401 を受ける)まで待つ。
+async fn wait_until_account_task_stops(manager: &ConnectionManager) {
+    within(async {
+        while !manager.accounts.lock().unwrap().get("acc1").unwrap().cmd.is_closed() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn add_channel_replaces_an_account_task_that_stopped_after_an_auth_failure() {
+    let server = MockServer::bind().await;
+    let app = app_with_events();
+    // モックの接続は `recv_json` 以外では読まず、Ping に Pong を返さない。既定の短い `read_timeout`
+    // だと、アイドルによる再接続が起きて「タスクを再利用した」の確認と区別できなくなる。
+    let manager = ConnectionManager::with_config(StreamConfig {
+        read_timeout: Duration::from_secs(30),
+        ..fast_config()
+    });
+    let open = |column: &str, token: &str| {
+        manager.open_notifications(
+            app.handle().clone(),
+            column.into(),
+            "acc1".into(),
+            server.host(),
+            token.into(),
+            None,
+        )
+    };
+
+    open("col1", "old-token");
+    server.reject_with_status(401).await;
+    wait_until_account_task_stops(&manager).await;
+
+    // 再認証後の再接続: 新しいトークンで、タスクが作り直される。
+    open("col2", "new-token");
+    let (mut conn, uri) = server.accept_with_uri().await;
+    assert!(uri.contains("i=new-token"), "the replacement task must use the new token: {uri}");
+    assert_eq!(conn.recv_json().await["type"], "connect");
+
+    // 続けて同じアカウントの別カラムを足しても、タスクは増えず、同じ接続に相乗りする。
+    open("col3", "new-token");
+    assert_eq!(conn.recv_json().await["type"], "connect");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), server.listener.accept())
+            .await
+            .is_err(),
+        "a live account task must be reused"
+    );
+    assert_eq!(manager.open_count(), 1);
+}
+
+#[tokio::test]
+async fn closing_the_last_column_of_a_stopped_account_removes_it() {
+    let server = MockServer::bind().await;
+    let app = app_with_events();
+    let manager = ConnectionManager::with_config(fast_config());
+
+    manager.open_notifications(
+        app.handle().clone(),
+        "col1".into(),
+        "acc1".into(),
+        server.host(),
+        "old-token".into(),
+        None,
+    );
+    server.reject_with_status(401).await;
+    wait_until_account_task_stops(&manager).await;
+
+    manager.close("col1");
+
+    assert_eq!(manager.open_count(), 0);
+}

@@ -131,9 +131,19 @@ pub struct ConnectionManager {
     accounts: Mutex<HashMap<String, AccountCtl>>,
     /// column_id -> account_id（close/capture のルーティング用）
     columns: Mutex<HashMap<String, String>>,
+    /// タスクへ渡す接続設定。本番は `StreamConfig::default()`、テストは短い時間と `ws` を渡す。
+    config: StreamConfig,
 }
 
 impl ConnectionManager {
+    #[cfg(test)]
+    fn with_config(config: StreamConfig) -> Self {
+        Self {
+            config,
+            ..Default::default()
+        }
+    }
+
     /// ノートを流すチャンネルを開く（フィルタ適用）。同じ account の WebSocket が無ければ
     /// 張り、あれば相乗りする。`sub_key` は1カラム内の複数チャンネル購読(TQL複数ソース)を
     /// 区別する識別子。単一ソースのカラムは `sub_key == column_id` を渡せばよい。
@@ -217,21 +227,34 @@ impl ConnectionManager {
             .insert(column_id.clone(), account_id.clone());
 
         let mut accounts = self.accounts.lock().unwrap();
+        // 認証失敗などで止まったタスクは捨てて、渡されたトークン(呼び出し側が取り直した最新のもの)で
+        // 作り直す。止まったタスクへ送ると購読が黙って失われる(Issue #622)。
+        if accounts.get(&account_id).is_some_and(|ctl| ctl.cmd.is_closed()) {
+            accounts.remove(&account_id);
+        }
+        let cmd = AccountCommand::AddChannel {
+            sub_key,
+            column_id,
+            channel,
+            params,
+            initial_last_seen_id,
+            mode,
+        };
         let ctl = accounts.entry(account_id.clone()).or_insert_with(|| {
-            spawn_account(app, account_id.clone(), host, token)
+            spawn_account(
+                app.clone(),
+                account_id.clone(),
+                host.clone(),
+                token.clone(),
+                self.config.clone(),
+            )
         });
-        send_command(
-            &account_id,
-            &ctl.cmd,
-            AccountCommand::AddChannel {
-                sub_key,
-                column_id,
-                channel,
-                params,
-                initial_last_seen_id,
-                mode,
-            },
-        );
+        // `is_closed()` の確認から送信までの間にタスクが止まった場合は、作り直して 1 回だけ送り直す。
+        if let Err(cmd) = try_send(&ctl.cmd, cmd) {
+            let ctl = spawn_account(app, account_id.clone(), host, token, self.config.clone());
+            send_command(&account_id, &ctl.cmd, cmd);
+            accounts.insert(account_id, ctl);
+        }
     }
 
     /// 指定カラムで note をキャプチャ購読する（表示中ノートのリアクションを追う）。
@@ -311,11 +334,19 @@ fn send_command(
     tx: &mpsc::UnboundedSender<AccountCommand>,
     cmd: AccountCommand,
 ) -> bool {
-    if tx.send(cmd).is_err() {
+    if try_send(tx, cmd).is_err() {
         log::warn!("[{account_id}] stream command dropped: account task is gone");
         return false;
     }
     true
+}
+
+/// 送れなかったコマンドを呼び出し側へ返す。受信側が無い(タスクが終了済み)ときだけ失敗する。
+fn try_send(
+    tx: &mpsc::UnboundedSender<AccountCommand>,
+    cmd: AccountCommand,
+) -> Result<(), AccountCommand> {
+    tx.send(cmd).map_err(|e| e.0)
 }
 
 fn spawn_account<R: Runtime>(
@@ -323,20 +354,12 @@ fn spawn_account<R: Runtime>(
     account_id: String,
     host: String,
     token: String,
+    config: StreamConfig,
 ) -> AccountCtl {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let handle = tauri::async_runtime::spawn(async move {
-        run_account(
-            app,
-            account_id,
-            host,
-            token,
-            StreamConfig::default(),
-            cancel_rx,
-            cmd_rx,
-        )
-        .await;
+        run_account(app, account_id, host, token, config, cancel_rx, cmd_rx).await;
     });
     AccountCtl {
         cmd: cmd_tx,
