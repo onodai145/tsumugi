@@ -101,6 +101,12 @@ export const commands = {
 	discardEmptyGroup: (groupId: string) => typedError<null, Error>(__TAURI_INVOKE("discard_empty_group", { groupId })),
 	/**  永続化済みタブを再開する（起動時の復元）。 */
 	resumeColumn: (columnId: string) => typedError<OpenedColumn, Error>(__TAURI_INVOKE("resume_column", { columnId })),
+	/**
+	 *  認証失敗で止まった(`Error` の)カラムのストリームだけを張り直す(Issue #622)。
+	 *  再認証の完了後にフロントが呼ぶ。初期ページの取得や `OpenedColumn` の組み立てはしない
+	 *  (タブは既に表示されている)。
+	 */
+	reconnectColumn: (columnId: string) => typedError<null, Error>(__TAURI_INVOKE("reconnect_column", { columnId })),
 	/**  永続化済みグループ一覧。 */
 	listGroups: () => typedError<ColumnGroup[], Error>(__TAURI_INVOKE("list_groups")),
 	/**  永続化済みタブ一覧。 */

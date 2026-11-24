@@ -337,6 +337,50 @@ pub async fn resume_column(
     resume_column_core(&app, &state, &column_id).await
 }
 
+/// 認証失敗で止まった(`Error` の)カラムのストリームだけを張り直す(Issue #622)。
+/// 再認証の完了後にフロントが呼ぶ。初期ページの取得や `OpenedColumn` の組み立てはしない
+/// (タブは既に表示されている)。
+#[tauri::command]
+#[specta::specta]
+pub async fn reconnect_column(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    column_id: String,
+) -> Result<()> {
+    reconnect_column_core(&app, &state, &column_id).await
+}
+
+async fn reconnect_column_core<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    column_id: &str,
+) -> Result<()> {
+    // 世代(epoch)は進めない: カラム定義は変わらず、進行中の取得を無効にする理由が無い。
+    let column = load_column(state, column_id)?;
+    let (host, token) = state.host_token(&column.account_id)?;
+    if matches!(column.kind, ColumnKind::Notifications) {
+        // 通知のギャップ埋めは、止まったタスクのウォーターマークと一緒に失われる(Issue #684)。
+        state.connections.open_notifications(
+            app.clone(),
+            column.id.clone(),
+            column.account_id.clone(),
+            host,
+            token,
+            None,
+        );
+        return Ok(());
+    }
+    let resolved = resolve_sources(state, &column.account_id, &column.kind, &column.filter).await?;
+    open_streams_only(app, state, &column, &resolved, host, token);
+    // 新しいタスクの最初の接続は再接続ではないので、停止中に流れたノートはここで補う。
+    let app = app.clone();
+    let column_id = column.id.clone();
+    tauri::async_runtime::spawn(async move {
+        gap_fill_on_reconnect(&app, &column_id).await;
+    });
+    Ok(())
+}
+
 /// `resume_column` の本体。`State` を引数に取らない形にして、テストできるようにしている
 /// (`update_column_core` と同じ狙い)。
 async fn resume_column_core<R: Runtime>(
@@ -4054,6 +4098,46 @@ mod tests {
         assert_eq!(state.cache_metrics.resume_fallback(), 0);
         assert_eq!(mock.received_requests().await.unwrap().len(), 0, "起動時にRESTを叩かない");
         assert_eq!(state.connections.open_count(), 1, "ストリームは開く");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_column_core_opens_the_stream_without_fetching_the_first_page() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await;
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Local)).unwrap();
+        let app = tauri::test::mock_app();
+
+        reconnect_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(state.connections.open_count(), 1, "ストリームを開く");
+        assert!(
+            state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(),
+            "初期取得はしないので、境界は作られない"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_column_core_opens_the_stream_for_a_notifications_column() {
+        let mock = MockServer::start().await;
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Notifications)).unwrap();
+        let app = tauri::test::mock_app();
+
+        reconnect_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        assert_eq!(state.connections.open_count(), 1);
+        assert_eq!(mock.received_requests().await.unwrap().len(), 0, "REST は呼ばない");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_column_core_rejects_an_unknown_column() {
+        let mock = MockServer::start().await;
+        let state = command_state(&mock);
+        let app = tauri::test::mock_app();
+
+        assert!(reconnect_column_core(app.handle(), &state, "closed").await.is_err());
+        assert_eq!(state.connections.open_count(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
