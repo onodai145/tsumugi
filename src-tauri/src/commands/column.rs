@@ -355,23 +355,49 @@ async fn reconnect_column_core<R: Runtime>(
     state: &AppState,
     column_id: &str,
 ) -> Result<()> {
-    // 世代(epoch)は進めない: カラム定義は変わらず、進行中の取得を無効にする理由が無い。
-    let column = load_column(state, column_id)?;
+    // `begin` は世代を控えるだけで進めない(進行中の取得を無効にしない)。
+    let (epoch, column) = begin_and_load_column(state, column_id)?;
+    reconnect_column_with(app, state, &column, &epoch).await
+}
+
+/// `reconnect_column_core` の本体。世代を控えたあとに定義が変わった(`update_column` /
+/// `close_column` が走った)ら、旧い定義のストリームを開かない。定義の変更で呼び出し側が
+/// 開き直す(または閉じる)ので、ここで開くと、旧い定義の購読(例: 増えすぎたソース)が
+/// 残って別のノートをカラムへ流し込む。
+async fn reconnect_column_with<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    column: &Column,
+    epoch: &Epoch,
+) -> Result<()> {
     let (host, token) = state.host_token(&column.account_id)?;
-    if matches!(column.kind, ColumnKind::Notifications) {
-        // 通知のギャップ埋めは、止まったタスクのウォーターマークと一緒に失われる(Issue #684)。
-        state.connections.open_notifications(
-            app.clone(),
-            column.id.clone(),
-            column.account_id.clone(),
-            host,
-            token,
-            None,
-        );
+    let is_notif = matches!(column.kind, ColumnKind::Notifications);
+    let resolved = if is_notif {
+        None
+    } else {
+        Some(resolve_sources(state, &column.account_id, &column.kind, &column.filter).await?)
+    };
+    let resolved_ref = resolved.as_ref();
+    let opened = state
+        .column_fence
+        .write_if_current(&column.id, epoch, |_| async move {
+            match resolved_ref {
+                // 通知のギャップ埋めは、止まったタスクのウォーターマークと一緒に失われる(Issue #684)。
+                None => state.connections.open_notifications(
+                    app.clone(),
+                    column.id.clone(),
+                    column.account_id.clone(),
+                    host,
+                    token,
+                    None,
+                ),
+                Some(r) => open_streams_only(app, state, column, r, host, token),
+            }
+        })
+        .await;
+    if opened.is_none() || is_notif {
         return Ok(());
     }
-    let resolved = resolve_sources(state, &column.account_id, &column.kind, &column.filter).await?;
-    open_streams_only(app, state, &column, &resolved, host, token);
     // 新しいタスクの最初の接続は再接続ではないので、停止中に流れたノートはここで補う。
     let app = app.clone();
     let column_id = column.id.clone();
@@ -4138,6 +4164,36 @@ mod tests {
 
         assert!(reconnect_column_core(app.handle(), &state, "closed").await.is_err());
         assert_eq!(state.connections.open_count(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_column_with_does_not_open_a_stream_for_a_stale_definition() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await;
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Local)).unwrap();
+        let app = tauri::test::mock_app();
+        let (epoch, column) = begin_and_load_column(&state, "c1").unwrap();
+        // 世代を控えたあとに update_column / close_column が走った。
+        state.column_fence.invalidate("c1", || async {}).await;
+
+        reconnect_column_with(app.handle(), &state, &column, &epoch).await.unwrap();
+
+        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_column_with_does_not_open_a_notifications_stream_for_a_stale_definition() {
+        let mock = MockServer::start().await;
+        let state = command_state(&mock);
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Notifications)).unwrap();
+        let app = tauri::test::mock_app();
+        let (epoch, column) = begin_and_load_column(&state, "c1").unwrap();
+        state.column_fence.invalidate("c1", || async {}).await;
+
+        reconnect_column_with(app.handle(), &state, &column, &epoch).await.unwrap();
+
+        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
     }
 
     #[tokio::test(flavor = "multi_thread")]
