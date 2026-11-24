@@ -52,12 +52,14 @@ docker compose down -v
   置かれているため、この実行には含まれない(WebdriverIOの`specs`配列は`!`による
   除外パターンをサポートしないため、パターンではなくディレクトリ分けで除外している)。
   失敗時のログは `wdio-logs/` に出力される。
-  予約投稿の操作(`helpers/scheduledUi.ts`)が失敗したときは、画面の状態(エラーモーダル、各ボタンの
-  状態)を `wdio-logs/miauth-bridge-debug.log` に、スクリーンショットを
-  `wdio-logs/schedule-failure-*.png` に残す(CI では `e2e-failure-artifacts` に含まれる)。
+  作成欄の操作(`helpers/composeUi.ts` の `postNote` / `waitForNoteText`、予約投稿の `helpers/scheduledUi.ts`)が
+  失敗したときは、画面の状態(エラーモーダル、各ボタンの状態、送信ボタンの表示、DOM 上のノート数)を
+  `wdio-logs/miauth-bridge-debug.log` に、スクリーンショットを `wdio-logs/ui-failure-*.png` に残す
+  (CI では `e2e-failure-artifacts` に含まれる)。
   作成欄は、フォーカス・入力の有無で textarea の高さが 0.12 秒かけて変わり、ツールバーのボタンが動く
   (`ComposeBar.svelte` の `compact`)。ここでのクリックは `waitForClickable` だけでは足りず、
-  `helpers/scheduledUi.ts` の `clickStable`(位置が落ち着くまで待つ)を使う(Issue #641)。
+  `helpers/composeUi.ts` の `clickStable`(位置が落ち着くまで待つ)を使う(Issue #641 / #664)。
+  `setValue` の直後に `compose-submit` を直接 `click()` しない。ノートを投稿するときは `postNote` を使う。
 - `browser.execute` に渡す関数の中では、名前付きの関数(`const f = () => ...` や `function f() {}`)を
   作らない。E2E の TS 変換(tsx/esbuild の keepNames)が `__name(...)` で包み、WebView 側には
   `__name` が無いため `Can't find variable: __name` で失敗する(Issue #641 の診断コードで実際に起きた)。

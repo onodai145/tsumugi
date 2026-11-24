@@ -2,6 +2,7 @@
 // ことを検証する(Issue #223)。server-word-mute.e2e.tsのクライアント側版。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { clickThroughAccountSelect } from "../helpers/accountSelect";
+import { postNote } from "../helpers/composeUi";
 import { signUp, createNote, signInAsSeededUser, allowRegistration, followUser } from "../helpers/misskeyApi";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
 
@@ -103,11 +104,8 @@ describe("client-side user mute hides the muted user's notes", () => {
     await addColumnSubmit.waitForClickable({ timeout: 15000 });
     await addColumnSubmit.click();
 
-    const textarea = await $('[data-testid="compose-textarea"]');
-    await textarea.waitForDisplayed({ timeout: 15000 });
-    await textarea.setValue(controlNoteText);
-    const submitButton = await $('[data-testid="compose-submit"]');
-    await submitButton.click();
+    // setValue 直後は textarea の高さ遷移でボタンが動くため、位置が落ち着いてから押す(Issue #664)。
+    await postNote(controlNoteText);
 
     // ミュート設定前は両方表示されていることを確認する(制御ノート:自分の投稿でライブ反映、
     // 対象ノート:REST初期ロードで表示済みのはず)。
