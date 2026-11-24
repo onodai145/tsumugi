@@ -58,6 +58,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::column::load_pane_layout,
             commands::column::discard_empty_group,
             commands::column::resume_column,
+            commands::column::reconnect_column,
             commands::column::list_groups,
             commands::column::list_columns,
             commands::column::note_count,

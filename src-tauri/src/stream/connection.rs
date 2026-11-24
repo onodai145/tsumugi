@@ -131,9 +131,19 @@ pub struct ConnectionManager {
     accounts: Mutex<HashMap<String, AccountCtl>>,
     /// column_id -> account_id（close/capture のルーティング用）
     columns: Mutex<HashMap<String, String>>,
+    /// タスクへ渡す接続設定。本番は `StreamConfig::default()`、テストは短い時間と `ws` を渡す。
+    config: StreamConfig,
 }
 
 impl ConnectionManager {
+    #[cfg(test)]
+    fn with_config(config: StreamConfig) -> Self {
+        Self {
+            config,
+            ..Default::default()
+        }
+    }
+
     /// ノートを流すチャンネルを開く（フィルタ適用）。同じ account の WebSocket が無ければ
     /// 張り、あれば相乗りする。`sub_key` は1カラム内の複数チャンネル購読(TQL複数ソース)を
     /// 区別する識別子。単一ソースのカラムは `sub_key == column_id` を渡せばよい。
@@ -217,21 +227,34 @@ impl ConnectionManager {
             .insert(column_id.clone(), account_id.clone());
 
         let mut accounts = self.accounts.lock().unwrap();
+        // 認証失敗などで止まったタスクは捨てて、渡されたトークン(呼び出し側が取り直した最新のもの)で
+        // 作り直す。止まったタスクへ送ると購読が黙って失われる(Issue #622)。
+        if accounts.get(&account_id).is_some_and(|ctl| ctl.cmd.is_closed()) {
+            accounts.remove(&account_id);
+        }
+        let cmd = AccountCommand::AddChannel {
+            sub_key,
+            column_id,
+            channel,
+            params,
+            initial_last_seen_id,
+            mode,
+        };
         let ctl = accounts.entry(account_id.clone()).or_insert_with(|| {
-            spawn_account(app, account_id.clone(), host, token)
+            spawn_account(
+                app.clone(),
+                account_id.clone(),
+                host.clone(),
+                token.clone(),
+                self.config.clone(),
+            )
         });
-        send_command(
-            &account_id,
-            &ctl.cmd,
-            AccountCommand::AddChannel {
-                sub_key,
-                column_id,
-                channel,
-                params,
-                initial_last_seen_id,
-                mode,
-            },
-        );
+        // `is_closed()` の確認から送信までの間にタスクが止まった場合は、作り直して 1 回だけ送り直す。
+        if let Err(cmd) = try_send(&ctl.cmd, cmd) {
+            let ctl = spawn_account(app, account_id.clone(), host, token, self.config.clone());
+            send_command(&account_id, &ctl.cmd, cmd);
+            accounts.insert(account_id, ctl);
+        }
     }
 
     /// 指定カラムで note をキャプチャ購読する（表示中ノートのリアクションを追う）。
@@ -311,11 +334,19 @@ fn send_command(
     tx: &mpsc::UnboundedSender<AccountCommand>,
     cmd: AccountCommand,
 ) -> bool {
-    if tx.send(cmd).is_err() {
+    if try_send(tx, cmd).is_err() {
         log::warn!("[{account_id}] stream command dropped: account task is gone");
         return false;
     }
     true
+}
+
+/// 送れなかったコマンドを呼び出し側へ返す。受信側が無い(タスクが終了済み)ときだけ失敗する。
+fn try_send(
+    tx: &mpsc::UnboundedSender<AccountCommand>,
+    cmd: AccountCommand,
+) -> Result<(), AccountCommand> {
+    tx.send(cmd).map_err(|e| e.0)
 }
 
 fn spawn_account<R: Runtime>(
@@ -323,20 +354,12 @@ fn spawn_account<R: Runtime>(
     account_id: String,
     host: String,
     token: String,
+    config: StreamConfig,
 ) -> AccountCtl {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let handle = tauri::async_runtime::spawn(async move {
-        run_account(
-            app,
-            account_id,
-            host,
-            token,
-            StreamConfig::default(),
-            cancel_rx,
-            cmd_rx,
-        )
-        .await;
+        run_account(app, account_id, host, token, config, cancel_rx, cmd_rx).await;
     });
     AccountCtl {
         cmd: cmd_tx,
@@ -457,13 +480,21 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 enum RunOutcome {
     Cancelled,
     Disconnected,
-    #[allow(dead_code)]
+    /// 認証失敗(ハンドシェイクが HTTP 401)。再試行しても直らないので、アカウントのタスクを
+    /// 止める(Issue #622)。
     Fatal,
 }
 
 /// 次回の再接続待ち時間。倍々に伸ばし、`max` で頭打ちにする。
 fn next_backoff(current: Duration, max: Duration) -> Duration {
     (current * 2).min(max)
+}
+
+/// ハンドシェイクの失敗が、トークンの失効・取り消し(HTTP 401)によるものか。
+/// 403 は含めない: リバースプロキシや WAF の一時的な拒否でも出るので、止めると自動では戻らない。
+fn is_auth_failure(e: &tokio_tungstenite::tungstenite::Error) -> bool {
+    use tokio_tungstenite::tungstenite::{http::StatusCode, Error};
+    matches!(e, Error::Http(resp) if resp.status() == StatusCode::UNAUTHORIZED)
 }
 
 /// アカウント接続ループ（再接続込み）。購読チャンネルとキャプチャ集合は再接続をまたいで
@@ -526,7 +557,19 @@ async fn run_account<R: Runtime>(
             RunOutcome::Disconnected => {
                 emit_state_all(&app, &subs, ConnectionState::Reconnecting)
             }
-            RunOutcome::Fatal => emit_state_all(&app, &subs, ConnectionState::Error),
+            RunOutcome::Fatal => {
+                emit_state_all(&app, &subs, ConnectionState::Error);
+                // 接続中に積まれて、まだ `subs` に入っていない購読にも Error を伝える。
+                // 受信側を閉じてから回収するので、以降の送信は失敗する(= 呼び出し側が
+                // タスクの停止を検出して作り直せる)。
+                cmd_rx.close();
+                while let Ok(cmd) = cmd_rx.try_recv() {
+                    if let AccountCommand::AddChannel { column_id, .. } = cmd {
+                        emit_state(&app, &column_id, ConnectionState::Error);
+                    }
+                }
+                return;
+            }
         }
 
         tokio::select! {
@@ -572,6 +615,10 @@ async fn connect_and_run<R: Runtime>(
     };
     let ws = match tokio_tungstenite::connect_async(request).await {
         Ok((ws, _resp)) => ws,
+        Err(e) if is_auth_failure(&e) => {
+            log::warn!("[{account_id}] ws handshake rejected as unauthorized: {e}");
+            return RunOutcome::Fatal;
+        }
         Err(e) => {
             log::warn!("[{account_id}] ws connect failed: {e}");
             return RunOutcome::Disconnected;

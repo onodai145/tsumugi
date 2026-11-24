@@ -25,6 +25,7 @@ import type {
   Account,
   Note,
   ConnectionState,
+  ColumnConnectionState,
   EmojiDef,
   NoteDraft_Deserialize as NoteDraft,
   VisibilityInput,
@@ -284,6 +285,11 @@ class AppStore {
   // (reconnecting→connecting→connected と必ず connecting を経由するため、
   // 直前状態が connecting かどうかでは区別できない)。
   #wasReconnecting = new Set<string>();
+  // 認証失敗(接続の Error)のログを出したアカウント -> そのログの id。同じアカウントの複数カラムが
+  // 同時に Error になるので、ログと「再認証」ボタンはアカウントごとに 1 回だけ出す(Issue #622)。
+  // ログが残っている間だけ抑止する(上限で流れ落ちた・クリアされた後は、次の Error でもう一度出す)。
+  // そのアカウントの再認証が成功したら外す(再認証したのにまた失敗したら、もう一度出す)。
+  #authErrorLogId = new Map<string, number>();
 
   /// Tauri イベント購読をすべて解除する。dev の HMR で古いインスタンスの
   /// リスナーが残り通知が多重化するのを防ぐために使う（本番では未使用）。
@@ -523,6 +529,8 @@ class AppStore {
       this.groups = [...this.groups, g];
     }
     const tab = this.#makeTab(opened);
+    // タブが挿入される前に Error が届いていた場合(#connState から拾った)は、ここで再認証の導線を出す。
+    if (tab.state === "error") this.#logAuthError(tab.accountId);
     g.tabs = [...g.tabs, tab];
     if (!g.activeTabId) g.activeTabId = tab.id;
     if (!this.focusedGroupId) this.focusedGroupId = g.id;
@@ -1053,6 +1061,37 @@ class AppStore {
     });
   }
 
+  /// 認証失敗のログ(「再認証」ボタン付き)を、アカウントごとに、ログが残っている間は 1 回だけ出す。
+  #logAuthError(accountId: string) {
+    const prev = this.#authErrorLogId.get(accountId);
+    if (prev !== undefined && this.logs.some((l) => l.id === prev)) return;
+    const acc = this.accounts.find((a) => a.id === accountId);
+    const who = acc ? `@${acc.username}@${acc.host}` : accountId;
+    this.#log("error", `認証に失敗しました: ${who} のトークンが失効している可能性があります`, accountId);
+    this.#authErrorLogId.set(accountId, this.#logSeq);
+  }
+
+  /// ColumnConnectionState イベントの本体。`Error` は、ストリームのハンドシェイクが認証失敗(401)で
+  /// 拒否されて Rust 側が再接続を止めたことを表す(他に Error になる経路は無い。Issue #622)。
+  applyConnectionState(p: ColumnConnectionState) {
+    // タブがまだ #insertTab 前でも(resumeColumn/addColumn の await 解決前に
+    // Connected が届くことがある)状態を取りこぼさないよう、まず記録する。
+    this.#connState.set(p.columnId, p.state);
+    const tab = this.#findTab(p.columnId);
+    if (!tab) return;
+    tab.state = p.state;
+    // 状態遷移を Backstage に記録（起動時の connecting→connected は除外）
+    const name = tab.title;
+    if (p.state === "error") {
+      this.#logAuthError(tab.accountId);
+    } else if (p.state === "reconnecting") {
+      this.#wasReconnecting.add(p.columnId);
+      this.#log("warn", `再接続中: ${name}`);
+    } else if (p.state === "connected" && this.#wasReconnecting.delete(p.columnId)) {
+      this.#log("success", `再接続しました: ${name}`);
+    }
+  }
+
   async #subscribe() {
     for (const u of this.#unlisten) u();
     this.#unlisten = [];
@@ -1135,23 +1174,7 @@ class AppStore {
       }),
     );
     this.#unlisten.push(
-      await events.columnConnectionState.listen((e) => {
-        // タブがまだ #insertTab 前でも(resumeColumn/addColumn の await 解決前に
-        // Connected が届くことがある)状態を取りこぼさないよう、まず記録する。
-        this.#connState.set(e.payload.columnId, e.payload.state);
-        const tab = this.#findTab(e.payload.columnId);
-        if (!tab) return;
-        tab.state = e.payload.state;
-        // 状態遷移を Backstage に記録（起動時の connecting→connected は除外）
-        const name = tab.title;
-        if (e.payload.state === "error") this.#log("error", `接続エラー: ${name}`);
-        else if (e.payload.state === "reconnecting") {
-          this.#wasReconnecting.add(e.payload.columnId);
-          this.#log("warn", `再接続中: ${name}`);
-        } else if (e.payload.state === "connected" && this.#wasReconnecting.delete(e.payload.columnId)) {
-          this.#log("success", `再接続しました: ${name}`);
-        }
-      }),
+      await events.columnConnectionState.listen((e) => this.applyConnectionState(e.payload)),
     );
     this.#unlisten.push(
       await events.columnNoteUpdated.listen((e) => this.#applyNoteUpdate(e.payload)),
@@ -1322,6 +1345,25 @@ class AppStore {
     }
   }
 
+  /// 再認証の直後に、そのアカウントの接続が Error で止まっているカラムのストリームを張り直す
+  /// (Issue #622)。Rust 側は認証失敗でタスクごと止めているので、新しいトークンで作り直させる。
+  /// 失敗はログのみ(再認証自体の成否には影響させない)。
+  async #reconnectErrorColumns(accountId: string) {
+    const targets = this.groups
+      .flatMap((g) => g.tabs)
+      .filter((t) => t.accountId === accountId && t.state === "error");
+    for (const t of targets) {
+      try {
+        await unwrap(commands.reconnectColumn(t.id));
+        // 止まったタスクの購読(キャプチャ)は一緒に消えている。表示中のノートを張り直さないと、
+        // そのリアクション・投票・削除が、アプリを再起動するまで反映されない。
+        this.#captureInitial(t.id, t.notes);
+      } catch (e) {
+        this.#logFailure(e);
+      }
+    }
+  }
+
   async completeAccount(sessionId: string) {
     const account = await unwrap(commands.completeMiauth(sessionId));
     const existingIdx = this.accounts.findIndex((a) => a.id === account.id);
@@ -1333,10 +1375,12 @@ class AppStore {
       this.#log("success", `再認証しました: @${account.username}@${account.host}`);
     }
     this.#clearNeedsLogin(account.id); // 認証が通ったので、通信の対象に戻す
+    this.#authErrorLogId.delete(account.id); // 再認証したのにまた失敗したら、ログをもう一度出す
     // 起動時に取らなかった(トークンなしだった)インスタンス情報を取る。再認証自体は待たせない。
     void this.#refreshInstanceMeta([account]);
     await this.#syncServerMutes(account.id);
     await this.#resumeAccountColumns(account.id);
+    await this.#reconnectErrorColumns(account.id);
   }
 
   /// 定期同期の1回分。発火時点の全アカウントを同期する(アカウントの追加・削除に追従する)。
