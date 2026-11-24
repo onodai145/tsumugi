@@ -86,6 +86,11 @@ async fn import_background_media(app: AppHandle, path: String) -> Result<Backgro
 4. `background_kind = Image`, `background_path = <新パス>` をセットする。
 5. 移行結果を即座に `save_ui()` で書き戻し、次回起動時は再移行が走らないようにする。
 
+失敗時の扱い(Issue #623): 元の `backgroundImage` は、手順3のファイル書き出しに成功してから消す。
+ディレクトリ作成・書き込みが失敗したときは、キーを残して「移行なし」(`Ok(false)`)で返し、次回起動で再試行する。
+形式不正・base64 デコード失敗は再試行しても直らないので、キーごと捨てる(起動のたびに警告が出続けないようにする)。
+ただし `UiPrefs` は `backgroundImage` を持たないため、失敗した起動中に設定を保存すると、キーはその保存で消える。
+
 `domain/ui.rs` の既存の後方互換テスト群 (321-524行目) と同じ形式で、旧JSON→新フィールド移行のテストケースを
 追加する。`store/settings.rs` にも移行の統合テストを追加する。
 

@@ -593,6 +593,9 @@ fn load_json_or_default(path: &Path, backgrounds_dir: &Path) -> Result<SettingsD
 /// 旧バージョンが `UiPrefs.backgroundImage` に Base64 data URL として保存していた背景画像を、
 /// `backgrounds_dir` 配下にファイルとして書き出し、`backgroundKind`/`backgroundPath` へ移行する。
 /// `backgroundImage` が存在しない/空文字なら何もしない。移行を行った場合は true を返す。
+///
+/// 復元できないデータ(形式不正・デコード失敗)は再試行しても直らないので、キーごと捨てて true を返す。
+/// 一時的なI/O失敗(ディレクトリ作成・書き込み)ではキーを残して false を返し、次回起動で再試行する(Issue #623)。
 fn migrate_legacy_background_image(
     ui: &mut serde_json::Value,
     backgrounds_dir: &Path,
@@ -602,12 +605,16 @@ fn migrate_legacy_background_image(
     else {
         return Ok(false);
     };
-    map.remove("backgroundImage");
     if data_url.is_empty() {
+        map.remove("backgroundImage");
         return Ok(true);
     }
-    let Some(rest) = data_url.strip_prefix("data:") else { return Ok(true) };
-    let Some((mime, b64)) = rest.split_once(";base64,") else { return Ok(true) };
+    let Some((mime, b64)) =
+        data_url.strip_prefix("data:").and_then(|rest| rest.split_once(";base64,"))
+    else {
+        map.remove("backgroundImage");
+        return Ok(true);
+    };
 
     let ext = match mime {
         "image/png" => "png",
@@ -623,20 +630,23 @@ fn migrate_legacy_background_image(
         Ok(b) => b,
         Err(e) => {
             log::warn!("legacy backgroundImage base64 decode failed, dropping: {e}");
-            // backgroundImage キーは既に上で remove 済みのため、ここでは何もせず migrated 扱いで返す
+            // デコードできないデータは再試行しても直らないので、キーを捨てて migrated 扱いで返す
+            map.remove("backgroundImage");
             return Ok(true);
         }
     };
     if let Err(e) = std::fs::create_dir_all(backgrounds_dir) {
-        log::warn!("legacy backgroundImage migration: failed to create backgrounds dir, dropping: {e}");
-        return Ok(true);
+        log::warn!("legacy backgroundImage migration: failed to create backgrounds dir, will retry on next start: {e}");
+        return Ok(false);
     }
     let file_path = backgrounds_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     if let Err(e) = std::fs::write(&file_path, bytes) {
-        log::warn!("legacy backgroundImage migration: failed to write file, dropping: {e}");
-        return Ok(true);
+        log::warn!("legacy backgroundImage migration: failed to write file, will retry on next start: {e}");
+        return Ok(false);
     }
 
+    // 書き出しに成功してから元のキーを消す。
+    map.remove("backgroundImage");
     map.insert("backgroundKind".into(), serde_json::json!("image"));
     map.insert(
         "backgroundPath".into(),
@@ -1273,6 +1283,50 @@ mod tests {
         assert_eq!(reloaded_ui.background_path, None);
 
         std::fs::remove_file(&path).ok();
+        std::fs::remove_dir_all(&backgrounds_dir).ok();
+    }
+
+    /// 背景画像の書き出しに失敗(ここでは保存先ディレクトリを作れない)しても、元の
+    /// backgroundImage をファイルから消さないこと。次回起動で再試行でき、成功すれば移行されること(Issue #623)。
+    #[test]
+    fn keeps_legacy_background_image_when_file_write_fails() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-bg-write-fail-{}.json", uuid::Uuid::new_v4()));
+        // 通常ファイルの配下は create_dir_all が必ず失敗する(権限に依らない)。
+        let blocker = std::env::temp_dir()
+            .join(format!("tsumugi-bg-write-fail-blocker-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        let broken_dir = blocker.join("backgrounds");
+        let data_url = "data:image/png;base64,iVBORw0KGgo=";
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"ui":{{"theme":"dark","defaultColumnWidth":300,"backgroundImage":"{data_url}"}}}}"#
+            ),
+        )
+        .unwrap();
+
+        let s = SettingsStore::new(path.clone(), broken_dir).unwrap();
+        let ui = s.load_ui().unwrap();
+        assert_eq!(ui.background_kind, None);
+        assert_eq!(ui.background_path, None);
+
+        // 元のデータがファイルに残っている。
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["ui"]["backgroundImage"], data_url);
+
+        // 書き込める状態に戻った次の起動で移行できる。
+        let backgrounds_dir = std::env::temp_dir()
+            .join(format!("tsumugi-bg-write-fail-dir-{}", uuid::Uuid::new_v4()));
+        let reloaded = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        let bg_path = reloaded.load_ui().unwrap().background_path.expect("migrated on retry");
+        assert!(std::path::Path::new(&bg_path).exists());
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("backgroundImage"));
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&blocker).ok();
         std::fs::remove_dir_all(&backgrounds_dir).ok();
     }
 
