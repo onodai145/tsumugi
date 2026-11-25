@@ -597,3 +597,149 @@ git commit -m "fix(account): アカウント削除が途中で失敗しても中
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
+
+---
+
+### Task 3: 削除の途中に、スケジューラがトークンを読まないようにする(最終レビュー後の追加)
+
+Global Constraints は同じ。ただし、スワップがほぼ埋まっている場合は `CARGO_BUILD_JOBS=2`、`MemoryMax=6G`、`MemoryHigh=5G` に下げる。
+
+**Files:**
+- Modify: `src-tauri/src/state.rs`(`AppState` のフィールドと `new_with_sound`)
+- Modify: `src-tauri/src/commands/account.rs`(`remove_account_core` と `removal_tests`)
+- Modify: `src-tauri/src/scheduler.rs`(`attempt`)
+- Modify: `CLAUDE.md`
+
+**Interfaces:**
+- Produces: `AppState.token_removal: std::sync::RwLock<()>`(`pub(crate)`)
+
+- [ ] **Step 1: テストを書く(`removal_tests`)**
+
+`SecretFaults` に `after_delete: Mutex<Option<Hook>>` を足し、フックの呼び出しを関数にまとめる。
+
+```rust
+    fn run_hook(slot: &Mutex<Option<Hook>>, account_id: &str) {
+        let hook = slot.lock().unwrap().take_if(|(id, _)| *id == account_id);
+        if let Some((_, run)) = hook {
+            run();
+        }
+    }
+```
+
+`get` の中のフック呼び出しは `run_hook(&self.faults.on_get, account_id);` に置き換え、`delete` は次にする。
+
+```rust
+        fn delete(&self, account_id: &str) -> Result<()> {
+            fault(&self.faults.delete)?;
+            self.inner.delete(account_id)?;
+            run_hook(&self.faults.after_delete, account_id);
+            Ok(())
+        }
+```
+
+`use` に `crate::domain::LocalScheduleStatus`、`std::sync::mpsc`、`std::time::Duration` を足し、テストを追加する。
+
+```rust
+    /// 削除の途中(トークンを消してから、確定に失敗して書き戻すまで)に予約の時刻が来ても、`Failed` にしない。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_post_due_during_a_failing_removal_is_not_marked_failed() {
+        let f = fixture();
+        let entry = f.state.scheduled_posts.add("a1", 1_000, test_input("due"), 0).unwrap();
+        f.settings_disk.break_dir();
+        let (deleted_tx, deleted_rx) = mpsc::channel();
+        let (scheduled_tx, scheduled_rx) = mpsc::channel::<()>();
+        *f.faults.after_delete.lock().unwrap() = Some((
+            "a1",
+            Box::new(move || {
+                deleted_tx.send(()).unwrap();
+                // 排他が無ければ、この間にスケジューラの処理が終わる。
+                let _ = scheduled_rx.recv_timeout(Duration::from_millis(500));
+            }),
+        ));
+
+        let handle = tokio::runtime::Handle::current();
+        tokio::task::block_in_place(|| {
+            std::thread::scope(|s| {
+                let removal = s.spawn(|| handle.block_on(remove_account_core(&f.state, "a1")));
+                deleted_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                handle.block_on(crate::scheduler::process_due(&f.state, 1_000));
+                let _ = scheduled_tx.send(());
+                assert!(removal.join().unwrap().is_err());
+            })
+        });
+
+        // 戻ったトークンで送り、接続できないので再試行待ちになる。
+        let after = f.state.scheduled_posts.get(&entry.id).unwrap();
+        assert_eq!((after.status, after.attempts), (LocalScheduleStatus::Pending, 1), "{:?}", after.error);
+    }
+```
+
+- [ ] **Step 2: 失敗を確認する**
+
+Run: `cargo test --lib removal_tests`
+Expected: 追加した1件だけが、`left: (Failed, 0)` で FAIL。ほかの9件は PASS。
+
+- [ ] **Step 3: 実装する**
+
+`state.rs` の `AppState` の `column_fence` の後に足す。
+
+```rust
+    /// アカウント削除が、トークンを消してから確定する(または書き戻す)までの間、書きロックを持つ。
+    /// トークンの読み取り失敗を状態として記録する処理(予約投稿のスケジューラ)は、読みロックを取ってから読む(Issue #694)。
+    pub(crate) token_removal: std::sync::RwLock<()>,
+```
+
+`new_with_sound` の `Self { … }` の `column_fence` の次に `token_removal: Default::default(),` を足す。
+
+`account.rs` の `remove_account_core` の、「トークンは確定点より前に消す」から確定点の `if let Err` の終わりまでを、次のブロックにする。
+
+```rust
+    {
+        // トークンが一時的に消えている間は、スケジューラに読ませない。この中で `await` しない。
+        let _removing = state.token_removal.write().unwrap();
+        // トークンは確定点より前に消す。後だと、失敗したときに、画面から消し直せないトークンが残る。
+        let token = state.secrets.get(account_id)?;
+        state.secrets.delete(account_id)?;
+
+        // 確定点: アカウントとカラムを永続層から削除する。
+        if let Err(e) = state.settings.delete_account(account_id) {
+            if let Some(token) = &token {
+                if let Err(restore) = state.secrets.set(account_id, token) {
+                    log::warn!("failed to restore the token after the account removal failed: {restore}");
+                }
+            }
+            return Err(e);
+        }
+    }
+```
+
+`scheduler.rs` の `attempt` の `let result = match state.client_for(&account_id) {` を次にする。
+
+```rust
+    // アカウント削除の途中で一時的に消えているトークンを読まない(Issue #694)。通信の前に放す。
+    let client = {
+        let _reading = state.token_removal.read().unwrap();
+        state.client_for(&account_id)
+    };
+    let result = match client {
+```
+
+`CLAUDE.md` の `commands/` の行の末尾に足す。
+
+```markdown
+ トークンを消してから確定するまでは `AppState.token_removal` の書きロックを持つ。トークンが読めないことを状態として記録する処理(予約投稿のスケジューラ)は、読みロックを取ってから `client_for` する。
+```
+
+- [ ] **Step 4: テストが通ることを確認する**
+
+Run: `cargo test --lib removal_tests`、続けて `cargo test`
+Expected: `removal_tests` は10件すべて PASS。全体で FAIL が0件。
+
+- [ ] **Step 5: コミットする**
+
+```bash
+git add src-tauri/src/state.rs src-tauri/src/commands/account.rs src-tauri/src/scheduler.rs CLAUDE.md
+git commit -m "fix(scheduler): アカウント削除の途中に予約の時刻が来ても失敗扱いにしない(Issue #694)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
