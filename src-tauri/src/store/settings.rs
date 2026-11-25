@@ -579,6 +579,11 @@ fn load_json_or_default(path: &Path, backgrounds_dir: &Path) -> Result<SettingsD
     } else {
         false
     };
+    // 一時的なI/O失敗でキーを残したとき、`UiPrefs` は backgroundImage を持たないので、この起動中に
+    // 設定を1回でも保存するとキーが消える。書き直される前に元のファイルを退避しておく(Issue #687)。
+    if value.get("ui").is_some_and(|ui| ui.get("backgroundImage").is_some()) {
+        backup_settings_before_background_retry(path);
+    }
     let mut data: SettingsData = serde_json::from_value(value)?;
     // 不正な外部サービスURLは既定値に戻す(Issue #549)。ファイルは書き換えない(次の保存で反映される)。
     data.ui.reset_invalid_external_urls();
@@ -588,6 +593,25 @@ fn load_json_or_default(path: &Path, backgrounds_dir: &Path) -> Result<SettingsD
         std::fs::rename(&tmp_path, path)?;
     }
     Ok(data)
+}
+
+/// 旧 `backgroundImage` の移行を再試行する起動のために、設定ファイルを退避する(Issue #687)。
+/// 退避先がすでにあれば上書きしない(最初に残したものが元のデータ)。失敗しても起動は止めない。
+fn backup_settings_before_background_retry(path: &Path) {
+    let backup = path.with_extension("json.bak-legacy-background");
+    if backup.exists() {
+        return;
+    }
+    match std::fs::copy(path, &backup) {
+        Ok(_) => log::warn!(
+            "legacy backgroundImage migration did not complete; backed up settings to {}",
+            backup.display()
+        ),
+        Err(e) => log::warn!(
+            "legacy backgroundImage migration did not complete, and backing up settings to {} failed: {e}",
+            backup.display()
+        ),
+    }
 }
 
 /// 旧バージョンが `UiPrefs.backgroundImage` に Base64 data URL として保存していた背景画像を、
@@ -1327,6 +1351,92 @@ mod tests {
 
         std::fs::remove_file(&path).ok();
         std::fs::remove_file(&blocker).ok();
+        std::fs::remove_dir_all(&backgrounds_dir).ok();
+    }
+
+    /// 移行に失敗した起動中に設定を保存すると settings.json から backgroundImage が消えるが、
+    /// その前に退避したファイルには元のデータが残ること(Issue #687)。
+    #[test]
+    fn backs_up_settings_when_legacy_background_migration_fails() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-bg-backup-{}.json", uuid::Uuid::new_v4()));
+        let backup = path.with_extension("json.bak-legacy-background");
+        let blocker = std::env::temp_dir()
+            .join(format!("tsumugi-bg-backup-blocker-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        let broken_dir = blocker.join("backgrounds");
+        let data_url = "data:image/png;base64,iVBORw0KGgo=";
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"ui":{{"theme":"dark","defaultColumnWidth":300,"backgroundImage":"{data_url}"}}}}"#
+            ),
+        )
+        .unwrap();
+
+        let s = SettingsStore::new(path.clone(), broken_dir).unwrap();
+        // 失敗した起動中に何か設定を保存する。型付きデータから書き直されるので、キーは消える。
+        let mut ui = s.load_ui().unwrap();
+        ui.default_column_width = 400;
+        s.save_ui(&ui).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("backgroundImage"));
+
+        // 退避ファイルには元の backgroundImage が残っている。
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
+        assert_eq!(saved["ui"]["backgroundImage"], data_url);
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&backup).ok();
+        std::fs::remove_file(&blocker).ok();
+    }
+
+    /// 退避ファイルがすでにあれば上書きしないこと(最初に残したものが元のデータ)。
+    #[test]
+    fn does_not_overwrite_existing_legacy_background_backup() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-bg-backup-keep-{}.json", uuid::Uuid::new_v4()));
+        let backup = path.with_extension("json.bak-legacy-background");
+        let blocker = std::env::temp_dir()
+            .join(format!("tsumugi-bg-backup-keep-blocker-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        std::fs::write(&backup, b"original backup").unwrap();
+        std::fs::write(
+            &path,
+            r#"{"ui":{"theme":"dark","defaultColumnWidth":300,"backgroundImage":"data:image/png;base64,iVBORw0KGgo="}}"#,
+        )
+        .unwrap();
+
+        SettingsStore::new(path.clone(), blocker.join("backgrounds")).unwrap();
+        assert_eq!(std::fs::read(&backup).unwrap(), b"original backup");
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&backup).ok();
+        std::fs::remove_file(&blocker).ok();
+    }
+
+    /// 移行が成功したとき、または backgroundImage が無いときは退避ファイルを作らないこと。
+    #[test]
+    fn no_legacy_background_backup_when_migration_succeeds() {
+        let path = std::env::temp_dir()
+            .join(format!("tsumugi-bg-backup-none-{}.json", uuid::Uuid::new_v4()));
+        let backup = path.with_extension("json.bak-legacy-background");
+        let backgrounds_dir = std::env::temp_dir()
+            .join(format!("tsumugi-bg-backup-none-dir-{}", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"{"ui":{"theme":"dark","defaultColumnWidth":300,"backgroundImage":"data:image/png;base64,iVBORw0KGgo="}}"#,
+        )
+        .unwrap();
+        SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        assert!(!backup.exists());
+
+        std::fs::write(&path, r#"{"ui":{"theme":"dark","defaultColumnWidth":300}}"#).unwrap();
+        SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
+        assert!(!backup.exists());
+
+        std::fs::remove_file(&path).ok();
         std::fs::remove_dir_all(&backgrounds_dir).ok();
     }
 

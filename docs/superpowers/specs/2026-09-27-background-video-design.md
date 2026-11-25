@@ -89,7 +89,10 @@ async fn import_background_media(app: AppHandle, path: String) -> Result<Backgro
 失敗時の扱い(Issue #623): 元の `backgroundImage` は、手順3のファイル書き出しに成功してから消す。
 ディレクトリ作成・書き込みが失敗したときは、キーを残して「移行なし」(`Ok(false)`)で返し、次回起動で再試行する。
 形式不正・base64 デコード失敗は再試行しても直らないので、キーごと捨てる(起動のたびに警告が出続けないようにする)。
-ただし `UiPrefs` は `backgroundImage` を持たないため、失敗した起動中に設定を保存すると、キーはその保存で消える。
+ただし `UiPrefs` は `backgroundImage` を持たないため、失敗した起動中に設定を保存すると、キーはその保存で消える(Issue #687)。
+そこで、移行後もキーが残っているときは、書き直しの前に `settings.json` を `settings.json.bak-legacy-background` へコピーしておく
+(すでにあれば上書きしない。失敗しても起動は止めず、ログに警告を出すだけ)。元のデータは、この退避ファイルから取り出せる。
+旧 SQLite からの移行は、移行後に `tsumugi.db` を `tsumugi.db.bak` へ退避するので、同じ穴はない。
 
 `domain/ui.rs` の既存の後方互換テスト群 (321-524行目) と同じ形式で、旧JSON→新フィールド移行のテストケースを
 追加する。`store/settings.rs` にも移行の統合テストを追加する。
