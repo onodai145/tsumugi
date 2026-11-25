@@ -183,6 +183,34 @@ pub(crate) async fn empty_set_contract(b: &dyn NoteCacheBackend) {
     }
 }
 
+/// フォロー一覧が未取得(`following_ids: None`)のときの `following`(Issue #670)が、
+/// 3 backend とインメモリ評価で同じ結果になること。恒偽なので、肯定は 0 件、否定は全件。
+/// PostgreSQL は整数 `0` を真偽値として受け付けず、`WHERE` / `NOT` でエラーになっていた。
+pub(crate) async fn following_contract(b: &dyn NoteCacheBackend) {
+    let notes = fixtures();
+    b.cache_notes("col1", &notes).await.unwrap();
+    let ctx = SqlCtx { my_ids: vec![], following_ids: None };
+    let eval_ctx = EvalContext::default();
+
+    let following = || Expr::Bare(Value::Field(Field::Following));
+    let cases: Vec<(&str, Expr, &[&str])> = vec![
+        ("following", following(), &[]),
+        ("!following", Expr::Not(Box::new(following())), ALL),
+    ];
+    for (label, expr, want) in cases {
+        let want: Vec<String> = want.iter().map(|s| s.to_string()).collect();
+
+        let w = build_where(&expr, &ctx).unwrap();
+        let mut got: Vec<String> = b.search_cache(&w, None, 100).await.unwrap().into_iter().map(|n| n.id).collect();
+        got.sort();
+        assert_eq!(got, want, "SQL: {label}");
+
+        let mut mem: Vec<String> = notes.iter().filter(|n| evaluate(&expr, n, &eval_ctx)).map(|n| n.id.clone()).collect();
+        mem.sort();
+        assert_eq!(mem, want, "eval: {label}");
+    }
+}
+
 /// `user.acct`(Issue #599)が、3 backend とインメモリ評価で同じ結果になること。
 /// MySQL は既定の `sql_mode` で `||` が論理 OR になり、`acct == "@..."` が誰にでも一致していた。
 /// 同じユーザー名でホストが違うユーザー(`@alice` と `@alice@remote.example`)を区別できることも確かめる。

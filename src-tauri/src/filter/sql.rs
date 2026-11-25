@@ -407,7 +407,7 @@ impl Builder<'_> {
             Mine => format!("n.user_id IN {}", self.id_list(&self.ctx.my_ids.clone())),
             Following => match self.ctx.following_ids.clone() {
                 Some(ids) => format!("n.user_id IN {}", self.id_list(&ids)),
-                None => "0".into(), // 未取得なら矛盾（常に偽）
+                None => ALWAYS_FALSE.into(), // 未取得なら矛盾（常に偽）
             },
             _ => return Err(format!("field is not boolean: {f:?}")),
         })
@@ -738,6 +738,25 @@ mod tests {
 
         let w = where_of("from cache where to_me");
         assert!(sq(&w).sql.contains("note_mention m WHERE m.note_id=n.id AND m.user_id IN (?)"));
+    }
+
+    /// フォロー一覧が未取得(`following_ids: None`)のとき `following` は恒偽(Issue #670)。
+    /// PostgreSQL は整数 `0` を真偽値として受け付けないので、3 方言とも `(1=0)` と書く。
+    #[test]
+    fn following_without_ids_is_constant_false_in_every_dialect() {
+        let ctx = SqlCtx { my_ids: vec![], following_ids: None };
+        for (query, want) in [
+            ("from cache where following", "(1=0)"),
+            ("from cache where !following", "(NOT (1=0))"),
+        ] {
+            let q = parse(query).unwrap();
+            let w = build_where(q.predicate.as_ref().unwrap(), &ctx).unwrap();
+            for d in [Dialect::Sqlite, Dialect::Postgres, Dialect::MySql] {
+                let r = w.render(d);
+                assert_eq!(r.sql, want, "{query} / {d:?}");
+                assert!(r.params.is_empty(), "{query} / {d:?}: 束縛値が残っている");
+            }
+        }
     }
 
     #[test]

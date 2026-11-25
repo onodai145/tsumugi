@@ -1509,6 +1509,14 @@ mod tests {
         crate::store::search_contract::empty_set_contract(&*s).await;
     }
 
+    /// 未取得の `following`(Issue #670)の契約。
+    #[tokio::test]
+    #[ignore]
+    async fn search_cache_following_contract() {
+        let s = backend().await;
+        crate::store::search_contract::following_contract(&*s).await;
+    }
+
     /// `user.acct`(Issue #599)の契約。
     #[tokio::test]
     #[ignore]
