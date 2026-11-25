@@ -199,6 +199,7 @@ impl Harness {
                 host,
                 "tok".into(),
                 config,
+                Default::default(),
                 cancel_rx,
                 cmd_rx,
             )
@@ -727,4 +728,74 @@ async fn closing_the_last_column_of_a_stopped_account_removes_it() {
     manager.close("col1");
 
     assert_eq!(manager.open_count(), 0);
+}
+
+// ---- 認証失敗で止まった通知カラムのウォーターマーク退避(Issue #684) ----
+
+#[tokio::test]
+async fn auth_failure_keeps_the_watermark_of_a_notification_column_still_waiting_to_connect() {
+    let server = MockServer::bind().await;
+    let app = app_with_events();
+    let manager = ConnectionManager::with_config(fast_config());
+
+    // 初回接続のハンドシェイクが 401: AddChannel はまだ `subs` に入っていない。
+    manager.open_notifications(
+        app.handle().clone(),
+        "col1".into(),
+        "acc1".into(),
+        server.host(),
+        "old-token".into(),
+        Some("9tj000005".into()),
+    );
+    server.reject_with_status(401).await;
+    wait_until_account_task_stops(&manager).await;
+
+    assert_eq!(manager.take_stalled_notification_mark("col1").as_deref(), Some("9tj000005"));
+    assert_eq!(manager.take_stalled_notification_mark("col1"), None, "取り出したら消える");
+}
+
+#[tokio::test]
+async fn auth_failure_keeps_the_watermark_of_a_subscribed_notification_column() {
+    let server = MockServer::bind().await;
+    let app = app_with_events();
+    let manager = ConnectionManager::with_config(fast_config());
+
+    manager.open_notifications(
+        app.handle().clone(),
+        "col1".into(),
+        "acc1".into(),
+        server.host(),
+        "tok".into(),
+        Some("9tj000005".into()),
+    );
+    // 一度つながって購読が `subs` に入ってから切れ、再接続が 401 になる。
+    let mut conn = server.accept().await;
+    assert_eq!(conn.recv_json().await["type"], "connect");
+    drop(conn);
+    server.reject_with_status(401).await;
+    wait_until_account_task_stops(&manager).await;
+
+    assert_eq!(manager.take_stalled_notification_mark("col1").as_deref(), Some("9tj000005"));
+}
+
+#[tokio::test]
+async fn closing_a_column_drops_its_stalled_watermark() {
+    let server = MockServer::bind().await;
+    let app = app_with_events();
+    let manager = ConnectionManager::with_config(fast_config());
+
+    manager.open_notifications(
+        app.handle().clone(),
+        "col1".into(),
+        "acc1".into(),
+        server.host(),
+        "tok".into(),
+        Some("9tj000005".into()),
+    );
+    server.reject_with_status(401).await;
+    wait_until_account_task_stops(&manager).await;
+
+    manager.close("col1");
+
+    assert_eq!(manager.take_stalled_notification_mark("col1"), None);
 }

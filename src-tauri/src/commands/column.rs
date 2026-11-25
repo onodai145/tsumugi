@@ -378,24 +378,43 @@ async fn reconnect_column_with<R: Runtime>(
         Some(resolve_sources(state, &column.account_id, &column.kind, &column.filter).await?)
     };
     let resolved_ref = resolved.as_ref();
+    // 定義が変わっていて開けなかった場合に、退避分を失わないよう、ここでは読むだけにする。
+    // 取り出す(消す)のは、開けたと分かってから。
+    let stalled_mark = if is_notif {
+        state.connections.peek_stalled_notification_mark(&column.id)
+    } else {
+        None
+    };
     let opened = state
         .column_fence
         .write_if_current(&column.id, epoch, |_| async move {
             match resolved_ref {
-                // 通知のギャップ埋めは、止まったタスクのウォーターマークと一緒に失われる(Issue #684)。
+                // 止まったタスクが残した最終通知idを引き継ぐ(Issue #684)。
                 None => state.connections.open_notifications(
                     app.clone(),
                     column.id.clone(),
                     column.account_id.clone(),
                     host,
                     token,
-                    None,
+                    stalled_mark.clone(),
                 ),
                 Some(r) => open_streams_only(app, state, column, r, host, token),
             }
         })
         .await;
-    if opened.is_none() || is_notif {
+    if opened.is_none() {
+        return Ok(());
+    }
+    if is_notif {
+        // 新しいタスクの最初の接続は再接続ではないので、停止中に届いた通知はここで補う(Issue #684)。
+        // 退避分が無ければ(一度も通知を知らないまま止まった)、補完の範囲が定まらないので何もしない。
+        if let Some(last_seen_id) = state.connections.take_stalled_notification_mark(&column.id) {
+            let app = app.clone();
+            let column_id = column.id.clone();
+            tauri::async_runtime::spawn(async move {
+                notification_gap_fill_on_reconnect(&app, &column_id, &last_seen_id).await;
+            });
+        }
         return Ok(());
     }
     // 新しいタスクの最初の接続は再接続ではないので、停止中に流れたノートはここで補う。
@@ -4154,6 +4173,32 @@ mod tests {
 
         assert_eq!(state.connections.open_count(), 1);
         assert_eq!(mock.received_requests().await.unwrap().len(), 0, "REST は呼ばない");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_column_core_fills_the_gap_of_a_notifications_column_from_the_stalled_watermark() {
+        let mock = MockServer::start().await;
+        mount_empty_pages(&mock).await;
+        let app = tauri::test::mock_app();
+        app.manage(command_state(&mock));
+        let state = app.state::<AppState>();
+        state.settings.upsert_column(&command_column("c1", ColumnKind::Notifications)).unwrap();
+        state.connections.stall_notification_mark_for_test("c1", "9tj000005");
+
+        reconnect_column_core(app.handle(), &state, "c1").await.unwrap();
+
+        // 新しいタスクの最初の接続は再接続ではないので、停止中に届いた通知はここで補う(Issue #684)。
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while mock.received_requests().await.unwrap().is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("ウォーターマークから REST で補完する");
+        assert!(
+            state.connections.take_stalled_notification_mark("c1").is_none(),
+            "退避分は使ったら消える"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

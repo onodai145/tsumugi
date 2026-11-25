@@ -133,7 +133,13 @@ pub struct ConnectionManager {
     columns: Mutex<HashMap<String, String>>,
     /// タスクへ渡す接続設定。本番は `StreamConfig::default()`、テストは短い時間と `ws` を渡す。
     config: StreamConfig,
+    /// 認証失敗で止まったタスクが残した、通知カラムごとの最終通知id(column_id -> id, Issue #684)。
+    /// 再認証後の `reconnect_column` が取り出して、停止中に届いた通知の補完の起点にする。
+    stalled_notification_marks: StalledMarks,
 }
+
+/// 止まったタスクと `ConnectionManager` が共有する、通知カラムのウォーターマークの退避先。
+type StalledMarks = Arc<Mutex<HashMap<String, String>>>;
 
 impl ConnectionManager {
     #[cfg(test)]
@@ -247,11 +253,19 @@ impl ConnectionManager {
                 host.clone(),
                 token.clone(),
                 self.config.clone(),
+                self.stalled_notification_marks.clone(),
             )
         });
         // `is_closed()` の確認から送信までの間にタスクが止まった場合は、作り直して 1 回だけ送り直す。
         if let Err(cmd) = try_send(&ctl.cmd, cmd) {
-            let ctl = spawn_account(app, account_id.clone(), host, token, self.config.clone());
+            let ctl = spawn_account(
+                app,
+                account_id.clone(),
+                host,
+                token,
+                self.config.clone(),
+                self.stalled_notification_marks.clone(),
+            );
             send_command(&account_id, &ctl.cmd, cmd);
             accounts.insert(account_id, ctl);
         }
@@ -286,8 +300,29 @@ impl ConnectionManager {
         }
     }
 
+    /// 認証失敗で止まった通知カラムの最終通知idを取り出す(取り出すと消える, Issue #684)。
+    /// 一度も通知を知らないまま止まっていれば `None`。
+    pub fn take_stalled_notification_mark(&self, column_id: &str) -> Option<String> {
+        self.stalled_notification_marks.lock().unwrap().remove(column_id)
+    }
+
+    /// `take_stalled_notification_mark` の、消さない版。
+    pub fn peek_stalled_notification_mark(&self, column_id: &str) -> Option<String> {
+        self.stalled_notification_marks.lock().unwrap().get(column_id).cloned()
+    }
+
+    /// テスト用: 認証失敗で止まったあとの状態(退避済みのウォーターマーク)を作る。
+    #[cfg(test)]
+    pub(crate) fn stall_notification_mark_for_test(&self, column_id: &str, id: &str) {
+        self.stalled_notification_marks
+            .lock()
+            .unwrap()
+            .insert(column_id.to_string(), id.to_string());
+    }
+
     /// カラムを閉じる（購読解除）。そのアカウントの最後のカラムなら WebSocket ごと畳む。
     pub fn close(&self, column_id: &str) {
+        self.stalled_notification_marks.lock().unwrap().remove(column_id);
         let account_id = match self.columns.lock().unwrap().remove(column_id) {
             Some(a) => a,
             None => return,
@@ -355,11 +390,12 @@ fn spawn_account<R: Runtime>(
     host: String,
     token: String,
     config: StreamConfig,
+    stalled_marks: StalledMarks,
 ) -> AccountCtl {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let handle = tauri::async_runtime::spawn(async move {
-        run_account(app, account_id, host, token, config, cancel_rx, cmd_rx).await;
+        run_account(app, account_id, host, token, config, stalled_marks, cancel_rx, cmd_rx).await;
     });
     AccountCtl {
         cmd: cmd_tx,
@@ -485,6 +521,18 @@ enum RunOutcome {
     Fatal,
 }
 
+/// 止まった通知カラムのウォーターマークを記録する。`None` なら、前回の古い値を消す。
+fn set_stalled_mark(marks: &mut HashMap<String, String>, column_id: &str, id: Option<String>) {
+    match id {
+        Some(id) => {
+            marks.insert(column_id.to_string(), id);
+        }
+        None => {
+            marks.remove(column_id);
+        }
+    }
+}
+
 /// 次回の再接続待ち時間。倍々に伸ばし、`max` で頭打ちにする。
 fn next_backoff(current: Duration, max: Duration) -> Duration {
     (current * 2).min(max)
@@ -505,6 +553,7 @@ async fn run_account<R: Runtime>(
     host: String,
     token: String,
     config: StreamConfig,
+    stalled_marks: StalledMarks,
     mut cancel: watch::Receiver<bool>,
     mut cmd_rx: mpsc::UnboundedReceiver<AccountCommand>,
 ) {
@@ -559,12 +608,25 @@ async fn run_account<R: Runtime>(
             }
             RunOutcome::Fatal => {
                 emit_state_all(&app, &subs, ConnectionState::Error);
+                // タスクと一緒に `subs` が失われるので、通知カラムのウォーターマークを退避する。
+                // 再認証後の `reconnect_column` が、停止中に届いた通知の補完に使う(Issue #684)。
+                {
+                    let mut marks = stalled_marks.lock().unwrap();
+                    for sub in subs.values() {
+                        if matches!(sub.mode, StreamMode::Notifications { .. }) {
+                            set_stalled_mark(&mut marks, &sub.column_id, sub.last_seen_notification_id.clone());
+                        }
+                    }
+                }
                 // 接続中に積まれて、まだ `subs` に入っていない購読にも Error を伝える。
                 // 受信側を閉じてから回収するので、以降の送信は失敗する(= 呼び出し側が
                 // タスクの停止を検出して作り直せる)。
                 cmd_rx.close();
                 while let Ok(cmd) = cmd_rx.try_recv() {
-                    if let AccountCommand::AddChannel { column_id, .. } = cmd {
+                    if let AccountCommand::AddChannel { column_id, mode, initial_last_seen_id, .. } = cmd {
+                        if matches!(mode, StreamMode::Notifications { .. }) {
+                            set_stalled_mark(&mut stalled_marks.lock().unwrap(), &column_id, initial_last_seen_id);
+                        }
                         emit_state(&app, &column_id, ConnectionState::Error);
                     }
                 }
