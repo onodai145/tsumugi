@@ -113,6 +113,14 @@ impl ScheduledPostStore {
         Ok(())
     }
 
+    /// 利用者の操作による変更を保存する。失敗したらメモリを `change` の前に戻して Err を返し、
+    /// 「失敗した」という応答と状態を一致させる(Issue #682)。
+    fn save_or_restore(&self, data: &mut Data, change: impl FnOnce(&mut Vec<ScheduledPostEntry>)) -> Result<()> {
+        let before = data.posts.clone();
+        change(&mut data.posts);
+        self.save(data).inspect_err(|_| data.posts = before)
+    }
+
     /// 送信結果をメモリに反映済みのまま保存する。失敗しても、メモリは巻き戻さない(送信は終わっていて、
     /// 巻き戻すと再送・二重投稿の元になる)。代わりに `dirty` を立て、`flush` で追いつかせる(Issue #620)。
     fn save_recorded(&self, data: &Data) -> Result<()> {
@@ -159,8 +167,7 @@ impl ScheduledPostStore {
             next_attempt_at: None,
             created_at: now,
         };
-        g.posts.push(entry.clone());
-        self.save(&g)?;
+        self.save_or_restore(&mut g, |posts| posts.push(entry.clone()))?;
         Ok(entry)
     }
 
@@ -282,14 +289,14 @@ impl ScheduledPostStore {
         if g.posts[pos].status == LocalScheduleStatus::Posting {
             return Err(Error::Invalid("投稿処理中のため取り消せません".into()));
         }
-        g.posts.remove(pos);
-        self.save(&g)
+        self.save_or_restore(&mut g, |posts| {
+            posts.remove(pos);
+        })
     }
 
     pub fn remove_account(&self, account_id: &str) -> Result<()> {
         let mut g = self.data.lock().unwrap();
-        g.posts.retain(|e| e.account_id != account_id);
-        self.save(&g)
+        self.save_or_restore(&mut g, |posts| posts.retain(|e| e.account_id != account_id))
     }
 
     /// 起動時: `Posting` のまま残っている予約を、再送せず `Failed` にする。直した件数を返す。
@@ -623,6 +630,68 @@ mod tests {
         assert!(!s.is_dirty());
         let reloaded = ScheduledPostStore::new(disk.path()).unwrap();
         assert!(reloaded.get(&e.id).is_none());
+    }
+
+    /// Issue #682: 利用者の操作は、保存に失敗したら Err とともにメモリも元のままにする
+    /// (「失敗した」と見えた予約が送信されない)。
+    #[test]
+    fn add_leaves_no_entry_when_saving_fails() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        let kept = s.add("acc1", 1_000, test_input("kept"), 0).unwrap();
+
+        disk.break_dir();
+        assert!(s.add("acc1", 500, test_input("lost"), 1).is_err());
+        let ids: Vec<_> = s.list_for_account("acc1").into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![kept.id]);
+        assert_eq!(s.due(500).len(), 0, "the rejected entry is never sent");
+    }
+
+    /// Issue #682: 取り消しに失敗した予約は残る(再起動で復活するのと同じ状態)。
+    #[test]
+    fn cancel_keeps_the_entry_when_saving_fails() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        let e = s.add("acc1", 1_000, test_input("a"), 0).unwrap();
+
+        disk.break_dir();
+        assert!(s.cancel("acc1", &e.id).is_err());
+        assert_eq!(s.get(&e.id).unwrap().status, LocalScheduleStatus::Pending);
+
+        disk.repair_dir();
+        s.cancel("acc1", &e.id).unwrap();
+        assert!(ScheduledPostStore::new(disk.path()).unwrap().get(&e.id).is_none());
+    }
+
+    /// Issue #682: アカウントの予約の削除に失敗したら、全部残す。
+    #[test]
+    fn remove_account_keeps_the_entries_when_saving_fails() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        s.add("acc1", 1_000, test_input("a"), 0).unwrap();
+        s.add("acc2", 1_000, test_input("b"), 0).unwrap();
+
+        disk.break_dir();
+        assert!(s.remove_account("acc1").is_err());
+        assert_eq!(s.list_for_account("acc1").len(), 1);
+        assert_eq!(s.list_for_account("acc2").len(), 1);
+    }
+
+    /// Issue #682: 巻き戻すのは失敗した操作の分だけで、未保存の送信結果(#620)は消さない。
+    #[test]
+    fn a_failed_user_operation_keeps_unsaved_send_results() {
+        let disk = BrokenDisk::new();
+        let s = ScheduledPostStore::new(disk.path()).unwrap();
+        let sent = s.add("acc1", 1_000, test_input("sent"), 0).unwrap();
+        let other = s.add("acc1", 2_000, test_input("other"), 1).unwrap();
+        s.begin_post(&sent.id).unwrap();
+
+        disk.break_dir();
+        assert!(s.finish_posted(&sent.id).is_err());
+        assert!(s.cancel("acc1", &other.id).is_err());
+        assert!(s.get(&sent.id).is_none(), "the posted entry does not come back");
+        assert!(s.get(&other.id).is_some());
+        assert!(s.is_dirty(), "still waiting to be flushed");
     }
 
     #[test]
