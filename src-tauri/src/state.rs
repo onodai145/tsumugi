@@ -192,6 +192,9 @@ pub struct AppState {
     /// カラムごとの世代とロック。`update_column` / `close_column` と、実行中の REST 取得の
     /// キャッシュ書き込みの競合を防ぐ(Issue #446)。
     pub column_fence: ColumnFence,
+    /// アカウント削除が、トークンを消してから確定する(または書き戻す)までの間、書きロックを持つ。
+    /// トークンの読み取り失敗を状態として記録する処理(予約投稿のスケジューラ)は、読みロックを取ってから読む(Issue #694)。
+    pub(crate) token_removal: std::sync::RwLock<()>,
 }
 
 impl AppState {
@@ -286,6 +289,7 @@ impl AppState {
             sound,
             cache_metrics: CacheMetrics::default(),
             column_fence: ColumnFence::default(),
+            token_removal: Default::default(),
         }
     }
 
