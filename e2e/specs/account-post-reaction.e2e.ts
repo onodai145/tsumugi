@@ -9,6 +9,7 @@
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
 import { clickThroughAccountSelect } from "../helpers/accountSelect";
+import { postNote, waitForNoteText } from "../helpers/composeUi";
 
 const MISSKEY_HOST = "misskey.local:8443";
 
@@ -127,36 +128,15 @@ describe("account → post → reaction", () => {
     await addColumnSubmit.waitForClickable({ timeout: 15000 });
     await addColumnSubmit.click();
 
-    const textarea = await $('[data-testid="compose-textarea"]');
-    await textarea.waitForDisplayed({ timeout: 15000 });
     noteText = `tsumugi e2e test note ${Date.now()}`;
-    await textarea.setValue(noteText);
-
-    const submitButton = await $('[data-testid="compose-submit"]');
-    await submitButton.click();
+    // setValue 直後は textarea の高さ遷移でボタンが動くため、位置が落ち着いてから押す(Issue #664)。
+    await postNote(noteText);
 
     // 自分のHomeカラムにストリーミングで即座に流れてくるはず。
-    // `*=text`(XPath contains()ベース)セレクタは、実機検証の結果
-    // ノート本文自体(data-testid="note-text")には正しくヒットしDOMにも
-    // 存在するのに`waitForDisplayed()`だけが20秒待っても`false`のままに
-    // なることがあった(実機確認済み: 診断コードでDOM上にテキストが
-    // 存在することを確認しつつ`waitForDisplayed`が失敗するケースを観測)。
-    // `*=`セレクタがマッチする実際の要素が意図した`note-text`要素ではなく
-    // 親のより大きなコンテナ側に解決されている可能性を疑い、
-    // `data-testid="note-text"`を明示的に指定したうえで`getText()`の
-    // 内容を`waitUntil`で直接ポーリングする、より曖昧さの無い待ち方に
-    // 変更した。
-    await browser.waitUntil(
-      async () => {
-        const noteTexts = await $$('[data-testid="note-text"]');
-        for (const el of noteTexts) {
-          const text = await el.getText().catch(() => "");
-          if (text.includes(noteText)) return true;
-        }
-        return false;
-      },
-      { timeout: 20000, interval: 300, timeoutMsg: `posted note "${noteText}" did not appear` },
-    );
+    // `*=text`(XPath contains()ベース)セレクタ+`waitForDisplayed()`は、DOM上にテキストが
+    // 存在するのに20秒待っても`false`のままになることがあったため(実機確認済み)、
+    // `data-testid="note-text"`の`getText()`を直接ポーリングする(waitForNoteText)。
+    await waitForNoteText(noteText);
   });
 
   it("reacts to its own note", async () => {

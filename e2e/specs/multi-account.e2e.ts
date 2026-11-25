@@ -2,6 +2,7 @@
 // ComposeBarのアカウント切り替えが正しく機能することを検証する(Issue #223)。
 import { startMiauthBridge, type MiauthBridge } from "../helpers/miauthBridge";
 import { clickThroughAccountSelect } from "../helpers/accountSelect";
+import { postNote, waitForNoteText } from "../helpers/composeUi";
 import { signUp, signInAsSeededUser, allowRegistration } from "../helpers/misskeyApi";
 import { debugLog, debugLogPath } from "../helpers/debugLog";
 
@@ -213,25 +214,12 @@ describe("multiple accounts used simultaneously", () => {
     await composeAccountOptionA.waitForDisplayed({ timeout: 15000 });
     await composeAccountOptionA.click();
 
-    const textarea = await $('[data-testid="compose-textarea"]');
-    await textarea.waitForDisplayed({ timeout: 15000 });
-    await textarea.setValue(noteFromA);
-    const submitButton = await $('[data-testid="compose-submit"]');
-    await submitButton.click();
+    // setValue 直後は textarea の高さ遷移でボタンが動くため、位置が落ち着いてから押す(Issue #664)。
+    await postNote(noteFromA);
 
     // アカウントAのカラム(data-account-id=accountIdA)にだけ現れることを確認する。
     const columnA = await $(`[data-account-id="${accountIdA}"]`);
-    await browser.waitUntil(
-      async () => {
-        const noteTexts = await columnA.$$('[data-testid="note-text"]');
-        for (const el of noteTexts) {
-          const text = await el.getText().catch(() => "");
-          if (text.includes(noteFromA)) return true;
-        }
-        return false;
-      },
-      { timeout: 20000, interval: 300, timeoutMsg: `note "${noteFromA}" did not appear in account A's column` },
-    );
+    await waitForNoteText(noteFromA, columnA);
 
     const columnB = await $(`[data-account-id="${accountIdB}"]`);
     const columnBNoteTexts = await columnB.$$('[data-testid="note-text"]');
