@@ -275,14 +275,17 @@ mod removal_tests {
     use crate::store::testutil::BrokenDisk;
     use crate::store::{ScheduledPostStore, SettingsStore};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
-    /// 立てた操作だけが失敗する。
+    type Hook = (&'static str, Box<dyn FnOnce() + Send>);
+
+    /// 立てた操作だけが失敗する。`on_get` は、そのアカウントのトークンを次に読むときに 1 回だけ呼ぶ。
     #[derive(Default)]
     struct SecretFaults {
         get: AtomicBool,
         set: AtomicBool,
         delete: AtomicBool,
+        on_get: Mutex<Option<Hook>>,
     }
 
     struct FaultySecrets {
@@ -305,6 +308,10 @@ mod removal_tests {
 
         fn get(&self, account_id: &str) -> Result<Option<String>> {
             fault(&self.faults.get)?;
+            let hook = self.faults.on_get.lock().unwrap().take_if(|(id, _)| *id == account_id);
+            if let Some((_, run)) = hook {
+                run();
+            }
             self.inner.get(account_id)
         }
 
@@ -318,7 +325,7 @@ mod removal_tests {
     struct Fixture {
         state: AppState,
         faults: Arc<SecretFaults>,
-        settings_disk: BrokenDisk,
+        settings_disk: Arc<BrokenDisk>,
         scheduled_disk: BrokenDisk,
         _app: tauri::App<tauri::test::MockRuntime>,
     }
@@ -359,7 +366,7 @@ mod removal_tests {
             ("a1", "127.0.0.1:1", "c1", "g1"),
             ("a2", "127.0.0.1:2", "c2", "g2"),
         ];
-        let settings_disk = BrokenDisk::new();
+        let settings_disk = Arc::new(BrokenDisk::new());
         let scheduled_disk = BrokenDisk::new();
         let settings = SettingsStore::new(
             settings_disk.path("settings.json"),
@@ -442,6 +449,9 @@ mod removal_tests {
         assert_eq!(has_account(&f, "a2"), (true, true));
         assert_eq!(token(&f, "a2").as_deref(), Some("token"));
         assert_eq!(f.state.scheduled_posts.list_for_account("a2").len(), 1);
+        // 残った 1 本が a2 のものなら、a2 のカラムを閉じると 0 本になる。
+        f.state.connections.close("c2");
+        assert_eq!(f.state.connections.open_count(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -524,6 +534,21 @@ mod removal_tests {
         assert_eq!(has_account(&f, "a1"), (false, false));
         assert_eq!(column_ids(&f), ["c2"]);
         assert_eq!(token(&f, "a1"), None);
+        assert_eq!(f.state.connections.open_count(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_empty_group_cleanup_failure_after_the_commit_still_succeeds() {
+        let f = fixture();
+        let disk = f.settings_disk.clone();
+        // 確定後の `refresh_fetch_allowlist` が、残るアカウント(a2)のトークンを読むところで、設定の保存先を壊す。
+        *f.faults.on_get.lock().unwrap() = Some(("a2", Box::new(move || disk.break_dir())));
+
+        remove_account_core(&f.state, "a1").await.unwrap();
+
+        assert!(!f.settings_disk.path("settings.json").exists(), "確定の後で保存先が壊れた");
+        assert_eq!(has_account(&f, "a1"), (false, false));
+        assert!(f.state.scheduled_posts.list_for_account("a1").is_empty());
         assert_eq!(f.state.connections.open_count(), 1);
     }
 
