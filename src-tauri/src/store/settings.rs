@@ -360,6 +360,7 @@ impl SettingsStore {
     }
 
     /// MCP設定を書き換えて保存し、新しい値を返す。
+    #[cfg(any(desktop, test))]
     pub fn update_mcp(
         &self,
         f: impl FnOnce(&mut crate::mcp::settings::McpSettings),

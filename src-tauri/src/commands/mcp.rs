@@ -8,6 +8,7 @@ use tauri::State;
 
 #[derive(Debug, Serialize, Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[cfg_attr(not(desktop), allow(dead_code))] // 型は全プラットフォームで TS に出す
 pub enum McpRunState {
     Stopped,
     Running,
@@ -52,6 +53,7 @@ pub(crate) fn status(s: &AppState) -> McpStatus {
 }
 
 /// 存在するアカウントだけ、公開の可否を切り替えられる。
+#[cfg(any(desktop, test))]
 pub(crate) fn set_exposed(s: &AppState, account_id: &str, exposed: bool) -> Result<(), String> {
     if !s
         .accounts
@@ -74,6 +76,7 @@ pub(crate) fn set_exposed(s: &AppState, account_id: &str, exposed: bool) -> Resu
         .map_err(|e| e.to_string())
 }
 
+#[cfg(any(desktop, test))]
 pub(crate) fn set_port_setting(s: &AppState, port: u16) -> Result<(), String> {
     crate::mcp::settings::validate_port(port)?;
     s.settings

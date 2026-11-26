@@ -103,6 +103,7 @@ impl LocalTranslate {
         *self.loaded.lock().await = None;
     }
 
+    #[cfg(test)]
     pub async fn is_loaded(&self) -> bool {
         self.loaded.lock().await.is_some()
     }

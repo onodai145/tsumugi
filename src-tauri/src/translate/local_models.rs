@@ -91,6 +91,7 @@ impl LocalModels {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn is_running(&self) -> bool {
         self.inner.lock().unwrap().running.is_some()
     }

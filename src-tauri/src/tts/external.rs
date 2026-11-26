@@ -54,6 +54,7 @@ impl ExternalEngine {
     }
 
     /// 応答サイズの上限を指定する(テスト用に公開。本番は `new` の既定値)。
+    #[cfg(test)]
     pub fn with_limits(mut self, max_json: usize, max_wav: usize) -> Self {
         self.max_json = max_json;
         self.max_wav = max_wav;

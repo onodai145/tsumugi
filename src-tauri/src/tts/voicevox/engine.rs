@@ -103,6 +103,7 @@ impl CoreEngine {
         self.inner.paused.store(paused, Ordering::SeqCst);
     }
 
+    #[cfg(test)]
     pub fn is_loaded(&self) -> bool {
         lock(&self.inner.backend).is_some()
     }
