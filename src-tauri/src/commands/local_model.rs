@@ -52,7 +52,11 @@ pub(crate) async fn start_core(s: &AppState, accepted_license_version: &str, not
         return Err(invalid(ERR_UNSUPPORTED));
     }
     s.local_models.start(notify)?;
-    s.settings.set_local_model_license_version(LICENSE_VERSION)
+    // 取得はもう始まっている。同意の保存に失敗しても、取得は止めずに成功として返す(次回の取得の前に、また確認が出るだけ)。
+    if let Err(e) = s.settings.set_local_model_license_version(LICENSE_VERSION) {
+        log::warn!("local model license consent could not be saved: {e}");
+    }
+    Ok(())
 }
 
 pub(crate) fn is_lang_supported(lang: &str) -> bool {
@@ -178,6 +182,47 @@ mod tests {
         })
         .await
         .expect("モデルが Ready にならない");
+    }
+
+    #[cfg(llama_target)]
+    #[tokio::test]
+    async fn a_failed_consent_save_does_not_fail_a_download_that_already_started() {
+        use crate::store::testutil::BrokenDisk;
+        use sha2::{Digest, Sha256};
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let data = vec![7u8; 10_000];
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone())).mount(&server).await;
+        let spec = ModelSpec {
+            url: format!("{}/m.gguf", server.uri()),
+            size: data.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(&data)),
+        };
+        let models_disk = BrokenDisk::new();
+        let models = Arc::new(LocalModels::with_spec(
+            models_disk.path("models"),
+            reqwest::Client::new(),
+            Arc::new(LocalTranslate::unconfigured()),
+            spec,
+        ));
+        let settings_disk = BrokenDisk::new();
+        let settings =
+            SettingsStore::new(settings_disk.path("settings.json"), settings_disk.path("backgrounds")).unwrap();
+        let s = AppState::new_for_test(settings).with_local_models(models);
+        settings_disk.break_dir(); // 同意の保存は失敗する
+
+        start_core(&s, LICENSE_VERSION, noop_notify()).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while info(&s).status != LocalModelStatus::Ready {
+                tokio::time::sleep(Duration::from_millis(10)).await
+            }
+        })
+        .await
+        .expect("モデルが Ready にならない");
+        assert_eq!(s.settings.local_model_license_version(), None);
     }
 
     #[test]
