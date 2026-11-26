@@ -241,6 +241,7 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::testutil::BrokenDisk;
 
     fn input(text: &str) -> DraftInput {
         DraftInput {
@@ -346,11 +347,10 @@ mod tests {
 
     // ---- 保存の失敗(Issue #696) ----
 
-    /// 返したディレクトリを消すと、以後の保存が失敗するストア。
-    fn file_store() -> (DraftStore, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tsumugi-draft-fail-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        (DraftStore::new(dir.join("drafts.json")).unwrap(), dir)
+    /// `break_dir` すると、以後の保存が失敗するストア。
+    fn file_store() -> (DraftStore, BrokenDisk) {
+        let disk = BrokenDisk::new();
+        (DraftStore::new(disk.path("drafts.json")).unwrap(), disk)
     }
 
     fn manual_texts(s: &DraftStore) -> Vec<String> {
@@ -363,10 +363,10 @@ mod tests {
 
     #[test]
     fn manual_draft_operations_change_nothing_when_saving_fails() {
-        let (s, dir) = file_store();
+        let (s, disk) = file_store();
         s.save_manual("acc1", &input("kept")).unwrap();
         let id = s.list_manual("acc1").unwrap()[0].id.clone();
-        std::fs::remove_dir_all(&dir).unwrap(); // 以後の保存は失敗する
+        disk.break_dir(); // 以後の保存は失敗する
 
         assert!(s.save_manual("acc1", &input("failed")).is_err());
         assert_eq!(manual_texts(&s), ["kept"]);
@@ -379,9 +379,9 @@ mod tests {
     /// 古い本文が復元され、投稿後の掃除の失敗では投稿済みの本文が復元される。
     #[test]
     fn auto_draft_operations_stay_in_memory_when_saving_fails() {
-        let (s, dir) = file_store();
+        let (s, disk) = file_store();
         s.save_auto("acc1", &input("old")).unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
+        disk.break_dir();
 
         assert!(s.save_auto("acc1", &input("latest")).is_err());
         assert_eq!(auto_text(&s).as_deref(), Some("latest"));
@@ -392,19 +392,18 @@ mod tests {
 
     #[test]
     fn an_unsaved_auto_draft_survives_a_failed_manual_save_and_is_written_later() {
-        let (s, dir) = file_store();
-        std::fs::remove_dir_all(&dir).unwrap();
+        let (s, disk) = file_store();
+        disk.break_dir();
         assert!(s.save_auto("acc1", &input("unsaved")).is_err());
         assert!(s.save_manual("acc1", &input("failed")).is_err());
         assert_eq!(auto_text(&s).as_deref(), Some("unsaved"));
 
-        std::fs::create_dir_all(&dir).unwrap();
+        disk.repair_dir();
         s.save_manual("acc1", &input("manual")).unwrap();
 
-        let reloaded = DraftStore::new(dir.join("drafts.json")).unwrap();
+        let reloaded = DraftStore::new(disk.path("drafts.json")).unwrap();
         assert_eq!(auto_text(&reloaded).as_deref(), Some("unsaved"));
         assert_eq!(manual_texts(&reloaded), ["manual"]);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

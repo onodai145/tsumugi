@@ -887,6 +887,7 @@ mod tests {
     }
 
     use crate::domain::{ColumnKind, FilterQuery, PaneChild, SplitDirection};
+    use crate::store::testutil::BrokenDisk;
 
     fn store() -> SettingsStore {
         SettingsStore::new_in_memory()
@@ -1783,13 +1784,12 @@ mod tests {
 
     // ---- 保存の失敗(Issue #696) ----
 
-    /// 返したディレクトリを消すと、以後の保存が失敗するストア。`seeded_data` を保存済み。
-    fn seeded_file_store() -> (SettingsStore, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tsumugi-save-fail-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let s = SettingsStore::new(dir.join("settings.json"), dir.join("backgrounds")).unwrap();
+    /// `break_dir` すると、以後の保存が失敗するストア。`seeded_data` を保存済み。
+    fn seeded_file_store() -> (SettingsStore, BrokenDisk) {
+        let disk = BrokenDisk::new();
+        let s = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
         s.replace(seeded_data()).unwrap();
-        (s, dir)
+        (s, disk)
     }
 
     /// `update_ops` のすべての操作が、何かを変えられる初期データ。
@@ -1880,8 +1880,8 @@ mod tests {
     fn every_update_op_changes_nothing_when_saving_fails() {
         let mut broken = Vec::new();
         for (name, op) in update_ops() {
-            let (s, dir) = seeded_file_store();
-            std::fs::remove_dir_all(&dir).unwrap(); // 以後の保存は失敗する
+            let (s, disk) = seeded_file_store();
+            disk.break_dir(); // 以後の保存は失敗する
             let before = as_json(&s);
             if op(&s).is_ok() {
                 broken.push(format!("{name}: Err にならない"));
@@ -1895,23 +1895,22 @@ mod tests {
 
     #[test]
     fn a_failed_change_is_not_written_by_the_next_successful_save() {
-        let (s, dir) = seeded_file_store();
-        std::fs::remove_dir_all(&dir).unwrap();
+        let (s, disk) = seeded_file_store();
+        disk.break_dir();
         assert!(s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).is_err());
 
-        std::fs::create_dir_all(&dir).unwrap();
+        disk.repair_dir();
         s.set_group_width("g1", 420).unwrap();
 
-        let reloaded = SettingsStore::new(dir.join("settings.json"), dir.join("backgrounds")).unwrap();
+        let reloaded = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
         assert!(reloaded.load_mcp().exposed_account_ids.is_empty());
         assert_eq!(reloaded.load_groups().unwrap()[0].width, 420);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_failed_save_does_not_trust_an_imported_summaly_proxy() {
-        let (s, dir) = seeded_file_store();
-        std::fs::remove_dir_all(&dir).unwrap();
+        let (s, disk) = seeded_file_store();
+        disk.break_dir();
 
         let mut ui = s.load_ui().unwrap();
         ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
@@ -1924,9 +1923,9 @@ mod tests {
 
     #[test]
     fn branches_that_do_not_save_succeed_even_when_saving_would_fail() {
-        let (s, dir) = seeded_file_store();
+        let (s, disk) = seeded_file_store();
         s.trust_summaly_proxy("https://a.example/url").unwrap(); // 信頼済みにしておく
-        std::fs::remove_dir_all(&dir).unwrap();
+        disk.break_dir();
 
         assert!(!s.set_column_speech("nope", Default::default()).unwrap());
         s.trust_summaly_proxy("https://a.example/url").unwrap();
