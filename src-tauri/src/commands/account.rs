@@ -60,13 +60,30 @@ pub async fn complete_miauth(state: State<'_, AppState>, session_id: String) -> 
         .map(|a| a.id.clone());
 
     let account = build_account(existing_id, &host, &raw_user);
-    // token は keyring のみに保存（Account/戻り値には含めない）
-    state.secrets.set(&account.id, &token)?;
-    state.settings.upsert_account(&account)?; // 再起動で復元できるよう永続化
+    persist_login(&state, &account, &token)?;
     state.accounts.lock().unwrap().upsert(account.clone());
     state.refresh_fetch_allowlist();
     state.pending.lock().unwrap().remove(&session_id);
     Ok(account)
+}
+
+/// token を keyring に、アカウントを設定に書く。設定の保存に失敗したら、keyring を書く前の状態に戻す
+/// (残すと、どのアカウントにも結びつかない token ができる。Issue #696)。
+fn persist_login(state: &AppState, account: &Account, token: &str) -> Result<()> {
+    // 戻せるように、書く前に控える。読めなければ何も書かない。
+    let previous = state.secrets.get(&account.id)?;
+    // token は keyring のみに保存（Account/戻り値には含めない）
+    state.secrets.set(&account.id, token)?;
+    // 再起動で復元できるよう永続化
+    state.settings.upsert_account(account).inspect_err(|_| {
+        let restored = match &previous {
+            Some(previous) => state.secrets.set(&account.id, previous),
+            None => state.secrets.delete(&account.id),
+        };
+        if let Err(e) = restored {
+            log::warn!("failed to restore the token after the login failed: {e}");
+        }
+    })
 }
 
 /// 登録済みアカウント一覧。
@@ -606,5 +623,62 @@ mod removal_tests {
 
         assert!(matches!(err, Error::Invalid(_)), "{err}");
         assert_untouched(&f);
+    }
+
+    // ---- ログインの保存の失敗(Issue #696) ----
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_saved_login_writes_the_token_and_the_account() {
+        let f = fixture();
+
+        persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token").unwrap();
+
+        assert_eq!(token(&f, "a3").as_deref(), Some("new-token"));
+        assert!(f.state.settings.load_accounts().unwrap().iter().any(|a| a.id == "a3"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_login_that_cannot_be_saved_leaves_no_token_for_a_new_account() {
+        let f = fixture();
+        f.settings_disk.break_dir();
+
+        assert!(persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token").is_err());
+
+        assert_eq!(token(&f, "a3"), None);
+        assert_eq!(has_account(&f, "a3"), (false, false));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reauthentication_that_cannot_be_saved_keeps_the_previous_token() {
+        let f = fixture();
+        f.settings_disk.break_dir();
+
+        assert!(persist_login(&f.state, &account("a1", "127.0.0.1:1"), "new-token").is_err());
+
+        assert_eq!(token(&f, "a1").as_deref(), Some("token"));
+        assert_eq!(has_account(&f, "a1"), (true, true));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_login_writes_nothing_when_the_previous_token_cannot_be_read() {
+        let f = fixture();
+        f.faults.get.store(true, Ordering::SeqCst);
+
+        let result = persist_login(&f.state, &account("a1", "127.0.0.1:1"), "new-token");
+
+        f.faults.get.store(false, Ordering::SeqCst);
+        assert!(matches!(result, Err(Error::Secret(_))), "{result:?}");
+        assert_eq!(token(&f, "a1").as_deref(), Some("token"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_cleanup_still_reports_the_save_error() {
+        let f = fixture();
+        f.settings_disk.break_dir();
+        f.faults.delete.store(true, Ordering::SeqCst);
+
+        let result = persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token");
+
+        assert!(result.is_err() && !matches!(result, Err(Error::Secret(_))), "{result:?}");
     }
 }
