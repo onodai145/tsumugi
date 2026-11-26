@@ -38,9 +38,36 @@ export async function waitForStableRect(selector: string, quietMs = 300): Promis
   }
 }
 
+/**
+ * 作成欄の textarea の高さの遷移を止め、最後にクリックを受けた要素を記録する(Issue #690)。何度呼んでもよい。
+ *
+ * `waitForStableRect` だけでは足りない。CI では、本文の入力後 300ms 以上、ボタンが展開前の座標のまま測れて
+ * 「落ち着いた」と判定され、`elementClick` の処理中に展開後の座標へ動いて、クリックが textarea に落ちた
+ * (0.12 秒の遷移が進んでいなかった。描画更新の停滞とみられるが未確認)。遷移を無効にすれば、クラスが変わった
+ * 時点で最終的なレイアウトに決まり、描画更新を待たない。進行中の遷移もその場で打ち切られる。
+ */
+async function prepareComposeForClick(): Promise<void> {
+  await browser.execute(() => {
+    if (document.getElementById("e2e-compose-no-transition")) return;
+    const style = document.createElement("style");
+    style.id = "e2e-compose-no-transition";
+    style.textContent = '[data-testid="compose-textarea"] { transition: none !important; }';
+    document.head.appendChild(style);
+    document.addEventListener(
+      "click",
+      (e) => {
+        const el = e.target as Element;
+        document.documentElement.dataset.e2eLastClick = el.closest("[data-testid]")?.getAttribute("data-testid") ?? el.tagName;
+      },
+      true,
+    );
+  });
+}
+
 /** 要素が押せて、位置が落ち着いてからクリックする(遷移中の座標ずれによる空振りを避ける)。 */
 export async function clickStable(testid: string): Promise<void> {
   const selector = `[data-testid="${testid}"]`;
+  await prepareComposeForClick();
   await (await $(selector)).waitForClickable({ timeout: 15000 });
   await waitForStableRect(selector);
   await (await $(selector)).click();
@@ -82,6 +109,8 @@ export async function dumpUiFailure(label: string, extra: Record<string, unknown
         submitY: submit ? Math.round(submit.getBoundingClientRect().y) : null,
         textareaHeight: textarea ? Math.round(textarea.getBoundingClientRect().height) : null,
         localHint: document.querySelector('[data-testid="compose-schedule-local-hint"]') !== null,
+        // 最後にクリックを受けた要素の testid(Issue #690)。押したはずのボタンと違えば、クリックの空振り
+        lastClick: document.documentElement.dataset.e2eLastClick ?? null,
         activeElement: document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? null,
         browserNow: new Date().toISOString(),
       };

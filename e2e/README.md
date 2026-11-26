@@ -59,6 +59,9 @@ docker compose down -v
   作成欄は、フォーカス・入力の有無で textarea の高さが 0.12 秒かけて変わり、ツールバーのボタンが動く
   (`ComposeBar.svelte` の `compact`)。ここでのクリックは `waitForClickable` だけでは足りず、
   `helpers/composeUi.ts` の `clickStable`(位置が落ち着くまで待つ)を使う(Issue #641 / #664)。
+  `clickStable` は、クリックの前に作成欄の textarea の高さの遷移を無効にする(Issue #690。CI では遷移が
+  進まないまま展開前の座標が「落ち着いた」と判定され、クリックが空振りした)。失敗時の診断の `lastClick` は、
+  最後にクリックを受けた要素を示す。
   `setValue` の直後に `compose-submit` を直接 `click()` しない。ノートを投稿するときは `postNote` を使う。
 - `browser.execute` に渡す関数の中では、名前付きの関数(`const f = () => ...` や `function f() {}`)を
   作らない。E2E の TS 変換(tsx/esbuild の keepNames)が `__name(...)` で包み、WebView 側には
