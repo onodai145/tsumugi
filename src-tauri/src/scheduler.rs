@@ -110,7 +110,12 @@ async fn attempt(
         }
     };
     let account_id = entry.account_id.clone();
-    let result = match state.client_for(&account_id) {
+    // アカウント削除の途中で一時的に消えているトークンを読まない(Issue #694)。通信の前に放す。
+    let client = {
+        let _reading = state.token_removal.read().unwrap();
+        state.client_for(&account_id)
+    };
+    let result = match client {
         Ok(client) => {
             match tokio::time::timeout(timeout, create_note(&client, &to_note_draft(&entry.input))).await {
                 Ok(r) => r,

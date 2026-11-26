@@ -160,14 +160,18 @@ impl SettingsStore {
         self.save(&guard)
     }
 
-    /// アカウント削除。紐づくカラムも消す。
+    /// アカウント削除。紐づくカラムも消す。保存に成功してからメモリを差し替えるので、
+    /// 失敗したときは何も変わらない(アカウント削除の確定点。Issue #694)。
     pub fn delete_account(&self, account_id: &str) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
-        guard.accounts.retain(|a| a.id != account_id);
-        guard.columns.retain(|c| c.account_id != account_id);
-        guard.server_mute_snapshots.remove(account_id);
-        guard.mcp.exposed_account_ids.retain(|id| id != account_id);
-        self.save(&guard)
+        let mut next = guard.clone();
+        next.accounts.retain(|a| a.id != account_id);
+        next.columns.retain(|c| c.account_id != account_id);
+        next.server_mute_snapshots.remove(account_id);
+        next.mcp.exposed_account_ids.retain(|id| id != account_id);
+        self.save(&next)?;
+        *guard = next;
+        Ok(())
     }
 
     // ---- ColumnGroup（視覚カラム） ----
@@ -958,6 +962,30 @@ mod tests {
         let s = store();
         s.upsert_account(&account("a1")).unwrap();
         s.upsert_column(&column("c1", "a1", 0)).unwrap();
+        s.delete_account("a1").unwrap();
+        assert!(s.load_accounts().unwrap().is_empty());
+        assert!(s.load_columns().unwrap().is_empty());
+    }
+
+    /// Issue #694: 保存に失敗した削除は、メモリも変えない。
+    #[test]
+    fn delete_account_keeps_memory_when_saving_fails() {
+        let disk = crate::store::testutil::BrokenDisk::new();
+        let s = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
+        s.upsert_account(&account("a1")).unwrap();
+        s.upsert_column(&column("c1", "a1", 0)).unwrap();
+        s.save_server_mute_snapshot("a1", &snap(&["u1"], &[])).unwrap();
+        s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).unwrap();
+
+        disk.break_dir();
+        assert!(s.delete_account("a1").is_err());
+
+        assert_eq!(s.load_accounts().unwrap().len(), 1);
+        assert_eq!(s.load_columns().unwrap().len(), 1);
+        assert!(s.load_server_mute_snapshot("a1").unwrap().is_some());
+        assert_eq!(s.load_mcp().exposed_account_ids, vec!["a1".to_string()]);
+
+        disk.repair_dir();
         s.delete_account("a1").unwrap();
         assert!(s.load_accounts().unwrap().is_empty());
         assert!(s.load_columns().unwrap().is_empty());
