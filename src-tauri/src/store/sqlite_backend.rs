@@ -1493,7 +1493,7 @@ mod tests {
                 "followersCount": 0, "followingCount": 0, "notesCount": 0,
                 "emojis": {}, "bio": null, "bannerUrl": null, "instance": null
             });
-            let mut reply = serde_json::to_value(&note("n_target", 100)).unwrap();
+            let mut reply = serde_json::to_value(note("n_target", 100)).unwrap();
             reply["user"] = serde_json::json!({
                 "id": "u_target", "username": "target", "host": null, "name": "Target",
                 "avatarUrl": null, "isBot": false, "isCat": false,

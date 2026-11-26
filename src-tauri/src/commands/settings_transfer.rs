@@ -381,13 +381,11 @@ mod tests {
 
         let err = import_settings_bytes(&state, &bytes)
             .await
-            .err()
-            .expect("拒否されるはず")
+            .expect_err("拒否されるはず")
             .to_string();
         assert!(err.contains("保存済みトークンと衝突"), "{err}");
         let err = inspect_settings_bytes(&state, &bytes)
-            .err()
-            .expect("プレビューも同じ結果")
+            .expect_err("プレビューも同じ結果")
             .to_string();
         assert!(err.contains("保存済みトークンと衝突"), "{err}");
 
@@ -436,16 +434,13 @@ mod tests {
 
         let err = import_settings_bytes(&state, &bytes)
             .await
-            .err()
-            .expect("拒否されるはず");
+            .expect_err("拒否されるはず");
         assert!(matches!(err, Error::Secret(_)), "{err}");
         assert!(
             err.to_string().contains("キーリングを読み取れない"),
             "{err}"
         );
-        let err = inspect_settings_bytes(&state, &bytes)
-            .err()
-            .expect("プレビューも同じ結果");
+        let err = inspect_settings_bytes(&state, &bytes).expect_err("プレビューも同じ結果");
         assert!(matches!(err, Error::Secret(_)), "{err}");
 
         assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c");
@@ -461,9 +456,7 @@ mod tests {
         let mut state = state_with_local_account();
         state.secrets = Box::new(FailingStore);
 
-        let err = accounts_without_token_ids(&state)
-            .err()
-            .expect("keyringを読めなければ失敗する");
+        let err = accounts_without_token_ids(&state).expect_err("keyringを読めなければ失敗する");
 
         assert!(matches!(err, Error::Secret(_)), "{err}");
     }

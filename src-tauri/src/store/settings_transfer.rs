@@ -561,8 +561,7 @@ mod tests {
 
     fn plan_err(current: &SettingsData, file: ExportFile) -> String {
         plan_import(current, file)
-            .err()
-            .expect("拒否されるはず")
+            .expect_err("拒否されるはず")
             .to_string()
     }
 

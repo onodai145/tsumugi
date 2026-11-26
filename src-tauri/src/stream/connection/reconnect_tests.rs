@@ -67,6 +67,7 @@ impl MockServer {
     }
 
     /// ハンドシェイクを HTTP ステータス `code` で拒否する(401 など)。拒否した時刻を返す。
+    #[allow(clippy::result_large_err)] // tungstenite のコールバックの型
     async fn reject_with_status(&self, code: u16) -> tokio::time::Instant {
         let (tcp, _) = within(self.listener.accept()).await.unwrap();
         let result = within(tokio_tungstenite::accept_hdr_async(
@@ -81,6 +82,7 @@ impl MockServer {
     }
 
     /// `accept` と同じだが、クライアントが要求した URI(`/streaming?i=<token>`)も返す。
+    #[allow(clippy::result_large_err)] // tungstenite のコールバックの型
     async fn accept_with_uri(&self) -> (MockConn, String) {
         let (tcp, _) = within(self.listener.accept()).await.unwrap();
         let mut uri = String::new();

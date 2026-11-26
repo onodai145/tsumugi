@@ -405,7 +405,9 @@ mod real_tests {
         assert!(wav.len() > 100_000, "{}", wav.len());
         let pcm = &wav[44..];
         assert!(
-            pcm.chunks_exact(2)
+            pcm.as_chunks::<2>()
+                .0
+                .iter()
                 .any(|c| i16::from_le_bytes([c[0], c[1]]).abs() > 1000),
             "無音ではない"
         );

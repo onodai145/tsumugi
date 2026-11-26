@@ -200,7 +200,7 @@ fn eval_bool(v: &Value, n: &Note, ctx: &EvalContext) -> bool {
         ReplyToMe => n
             .reply_user_id
             .as_ref()
-            .map_or(false, |u| ctx.my_user_ids.contains(u)),
+            .is_some_and(|u| ctx.my_user_ids.contains(u)),
         HasMention => !n.mentions.is_empty(),
         HasLink => n.text.as_deref().map(has_url).unwrap_or(false),
         Pinned => n.is_pinned,

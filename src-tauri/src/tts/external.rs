@@ -193,10 +193,13 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    /// フェイクのエンジンが受け取ったリクエストの記録。
+    type Recorded<T> = Arc<Mutex<Vec<T>>>;
+
     #[derive(Clone, Default)]
     struct Seen {
-        audio_query: Arc<Mutex<Vec<HashMap<String, String>>>>,
-        synthesis: Arc<Mutex<Vec<(HashMap<String, String>, Value)>>>,
+        audio_query: Recorded<HashMap<String, String>>,
+        synthesis: Recorded<(HashMap<String, String>, Value)>,
     }
 
     fn wav() -> Vec<u8> {

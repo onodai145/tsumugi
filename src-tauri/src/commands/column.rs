@@ -1781,6 +1781,7 @@ struct BackfillPass {
 /// - 画面用が0件のとき、フロントが同じ `until_id` を繰り返してそのカラムが遡れなくなる。
 /// - 画面用が数件のとき、カラムがスクロールできず(`loadMore` は scroll イベントでだけ呼ばれる)
 ///   それ以上遡れなくなる。
+///
 /// 後続パスの画面用は前のパスの透かしより古い範囲に収まるので、積み上げた全体は最後の透かし以上に
 /// 収まり、次の `until_id` も最後の透かし以上になる。
 /// `BACKFILL_MAX_PASSES` に達しても0件なら、スクロールが止まらないよう最後の1パスだけ透かしなしで返す。
@@ -3020,7 +3021,7 @@ mod tests {
 
     #[test]
     fn cache_backfill_page_none_when_boundary_unknown() {
-        let cached = vec![note("n1", 10); 0]; // 空でも境界未確定なら常にAPIへ
+        let cached = Vec::new(); // 空でも境界未確定なら常にAPIへ
         let result = cache_backfill_page(None, "n999", cached, 0, 20);
         assert!(result.is_none());
     }

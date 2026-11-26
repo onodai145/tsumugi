@@ -191,7 +191,9 @@ mod real_tests {
             .unwrap();
         let peak = |w: &[u8]| {
             w[44..]
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| i16::from_le_bytes([c[0], c[1]]).unsigned_abs())
                 .max()
                 .unwrap_or(0)

@@ -435,14 +435,11 @@ fn delete_matching(
     conn.execute("DROP TABLE prune_ids", [])?;
 
     for column_id in &affected_columns {
-        let survivor: Option<String> = match conn.query_row(
+        let survivor: Option<String> = conn.query_row(
             "SELECT MIN(note_id) FROM column_note WHERE column_id = ?1",
             params![column_id],
             |r| r.get::<_, Option<String>>(0),
-        ) {
-            Ok(v) => v,
-            Err(e) => return Err(e.into()),
-        };
+        )?;
         match survivor {
             Some(oldest) => {
                 // 削除対象は created_at 基準で選ばれるため、生存最古IDより新しいIDのノートが

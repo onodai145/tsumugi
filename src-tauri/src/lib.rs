@@ -1,3 +1,6 @@
+// テストでは `let mut p = T::default(); p.field = ..;` の形を使う(Issue #707)。本番コードでは有効のまま。
+#![cfg_attr(test, allow(clippy::field_reassign_with_default))]
+
 mod api;
 mod attribution;
 mod commands;

@@ -18,6 +18,7 @@ pub enum Transport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::enum_variant_names)] // 名前は TS に出るので変えない
 pub enum Metered {
     Metered,
     Unmetered,

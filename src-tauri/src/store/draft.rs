@@ -163,7 +163,7 @@ impl DraftStore {
             .filter(|d| d.account_id == account_id && matches!(d.kind, DraftKind::Manual))
             .cloned()
             .collect();
-        list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        list.sort_by_key(|d| std::cmp::Reverse(d.updated_at));
         Ok(list)
     }
 

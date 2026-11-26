@@ -386,6 +386,7 @@ fn send_command(
 }
 
 /// 送れなかったコマンドを呼び出し側へ返す。受信側が無い(タスクが終了済み)ときだけ失敗する。
+#[allow(clippy::result_large_err)] // 送れなかったコマンドを呼び出し側へ返す
 fn try_send(
     tx: &mpsc::UnboundedSender<AccountCommand>,
     cmd: AccountCommand,
@@ -566,6 +567,7 @@ fn is_auth_failure(e: &tokio_tungstenite::tungstenite::Error) -> bool {
 
 /// アカウント接続ループ（再接続込み）。購読チャンネルとキャプチャ集合は再接続をまたいで
 /// 保持し、接続確立時に一括で再購読する。
+#[allow(clippy::too_many_arguments)]
 async fn run_account<R: Runtime>(
     app: AppHandle<R>,
     account_id: String,

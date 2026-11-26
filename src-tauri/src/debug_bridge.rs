@@ -173,7 +173,7 @@ async fn eval_js(app: &AppHandle, js: String) -> Result<String, String> {
 fn http_response(status: u16, reason: &str, body: &str) -> String {
     format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.as_bytes().len()
+        body.len()
     )
 }
 

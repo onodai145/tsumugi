@@ -105,9 +105,8 @@ impl LocalTranslator for LlamaTranslator {
         let vocab = self.model.vocab();
         let mut sampler = LlamaSampler::greedy();
         let mut out: Vec<u8> = Vec::new();
-        let mut n_cur = tokens.len() as i32;
         let max_new = N_CTX as usize - tokens.len();
-        for _ in 0..max_new {
+        for n_cur in (tokens.len() as i32..).take(max_new) {
             let tok = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(tok);
             if vocab.is_eog(tok) {
@@ -122,7 +121,6 @@ impl LocalTranslator for LlamaTranslator {
             batch
                 .add(tok, n_cur, &[0], true)
                 .map_err(|e| llama_err("batch", e))?;
-            n_cur += 1;
             ctx.decode(&mut batch).map_err(|e| llama_err("decode", e))?;
         }
         // 本文の無害化で入れたゼロ幅スペースが、モデルの写した訳文に残っていたら取り除く。

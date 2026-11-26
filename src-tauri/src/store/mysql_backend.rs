@@ -2255,8 +2255,8 @@ mod tests {
         s.cache_notes("col2", &[note("n2", 200), note("n4", 400)])
             .await
             .unwrap();
-        set0(&s, "col1", "n1").await;
-        set0(&s, "col2", "n2").await;
+        set0(s, "col1", "n1").await;
+        set0(s, "col2", "n2").await;
     }
 
     async fn delete_via_chunk_size(s: &MySqlBackend, ids: &[String], chunk_size: usize) -> i64 {
