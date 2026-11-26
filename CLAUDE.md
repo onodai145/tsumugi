@@ -25,7 +25,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs  # 手元で1回。整形
 cd src-tauri && cargo "+$(cat clippy-toolchain)" clippy --all-targets -- -D warnings  # CI の clippy ジョブと同じ版(Issue #707)。版は src-tauri/clippy-toolchain の 1 か所(`rustup toolchain install <版> -c clippy` が必要、frontend/dist も必要)。CI は Android(`--lib --target aarch64-linux-android`)も確認する。版を上げる PR で新しい指摘を直す
 pre-commit install  # 手元で1回(フックの種類が増えたら再実行)。コミット時に gitleaks と rustfmt --check、push の前に clippy と ESLint が動く(rustfmt のフックは rustup と stable の rustfmt コンポーネントが必要: `rustup component add rustfmt --toolchain stable`)
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
-cd frontend  && pnpm lint                # ESLint(CI の frontend-check と同じ、Issue #707)。型情報を使うルールは Promise の取りこぼしだけ
+cd frontend  && pnpm lint                # ESLint(CI の frontend-check と同じ、Issue #707)。型情報を使うルールは Promise の取りこぼしだけ。Svelte のイベントハンドラが返す Promise(`onclick={save}` など)は検出されないので、呼び先で catch する
 cd frontend  && pnpm test                # Vitest unit tests
 cd frontend  && npx vitest run <path>   # single file — `pnpm test -- <path>` ignores the path and runs the whole suite
 

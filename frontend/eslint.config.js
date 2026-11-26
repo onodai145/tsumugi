@@ -1,4 +1,6 @@
 // 型情報を使うルールは Promise の取りこぼし(no-floating-promises / no-misused-promises)だけにする(Issue #707)。
+// 限界: Svelte の要素のイベントハンドラは検出されない(`onclick={save}`、`onclick={() => save()}`、`onclick={async () => …}`)。
+// 失敗しうる非同期の処理は、呼び先で catch する。
 import js from "@eslint/js";
 import { defineConfig, globalIgnores } from "eslint/config";
 import svelte from "eslint-plugin-svelte";
