@@ -36,7 +36,7 @@ jobs:
 
       # Windows の既定の CARGO_HOME（C:\Users\<名前>\.cargo）だと、llama-cpp-rs の git 依存のサブモジュール
       # （llama.cpp、最長 195 文字のパスを含む）のチェックアウトが MAX_PATH（260）を超えて、`path too long` で失敗する
-      # （Issue #603）。後続のステップ（rust-cache を含む）が使えるよう、最初に短いパスへ移す。
+      # （Issue #603）。後続のステップが使えるよう、最初に短いパスへ移す。
       - name: Use a short CARGO_HOME (Windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -48,9 +48,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-        with:
-          workspaces: src-tauri
+      # rust-cache は使わない: Actions のキャッシュは上限が 10GB で、ここで保存すると test.yml の main のキャッシュが追い出される(Issue #710)。
 
       # tauri::generate_context!() は frontendDist の実在を要求する（test.yml と同じ事情）。
       # cargo check にビルド済みのフロントは要らないので、空の index.html で足りる。
