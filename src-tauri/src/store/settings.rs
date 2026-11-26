@@ -136,13 +136,26 @@ impl SettingsStore {
         self.data.lock().unwrap().clone()
     }
 
-    /// 設定全体を差し替える(設定のインポート用、Issue #544)。保存に成功してから
-    /// メモリ上の状態を差し替えるので、失敗したときは何も変わらない。
+    /// 保存に成功してから、メモリを `next` に差し替える。失敗したときは何も変わらない(Issue #696)。
+    fn commit(&self, guard: &mut SettingsData, next: SettingsData) -> Result<()> {
+        self.save(&next)?;
+        *guard = next;
+        Ok(())
+    }
+
+    /// 複製を `change` で書き換えて `commit` する。更新メソッドは、メモリを直接書き換えずにこれを使う。
+    fn update<T>(&self, change: impl FnOnce(&mut SettingsData) -> T) -> Result<T> {
+        let mut guard = self.data.lock().unwrap();
+        let mut next = guard.clone();
+        let out = change(&mut next);
+        self.commit(&mut guard, next)?;
+        Ok(out)
+    }
+
+    /// 設定全体を差し替える(設定のインポート用、Issue #544)。保存に失敗したときは何も変わらない。
     pub(crate) fn replace(&self, new: SettingsData) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
-        self.save(&new)?;
-        *guard = new;
-        Ok(())
+        self.commit(&mut guard, new)
     }
 
     // ---- Account ----
@@ -152,26 +165,21 @@ impl SettingsStore {
     }
 
     pub fn upsert_account(&self, a: &Account) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        match guard.accounts.iter_mut().find(|x| x.id == a.id) {
+        self.update(|data| match data.accounts.iter_mut().find(|x| x.id == a.id) {
             Some(existing) => *existing = a.clone(),
-            None => guard.accounts.push(a.clone()),
-        }
-        self.save(&guard)
+            None => data.accounts.push(a.clone()),
+        })
     }
 
     /// アカウント削除。紐づくカラムも消す。保存に成功してからメモリを差し替えるので、
     /// 失敗したときは何も変わらない(アカウント削除の確定点。Issue #694)。
     pub fn delete_account(&self, account_id: &str) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        let mut next = guard.clone();
-        next.accounts.retain(|a| a.id != account_id);
-        next.columns.retain(|c| c.account_id != account_id);
-        next.server_mute_snapshots.remove(account_id);
-        next.mcp.exposed_account_ids.retain(|id| id != account_id);
-        self.save(&next)?;
-        *guard = next;
-        Ok(())
+        self.update(|data| {
+            data.accounts.retain(|a| a.id != account_id);
+            data.columns.retain(|c| c.account_id != account_id);
+            data.server_mute_snapshots.remove(account_id);
+            data.mcp.exposed_account_ids.retain(|id| id != account_id);
+        })
     }
 
     // ---- ColumnGroup（視覚カラム） ----
@@ -183,62 +191,60 @@ impl SettingsStore {
     }
 
     pub fn upsert_group(&self, g: &ColumnGroup) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        match guard.groups.iter_mut().find(|x| x.id == g.id) {
+        self.update(|data| match data.groups.iter_mut().find(|x| x.id == g.id) {
             Some(existing) => *existing = g.clone(),
-            None => guard.groups.push(g.clone()),
-        }
-        self.save(&guard)
+            None => data.groups.push(g.clone()),
+        })
     }
 
     pub fn set_group_width(&self, group_id: &str, width: i32) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        if let Some(g) = guard.groups.iter_mut().find(|x| x.id == group_id) {
-            g.width = width;
-        }
-        self.save(&guard)
+        self.update(|data| {
+            if let Some(g) = data.groups.iter_mut().find(|x| x.id == group_id) {
+                g.width = width;
+            }
+        })
     }
 
     pub fn set_group_auto(&self, group_id: &str, auto: bool) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        if let Some(g) = guard.groups.iter_mut().find(|x| x.id == group_id) {
-            g.auto = auto;
-        }
-        self.save(&guard)
+        self.update(|data| {
+            if let Some(g) = data.groups.iter_mut().find(|x| x.id == group_id) {
+                g.auto = auto;
+            }
+        })
     }
 
     /// グループの並び順を id 順に振り直す。
     pub fn reorder_groups(&self, ordered_ids: &[String]) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        for (i, id) in ordered_ids.iter().enumerate() {
-            if let Some(g) = guard.groups.iter_mut().find(|x| &x.id == id) {
-                g.order = i as i32;
+        self.update(|data| {
+            for (i, id) in ordered_ids.iter().enumerate() {
+                if let Some(g) = data.groups.iter_mut().find(|x| &x.id == id) {
+                    g.order = i as i32;
+                }
             }
-        }
-        self.save(&guard)
+        })
     }
 
     /// 空になったグループを削除する（タブが 0 のもの）。木構造(pane_layout)からも
     /// 該当Leafを取り除く(唯一のルートだった場合はツリーをリセットする)。
     pub fn delete_empty_groups(&self) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        let used: std::collections::HashSet<String> =
-            guard.columns.iter().map(|c| c.group_id.clone()).collect();
-        let removed_ids: Vec<String> =
-            guard.groups.iter().filter(|g| !used.contains(&g.id)).map(|g| g.id.clone()).collect();
-        guard.groups.retain(|g| used.contains(&g.id));
-        for gid in &removed_ids {
-            if let Some(root) = &mut guard.pane_layout {
-                let is_root_leaf_target =
-                    matches!(root, PaneNode::Leaf { group_id, .. } if group_id == gid);
-                if is_root_leaf_target {
-                    guard.pane_layout = None;
-                } else {
-                    root.remove_group(gid);
+        self.update(|data| {
+            let used: std::collections::HashSet<String> =
+                data.columns.iter().map(|c| c.group_id.clone()).collect();
+            let removed_ids: Vec<String> =
+                data.groups.iter().filter(|g| !used.contains(&g.id)).map(|g| g.id.clone()).collect();
+            data.groups.retain(|g| used.contains(&g.id));
+            for gid in &removed_ids {
+                if let Some(root) = &mut data.pane_layout {
+                    let is_root_leaf_target =
+                        matches!(root, PaneNode::Leaf { group_id, .. } if group_id == gid);
+                    if is_root_leaf_target {
+                        data.pane_layout = None;
+                    } else {
+                        root.remove_group(gid);
+                    }
                 }
             }
-        }
-        self.save(&guard)
+        })
     }
 
     // ---- Column（タブ） ----
@@ -251,11 +257,11 @@ impl SettingsStore {
 
     /// タブのカスタム名を設定/解除（None で自動生成名に戻す）。
     pub fn set_column_title(&self, column_id: &str, title: Option<&str>) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        if let Some(c) = guard.columns.iter_mut().find(|x| x.id == column_id) {
-            c.title = title.map(|s| s.to_string());
-        }
-        self.save(&guard)
+        self.update(|data| {
+            if let Some(c) = data.columns.iter_mut().find(|x| x.id == column_id) {
+                c.title = title.map(|s| s.to_string());
+            }
+        })
     }
 
     /// タブごとの通知可否（デスクトップ/音/通知音の選択）を更新する。
@@ -267,28 +273,24 @@ impl SettingsStore {
         notify_sound: bool,
         notify_sound_choice: &str,
     ) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        if let Some(c) = guard.columns.iter_mut().find(|x| x.id == column_id) {
-            c.notify_desktop = notify_desktop;
-            c.notify_sound = notify_sound;
-            c.notify_sound_choice = notify_sound_choice.to_string();
-        }
-        self.save(&guard)
+        self.update(|data| {
+            if let Some(c) = data.columns.iter_mut().find(|x| x.id == column_id) {
+                c.notify_desktop = notify_desktop;
+                c.notify_sound = notify_sound;
+                c.notify_sound_choice = notify_sound_choice.to_string();
+            }
+        })
     }
 
     pub fn upsert_column(&self, c: &Column) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        match guard.columns.iter_mut().find(|x| x.id == c.id) {
+        self.update(|data| match data.columns.iter_mut().find(|x| x.id == c.id) {
             Some(existing) => *existing = c.clone(),
-            None => guard.columns.push(c.clone()),
-        }
-        self.save(&guard)
+            None => data.columns.push(c.clone()),
+        })
     }
 
     pub fn delete_column(&self, column_id: &str) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.columns.retain(|c| c.id != column_id);
-        self.save(&guard)
+        self.update(|data| data.columns.retain(|c| c.id != column_id))
     }
 
     // ---- NG（ミュート）設定 ----
@@ -298,9 +300,7 @@ impl SettingsStore {
     }
 
     pub fn save_mute(&self, cfg: &MuteConfig) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.mute = cfg.clone();
-        self.save(&guard)
+        self.update(|data| data.mute = cfg.clone())
     }
 
     // ---- サーバー側ミュートの前回の集合(Issue #454) ----
@@ -310,9 +310,9 @@ impl SettingsStore {
     }
 
     pub fn save_server_mute_snapshot(&self, account_id: &str, snapshot: &ServerMuteSnapshot) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.server_mute_snapshots.insert(account_id.to_string(), snapshot.clone());
-        self.save(&guard)
+        self.update(|data| {
+            data.server_mute_snapshots.insert(account_id.to_string(), snapshot.clone());
+        })
     }
 
     // ---- note cacheバックエンド設定(Issue #115 Phase 2) ----
@@ -322,9 +322,7 @@ impl SettingsStore {
     }
 
     pub fn save_cache_backend(&self, cfg: &CacheBackendConfig) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.cache_backend = cfg.clone();
-        self.save(&guard)
+        self.update(|data| data.cache_backend = cfg.clone())
     }
 
     pub fn load_mcp(&self) -> crate::mcp::settings::McpSettings {
@@ -336,10 +334,10 @@ impl SettingsStore {
         &self,
         f: impl FnOnce(&mut crate::mcp::settings::McpSettings),
     ) -> Result<crate::mcp::settings::McpSettings> {
-        let mut guard = self.data.lock().unwrap();
-        f(&mut guard.mcp);
-        self.save(&guard)?;
-        Ok(guard.mcp.clone())
+        self.update(|data| {
+            f(&mut data.mcp);
+            data.mcp.clone()
+        })
     }
 
     /// 読み上げの全体設定(Issue #625)。
@@ -352,10 +350,10 @@ impl SettingsStore {
         &self,
         f: impl FnOnce(&mut crate::domain::SpeechSettings),
     ) -> Result<crate::domain::SpeechSettings> {
-        let mut guard = self.data.lock().unwrap();
-        f(&mut guard.speech);
-        self.save(&guard)?;
-        Ok(guard.speech.clone())
+        self.update(|data| {
+            f(&mut data.speech);
+            data.speech.clone()
+        })
     }
 
     /// 1つのカラムを返す(無ければ `None`)。
@@ -366,11 +364,12 @@ impl SettingsStore {
     /// カラムの読み上げ設定を更新する。カラムが無ければ何もせず `Ok(false)`。
     pub fn set_column_speech(&self, column_id: &str, speech: crate::domain::ColumnSpeech) -> Result<bool> {
         let mut guard = self.data.lock().unwrap();
-        let Some(c) = guard.columns.iter_mut().find(|x| x.id == column_id) else {
+        let mut next = guard.clone();
+        let Some(c) = next.columns.iter_mut().find(|x| x.id == column_id) else {
             return Ok(false);
         };
         c.speech = speech;
-        self.save(&guard)?;
+        self.commit(&mut guard, next)?;
         Ok(true)
     }
 
@@ -379,9 +378,7 @@ impl SettingsStore {
     }
 
     pub fn set_local_model_license_version(&self, version: &str) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.local_model_license_version = Some(version.to_string());
-        self.save(&guard)
+        self.update(|data| data.local_model_license_version = Some(version.to_string()))
     }
 
     pub fn speech_core_terms_version(&self) -> Option<String> {
@@ -389,9 +386,7 @@ impl SettingsStore {
     }
 
     pub fn set_speech_core_terms_version(&self, version: &str) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.speech_core_terms_version = Some(version.to_string());
-        self.save(&guard)
+        self.update(|data| data.speech_core_terms_version = Some(version.to_string()))
     }
 
     pub fn load_notify(&self) -> Result<NotifyConfig> {
@@ -399,9 +394,7 @@ impl SettingsStore {
     }
 
     pub fn save_notify(&self, cfg: &NotifyConfig) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.notify = cfg.clone();
-        self.save(&guard)
+        self.update(|data| data.notify = cfg.clone())
     }
 
     pub fn load_ui(&self) -> Result<UiPrefs> {
@@ -413,12 +406,12 @@ impl SettingsStore {
     /// (`summaly_proxy_imported` を偽にする)。
     pub fn save_ui(&self, prefs: &UiPrefs) -> Result<()> {
         prefs.validate_external_urls()?;
-        let mut guard = self.data.lock().unwrap();
-        if prefs.summaly_proxy_url != guard.ui.summaly_proxy_url {
-            guard.summaly_proxy_imported = false;
-        }
-        guard.ui = prefs.clone();
-        self.save(&guard)
+        self.update(|data| {
+            if prefs.summaly_proxy_url != data.ui.summaly_proxy_url {
+                data.summaly_proxy_imported = false;
+            }
+            data.ui = prefs.clone();
+        })
     }
 
     /// 取得先が設定されていて、かつインポート由来(まだ利用者が保存し直していない)か。
@@ -439,8 +432,9 @@ impl SettingsStore {
         if !guard.summaly_proxy_imported {
             return Ok(());
         }
-        guard.summaly_proxy_imported = false;
-        self.save(&guard)
+        let mut next = guard.clone();
+        next.summaly_proxy_imported = false;
+        self.commit(&mut guard, next)
     }
 
     /// `fetch_http` の許可リストに入れる、利用者が設定した取得先の `host[:port]`。
@@ -539,23 +533,21 @@ impl SettingsStore {
     }
 
     pub fn save_pane_layout(&self, root: &PaneNode) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.pane_layout = Some(root.clone());
-        self.save(&guard)
+        self.update(|data| data.pane_layout = Some(root.clone()))
     }
 
     /// タブを別グループへ移動し、そのグループ内での順序を id 順に振り直す。
     pub fn move_tab(&self, tab_id: &str, group_id: &str, ordered_tab_ids: &[String]) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        if let Some(c) = guard.columns.iter_mut().find(|x| x.id == tab_id) {
-            c.group_id = group_id.to_string();
-        }
-        for (i, id) in ordered_tab_ids.iter().enumerate() {
-            if let Some(c) = guard.columns.iter_mut().find(|x| &x.id == id) {
-                c.order = i as i32;
+        self.update(|data| {
+            if let Some(c) = data.columns.iter_mut().find(|x| x.id == tab_id) {
+                c.group_id = group_id.to_string();
             }
-        }
-        self.save(&guard)
+            for (i, id) in ordered_tab_ids.iter().enumerate() {
+                if let Some(c) = data.columns.iter_mut().find(|x| &x.id == id) {
+                    c.order = i as i32;
+                }
+            }
+        })
     }
 }
 
@@ -895,6 +887,7 @@ mod tests {
     }
 
     use crate::domain::{ColumnKind, FilterQuery, PaneChild, SplitDirection};
+    use crate::store::testutil::BrokenDisk;
 
     fn store() -> SettingsStore {
         SettingsStore::new_in_memory()
@@ -1787,5 +1780,158 @@ mod tests {
         assert_eq!(s.load_column("c2").unwrap().speech, crate::domain::ColumnSpeech::default());
         assert!(!s.set_column_speech("nope", on).unwrap(), "存在しないカラムは false");
         assert!(s.load_column("nope").is_none());
+    }
+
+    // ---- 保存の失敗(Issue #696) ----
+
+    /// `break_dir` すると、以後の保存が失敗するストア。`seeded_data` を保存済み。
+    fn seeded_file_store() -> (SettingsStore, BrokenDisk) {
+        let disk = BrokenDisk::new();
+        let s = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
+        s.replace(seeded_data()).unwrap();
+        (s, disk)
+    }
+
+    /// `update_ops` のすべての操作が、何かを変えられる初期データ。
+    fn seeded_data() -> SettingsData {
+        let group = |id: &str, order: i32| ColumnGroup { id: id.into(), order, width: 300, auto: false };
+        let mut data = SettingsData::default();
+        data.accounts = vec![account("a1")];
+        data.groups = vec![group("g1", 0), group("g2", 1), group("g_empty", 2)];
+        data.columns = vec![column("c1", "a1", 0), Column { group_id: "g2".into(), ..column("c2", "a1", 1) }];
+        data.pane_layout = Some(PaneNode::new_leaf("g1"));
+        data.ui.summaly_proxy_url = "https://a.example/url".into();
+        data.summaly_proxy_imported = true;
+        data
+    }
+
+    type UpdateOp = (&'static str, fn(&SettingsStore) -> Result<()>);
+
+    /// `SettingsStore` の更新操作すべて。更新メソッドを足したら、ここにも足す。
+    fn update_ops() -> Vec<UpdateOp> {
+        vec![
+            ("upsert_account", |s| s.upsert_account(&account("a2"))),
+            ("delete_account", |s| s.delete_account("a1")),
+            ("replace", |s| s.replace(SettingsData::default())),
+            ("upsert_group", |s| {
+                s.upsert_group(&ColumnGroup { id: "g3".into(), order: 3, width: 300, auto: false })
+            }),
+            ("set_group_width", |s| s.set_group_width("g1", 420)),
+            ("set_group_auto", |s| s.set_group_auto("g1", true)),
+            ("reorder_groups", |s| s.reorder_groups(&["g2".into(), "g1".into()])),
+            ("delete_empty_groups", |s| s.delete_empty_groups()),
+            ("set_column_title", |s| s.set_column_title("c1", Some("t"))),
+            ("set_column_notify", |s| s.set_column_notify("c1", false, true, "chime")),
+            ("upsert_column", |s| s.upsert_column(&column("c3", "a1", 2))),
+            ("delete_column", |s| s.delete_column("c1")),
+            ("save_mute", |s| {
+                s.save_mute(&MuteConfig { ng_words: vec!["x".into()], ..Default::default() })
+            }),
+            ("save_server_mute_snapshot", |s| s.save_server_mute_snapshot("a1", &snap(&["u1"], &[]))),
+            ("save_cache_backend", |s| {
+                s.save_cache_backend(&CacheBackendConfig::Postgres {
+                    host: "db.example".into(),
+                    port: 5432,
+                    database: "tsumugi".into(),
+                    user: "app".into(),
+                })
+            }),
+            ("update_mcp", |s| s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).map(|_| ())),
+            ("update_speech", |s| s.update_speech(|v| v.enabled = true).map(|_| ())),
+            ("set_column_speech", |s| {
+                let speech = crate::domain::ColumnSpeech { enabled: true, ..Default::default() };
+                s.set_column_speech("c1", speech).map(|_| ())
+            }),
+            ("set_local_model_license_version", |s| s.set_local_model_license_version("v1")),
+            ("set_speech_core_terms_version", |s| s.set_speech_core_terms_version("v1")),
+            ("save_notify", |s| {
+                let mut notify = s.load_notify()?;
+                notify.sound_choice = "chime".into();
+                s.save_notify(&notify)
+            }),
+            ("save_ui", |s| {
+                let mut ui = s.load_ui()?;
+                ui.summaly_proxy_url = "https://b.example/url".into();
+                s.save_ui(&ui)
+            }),
+            ("trust_summaly_proxy", |s| s.trust_summaly_proxy("https://a.example/url")),
+            ("save_pane_layout", |s| s.save_pane_layout(&PaneNode::new_leaf("g2"))),
+            ("move_tab", |s| s.move_tab("c1", "g2", &["c2".into(), "c1".into()])),
+        ]
+    }
+
+    fn as_json(s: &SettingsStore) -> serde_json::Value {
+        serde_json::to_value(s.snapshot()).unwrap()
+    }
+
+    /// 下の「保存に失敗したら変わらない」テストが、何も変えない操作で素通りしないことの確認。
+    #[test]
+    fn every_update_op_in_the_table_changes_data_when_saving_succeeds() {
+        for (name, op) in update_ops() {
+            let s = store();
+            s.replace(seeded_data()).unwrap();
+            let before = as_json(&s);
+            op(&s).unwrap();
+            assert_ne!(as_json(&s), before, "{name} が何も変えていない");
+        }
+    }
+
+    #[test]
+    fn every_update_op_changes_nothing_when_saving_fails() {
+        let mut broken = Vec::new();
+        for (name, op) in update_ops() {
+            let (s, disk) = seeded_file_store();
+            disk.break_dir(); // 以後の保存は失敗する
+            let before = as_json(&s);
+            if op(&s).is_ok() {
+                broken.push(format!("{name}: Err にならない"));
+            }
+            if as_json(&s) != before {
+                broken.push(format!("{name}: メモリが変わった"));
+            }
+        }
+        assert!(broken.is_empty(), "{broken:#?}");
+    }
+
+    #[test]
+    fn a_failed_change_is_not_written_by_the_next_successful_save() {
+        let (s, disk) = seeded_file_store();
+        disk.break_dir();
+        assert!(s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).is_err());
+
+        disk.repair_dir();
+        s.set_group_width("g1", 420).unwrap();
+
+        let reloaded = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
+        assert!(reloaded.load_mcp().exposed_account_ids.is_empty());
+        assert_eq!(reloaded.load_groups().unwrap()[0].width, 420);
+    }
+
+    #[test]
+    fn a_failed_save_does_not_trust_an_imported_summaly_proxy() {
+        let (s, disk) = seeded_file_store();
+        disk.break_dir();
+
+        let mut ui = s.load_ui().unwrap();
+        ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
+        assert!(s.save_ui(&ui).is_err());
+        assert!(s.trust_summaly_proxy("https://a.example/url").is_err());
+
+        assert!(s.summaly_proxy_imported());
+        assert_eq!(s.trusted_summaly_allowlist_entry(), None);
+    }
+
+    #[test]
+    fn branches_that_do_not_save_succeed_even_when_saving_would_fail() {
+        let (s, disk) = seeded_file_store();
+        s.trust_summaly_proxy("https://a.example/url").unwrap(); // 信頼済みにしておく
+        disk.break_dir();
+
+        assert!(!s.set_column_speech("nope", Default::default()).unwrap());
+        s.trust_summaly_proxy("https://a.example/url").unwrap();
+        assert!(matches!(
+            s.trust_summaly_proxy("https://other.example/url"),
+            Err(crate::error::Error::Invalid(_))
+        ));
     }
 }
