@@ -22,6 +22,7 @@ cd src-tauri && cargo test --lib mysql_ -- --ignored --test-threads=2  # keep pa
 # docker run -d -p 127.0.0.1:33064:3306 -e MARIADB_ROOT_PASSWORD=probe mariadb:11.4  ->  cd src-tauri && TSUMUGI_TEST_MYSQL_PORT=33064 TSUMUGI_TEST_MYSQL_PASSWORD=probe cargo test --lib mysql_ -- --ignored --test-threads=2
 cd src-tauri && cargo +stable fmt --all && rustfmt +stable --edition 2021 llama_target.rs  # コミット前の整形(CI の rust-test が --check で確認する)。llama_target.rs は include! で読むので cargo fmt の対象外
 git config blame.ignoreRevsFile .git-blame-ignore-revs  # 手元で1回。整形だけのコミットを git blame で飛ばす(GitHub はファイルを自動で読む)。ファイルが無い古いコミットを checkout している間は git blame がエラーになる
+pre-commit install  # 手元で1回。コミット時に gitleaks と rustfmt --check が動く(rustfmt は stable toolchain が必要)
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
 cd frontend  && pnpm test                # Vitest unit tests
 cd frontend  && npx vitest run <path>   # single file — `pnpm test -- <path>` ignores the path and runs the whole suite
