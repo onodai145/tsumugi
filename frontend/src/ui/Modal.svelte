@@ -49,6 +49,18 @@
 
   let modalEl: HTMLDivElement | undefined;
 
+  // フォーカス中の要素が消える・無効になると、フォーカスは body に移り、下の overlay の onkeydown には
+  // Escape が届かなくなる(Issue #698)。その場合だけ window で受け、一番手前の画面なら閉じる。
+  // data-escape-layer は、aria-modal を持たずに自分で Escape を処理する画面(MediaViewer)の目印。
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key !== "Escape" || e.defaultPrevented || e.target !== document.body) return;
+    const layers = document.querySelectorAll('[aria-modal="true"], [data-escape-layer]');
+    if (layers[layers.length - 1] !== modalEl) return;
+    // 閉じた直後に、下の Modal が同じ Escape で自分を一番手前と判定しないようにする。
+    e.preventDefault();
+    onclose();
+  }
+
   // 子が既にモーダル内の要素へフォーカスしていれば奪わない(ComposeBarの返信・共有の事前入力は
   // マウント時に入力欄へフォーカスする。子のeffectの方が先に走るため、無条件にfocus()すると
   // モバイルのソフトキーボードが開かなくなる)。
@@ -78,6 +90,8 @@
     return pushModalHistory(() => onclose());
   });
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div
   class={fullscreen

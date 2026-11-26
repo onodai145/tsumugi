@@ -140,6 +140,14 @@ describe("MediaViewer", () => {
     expect(onclose).toHaveBeenCalledOnce();
   });
 
+  // 下のModalが、bodyに届いたEscapeでビューアごと閉じないための目印(Issue #698)。
+  it("ルート要素にdata-escape-layerを持つ", () => {
+    render(MediaViewer, {
+      props: { files: [file({ id: "a" })], startIndex: 0, revealed: {}, onclose: () => {} },
+    });
+    expect(document.querySelector("[data-escape-layer]")).not.toBeNull();
+  });
+
   it("背景クリックでoncloseが呼ばれる", async () => {
     const onclose = vi.fn();
     const { getByRole } = render(MediaViewer, {
