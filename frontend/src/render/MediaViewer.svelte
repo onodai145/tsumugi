@@ -480,6 +480,7 @@
   use:portal
   onclick={onclose}
   role="presentation"
+  data-escape-layer
 >
   <div class="relative z-10 flex flex-none items-center justify-end p-[max(0.5rem,var(--safe-top))_max(0.5rem,var(--safe-right))_0.5rem_0.5rem]">
     <Button variant="ghost" size="icon" class="text-white viewer-icon-btn hover:text-white" onclick={(e) => { e.stopPropagation(); onclose(); }} aria-label="閉じる">

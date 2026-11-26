@@ -345,3 +345,66 @@ describe("Modal モバイル全画面(Issue #450)", () => {
     expect(document.activeElement).toBe(getByTestId("child-input"));
   });
 });
+
+describe("Modal フォーカスが外れたあとのEscape(Issue #698)", () => {
+  function open(onclose = vi.fn()) {
+    const r = render(Modal, { props: { title: "設定", onclose, children: textSnippet("hi") } });
+    return { ...r, onclose };
+  }
+  const escape = () => fireEvent.keyDown(document.body, { key: "Escape" });
+
+  it("フォーカス中のボタンが消えてbodyにフォーカスが移っても閉じる", async () => {
+    const { onclose, getByText } = open();
+    await tick();
+    const button = document.createElement("button");
+    getByText("hi").appendChild(button);
+    button.focus();
+    button.remove();
+    expect(document.activeElement).toBe(document.body);
+    await escape();
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it("重なっているときは一番手前のモーダルだけ閉じる", async () => {
+    const lower = open();
+    const upper = open();
+    await tick();
+    await escape();
+    expect(upper.onclose).toHaveBeenCalledOnce();
+    expect(lower.onclose).not.toHaveBeenCalled();
+    upper.unmount();
+    await escape();
+    expect(lower.onclose).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["aria-modal", "true"],
+    ["data-escape-layer", ""],
+  ])("手前に%sの要素があれば閉じない", async (name, value) => {
+    const { onclose } = open();
+    await tick();
+    const layer = document.createElement("div");
+    layer.setAttribute(name, value);
+    document.body.appendChild(layer);
+    await escape();
+    layer.remove();
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it("他がEscapeを処理済み(defaultPrevented)なら閉じない", async () => {
+    const { onclose } = open();
+    await tick();
+    const consume = (e: Event) => e.preventDefault();
+    document.addEventListener("keydown", consume);
+    await escape();
+    document.removeEventListener("keydown", consume);
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it("Escape以外のキーでは閉じない", async () => {
+    const { onclose } = open();
+    await tick();
+    await fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(onclose).not.toHaveBeenCalled();
+  });
+});
