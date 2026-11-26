@@ -93,30 +93,26 @@ fn decode_fully(bytes: Vec<u8>) -> DecodeOutcome {
     })
 }
 
-/// コメントヘッダを探す範囲。触覚入り ogg のコメントヘッダは先頭近くにあるので、
-/// 通知のたびに音声全体を舐めないよう先頭だけを見る。
-const HAPTIC_SCAN_LIMIT: usize = 64 * 1024;
-
 /// ogg(Vorbis)が Android の触覚チャンネル入りかを判定する(Issue #592)。
 ///
 /// 触覚入りの ogg は、Vorbis コメントに `ANDROID_HAPTIC=<触覚チャンネル数>` を持つ
 /// (AOSP「UX foundation for haptic framework」)。次をすべて満たすときだけ true:
-/// 先頭が `OggS` / 先頭 64KiB に Vorbis のコメントヘッダ(`\x03vorbis`)がある /
+/// 先頭が `OggS` / Vorbis のストリームのコメントヘッダ(`\x03vorbis`)が読める /
 /// `ANDROID_HAPTIC`(大文字小文字を区別しない)の値が 1 以上の整数。
 ///
-/// 既知の制約: コメントヘッダが 64KiB の外にある、または Ogg のページ境界をまたぐ(カバー画像入りなど)
-/// ときは判定できず false(触覚なしの音として rodio で鳴る)。Opus は対象外。
-/// 壊れたデータでもパニックせず false を返す。
+/// コメントヘッダは、カバー画像入りなどで大きいと複数の Ogg ページに分かれるので、
+/// ページをつなげて読む(Issue #654)。Opus は対象外。壊れたデータでもパニックせず false を返す。
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub(crate) fn has_haptic_channel(bytes: &[u8]) -> bool {
     if !bytes.starts_with(b"OggS") {
         return false;
     }
-    let window = &bytes[..bytes.len().min(HAPTIC_SCAN_LIMIT)];
-    let Some(pos) = window.windows(7).position(|w| w == b"\x03vorbis") else {
+    let Some(packet) = read_vorbis_comment_packet(bytes) else {
         return false;
     };
-    let comments = &window[pos + 7..];
+    let Some(comments) = packet.strip_prefix(b"\x03vorbis") else {
+        return false;
+    };
     let mut cursor = 0usize;
     let Some(vendor_len) = read_u32_le(comments, &mut cursor) else {
         return false;
@@ -140,6 +136,64 @@ pub(crate) fn has_haptic_channel(bytes: &[u8]) -> bool {
         }
     }
     false
+}
+
+/// 最初の Vorbis ストリームの 2 番目のパケット(コメントヘッダ)を、ページをつなげて組み立てる。
+/// 通知のたびに走るので、パケットが終わった所で読むのをやめる。ファイルが途中で切れている・
+/// ページが壊れているときは、そこまでに読めた分を返す。CRC は検証しない。
+fn read_vorbis_comment_packet(mut bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut vorbis_serial = None;
+    let mut packet = Vec::new();
+    while let Some(page) = read_ogg_page(&mut bytes) {
+        match vorbis_serial {
+            // 識別ヘッダは単独で 1 ページになるので、コメントヘッダは同じストリームの次のページから始まる
+            None if page.body.starts_with(b"\x01vorbis") => vorbis_serial = Some(page.serial),
+            Some(serial) if serial == page.serial => {
+                let mut body = page.body;
+                for &segment_len in page.lacing {
+                    let segment_len = usize::from(segment_len);
+                    let (segment, rest) = body.split_at(segment_len.min(body.len()));
+                    packet.extend_from_slice(segment);
+                    body = rest;
+                    // 255 未満のセグメントでパケットが終わる
+                    if segment_len < 255 {
+                        return Some(packet);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (!packet.is_empty()).then_some(packet)
+}
+
+struct OggPage<'a> {
+    serial: u32,
+    /// セグメントテーブル(各セグメントの長さ)
+    lacing: &'a [u8],
+    /// ファイルが途中で切れていると、`lacing` の合計より短い
+    body: &'a [u8],
+}
+
+/// 先頭の Ogg ページを読んで、`bytes` をその後ろまで進める。ページでなければ None。
+fn read_ogg_page<'a>(bytes: &mut &'a [u8]) -> Option<OggPage<'a>> {
+    let data = *bytes;
+    if !data.starts_with(b"OggS") {
+        return None;
+    }
+    let mut cursor = 14usize; // capture pattern・バージョン・種別・granule position の後
+    let serial = read_u32_le(data, &mut cursor)?;
+    cursor += 8; // ページ番号・CRC
+    let segment_count = usize::from(*read_slice(data, &mut cursor, 1)?.first()?);
+    let lacing = read_slice(data, &mut cursor, segment_count)?;
+    let body_len: usize = lacing.iter().map(|&n| usize::from(n)).sum();
+    let (body, rest) = data[cursor..].split_at(body_len.min(data.len() - cursor));
+    *bytes = rest;
+    Some(OggPage {
+        serial,
+        lacing,
+        body,
+    })
 }
 
 fn read_u32_le(buf: &[u8], pos: &mut usize) -> Option<u32> {
@@ -369,12 +423,50 @@ mod tests {
     const HAPTIC_OGG: &[u8] = include_bytes!("../tests/fixtures/haptic_ogg/haptic_2ch.ogg");
     const PLAIN_OGG: &[u8] = include_bytes!("../tests/fixtures/haptic_ogg/plain_2ch.ogg");
 
-    /// 判定の単体テスト用に、`padding` バイトの後ろに Vorbis コメントヘッダを持つ ogg 風のバイト列を作る
-    /// (`has_haptic_channel` はヘッダしか見ないので、音声データは要らない)。
-    fn ogg_with_comments_after(padding: usize, comments: &[&str]) -> Vec<u8> {
+    /// テスト用の Ogg ページを 1 つ作る。CRC は判定で見ないので 0 のまま。
+    fn ogg_page(serial: u32, header_type: u8, lacing: &[u8], payload: &[u8]) -> Vec<u8> {
         let mut v = b"OggS".to_vec();
-        v.extend(std::iter::repeat(0u8).take(padding));
-        v.extend_from_slice(b"\x03vorbis");
+        v.push(0); // バージョン
+        v.push(header_type);
+        v.extend_from_slice(&[0u8; 8]); // granule position
+        v.extend_from_slice(&serial.to_le_bytes());
+        v.extend_from_slice(&[0u8; 8]); // ページ番号・CRC
+        v.push(lacing.len() as u8);
+        v.extend_from_slice(lacing);
+        v.extend_from_slice(payload);
+        v
+    }
+
+    /// 1 つのパケットを Ogg のページ列にする(1 ページは最大 255 セグメント)。
+    /// 長さが 255 の倍数のパケットは、長さ 0 のセグメントで終わる。
+    fn ogg_packet_pages(serial: u32, first_header_type: u8, packet: &[u8]) -> Vec<Vec<u8>> {
+        let mut lacing = vec![255u8; packet.len() / 255];
+        lacing.push((packet.len() % 255) as u8);
+        let mut pages = Vec::new();
+        let mut offset = 0;
+        for (i, segments) in lacing.chunks(255).enumerate() {
+            let len: usize = segments.iter().map(|&n| n as usize).sum();
+            let header_type = if i == 0 { first_header_type } else { 0x01 };
+            pages.push(ogg_page(
+                serial,
+                header_type,
+                segments,
+                &packet[offset..offset + len],
+            ));
+            offset += len;
+        }
+        pages
+    }
+
+    /// Vorbis の識別ヘッダ(中身は判定で見ないので 0)。
+    fn vorbis_id_packet() -> Vec<u8> {
+        let mut v = b"\x01vorbis".to_vec();
+        v.extend_from_slice(&[0u8; 23]);
+        v
+    }
+
+    fn vorbis_comment_packet(comments: &[&str]) -> Vec<u8> {
+        let mut v = b"\x03vorbis".to_vec();
         let vendor = b"test";
         v.extend_from_slice(&(vendor.len() as u32).to_le_bytes());
         v.extend_from_slice(vendor);
@@ -387,8 +479,16 @@ mod tests {
         v
     }
 
+    /// 識別ヘッダと `comment_packet` を持つ Vorbis の ogg を作る
+    /// (`has_haptic_channel` はヘッダしか見ないので、音声データは要らない)。
+    fn ogg_with_comment_packet(comment_packet: &[u8]) -> Vec<u8> {
+        let mut pages = ogg_packet_pages(1, 0x02, &vorbis_id_packet());
+        pages.extend(ogg_packet_pages(1, 0x00, comment_packet));
+        pages.concat()
+    }
+
     fn ogg_with_comments(comments: &[&str]) -> Vec<u8> {
-        ogg_with_comments_after(23, comments)
+        ogg_with_comment_packet(&vorbis_comment_packet(comments))
     }
 
     /// Vorbis の識別ヘッダ(`\x01vorbis` + バージョン(4 バイト) + チャンネル数(1 バイト))から、チャンネル総数を読む。
@@ -493,42 +593,83 @@ mod tests {
     }
 
     #[test]
-    fn comment_header_beyond_the_scan_window_is_not_detected() {
-        // 先頭 64KiB の外にあるコメントヘッダは見ない(既知の制約)
-        assert!(has_haptic_channel(&ogg_with_comments_after(
-            60_000,
-            &["ANDROID_HAPTIC=1"]
-        )));
-        assert!(!has_haptic_channel(&ogg_with_comments_after(
-            70_000,
-            &["ANDROID_HAPTIC=1"]
-        )));
+    fn comment_header_spanning_pages_is_detected() {
+        // タグより前に大きなコメント(カバー画像など)があると、コメントヘッダは複数のページに分かれる
+        // (1 ページは約 64KiB まで)。ページをつなげて読むので、大きさに関係なく見つかる
+        for size in [60_000, 70_000, 200_000] {
+            let big = format!("COVER={}", "x".repeat(size));
+            assert!(
+                has_haptic_channel(&ogg_with_comments(&[&big, "ANDROID_HAPTIC=1"])),
+                "size {size}"
+            );
+            assert!(
+                !has_haptic_channel(&ogg_with_comments(&[&big, "ANDROID_HAPTIC=0"])),
+                "size {size}"
+            );
+        }
+    }
+
+    #[test]
+    fn comment_packet_ending_on_a_page_boundary_is_detected() {
+        // 1 ページ分(255 セグメント)ちょうどのパケットは、長さ 0 のセグメントだけが次のページに行く
+        let overhead = vorbis_comment_packet(&["COVER=", "ANDROID_HAPTIC=1"]).len();
+        let big = format!("COVER={}", "x".repeat(255 * 255 - overhead));
+        let packet = vorbis_comment_packet(&[&big, "ANDROID_HAPTIC=1"]);
+        assert_eq!(packet.len(), 255 * 255);
+        assert!(has_haptic_channel(&ogg_with_comment_packet(&packet)));
+    }
+
+    #[test]
+    fn pages_of_other_streams_are_skipped() {
+        // 多重化された ogg: 先頭が別のストリームで、コメントヘッダのページの間にも別のページが挟まる
+        let big = format!("COVER={}", "x".repeat(70_000));
+        let other = ogg_page(2, 0x00, &[16], b"ANDROID_HAPTIC=0");
+        let mut pages = vec![ogg_page(2, 0x02, &[8], b"fishead\0")];
+        pages.extend(ogg_packet_pages(1, 0x02, &vorbis_id_packet()));
+        for page in ogg_packet_pages(1, 0x00, &vorbis_comment_packet(&[&big, "ANDROID_HAPTIC=1"])) {
+            pages.push(other.clone());
+            pages.push(page);
+        }
+        assert!(has_haptic_channel(&pages.concat()));
     }
 
     #[test]
     fn corrupt_comment_lengths_do_not_panic() {
         // ベンダー文字列の長さが巨大
-        let mut v = b"OggS".to_vec();
-        v.extend_from_slice(&[0u8; 23]);
-        v.extend_from_slice(b"\x03vorbis");
-        v.extend_from_slice(&u32::MAX.to_le_bytes());
-        assert!(!has_haptic_channel(&v));
+        let mut packet = b"\x03vorbis".to_vec();
+        packet.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(!has_haptic_channel(&ogg_with_comment_packet(&packet)));
         // コメント数が巨大で、中身が足りない
-        let mut v = b"OggS".to_vec();
-        v.extend_from_slice(&[0u8; 23]);
-        v.extend_from_slice(b"\x03vorbis");
-        v.extend_from_slice(&0u32.to_le_bytes());
-        v.extend_from_slice(&u32::MAX.to_le_bytes());
-        assert!(!has_haptic_channel(&v));
+        let mut packet = b"\x03vorbis".to_vec();
+        packet.extend_from_slice(&0u32.to_le_bytes());
+        packet.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(!has_haptic_channel(&ogg_with_comment_packet(&packet)));
         // コメントの長さが残りより長い
-        let mut v = b"OggS".to_vec();
-        v.extend_from_slice(&[0u8; 23]);
-        v.extend_from_slice(b"\x03vorbis");
-        v.extend_from_slice(&0u32.to_le_bytes());
-        v.extend_from_slice(&1u32.to_le_bytes());
-        v.extend_from_slice(&1000u32.to_le_bytes());
-        v.extend_from_slice(b"ANDROID_HAPTIC=1");
-        assert!(!has_haptic_channel(&v));
+        let mut packet = b"\x03vorbis".to_vec();
+        packet.extend_from_slice(&0u32.to_le_bytes());
+        packet.extend_from_slice(&1u32.to_le_bytes());
+        packet.extend_from_slice(&1000u32.to_le_bytes());
+        packet.extend_from_slice(b"ANDROID_HAPTIC=1");
+        assert!(!has_haptic_channel(&ogg_with_comment_packet(&packet)));
+    }
+
+    #[test]
+    fn corrupt_page_structure_does_not_panic() {
+        let id = ogg_packet_pages(1, 0x02, &vorbis_id_packet()).concat();
+        let comment = ogg_packet_pages(1, 0x00, &vorbis_comment_packet(&["ANDROID_HAPTIC=1"]));
+        // 2 ページ目の先頭が OggS でなければ、そこで打ち切る
+        let mut broken = comment.concat();
+        broken[0] = b'X';
+        assert!(!has_haptic_channel(&[id.clone(), broken].concat()));
+        // セグメント数だけがあって、セグメントテーブルが足りない
+        let mut short_table = ogg_page(1, 0x00, &[], &[]);
+        *short_table.last_mut().unwrap() = 255;
+        assert!(!has_haptic_channel(&[id.clone(), short_table].concat()));
+        // セグメントが 0 個のページが続いても、読み進めて終わる
+        let empty = ogg_page(1, 0x00, &[], &[]).repeat(1000);
+        assert!(!has_haptic_channel(&[id.clone(), empty].concat()));
+        // 識別ヘッダのページしかない
+        assert!(!has_haptic_channel(&id));
     }
 
     #[test]
@@ -540,6 +681,22 @@ mod tests {
         assert!(!has_haptic_channel(&HAPTIC_OGG[..50]));
         // 先頭 700 バイト(コメントヘッダは読めて、音声データは壊れている)。受け入れ基準 5 の壊れた ogg に使う
         assert!(has_haptic_channel(&HAPTIC_OGG[..700]));
+    }
+
+    #[test]
+    fn every_truncation_of_a_multi_page_header_is_safe() {
+        let big = format!("COVER={}", "x".repeat(70_000));
+        let ogg = ogg_with_comments(&[&big, "ANDROID_HAPTIC=1"]);
+        // 全バイト位置は重いので間引き、末尾(タグのある所)は 1 バイトずつ見る
+        for n in (0..ogg.len())
+            .step_by(97)
+            .chain(ogg.len() - 600..=ogg.len())
+        {
+            let _ = has_haptic_channel(&ogg[..n]);
+        }
+        // タグの手前で切れていれば false、末尾の framing bit だけが欠けても true
+        assert!(!has_haptic_channel(&ogg[..ogg.len() - 2]));
+        assert!(has_haptic_channel(&ogg[..ogg.len() - 1]));
     }
 
     #[tokio::test]
