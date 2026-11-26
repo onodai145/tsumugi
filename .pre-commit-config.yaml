@@ -4,12 +4,11 @@ repos:
     hooks:
       - id: gitleaks
   # CI の rust-test と同じ確認(Issue #672)。ファイルは書き換えない。
-  # llama_target.rs は include! で読むので、cargo fmt の対象に入らない。
   - repo: local
     hooks:
       - id: rustfmt
         name: rustfmt --check
-        entry: bash -c 'cd src-tauri && cargo +stable fmt --all --check && rustfmt +stable --edition 2021 --check llama_target.rs'
+        entry: bash -c 'cd src-tauri && cargo +stable fmt --all --check'
         language: system
         types: [rust]
         pass_filenames: false

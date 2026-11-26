@@ -1,5 +1,6 @@
 // `llama_target`(cfg `llama_target` を立てる条件)。単体テストのために別ファイルにしてある。
-include!("llama_target.rs");
+// `include!` ではなく `mod` で読む: `cargo fmt` は `mod` をたどって対象を集める(Issue #672)。
+mod llama_target;
 
 fn main() {
     println!("cargo:rerun-if-changed=llama_target.rs");
@@ -7,7 +8,7 @@ fn main() {
     let feature = std::env::var_os("CARGO_FEATURE_LOCAL_TRANSLATE").is_some();
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    if llama_target(feature, &os, &arch) {
+    if llama_target::llama_target(feature, &os, &arch) {
         println!("cargo:rustc-cfg=llama_target");
     }
 

@@ -20,9 +20,9 @@ cd src-tauri && cargo test --lib postgres_ -- --ignored --test-threads=2  # Post
 cd src-tauri && cargo test --lib mysql_ -- --ignored --test-threads=2  # keep parallelism low: full parallelism starts one DB container per test at once and OOMs (dropping containers at test end doesn't lower that peak). Each test's `TestBackend` guard removes its container and anonymous volume on drop, even on panic; only a killed run leaves leftovers — remove those mysql:8.1/postgres containers by ID with `docker rm -fv <id>` — `-v` is required: both images declare an anonymous VOLUME, so plain `docker rm -f` orphans one volume per container (`docker volume ls -f dangling=true`)
 # The same real-DB tests also run against MariaDB (Issue #646): start a throwaway server and set `TSUMUGI_TEST_MYSQL_PORT` (a `127.0.0.1` port) and `TSUMUGI_TEST_MYSQL_PASSWORD` (root's password). Each test creates its own database and never drops it, so use a disposable container and remove it afterwards with `docker rm -fv <id>`. MariaDB 10.5 cannot match patterns containing 4-byte characters (e.g. emoji); 10.6+ is fine.
 # docker run -d -p 127.0.0.1:33064:3306 -e MARIADB_ROOT_PASSWORD=probe mariadb:11.4  ->  cd src-tauri && TSUMUGI_TEST_MYSQL_PORT=33064 TSUMUGI_TEST_MYSQL_PASSWORD=probe cargo test --lib mysql_ -- --ignored --test-threads=2
-cd src-tauri && cargo +stable fmt --all && rustfmt +stable --edition 2021 llama_target.rs  # コミット前の整形(CI の rust-test が --check で確認する)。llama_target.rs は include! で読むので cargo fmt の対象外
+cd src-tauri && cargo +stable fmt --all  # コミット前の整形(CI の rust-test が --check で確認する)。`include!` だけで読むファイルは対象外になるので、`mod` でも読み込む
 git config blame.ignoreRevsFile .git-blame-ignore-revs  # 手元で1回。整形だけのコミットを git blame で飛ばす(GitHub はファイルを自動で読む)。ファイルが無い古いコミットを checkout している間は git blame がエラーになる
-pre-commit install  # 手元で1回。コミット時に gitleaks と rustfmt --check が動く(rustfmt は stable toolchain が必要)
+pre-commit install  # 手元で1回。コミット時に gitleaks と rustfmt --check が動く(rustfmt のフックは rustup と stable の rustfmt コンポーネントが必要: `rustup component add rustfmt --toolchain stable`)
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
 cd frontend  && pnpm test                # Vitest unit tests
 cd frontend  && npx vitest run <path>   # single file — `pnpm test -- <path>` ignores the path and runs the whole suite

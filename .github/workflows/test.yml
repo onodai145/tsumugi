@@ -55,13 +55,10 @@ jobs:
           components: rustfmt
 
       # 整形崩れは、時間のかかる apt のインストールとビルドの前に落とす(Issue #672)。
-      # llama_target.rs は include! で読むので、cargo fmt の対象に入らない。
-      - name: rustfmt --check
+      - name: cargo fmt --check
         if: needs.changes.outputs.code == 'true'
         working-directory: src-tauri
-        run: |
-          cargo fmt --all --check
-          rustfmt --edition 2021 --check llama_target.rs
+        run: cargo fmt --all --check
 
       - name: Install system dependencies (Tauri v2 Linux)
         if: needs.changes.outputs.code == 'true'

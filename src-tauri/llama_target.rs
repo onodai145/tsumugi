@@ -1,4 +1,4 @@
-// `build.rs` と、`src/translate/mod.rs` のテストの両方が `include!` する(build.rs はテストを走らせられないため)。
+// `build.rs`(`mod`)と、`src/translate/mod.rs` のテスト(`include!`)の両方が読み込む(build.rs はテストを走らせられないため)。
 //
 // llama.cpp（ローカル翻訳）をビルドするターゲットか。`local-translate` feature が有効で、
 // Linux / macOS / Windows、または Android でビルドできることを確認した ABI のとき。
