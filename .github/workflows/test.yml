@@ -47,6 +47,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
+      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
+      # resolves the current stable Rust release, so it is left unpinned by design.
+      - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.code == 'true'
+        with:
+          components: rustfmt
+
+      # 整形崩れは、時間のかかる apt のインストールとビルドの前に落とす(Issue #672)。
+      # llama_target.rs は include! で読むので、cargo fmt の対象に入らない。
+      - name: rustfmt --check
+        if: needs.changes.outputs.code == 'true'
+        working-directory: src-tauri
+        run: |
+          cargo fmt --all --check
+          rustfmt --edition 2021 --check llama_target.rs
+
       - name: Install system dependencies (Tauri v2 Linux)
         if: needs.changes.outputs.code == 'true'
         run: |
@@ -61,11 +77,6 @@ jobs:
             libasound2-dev \
             patchelf \
             cmake
-
-      # dtolnay/rust-toolchain@stable is an intentionally moving branch that always
-      # resolves the current stable Rust release, so it is left unpinned by design.
-      - uses: dtolnay/rust-toolchain@stable
-        if: needs.changes.outputs.code == 'true'
 
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         if: needs.changes.outputs.code == 'true'
