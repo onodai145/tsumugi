@@ -112,27 +112,38 @@ impl DraftStore {
         Ok(())
     }
 
-    pub fn save_manual(&self, account_id: &str, input: &DraftInput) -> Result<()> {
+    /// 複製を `change` で書き換え、保存に成功してからメモリを差し替える。失敗が画面に出る
+    /// 手動下書きの操作に使う(Issue #696)。自動下書き(`save_auto` / `clear_auto`)は使わない。
+    fn update_if_saved(&self, change: impl FnOnce(&mut Vec<Draft>)) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
-        let now = now_millis();
-        guard.drafts.push(Draft {
-            id: uuid::Uuid::new_v4().to_string(),
-            account_id: account_id.to_string(),
-            kind: DraftKind::Manual,
-            text: input.text.clone(),
-            cw: input.cw.clone(),
-            visibility: input.visibility,
-            local_only: input.local_only,
-            reaction_acceptance: input.reaction_acceptance,
-            channel_id: input.channel_id.clone(),
-            poll: input.poll.clone(),
-            file_ids: input.file_ids.clone(),
-            reply_note: input.reply_note.clone(),
-            quote_note: input.quote_note.clone(),
-            created_at: now,
-            updated_at: now,
-        });
-        self.save(&guard)
+        let mut next = guard.clone();
+        change(&mut next.drafts);
+        self.save(&next)?;
+        *guard = next;
+        Ok(())
+    }
+
+    pub fn save_manual(&self, account_id: &str, input: &DraftInput) -> Result<()> {
+        self.update_if_saved(|drafts| {
+            let now = now_millis();
+            drafts.push(Draft {
+                id: uuid::Uuid::new_v4().to_string(),
+                account_id: account_id.to_string(),
+                kind: DraftKind::Manual,
+                text: input.text.clone(),
+                cw: input.cw.clone(),
+                visibility: input.visibility,
+                local_only: input.local_only,
+                reaction_acceptance: input.reaction_acceptance,
+                channel_id: input.channel_id.clone(),
+                poll: input.poll.clone(),
+                file_ids: input.file_ids.clone(),
+                reply_note: input.reply_note.clone(),
+                quote_note: input.quote_note.clone(),
+                created_at: now,
+                updated_at: now,
+            });
+        })
     }
 
     pub fn list_manual(&self, account_id: &str) -> Result<Vec<Draft>> {
@@ -148,11 +159,11 @@ impl DraftStore {
     }
 
     pub fn delete_manual(&self, account_id: &str, draft_id: &str) -> Result<()> {
-        let mut guard = self.data.lock().unwrap();
-        guard.drafts.retain(|d| {
-            !(d.account_id == account_id && d.id == draft_id && matches!(d.kind, DraftKind::Manual))
-        });
-        self.save(&guard)
+        self.update_if_saved(|drafts| {
+            drafts.retain(|d| {
+                !(d.account_id == account_id && d.id == draft_id && matches!(d.kind, DraftKind::Manual))
+            })
+        })
     }
 
     pub fn get_auto(&self, account_id: &str) -> Result<Option<Draft>> {
@@ -164,6 +175,8 @@ impl DraftStore {
             .cloned())
     }
 
+    /// 自動下書きの保存と削除(`clear_auto`)は、保存に失敗してもメモリを巻き戻さない。呼び出し側は
+    /// 失敗を画面に出さず、巻き戻すと古い本文や投稿済みの本文が復元されるため(Issue #696)。
     pub fn save_auto(&self, account_id: &str, input: &DraftInput) -> Result<()> {
         let mut guard = self.data.lock().unwrap();
         guard
@@ -329,6 +342,69 @@ mod tests {
         // 正しいアカウントからの削除は反映される
         s.delete_manual("acc1", &id).unwrap();
         assert!(s.list_manual("acc1").unwrap().is_empty());
+    }
+
+    // ---- 保存の失敗(Issue #696) ----
+
+    /// 返したディレクトリを消すと、以後の保存が失敗するストア。
+    fn file_store() -> (DraftStore, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tsumugi-draft-fail-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        (DraftStore::new(dir.join("drafts.json")).unwrap(), dir)
+    }
+
+    fn manual_texts(s: &DraftStore) -> Vec<String> {
+        s.list_manual("acc1").unwrap().into_iter().map(|d| d.text).collect()
+    }
+
+    fn auto_text(s: &DraftStore) -> Option<String> {
+        s.get_auto("acc1").unwrap().map(|d| d.text)
+    }
+
+    #[test]
+    fn manual_draft_operations_change_nothing_when_saving_fails() {
+        let (s, dir) = file_store();
+        s.save_manual("acc1", &input("kept")).unwrap();
+        let id = s.list_manual("acc1").unwrap()[0].id.clone();
+        std::fs::remove_dir_all(&dir).unwrap(); // 以後の保存は失敗する
+
+        assert!(s.save_manual("acc1", &input("failed")).is_err());
+        assert_eq!(manual_texts(&s), ["kept"]);
+
+        assert!(s.delete_manual("acc1", &id).is_err());
+        assert_eq!(manual_texts(&s), ["kept"]);
+    }
+
+    /// 自動下書きは失敗を画面に出さないので、メモリを正とする。巻き戻すと、投稿画面を開き直したときに
+    /// 古い本文が復元され、投稿後の掃除の失敗では投稿済みの本文が復元される。
+    #[test]
+    fn auto_draft_operations_stay_in_memory_when_saving_fails() {
+        let (s, dir) = file_store();
+        s.save_auto("acc1", &input("old")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(s.save_auto("acc1", &input("latest")).is_err());
+        assert_eq!(auto_text(&s).as_deref(), Some("latest"));
+
+        assert!(s.clear_auto("acc1").is_err());
+        assert_eq!(auto_text(&s), None);
+    }
+
+    #[test]
+    fn an_unsaved_auto_draft_survives_a_failed_manual_save_and_is_written_later() {
+        let (s, dir) = file_store();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(s.save_auto("acc1", &input("unsaved")).is_err());
+        assert!(s.save_manual("acc1", &input("failed")).is_err());
+        assert_eq!(auto_text(&s).as_deref(), Some("unsaved"));
+
+        std::fs::create_dir_all(&dir).unwrap();
+        s.save_manual("acc1", &input("manual")).unwrap();
+
+        let reloaded = DraftStore::new(dir.join("drafts.json")).unwrap();
+        assert_eq!(auto_text(&reloaded).as_deref(), Some("unsaved"));
+        assert_eq!(manual_texts(&reloaded), ["manual"]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
