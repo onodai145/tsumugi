@@ -151,6 +151,9 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           workspaces: src-tauri
+          # Actions のキャッシュは上限(10GB)に達しているので、このジョブは main でだけ保存する。
+          # PR は main のキャッシュを復元する。
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # tauri::generate_context!() は frontendDist の実在を要求する。clippy にビルド済みのフロントは要らない。
       - name: Create empty frontendDist

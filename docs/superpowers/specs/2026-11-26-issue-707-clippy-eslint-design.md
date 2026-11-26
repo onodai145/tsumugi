@@ -82,6 +82,7 @@ typescript-eslint が対応する TypeScript は `<6.1.0`。今の `~6.0.2` は�
 - `changes` の結果で中のステップを飛ばす(他の必須ジョブと同じ)
 - `ubuntu-24.04`、`timeout-minutes: 45`
 - apt の依存は `rust-test` と同じ
+- `rust-cache` の保存は `main` でだけ(Actions のキャッシュが上限の 10GB に達しているため)
 - `dtolnay/rust-toolchain`(`master` の SHA で固定)に、`clippy-toolchain` の版、`clippy` コンポーネント、`aarch64-linux-android` ターゲットを渡す
 - `frontend/dist` は空の `index.html` を置くだけにする(`local-translate-build.yml` と同じ)
 - NDK r27c の用意(`android-build` の `setup-ndk` とシンボリックリンクの復元を流用)
@@ -140,7 +141,7 @@ TypeScript を 6.1 以上に上げる更新は、typescript-eslint が対応す�
 `.pre-commit-config.yaml` に pre-push のフックを足す。
 
 - `default_install_hook_types: [pre-commit, pre-push]` と `default_stages: [pre-commit]`。`pre-commit install` をもう一度実行する必要がある。
-- clippy: `src-tauri/` の変更があるとき。固定した版で Linux 向けだけを確認する(Android は NDK の環境変数が要るので CI だけ)。固定した版のツールチェーンと `frontend/dist` が必要。
+- clippy: `src-tauri/` の変更があるとき。固定した版で Linux 向けだけを確認する(Android は NDK の環境変数が要るので CI だけ)。固定した版のツールチェーンと `frontend/dist` が必要。cargo の並列度は、指定が無ければ 4。macOS / Windows では、その OS 向けのコードの指摘も出る。
 - ESLint: `frontend/` の変更があるとき `pnpm lint`(ESLint の PR で追加)。
 
 コミット時のフックは今のまま(gitleaks と rustfmt)。

@@ -16,10 +16,11 @@ repos:
         types: [rust]
         pass_filenames: false
       # CI の clippy ジョブの Linux 側と同じ確認(Issue #707)。ビルドが要るので push の前だけ。
-      # Android 側は NDK の環境変数が要るので CI だけ。
+      # Android 側は NDK の環境変数が要るので CI だけ。macOS / Windows では、CI が見ないその OS 向けのコードの指摘も出る。
+      # llama.cpp の再ビルドを含むと重いので、並列度は指定が無ければ 4 にする(Issue #603)。
       - id: clippy
         name: clippy (src-tauri/clippy-toolchain の版)
-        entry: bash -c 'cd src-tauri && cargo "+$(cat clippy-toolchain)" clippy --all-targets -- -D warnings'
+        entry: bash -c 'cd src-tauri && CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" cargo "+$(cat clippy-toolchain)" clippy --all-targets -- -D warnings'
         language: system
         files: ^src-tauri/
         pass_filenames: false
