@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render } from "@testing-library/svelte";
+import { createRawSnippet, tick } from "svelte";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -13,6 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 const { default: LicenseConsentDialog } = await import("./LicenseConsentDialog.svelte");
+const { default: Modal } = await import("../Modal.svelte");
 
 afterEach(cleanup);
 
@@ -33,5 +35,23 @@ describe("LicenseConsentDialog", () => {
   it("networkWarning が null でも、警告の領域を出さない", () => {
     const { queryByTestId } = render(LicenseConsentDialog, { props: { ...base, networkWarning: null } });
     expect(queryByTestId("license-network-warning")).toBeNull();
+  });
+});
+
+describe("LicenseConsentDialog のフォーカスが外れた後の Escape(Issue #700)", () => {
+  const body = createRawSnippet(() => ({ render: () => `<span>settings</span>` }));
+
+  it("bodyに移った後のEscapeは、手前のダイアログだけをキャンセルする", async () => {
+    const onclose = vi.fn();
+    render(Modal, { props: { title: "親", onclose, children: body } });
+    await tick();
+    const onCancel = vi.fn();
+    render(LicenseConsentDialog, { props: { ...base, onCancel } });
+    await tick();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    await fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onclose).not.toHaveBeenCalled();
   });
 });

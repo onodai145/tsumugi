@@ -169,3 +169,41 @@ describe("ReportUserDialog のモバイル履歴(Issue #573)", () => {
     expect(push).not.toHaveBeenCalled();
   });
 });
+
+describe("ReportUserDialog のフォーカスが外れた後の Escape(Issue #700)", () => {
+  const body = createRawSnippet(() => ({ render: () => `<span>profile</span>` }));
+
+  async function submitOverModal(onsubmit: () => Promise<void>) {
+    const onclose = vi.fn();
+    render(Modal, { props: { title: "プロフィール", onclose, children: body } });
+    await tick();
+    const m = mount(onsubmit as never);
+    await tick();
+    await fireEvent.input(m.getByLabelText("通報の内容"), { target: { value: "スパムです" } });
+    await fireEvent.click(m.getByRole("button", { name: "通報する" }));
+    return { ...m, onclose };
+  }
+
+  async function escapeFromBody() {
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    await fireEvent.keyDown(document.body, { key: "Escape" });
+  }
+
+  it("送信に失敗した後は、bodyでのEscapeでダイアログだけ閉じる", async () => {
+    const { findByText, oncancel, onclose } = await submitOverModal(() =>
+      Promise.reject(new Error("users/report-abuse: FAILED")),
+    );
+    await findByText(/FAILED/);
+    await escapeFromBody();
+    expect(oncancel).toHaveBeenCalledTimes(1);
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
+  it("送信中は、bodyでのEscapeでダイアログも親のモーダルも閉じない", async () => {
+    const { oncancel, onclose } = await submitOverModal(() => new Promise<void>(() => {}));
+    await escapeFromBody();
+    expect(oncancel).not.toHaveBeenCalled();
+    expect(onclose).not.toHaveBeenCalled();
+  });
+});
