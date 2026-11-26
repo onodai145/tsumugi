@@ -638,3 +638,312 @@ git commit -m "fix(draft): 保存に失敗した手動下書きの変更をメ�
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
+
+---
+
+## 追加タスク(ブランチのレビューで追加。spec の 3)
+
+Global Constraints の「呼び出し元は変更しない」は、spec の 3 の 2 か所(`commands/account.rs`、`commands/local_model.rs`)を除く。
+
+追加の Review Focus:
+
+- 再認証の保存に失敗しても、前のトークンが残り、アカウントは使い続けられる → Task 3
+- 控えのトークンが読めないときは、何も書かない → Task 3
+- 後始末も失敗したら、返すのは設定の保存のエラー → Task 3
+
+### Task 3: ログインの保存に失敗したら keyring を元に戻す
+
+**Files:**
+- Modify: `src-tauri/src/commands/account.rs`(`complete_miauth`、`mod removal_tests`)
+
+**Interfaces:**
+- Produces: 非公開の `fn persist_login(state: &AppState, account: &Account, token: &str) -> Result<()>`
+- Consumes: `mod removal_tests` の `fixture()` / `account(id, host)` / `token(&f, id)` / `has_account(&f, id)`、`f.settings_disk.break_dir()`、`f.faults.get` / `f.faults.delete`
+
+- [ ] **Step 1: 動作を変えずに `persist_login` を切り出す**
+
+`complete_miauth` の次の 3 行を
+
+```rust
+    // token は keyring のみに保存（Account/戻り値には含めない）
+    state.secrets.set(&account.id, &token)?;
+    state.settings.upsert_account(&account)?; // 再起動で復元できるよう永続化
+```
+
+次の 1 行に置き換える。
+
+```rust
+    persist_login(&state, &account, &token)?;
+```
+
+`complete_miauth` の後に追加する。
+
+```rust
+fn persist_login(state: &AppState, account: &Account, token: &str) -> Result<()> {
+    // token は keyring のみに保存（Account/戻り値には含めない）
+    state.secrets.set(&account.id, token)?;
+    state.settings.upsert_account(account) // 再起動で復元できるよう永続化
+}
+```
+
+- [ ] **Step 2: テストを書く**
+
+`mod removal_tests` の末尾に追加する。
+
+```rust
+    // ---- ログインの保存の失敗(Issue #696) ----
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_saved_login_writes_the_token_and_the_account() {
+        let f = fixture();
+
+        persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token").unwrap();
+
+        assert_eq!(token(&f, "a3").as_deref(), Some("new-token"));
+        assert!(f.state.settings.load_accounts().unwrap().iter().any(|a| a.id == "a3"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_login_that_cannot_be_saved_leaves_no_token_for_a_new_account() {
+        let f = fixture();
+        f.settings_disk.break_dir();
+
+        assert!(persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token").is_err());
+
+        assert_eq!(token(&f, "a3"), None);
+        assert_eq!(has_account(&f, "a3"), (false, false));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_reauthentication_that_cannot_be_saved_keeps_the_previous_token() {
+        let f = fixture();
+        f.settings_disk.break_dir();
+
+        assert!(persist_login(&f.state, &account("a1", "127.0.0.1:1"), "new-token").is_err());
+
+        assert_eq!(token(&f, "a1").as_deref(), Some("token"));
+        assert_eq!(has_account(&f, "a1"), (true, true));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_login_writes_nothing_when_the_previous_token_cannot_be_read() {
+        let f = fixture();
+        f.faults.get.store(true, Ordering::SeqCst);
+
+        let result = persist_login(&f.state, &account("a1", "127.0.0.1:1"), "new-token");
+
+        f.faults.get.store(false, Ordering::SeqCst);
+        assert!(matches!(result, Err(Error::Secret(_))), "{result:?}");
+        assert_eq!(token(&f, "a1").as_deref(), Some("token"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_cleanup_still_reports_the_save_error() {
+        let f = fixture();
+        f.settings_disk.break_dir();
+        f.faults.delete.store(true, Ordering::SeqCst);
+
+        let result = persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token");
+
+        assert!(result.is_err() && !matches!(result, Err(Error::Secret(_))), "{result:?}");
+    }
+```
+
+- [ ] **Step 3: テストが失敗することを確認する**
+
+Run: `cd src-tauri && CARGO_BUILD_JOBS=4 cargo test --lib commands::account`
+
+Expected: `a_login_that_cannot_be_saved_leaves_no_token_for_a_new_account`、`a_reauthentication_that_cannot_be_saved_keeps_the_previous_token`(`new-token` が残る)、`a_login_writes_nothing_when_the_previous_token_cannot_be_read`(`Ok` になる)が FAIL。残りは PASS。
+
+- [ ] **Step 4: 実装する**
+
+`persist_login` を置き換える。
+
+```rust
+/// token を keyring に、アカウントを設定に書く。設定の保存に失敗したら、keyring を書く前の状態に戻す
+/// (残すと、どのアカウントにも結びつかない token ができる。Issue #696)。
+fn persist_login(state: &AppState, account: &Account, token: &str) -> Result<()> {
+    // 戻せるように、書く前に控える。読めなければ何も書かない。
+    let previous = state.secrets.get(&account.id)?;
+    // token は keyring のみに保存（Account/戻り値には含めない）
+    state.secrets.set(&account.id, token)?;
+    // 再起動で復元できるよう永続化
+    state.settings.upsert_account(account).inspect_err(|_| {
+        let restored = match &previous {
+            Some(previous) => state.secrets.set(&account.id, previous),
+            None => state.secrets.delete(&account.id),
+        };
+        if let Err(e) = restored {
+            log::warn!("failed to restore the token after the login failed: {e}");
+        }
+    })
+}
+```
+
+- [ ] **Step 5: テストが通ることを確認してコミットする**
+
+Run: `cd src-tauri && CARGO_BUILD_JOBS=4 cargo test --lib commands::account`
+
+Expected: すべて PASS。
+
+```bash
+git add src-tauri/src/commands/account.rs
+git commit -m "fix(account): ログインの保存に失敗したら token を元に戻す(Issue #696)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4: 同意の保存の失敗で、開始済みのダウンロードをエラーにしない
+
+**Files:**
+- Modify: `src-tauri/src/commands/local_model.rs`(`start_core` と `mod tests`)
+
+**Interfaces:**
+- Consumes: `BrokenDisk`(`crate::store::testutil::BrokenDisk`)の `new` / `path` / `break_dir`、テスト補助の `noop_notify()`
+
+- [ ] **Step 1: テストを書く**
+
+`the_right_version_starts_and_records_the_acceptance` の後に追加する。
+
+```rust
+    #[cfg(llama_target)]
+    #[tokio::test]
+    async fn a_failed_consent_save_does_not_fail_a_download_that_already_started() {
+        use crate::store::testutil::BrokenDisk;
+        use sha2::{Digest, Sha256};
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let data = vec![7u8; 10_000];
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone())).mount(&server).await;
+        let spec = ModelSpec {
+            url: format!("{}/m.gguf", server.uri()),
+            size: data.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(&data)),
+        };
+        let models_disk = BrokenDisk::new();
+        let models = Arc::new(LocalModels::with_spec(
+            models_disk.path("models"),
+            reqwest::Client::new(),
+            Arc::new(LocalTranslate::unconfigured()),
+            spec,
+        ));
+        let settings_disk = BrokenDisk::new();
+        let settings =
+            SettingsStore::new(settings_disk.path("settings.json"), settings_disk.path("backgrounds")).unwrap();
+        let s = AppState::new_for_test(settings).with_local_models(models);
+        settings_disk.break_dir(); // 同意の保存は失敗する
+
+        start_core(&s, LICENSE_VERSION, noop_notify()).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while info(&s).status != LocalModelStatus::Ready {
+                tokio::time::sleep(Duration::from_millis(10)).await
+            }
+        })
+        .await
+        .expect("モデルが Ready にならない");
+        assert_eq!(s.settings.local_model_license_version(), None);
+    }
+```
+
+- [ ] **Step 2: テストが失敗することを確認する**
+
+Run: `cd src-tauri && CARGO_BUILD_JOBS=4 cargo test --lib commands::local_model`
+
+Expected: 追加したテストが、`start_core(...).unwrap()` の I/O エラーで FAIL。残りは PASS。
+
+- [ ] **Step 3: 実装する**
+
+`start_core` の末尾の 2 行(`s.local_models.start(notify)?;` と `s.settings.set_local_model_license_version(LICENSE_VERSION)`)を置き換える。
+
+```rust
+    s.local_models.start(notify)?;
+    // 取得はもう始まっている。同意の保存に失敗しても、取得は止めずに成功として返す(次回の取得の前に、また確認が出るだけ)。
+    if let Err(e) = s.settings.set_local_model_license_version(LICENSE_VERSION) {
+        log::warn!("local model license consent could not be saved: {e}");
+    }
+    Ok(())
+```
+
+- [ ] **Step 4: テストが通ることを確認してコミットする**
+
+Run: `cd src-tauri && CARGO_BUILD_JOBS=4 cargo test --lib commands::local_model`
+
+Expected: すべて PASS。
+
+```bash
+git add src-tauri/src/commands/local_model.rs
+git commit -m "fix(translate): 同意の保存に失敗しても開始済みの取得をエラーにしない(Issue #696)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 5: 保存失敗のテストを `BrokenDisk` にそろえる
+
+**Files:**
+- Modify: `src-tauri/src/store/settings.rs`(`mod tests`)
+- Modify: `src-tauri/src/store/draft.rs`(`mod tests`)
+
+**Interfaces:**
+- Consumes: `crate::store::testutil::BrokenDisk` の `new` / `path` / `break_dir` / `repair_dir`(`Drop` でディレクトリを消す)
+
+テストだけの整理で、検証する内容は変えない。
+
+- [ ] **Step 1: 補助関数を置き換える**
+
+`settings.rs` の `mod tests` に `use crate::store::testutil::BrokenDisk;` を足し、`seeded_file_store` を置き換える。
+
+```rust
+    /// `break_dir` すると、以後の保存が失敗するストア。`seeded_data` を保存済み。
+    fn seeded_file_store() -> (SettingsStore, BrokenDisk) {
+        let disk = BrokenDisk::new();
+        let s = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
+        s.replace(seeded_data()).unwrap();
+        (s, disk)
+    }
+```
+
+`draft.rs` の `mod tests` に `use crate::store::testutil::BrokenDisk;` を足し、`file_store` を置き換える。
+
+```rust
+    /// `break_dir` すると、以後の保存が失敗するストア。
+    fn file_store() -> (DraftStore, BrokenDisk) {
+        let disk = BrokenDisk::new();
+        (DraftStore::new(disk.path("drafts.json")).unwrap(), disk)
+    }
+```
+
+- [ ] **Step 2: Issue #696 で足したテストの呼び出しを置き換える**
+
+両ファイルの「保存の失敗(Issue #696)」より後のテストで、次のとおり置き換える。
+
+| 変更前 | 変更後 |
+|---|---|
+| `let (s, dir) = ...` | `let (s, disk) = ...` |
+| `std::fs::remove_dir_all(&dir).unwrap();` | `disk.break_dir();` |
+| `std::fs::create_dir_all(&dir).unwrap();` | `disk.repair_dir();` |
+| `dir.join("...")` | `disk.path("...")` |
+| `std::fs::remove_dir_all(&dir).ok();` | 行ごと削除(`Drop` が消す) |
+
+- [ ] **Step 3: 全体のテストを実行してコミットする**
+
+Run: `cd src-tauri && CARGO_BUILD_JOBS=4 cargo test`
+
+Expected: すべて PASS(`#[ignore]` は除く)。
+
+Run: `git status --short`
+
+Expected: `store/settings.rs` と `store/draft.rs` だけ。
+
+```bash
+git add src-tauri/src/store/settings.rs src-tauri/src/store/draft.rs
+git commit -m "test(store): 保存失敗のテストを BrokenDisk にそろえる(Issue #696)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
