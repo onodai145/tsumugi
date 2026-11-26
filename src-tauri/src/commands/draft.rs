@@ -1,8 +1,8 @@
 //! 下書き(未送信の投稿の保存/復元)系 command。
 
+use crate::error::Result;
 use crate::state::AppState;
 use crate::store::draft::{Draft, DraftInput};
-use crate::error::Result;
 use tauri::State;
 
 /// アカウントの手動保存下書き一覧(更新日時降順)。
@@ -19,7 +19,11 @@ fn list_drafts_core(state: &AppState, account_id: &str) -> Result<Vec<Draft>> {
 /// 手動下書きを新規保存する(既存の上書きはしない)。
 #[tauri::command]
 #[specta::specta]
-pub async fn save_draft(state: State<'_, AppState>, account_id: String, input: DraftInput) -> Result<()> {
+pub async fn save_draft(
+    state: State<'_, AppState>,
+    account_id: String,
+    input: DraftInput,
+) -> Result<()> {
     save_draft_core(state.inner(), &account_id, &input)
 }
 
@@ -30,7 +34,11 @@ fn save_draft_core(state: &AppState, account_id: &str, input: &DraftInput) -> Re
 /// 手動下書きを削除する。
 #[tauri::command]
 #[specta::specta]
-pub async fn delete_draft(state: State<'_, AppState>, account_id: String, draft_id: String) -> Result<()> {
+pub async fn delete_draft(
+    state: State<'_, AppState>,
+    account_id: String,
+    draft_id: String,
+) -> Result<()> {
     delete_draft_core(state.inner(), &account_id, &draft_id)
 }
 
@@ -41,7 +49,10 @@ fn delete_draft_core(state: &AppState, account_id: &str, draft_id: &str) -> Resu
 /// アカウントの自動一時下書き(あれば1件)。
 #[tauri::command]
 #[specta::specta]
-pub async fn get_auto_draft(state: State<'_, AppState>, account_id: String) -> Result<Option<Draft>> {
+pub async fn get_auto_draft(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Option<Draft>> {
     get_auto_draft_core(state.inner(), &account_id)
 }
 
@@ -52,7 +63,11 @@ fn get_auto_draft_core(state: &AppState, account_id: &str) -> Result<Option<Draf
 /// 自動一時下書きをupsertする(アカウントにつき1件)。
 #[tauri::command]
 #[specta::specta]
-pub async fn save_auto_draft(state: State<'_, AppState>, account_id: String, input: DraftInput) -> Result<()> {
+pub async fn save_auto_draft(
+    state: State<'_, AppState>,
+    account_id: String,
+    input: DraftInput,
+) -> Result<()> {
     save_auto_draft_core(state.inner(), &account_id, &input)
 }
 
@@ -163,6 +178,9 @@ mod tests {
         let state = test_state();
         save_auto_draft_core(&state, "acc1", &input("acc1の自動下書き")).unwrap();
         assert!(get_auto_draft_core(&state, "acc2").unwrap().is_none());
-        assert_eq!(get_auto_draft_core(&state, "acc1").unwrap().unwrap().text, "acc1の自動下書き");
+        assert_eq!(
+            get_auto_draft_core(&state, "acc1").unwrap().unwrap().text,
+            "acc1の自動下書き"
+        );
     }
 }

@@ -62,7 +62,8 @@ pub fn from_note(note: &Note, account_host: &str) -> Option<NoteDto> {
     if note.local_only {
         return None;
     }
-    let created_at = chrono::DateTime::from_timestamp(note.created_at, 0)?.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let created_at = chrono::DateTime::from_timestamp(note.created_at, 0)?
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let acct = match &note.user.host {
         Some(h) => format!("@{}@{}", note.user.username, h),
         None => format!("@{}", note.user.username),
@@ -74,14 +75,23 @@ pub fn from_note(note: &Note, account_host: &str) -> Option<NoteDto> {
         text: note.text.clone(),
         cw: note.cw.clone(),
         visibility,
-        user: UserDto { id: note.user.id.clone(), acct, name: note.user.name.clone(), is_bot: note.user.is_bot },
+        user: UserDto {
+            id: note.user.id.clone(),
+            acct,
+            name: note.user.name.clone(),
+            is_bot: note.user.is_bot,
+        },
         reply_id: note.reply_id.clone(),
         renote_id: note.renote_id.clone(),
         tags: note.tags.clone(),
         files: note
             .files
             .iter()
-            .map(|f| FileDto { name: f.name.clone(), mime_type: f.mime_type.clone(), is_sensitive: f.is_sensitive })
+            .map(|f| FileDto {
+                name: f.name.clone(),
+                mime_type: f.mime_type.clone(),
+                is_sensitive: f.is_sensitive,
+            })
             .collect(),
         reaction_count: note.reaction_count,
         renote_count: note.renote_count,
@@ -99,18 +109,51 @@ mod tests {
     /// 許可するキーの全体。ここに無いキーが出力に現れたらテストが落ちる(新しいフィールドが
     /// 自動で外に出ないことの固定)。
     const ALLOWED_KEYS: &[&str] = &[
-        "id", "url", "createdAt", "text", "cw", "visibility", "user", "replyId", "renoteId", "tags", "files",
-        "reactionCount", "renoteCount", "replyCount",
+        "id",
+        "url",
+        "createdAt",
+        "text",
+        "cw",
+        "visibility",
+        "user",
+        "replyId",
+        "renoteId",
+        "tags",
+        "files",
+        "reactionCount",
+        "renoteCount",
+        "replyCount",
     ];
 
     fn full_note() -> crate::domain::Note {
-        let mut n = note("n1", 1_793_491_200, Visibility::Public, false, "hello #rust", user("u1", "alice", Some("example.com")));
+        let mut n = note(
+            "n1",
+            1_793_491_200,
+            Visibility::Public,
+            false,
+            "hello #rust",
+            user("u1", "alice", Some("example.com")),
+        );
         n.cw = Some("cw".into());
         n.reply_id = Some("r1".into());
         n.renote_id = Some("q1".into());
         // 返信先・引用元の本文は、IDだけ返して本文は返さない。
-        n.reply = Some(Box::new(note("r1", 1, Visibility::Followers, false, "SECRET reply body", user("u2", "bob", None))));
-        n.renote = Some(Box::new(note("q1", 1, Visibility::Followers, false, "SECRET quote body", user("u3", "carol", None))));
+        n.reply = Some(Box::new(note(
+            "r1",
+            1,
+            Visibility::Followers,
+            false,
+            "SECRET reply body",
+            user("u2", "bob", None),
+        )));
+        n.renote = Some(Box::new(note(
+            "q1",
+            1,
+            Visibility::Followers,
+            false,
+            "SECRET quote body",
+            user("u3", "carol", None),
+        )));
         n.tags = vec!["rust".into()];
         n.files = vec![DriveFile {
             id: "f1".into(),
@@ -145,8 +188,21 @@ mod tests {
     #[test]
     fn nothing_sensitive_leaks_into_the_serialized_text() {
         let json = serde_json::to_string(&from_note(&full_note(), "example.com").unwrap()).unwrap();
-        for forbidden in ["SECRET", "myReaction", "isRenotedByMe", "isFavoritedByMe", "isPinned", "secret-file-url", "thumb.png", "u9", "👍"] {
-            assert!(!json.contains(forbidden), "出力に {forbidden} が含まれている: {json}");
+        for forbidden in [
+            "SECRET",
+            "myReaction",
+            "isRenotedByMe",
+            "isFavoritedByMe",
+            "isPinned",
+            "secret-file-url",
+            "thumb.png",
+            "u9",
+            "👍",
+        ] {
+            assert!(
+                !json.contains(forbidden),
+                "出力に {forbidden} が含まれている: {json}"
+            );
         }
     }
 
@@ -154,7 +210,10 @@ mod tests {
     fn fields_are_mapped_as_specified() {
         let v = serde_json::to_value(from_note(&full_note(), "viewer.example").unwrap()).unwrap();
         assert_eq!(v["id"], "n1");
-        assert_eq!(v["url"], "https://viewer.example/notes/n1", "アカウントのホストから組み立てる");
+        assert_eq!(
+            v["url"], "https://viewer.example/notes/n1",
+            "アカウントのホストから組み立てる"
+        );
         assert_eq!(v["createdAt"], "2026-11-01T00:00:00Z");
         assert_eq!(v["visibility"], "public");
         assert_eq!(v["user"]["acct"], "@alice@example.com");
@@ -170,7 +229,14 @@ mod tests {
 
     #[test]
     fn local_user_acct_has_no_host_part_and_none_fields_are_omitted() {
-        let mut n = note("n2", 0, Visibility::Home, false, "x", user("u1", "alice", None));
+        let mut n = note(
+            "n2",
+            0,
+            Visibility::Home,
+            false,
+            "x",
+            user("u1", "alice", None),
+        );
         n.text = None;
         let v = serde_json::to_value(from_note(&n, "example.com").unwrap()).unwrap();
         assert_eq!(v["user"]["acct"], "@alice");
@@ -184,8 +250,14 @@ mod tests {
     fn notes_outside_public_or_home_or_local_only_are_never_converted() {
         // SQLのスコープ条件に加えた、二重の安全(payload と列が食い違っても外に出さない)。
         for vis in [Visibility::Followers, Visibility::Specified] {
-            assert!(from_note(&note("n", 0, vis, false, "x", user("u1", "a", None)), "h").is_none());
+            assert!(
+                from_note(&note("n", 0, vis, false, "x", user("u1", "a", None)), "h").is_none()
+            );
         }
-        assert!(from_note(&note("n", 0, Visibility::Public, true, "x", user("u1", "a", None)), "h").is_none());
+        assert!(from_note(
+            &note("n", 0, Visibility::Public, true, "x", user("u1", "a", None)),
+            "h"
+        )
+        .is_none());
     }
 }

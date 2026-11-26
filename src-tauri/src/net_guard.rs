@@ -78,7 +78,9 @@ fn is_blocked_v6(ip: Ipv6Addr) -> bool {
 /// 角括弧付きIPv6はアカウントのホストとして来ない(`normalize_host` が `.` を要求する)ため考慮しない。
 fn split_port(h: &str) -> (&str, Option<&str>) {
     match h.rsplit_once(':') {
-        Some((name, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => (name, Some(port)),
+        Some((name, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => {
+            (name, Some(port))
+        }
         _ => (h, None),
     }
 }
@@ -162,7 +164,11 @@ impl FetchAllowlist {
 
     /// ホストが許可リストにあり、かつ `port` が許可ポートに含まれるか。
     pub(crate) fn allows(&self, key: &str, port: u16) -> bool {
-        self.0.read().unwrap().get(key).is_some_and(|ports| ports.contains(&port))
+        self.0
+            .read()
+            .unwrap()
+            .get(key)
+            .is_some_and(|ports| ports.contains(&port))
     }
 }
 
@@ -186,7 +192,10 @@ impl std::error::Error for BlockedAddress {}
 ///
 /// 許可リストにあるホストは、DNSリゾルバにポートが渡らず全アドレスが通ってしまうため、
 /// URLのポートが許可ポートに含まれるかをここで確認する(Issue #482)。
-pub(crate) fn validate_url(url: &url::Url, allow: &FetchAllowlist) -> std::result::Result<(), BlockedAddress> {
+pub(crate) fn validate_url(
+    url: &url::Url,
+    allow: &FetchAllowlist,
+) -> std::result::Result<(), BlockedAddress> {
     let blocked = |host: String| BlockedAddress { host };
     if !matches!(url.scheme(), "http" | "https") {
         return Err(blocked(format!("scheme {}", url.scheme())));
@@ -213,9 +222,15 @@ pub(crate) fn validate_url(url: &url::Url, allow: &FetchAllowlist) -> std::resul
 /// IPリテラルのURLを検証する。禁止IPは、許可リストにそのIPがあり、かつポートが許可ポートに含まれる場合だけ通す。
 /// 許可リストのキーはポートを除いたホスト部。`ip.to_string()` は既にポートを含まない正規形なので、
 /// `host_key` を通さずそのまま照合する(IPv6の `:` をポート区切りと誤認しないため)。
-fn validate_ip_literal(ip: IpAddr, port: u16, allow: &FetchAllowlist) -> std::result::Result<(), BlockedAddress> {
+fn validate_ip_literal(
+    ip: IpAddr,
+    port: u16,
+    allow: &FetchAllowlist,
+) -> std::result::Result<(), BlockedAddress> {
     if is_blocked_ip(ip) && !allow.allows(&ip.to_string(), port) {
-        return Err(BlockedAddress { host: format!("{ip}:{port}") });
+        return Err(BlockedAddress {
+            host: format!("{ip}:{port}"),
+        });
     }
     Ok(())
 }
@@ -229,9 +244,14 @@ pub(crate) fn filter_addrs(
     if allow.contains_host(&host_key(host)) {
         return Ok(addrs);
     }
-    let kept: Vec<SocketAddr> = addrs.into_iter().filter(|a| !is_blocked_ip(a.ip())).collect();
+    let kept: Vec<SocketAddr> = addrs
+        .into_iter()
+        .filter(|a| !is_blocked_ip(a.ip()))
+        .collect();
     if kept.is_empty() {
-        return Err(BlockedAddress { host: host.to_string() });
+        return Err(BlockedAddress {
+            host: host.to_string(),
+        });
     }
     Ok(kept)
 }
@@ -247,7 +267,8 @@ impl reqwest::dns::Resolve for GuardedResolver {
         let allow = self.allow.clone();
         let host = name.as_str().to_string();
         Box::pin(async move {
-            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
+            let addrs: Vec<SocketAddr> =
+                tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
             match filter_addrs(&host, addrs, &allow) {
                 Ok(kept) => Ok(Box::new(kept.into_iter()) as reqwest::dns::Addrs),
                 Err(blocked) => {
@@ -284,7 +305,10 @@ fn redirect_policy(allow: FetchAllowlist) -> reqwest::redirect::Policy {
 /// 応答しないサーバーで `await` が永久に返らないよう、接続と読み取りにタイムアウトを持たせる(Issue #606)。
 /// 全体の上限は付けない: 添付ファイルのダウンロードは大きく、遅い回線でも進んでいる限りは続けたいので、
 /// 読み取り(最初の応答と、各チャンクの間隔)が止まったときだけ打ち切る。
-pub(crate) fn build_fetch_client(user_agent: &str, allow: FetchAllowlist) -> reqwest::Result<reqwest::Client> {
+pub(crate) fn build_fetch_client(
+    user_agent: &str,
+    allow: FetchAllowlist,
+) -> reqwest::Result<reqwest::Client> {
     build_fetch_client_with(user_agent, allow, FETCH_CONNECT_TIMEOUT, FETCH_READ_TIMEOUT)
 }
 
@@ -301,7 +325,9 @@ fn build_fetch_client_with(
         .user_agent(user_agent)
         .connect_timeout(connect_timeout)
         .read_timeout(read_timeout)
-        .dns_resolver(Arc::new(GuardedResolver { allow: allow.clone() }))
+        .dns_resolver(Arc::new(GuardedResolver {
+            allow: allow.clone(),
+        }))
         .redirect(redirect_policy(allow))
         .build()
 }
@@ -331,13 +357,35 @@ mod tests {
     #[test]
     fn blocks_ipv4_special_ranges() {
         for s in [
-            "127.0.0.1", "127.255.255.254", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.0.1",
-            "169.254.169.254", "0.0.0.0", "255.255.255.255", "100.64.0.1", "100.127.255.255", "224.0.0.1",
-            "0.0.0.1", "0.255.255.255", "192.0.0.0", "192.0.0.255", "198.18.0.0", "198.19.255.255",
-            "240.0.0.0", "254.255.255.255",
+            "127.0.0.1",
+            "127.255.255.254",
+            "10.0.0.1",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.0.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "255.255.255.255",
+            "100.64.0.1",
+            "100.127.255.255",
+            "224.0.0.1",
+            "0.0.0.1",
+            "0.255.255.255",
+            "192.0.0.0",
+            "192.0.0.255",
+            "198.18.0.0",
+            "198.19.255.255",
+            "240.0.0.0",
+            "254.255.255.255",
             // ドキュメント用 TEST-NET-1/2/3 と、廃止済みの 6to4 リレー 192.88.99.0/24
-            "192.0.2.0", "192.0.2.255", "198.51.100.0", "198.51.100.255", "203.0.113.0", "203.0.113.255",
-            "192.88.99.0", "192.88.99.255",
+            "192.0.2.0",
+            "192.0.2.255",
+            "198.51.100.0",
+            "198.51.100.255",
+            "203.0.113.0",
+            "203.0.113.255",
+            "192.88.99.0",
+            "192.88.99.255",
         ] {
             assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
         }
@@ -345,9 +393,27 @@ mod tests {
 
     #[test]
     fn allows_ipv4_just_outside_special_ranges() {
-        for s in ["8.8.8.8", "1.1.1.1", "172.15.255.255", "172.32.0.1", "100.63.255.255", "100.128.0.1", "192.167.1.1", "11.0.0.1",
-            "1.0.0.0", "192.0.1.0", "198.17.255.255", "198.20.0.0", "223.255.255.255",
-            "192.0.3.0", "198.51.99.255", "198.51.101.0", "203.0.112.255", "203.0.114.0", "192.88.98.255", "192.88.100.0",
+        for s in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "172.15.255.255",
+            "172.32.0.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "192.167.1.1",
+            "11.0.0.1",
+            "1.0.0.0",
+            "192.0.1.0",
+            "198.17.255.255",
+            "198.20.0.0",
+            "223.255.255.255",
+            "192.0.3.0",
+            "198.51.99.255",
+            "198.51.101.0",
+            "203.0.112.255",
+            "203.0.114.0",
+            "192.88.98.255",
+            "192.88.100.0",
         ] {
             assert!(!is_blocked_ip(ip(s)), "{s} should be allowed");
         }
@@ -356,26 +422,50 @@ mod tests {
     #[test]
     fn blocks_ipv6_special_ranges() {
         for s in [
-            "::1", "::", "fc00::1", "fd12:3456::1", "fe80::1", "ff02::1",
+            "::1",
+            "::",
+            "fc00::1",
+            "fd12:3456::1",
+            "fe80::1",
+            "ff02::1",
             // site-local fec0::/10(廃止済み)
-            "fec0::1", "feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "fec0::1",
+            "feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
             // IPv4互換 ::/96(廃止済み)。埋め込みが公開IPでも範囲ごと拒否する
-            "::2", "::7f00:1", "::8.8.8.8", "::ffff:ffff",
+            "::2",
+            "::7f00:1",
+            "::8.8.8.8",
+            "::ffff:ffff",
             // discard 100::/64
-            "100::", "100::ffff:ffff:ffff:ffff",
+            "100::",
+            "100::ffff:ffff:ffff:ffff",
             // ローカル用NAT64 64:ff9b:1::/48。埋め込みが公開IPでも範囲ごと拒否する
-            "64:ff9b:1::", "64:ff9b:1:ffff:ffff:ffff:ffff:ffff", "64:ff9b:1::808:808",
+            "64:ff9b:1::",
+            "64:ff9b:1:ffff:ffff:ffff:ffff:ffff",
+            "64:ff9b:1::808:808",
             // ダミー 100:0:0:1::/64
-            "100:0:0:1::", "100:0:0:1:ffff:ffff:ffff:ffff",
+            "100:0:0:1::",
+            "100:0:0:1:ffff:ffff:ffff:ffff",
             // Teredo 2001::/32(IPv4を埋め込む。範囲ごと拒否)
-            "2001::", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "2001:0:ffff:ffff:ffff:ffff:ffff:ffff",
+            "2001::",
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+            "2001:0:ffff:ffff:ffff:ffff:ffff:ffff",
             // ドキュメント用 2001:db8::/32 と 3fff::/20
-            "2001:db8::", "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", "3fff::", "3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "2001:db8::",
+            "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff",
+            "3fff::",
+            "3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff",
             // ベンチマーク用 2001:2::/48、廃止済みORCHID 2001:10::/28、SRv6 SID 5f00::/16
-            "2001:2::", "2001:2:0:ffff:ffff:ffff:ffff:ffff", "2001:10::", "2001:1f:ffff:ffff:ffff:ffff:ffff:ffff",
-            "5f00::", "5f00:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "2001:2::",
+            "2001:2:0:ffff:ffff:ffff:ffff:ffff",
+            "2001:10::",
+            "2001:1f:ffff:ffff:ffff:ffff:ffff:ffff",
+            "5f00::",
+            "5f00:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
             // 旧SIIT形式のIPv4-translated ::ffff:0:0:0/96(登録簿に無い廃止済み形式。範囲ごと拒否)
-            "::ffff:0:7f00:1", "::ffff:0:8.8.8.8", "::ffff:0:ffff:ffff",
+            "::ffff:0:7f00:1",
+            "::ffff:0:8.8.8.8",
+            "::ffff:0:ffff:ffff",
         ] {
             assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
         }
@@ -384,14 +474,36 @@ mod tests {
     #[test]
     fn allows_ipv6_just_outside_special_ranges() {
         for s in [
-            "2606:4700:4700::1111", "fe7f::1", "::1:0:0", "101::1", "64:ff9b:2::1",
-            "64:ff9c::1", "64:ff9a::1", "64:ff9b:0:1::1",
-            "100:0:0:2::", "100:1::",
+            "2606:4700:4700::1111",
+            "fe7f::1",
+            "::1:0:0",
+            "101::1",
+            "64:ff9b:2::1",
+            "64:ff9c::1",
+            "64:ff9a::1",
+            "64:ff9b:0:1::1",
+            "100:0:0:2::",
+            "100:1::",
             // 登録簿で全世界から到達可能とされる 2001::/23 内の細分は拒否しない
-            "2001:1::1", "2001:1::2", "2001:1::3", "2001:3::1", "2001:4:112::1", "2001:20::1", "2001:30::1", "2620:4f:8000::1",
+            "2001:1::1",
+            "2001:1::2",
+            "2001:1::3",
+            "2001:3::1",
+            "2001:4:112::1",
+            "2001:20::1",
+            "2001:30::1",
+            "2620:4f:8000::1",
             // 禁止範囲の境界の外側
-            "2001:1::", "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", "2001:db9::", "2001:2:1::", "2001:f:ffff:ffff:ffff:ffff:ffff:ffff",
-            "3ffe:ffff::1", "3fff:1000::", "5eff:ffff::1", "5f01::", "::ffff:1:0:0",
+            "2001:1::",
+            "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff",
+            "2001:db9::",
+            "2001:2:1::",
+            "2001:f:ffff:ffff:ffff:ffff:ffff:ffff",
+            "3ffe:ffff::1",
+            "3fff:1000::",
+            "5eff:ffff::1",
+            "5f01::",
+            "::ffff:1:0:0",
         ] {
             assert!(!is_blocked_ip(ip(s)), "{s} should be allowed");
         }
@@ -400,8 +512,13 @@ mod tests {
     #[test]
     fn nat64_is_judged_by_embedded_ipv4() {
         for s in [
-            "64:ff9b::7f00:1", "64:ff9b::c0a8:101", "64:ff9b::a9fe:a9fe", "64:ff9b::a00:1",
-            "64:ff9b::c000:1", "64:ff9b::f000:1", "64:ff9b::127.0.0.1",
+            "64:ff9b::7f00:1",
+            "64:ff9b::c0a8:101",
+            "64:ff9b::a9fe:a9fe",
+            "64:ff9b::a00:1",
+            "64:ff9b::c000:1",
+            "64:ff9b::f000:1",
+            "64:ff9b::127.0.0.1",
         ] {
             assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
         }
@@ -412,10 +529,21 @@ mod tests {
 
     #[test]
     fn sixto4_is_judged_by_embedded_ipv4() {
-        for s in ["2002:7f00:1::", "2002:7f00:1::1", "2002:c0a8:101::1", "2002:a9fe:a9fe::1", "2002:0a00:0001:1:2:3:4:5"] {
+        for s in [
+            "2002:7f00:1::",
+            "2002:7f00:1::1",
+            "2002:c0a8:101::1",
+            "2002:a9fe:a9fe::1",
+            "2002:0a00:0001:1:2:3:4:5",
+        ] {
             assert!(is_blocked_ip(ip(s)), "{s} should be blocked");
         }
-        for s in ["2002:808:808::", "2002:808:808:1::1", "2001:7f00:1::1", "2003:7f00:1::1"] {
+        for s in [
+            "2002:808:808::",
+            "2002:808:808:1::1",
+            "2001:7f00:1::1",
+            "2003:7f00:1::1",
+        ] {
             assert!(!is_blocked_ip(ip(s)), "{s} should be allowed");
         }
     }
@@ -441,7 +569,11 @@ mod tests {
         let key = host_key("みすきー.example:3000");
         assert!(key.starts_with("xn--"), "unexpected key: {key}");
         // reqwest/url がリゾルバへ渡す名前と同じ表記になる
-        let ascii = url::Url::parse("http://みすきー.example:3000/").unwrap().host_str().unwrap().to_string();
+        let ascii = url::Url::parse("http://みすきー.example:3000/")
+            .unwrap()
+            .host_str()
+            .unwrap()
+            .to_string();
         assert_eq!(key, ascii);
     }
 
@@ -449,7 +581,11 @@ mod tests {
     fn allowlisted_unicode_host_matches_the_name_the_resolver_receives() {
         let allow = FetchAllowlist::default();
         allow.replace(["みすきー.example:3000"]);
-        let ascii = url::Url::parse("http://みすきー.example:3000/").unwrap().host_str().unwrap().to_string();
+        let ascii = url::Url::parse("http://みすきー.example:3000/")
+            .unwrap()
+            .host_str()
+            .unwrap()
+            .to_string();
         let out = filter_addrs(&ascii, vec![sa("192.168.1.10")], &allow).unwrap();
         assert_eq!(out, vec![sa("192.168.1.10")]);
     }
@@ -498,7 +634,10 @@ mod tests {
         let allow = FetchAllowlist::default();
         allow.replace(["mi.home.lan:3000", "mi.home.lan"]);
         for port in [3000, 80, 443] {
-            assert!(allow.allows("mi.home.lan", port), "{port} should be allowed");
+            assert!(
+                allow.allows("mi.home.lan", port),
+                "{port} should be allowed"
+            );
         }
         assert!(!allow.allows("mi.home.lan", 8080));
     }
@@ -516,7 +655,11 @@ mod tests {
         let allow = FetchAllowlist::default();
         allow.replace(["MI.Home.Lan.:3000", "みすきー.example:4000"]);
         assert!(allow.allows("mi.home.lan", 3000));
-        let ascii = url::Url::parse("http://みすきー.example/").unwrap().host_str().unwrap().to_string();
+        let ascii = url::Url::parse("http://みすきー.example/")
+            .unwrap()
+            .host_str()
+            .unwrap()
+            .to_string();
         assert!(allow.allows(&ascii, 4000));
         assert!(!allow.allows(&ascii, 3000));
     }
@@ -560,7 +703,10 @@ mod tests {
             "http://0x7f.1/",
             "http://2130706433/",
         ] {
-            assert!(validate_url(&url(s), &allow).is_err(), "{s} should be rejected");
+            assert!(
+                validate_url(&url(s), &allow).is_err(),
+                "{s} should be rejected"
+            );
         }
     }
 
@@ -598,12 +744,21 @@ mod tests {
     #[test]
     fn allowlist_entry_for_url_keeps_the_explicit_port_only() {
         let e = |s: &str| allowlist_entry_for_url(&url(s));
-        assert_eq!(e("https://proxy.example.com/url").as_deref(), Some("proxy.example.com"));
-        assert_eq!(e("http://192.168.1.10:3030/url").as_deref(), Some("192.168.1.10:3030"));
+        assert_eq!(
+            e("https://proxy.example.com/url").as_deref(),
+            Some("proxy.example.com")
+        );
+        assert_eq!(
+            e("http://192.168.1.10:3030/url").as_deref(),
+            Some("192.168.1.10:3030")
+        );
         assert_eq!(e("http://[::1]:3030/url").as_deref(), Some("[::1]:3030"));
         assert_eq!(e("http://[::1]/url").as_deref(), Some("[::1]"));
         // 既定ポートは `url` クレートが落とすので、ホストだけ(80と443を許可)になる。
-        assert_eq!(e("https://proxy.example.com:443/url").as_deref(), Some("proxy.example.com"));
+        assert_eq!(
+            e("https://proxy.example.com:443/url").as_deref(),
+            Some("proxy.example.com")
+        );
     }
 
     #[test]
@@ -636,11 +791,22 @@ mod tests {
     fn validate_url_allows_default_ports_for_portless_hostname() {
         let allow = FetchAllowlist::default();
         allow.replace(["mi.home.lan"]);
-        for s in ["http://mi.home.lan/", "https://mi.home.lan/", "http://mi.home.lan:80/", "https://mi.home.lan:443/"] {
-            assert!(validate_url(&url(s), &allow).is_ok(), "{s} should be allowed");
+        for s in [
+            "http://mi.home.lan/",
+            "https://mi.home.lan/",
+            "http://mi.home.lan:80/",
+            "https://mi.home.lan:443/",
+        ] {
+            assert!(
+                validate_url(&url(s), &allow).is_ok(),
+                "{s} should be allowed"
+            );
         }
         for s in ["http://mi.home.lan:3000/", "https://mi.home.lan:8080/"] {
-            assert!(validate_url(&url(s), &allow).is_err(), "{s} should be rejected");
+            assert!(
+                validate_url(&url(s), &allow).is_err(),
+                "{s} should be rejected"
+            );
         }
     }
 
@@ -680,13 +846,23 @@ mod tests {
     #[test]
     fn filter_addrs_drops_blocked_and_keeps_public() {
         let allow = FetchAllowlist::default();
-        let out = filter_addrs("rebind.example", vec![sa("127.0.0.1"), sa("93.184.216.34"), sa("10.0.0.5")], &allow).unwrap();
+        let out = filter_addrs(
+            "rebind.example",
+            vec![sa("127.0.0.1"), sa("93.184.216.34"), sa("10.0.0.5")],
+            &allow,
+        )
+        .unwrap();
         assert_eq!(out, vec![sa("93.184.216.34")]);
     }
 
     #[test]
     fn filter_addrs_errors_when_every_address_is_blocked() {
-        let err = filter_addrs("evil.example", vec![sa("127.0.0.1"), sa("192.168.0.1")], &FetchAllowlist::default()).unwrap_err();
+        let err = filter_addrs(
+            "evil.example",
+            vec![sa("127.0.0.1"), sa("192.168.0.1")],
+            &FetchAllowlist::default(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("evil.example"));
     }
 
@@ -715,7 +891,11 @@ mod tests {
             std::time::Duration::from_millis(200),
         )
         .unwrap();
-        let res = tokio::time::timeout(std::time::Duration::from_secs(5), http.get(format!("http://127.0.0.1:{port}/")).send()).await;
+        let res = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            http.get(format!("http://127.0.0.1:{port}/")).send(),
+        )
+        .await;
         let err = res.expect("タイムアウトせず永久に待っている").unwrap_err();
         assert!(err.is_timeout(), "unexpected: {err:?}");
     }
@@ -736,12 +916,27 @@ mod tests {
         let first = MockServer::start().await;
         let other = MockServer::start().await;
         let target = localhost_url(&other, "/secret");
-        Mock::given(method("GET")).and(path("/r")).respond_with(ResponseTemplate::new(302).insert_header("Location", target.as_str())).mount(&first).await;
-        Mock::given(method("GET")).and(path("/secret")).respond_with(ResponseTemplate::new(200).set_body_string("other service")).mount(&other).await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", target.as_str()))
+            .mount(&first)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/secret"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("other service"))
+            .mount(&other)
+            .await;
         let allow = allow_localhost_port(&first);
-        let err = client(&allow).get(localhost_url(&first, "/r")).send().await.unwrap_err();
+        let err = client(&allow)
+            .get(localhost_url(&first, "/r"))
+            .send()
+            .await
+            .unwrap_err();
         assert!(is_blocked_error(&err), "unexpected error: {err:?}");
-        assert!(other.received_requests().await.unwrap().is_empty(), "the other port must not be requested");
+        assert!(
+            other.received_requests().await.unwrap().is_empty(),
+            "the other port must not be requested"
+        );
     }
 
     /// `MockServer` は 127.0.0.1 で待ち受ける。`localhost` 名でアクセスして、リゾルバ経由の経路を通す。
@@ -753,18 +948,37 @@ mod tests {
     #[tokio::test]
     async fn resolver_rejects_localhost_when_not_allowlisted() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/a")).respond_with(ResponseTemplate::new(200).set_body_string("ok")).mount(&server).await;
-        let err = client(&FetchAllowlist::default()).get(localhost_url(&server, "/a")).send().await.unwrap_err();
+        Mock::given(method("GET"))
+            .and(path("/a"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+        let err = client(&FetchAllowlist::default())
+            .get(localhost_url(&server, "/a"))
+            .send()
+            .await
+            .unwrap_err();
         assert!(is_blocked_error(&err), "unexpected error: {err:?}");
     }
 
     #[tokio::test]
     async fn resolver_allows_localhost_when_allowlisted() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/a")).respond_with(ResponseTemplate::new(200).set_body_string("ok")).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/a"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
         let allow = FetchAllowlist::default();
         allow.replace(["localhost"]);
-        let body = client(&allow).get(localhost_url(&server, "/a")).send().await.unwrap().text().await.unwrap();
+        let body = client(&allow)
+            .get(localhost_url(&server, "/a"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
         assert_eq!(body, "ok");
     }
 
@@ -772,24 +986,54 @@ mod tests {
     async fn redirect_to_blocked_ip_literal_is_rejected() {
         let server = MockServer::start().await;
         let secret = format!("http://127.0.0.1:{}/secret", server.address().port());
-        Mock::given(method("GET")).and(path("/r")).respond_with(ResponseTemplate::new(302).insert_header("Location", secret.as_str())).mount(&server).await;
-        Mock::given(method("GET")).and(path("/secret")).respond_with(ResponseTemplate::new(200).set_body_string("internal")).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", secret.as_str()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/secret"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("internal"))
+            .mount(&server)
+            .await;
         let allow = FetchAllowlist::default();
         allow.replace(["localhost"]); // 最初のホップは許可し、リダイレクト先のIPリテラルだけを拒否させる
-        let err = client(&allow).get(localhost_url(&server, "/r")).send().await.unwrap_err();
+        let err = client(&allow)
+            .get(localhost_url(&server, "/r"))
+            .send()
+            .await
+            .unwrap_err();
         assert!(is_blocked_error(&err), "unexpected error: {err:?}");
         let received = server.received_requests().await.unwrap();
-        assert!(received.iter().all(|r| r.url.path() != "/secret"), "the redirect target must not be requested");
+        assert!(
+            received.iter().all(|r| r.url.path() != "/secret"),
+            "the redirect target must not be requested"
+        );
     }
 
     #[tokio::test]
     async fn redirect_between_allowed_hosts_is_followed() {
         let server = MockServer::start().await;
         let target = localhost_url(&server, "/final");
-        Mock::given(method("GET")).and(path("/r")).respond_with(ResponseTemplate::new(302).insert_header("Location", target.as_str())).mount(&server).await;
-        Mock::given(method("GET")).and(path("/final")).respond_with(ResponseTemplate::new(200).set_body_string("done")).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/r"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", target.as_str()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/final"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("done"))
+            .mount(&server)
+            .await;
         let allow = allow_localhost_port(&server);
-        let body = client(&allow).get(localhost_url(&server, "/r")).send().await.unwrap().text().await.unwrap();
+        let body = client(&allow)
+            .get(localhost_url(&server, "/r"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
         assert_eq!(body, "done");
     }
 
@@ -797,7 +1041,11 @@ mod tests {
     async fn too_many_redirects_is_an_error() {
         let server = MockServer::start().await;
         let me = localhost_url(&server, "/loop");
-        Mock::given(method("GET")).and(path("/loop")).respond_with(ResponseTemplate::new(302).insert_header("Location", me.as_str())).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/loop"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", me.as_str()))
+            .mount(&server)
+            .await;
         let allow = allow_localhost_port(&server);
         let err = client(&allow).get(me).send().await.unwrap_err();
         assert!(err.is_redirect(), "unexpected error: {err:?}");

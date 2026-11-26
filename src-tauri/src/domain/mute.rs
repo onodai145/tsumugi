@@ -54,16 +54,37 @@ mod tests {
 
     #[test]
     fn each_period_adds_its_length_in_milliseconds() {
-        assert_eq!(MutePeriod::TenMinutes.expires_at_ms(NOW), Some(NOW + 10 * 60 * 1000));
-        assert_eq!(MutePeriod::OneHour.expires_at_ms(NOW), Some(NOW + 60 * 60 * 1000));
-        assert_eq!(MutePeriod::OneDay.expires_at_ms(NOW), Some(NOW + 24 * 60 * 60 * 1000));
-        assert_eq!(MutePeriod::OneWeek.expires_at_ms(NOW), Some(NOW + 7 * 24 * 60 * 60 * 1000));
+        assert_eq!(
+            MutePeriod::TenMinutes.expires_at_ms(NOW),
+            Some(NOW + 10 * 60 * 1000)
+        );
+        assert_eq!(
+            MutePeriod::OneHour.expires_at_ms(NOW),
+            Some(NOW + 60 * 60 * 1000)
+        );
+        assert_eq!(
+            MutePeriod::OneDay.expires_at_ms(NOW),
+            Some(NOW + 24 * 60 * 60 * 1000)
+        );
+        assert_eq!(
+            MutePeriod::OneWeek.expires_at_ms(NOW),
+            Some(NOW + 7 * 24 * 60 * 60 * 1000)
+        );
     }
 
     #[test]
     fn serializes_as_camel_case_matching_the_frontend_values() {
-        assert_eq!(serde_json::to_string(&MutePeriod::TenMinutes).unwrap(), "\"tenMinutes\"");
-        assert_eq!(serde_json::to_string(&MutePeriod::Indefinitely).unwrap(), "\"indefinitely\"");
-        assert_eq!(serde_json::from_str::<MutePeriod>("\"oneWeek\"").unwrap(), MutePeriod::OneWeek);
+        assert_eq!(
+            serde_json::to_string(&MutePeriod::TenMinutes).unwrap(),
+            "\"tenMinutes\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MutePeriod::Indefinitely).unwrap(),
+            "\"indefinitely\""
+        );
+        assert_eq!(
+            serde_json::from_str::<MutePeriod>("\"oneWeek\"").unwrap(),
+            MutePeriod::OneWeek
+        );
     }
 }

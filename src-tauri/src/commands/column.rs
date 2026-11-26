@@ -8,9 +8,9 @@ use crate::api::meta::{
 use crate::api::notes::{fetch_notes, search_notes, SearchParams};
 use crate::api::notifications::fetch_notifications;
 use crate::domain::{
-    clamp_group_width, search_capabilities, Column, ColumnGroup, ColumnKind, Edge, FilterQuery, MuteConfig, Note,
-    Notification, PaneNode, SearchCapabilities, SourceItem, SplitDirection, User, UserList, GROUP_WIDTH_MAX,
-    GROUP_WIDTH_MIN,
+    clamp_group_width, search_capabilities, Column, ColumnGroup, ColumnKind, Edge, FilterQuery,
+    MuteConfig, Note, Notification, PaneNode, SearchCapabilities, SourceItem, SplitDirection, User,
+    UserList, GROUP_WIDTH_MAX, GROUP_WIDTH_MIN,
 };
 use crate::error::{Error, Result};
 use crate::fence::{ColumnFence, Epoch};
@@ -98,8 +98,12 @@ pub async fn add_column(
                 .into_iter()
                 .find(|g| g.id == gid)
                 .ok_or_else(|| Error::Invalid(format!("unknown group: {gid}")))?;
-            let tab_order =
-                state.settings.load_columns()?.iter().filter(|c| c.group_id == gid).count() as i32;
+            let tab_order = state
+                .settings
+                .load_columns()?
+                .iter()
+                .filter(|c| c.group_id == gid)
+                .count() as i32;
             (group, tab_order)
         }
         None => {
@@ -175,13 +179,20 @@ pub async fn split_pane(
         .map(|p| p.default_column_width)
         .unwrap_or(DEFAULT_WIDTH)
         .clamp(GROUP_WIDTH_MIN, GROUP_WIDTH_MAX);
-    let group = ColumnGroup { id: uuid::Uuid::new_v4().to_string(), order, width, auto: false };
+    let group = ColumnGroup {
+        id: uuid::Uuid::new_v4().to_string(),
+        order,
+        width,
+        auto: false,
+    };
     // upsert_groupより先にload_pane_layoutする(add_columnと同じ理由: 自己修復ロジックとの
     // 二重挿入を避けるため。Issue #31)。
     let mut root = state.settings.load_pane_layout()?;
     if !root.insert_sibling(&reference_group_id, &group.id, direction) {
         // reference_group_idはフロントが既存グループのidしか渡さない前提のため通常到達しない。
-        return Err(Error::Invalid(format!("unknown reference group: {reference_group_id}")));
+        return Err(Error::Invalid(format!(
+            "unknown reference group: {reference_group_id}"
+        )));
     }
     state.settings.upsert_group(&group)?;
     state.settings.save_pane_layout(&root)?;
@@ -215,16 +226,30 @@ pub async fn set_pane_auto(state: State<'_, AppState>, node_id: String, auto: bo
 /// dragged_group_id == target_group_idの場合は何もしない(同じ場所への無意味なドロップ)。
 #[tauri::command]
 #[specta::specta]
-pub async fn move_pane(state: State<'_, AppState>, dragged_group_id: String, target_group_id: String, edge: Edge) -> Result<()> {
+pub async fn move_pane(
+    state: State<'_, AppState>,
+    dragged_group_id: String,
+    target_group_id: String,
+    edge: Edge,
+) -> Result<()> {
     if dragged_group_id == target_group_id {
         return Ok(());
     }
     let mut root = state.settings.load_pane_layout()?;
     if !root.remove_group(&dragged_group_id) {
-        return Err(Error::Invalid(format!("unknown dragged group: {dragged_group_id}")));
+        return Err(Error::Invalid(format!(
+            "unknown dragged group: {dragged_group_id}"
+        )));
     }
-    if !root.insert_sibling_at(&target_group_id, &dragged_group_id, edge.direction(), edge.before()) {
-        return Err(Error::Invalid(format!("unknown target group: {target_group_id}")));
+    if !root.insert_sibling_at(
+        &target_group_id,
+        &dragged_group_id,
+        edge.direction(),
+        edge.before(),
+    ) {
+        return Err(Error::Invalid(format!(
+            "unknown target group: {target_group_id}"
+        )));
     }
     state.settings.save_pane_layout(&root)
 }
@@ -241,7 +266,11 @@ pub async fn load_pane_layout(state: State<'_, AppState>) -> Result<PaneNode> {
 #[tauri::command]
 #[specta::specta]
 pub async fn discard_empty_group(state: State<'_, AppState>, group_id: String) -> Result<()> {
-    let has_tabs = state.settings.load_columns()?.iter().any(|c| c.group_id == group_id);
+    let has_tabs = state
+        .settings
+        .load_columns()?
+        .iter()
+        .any(|c| c.group_id == group_id);
     if has_tabs {
         return Ok(());
     }
@@ -462,7 +491,10 @@ async fn resume_column_core<R: Runtime>(
         };
         let cache_eligible = resolved.as_ref().is_some_and(backfill_cache_eligible);
         let boundary_unset = needs_boundary_refetch(cache_eligible, restore_e.as_deref());
-        (restrict_to_boundary(cached, restore_e.as_deref()), boundary_unset)
+        (
+            restrict_to_boundary(cached, restore_e.as_deref()),
+            boundary_unset,
+        )
     };
 
     // キャッシュが有っても、境界が確定していないキャッシュ優先対象のカラムは、初回取得をやり直して
@@ -471,7 +503,9 @@ async fn resume_column_core<R: Runtime>(
     // (オフラインでも起動できる)。ただし、取得中に update_column / close_column が走った(世代が古い)
     // 場合は、古い定義のストリームを開かないよう、フォールバックせず Err を返す。
     if !notes.is_empty() && boundary_unset {
-        let eligible = resolved.as_ref().expect("非通知カラムは resolve_sources 済み");
+        let eligible = resolved
+            .as_ref()
+            .expect("非通知カラムは resolve_sources 済み");
         match reestablish_boundary(
             app,
             state,
@@ -486,19 +520,30 @@ async fn resume_column_core<R: Runtime>(
         {
             Ok(Some(fresh)) => {
                 state.cache_metrics.record_resume_boundary_refetch();
-                return Ok(OpenedColumn { column, group, notes: fresh, notifications: vec![] });
+                return Ok(OpenedColumn {
+                    column,
+                    group,
+                    notes: fresh,
+                    notifications: vec![],
+                });
             }
             Ok(None) => {
                 // 取得に失敗したときも、取得中に世代が変わっていたら、古い定義のストリームを開かない。
                 if !state.column_fence.is_current(&column.id, &epoch) {
-                    return Err(Error::Invalid(format!("column {} was modified while it was being opened", column.id)));
+                    return Err(Error::Invalid(format!(
+                        "column {} was modified while it was being opened",
+                        column.id
+                    )));
                 }
             }
             Err(e) => {
                 if !state.column_fence.is_current(&column.id, &epoch) {
                     return Err(e);
                 }
-                log::warn!("failed to re-establish the backfill boundary of column {}: {e}", column.id);
+                log::warn!(
+                    "failed to re-establish the backfill boundary of column {}: {e}",
+                    column.id
+                );
             }
         }
     }
@@ -528,21 +573,25 @@ async fn resume_column_core<R: Runtime>(
             let column_id = column.id.clone();
             let account_id = column.account_id.clone();
             tauri::async_runtime::spawn(async move {
-                let Some(state) = app2.try_state::<AppState>() else { return };
-                let gap_result = fill_gap(&state, &account_id, &resolved, &newest_known_id, gap_limit)
-                    .await
-                    .unwrap_or(GapFillResult {
-                        notes: vec![],
-                        truncated: false,
-                        boundary_id: None,
-                        sources: vec![],
-                        all_reached: false,
-                        dropped_floor: None,
-                    });
+                let Some(state) = app2.try_state::<AppState>() else {
+                    return;
+                };
+                let gap_result =
+                    fill_gap(&state, &account_id, &resolved, &newest_known_id, gap_limit)
+                        .await
+                        .unwrap_or(GapFillResult {
+                            notes: vec![],
+                            truncated: false,
+                            boundary_id: None,
+                            sources: vec![],
+                            all_reached: false,
+                            dropped_floor: None,
+                        });
                 // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
                 // 残るので、空判定の前に行う(Issue #432)。取得中に update_column / close_column が
                 // 走っていた(世代が古い)なら、何も書かず、イベントも出さない(Issue #446)。
-                let attribute_to = crate::attribution::attribution_target(&account_id, resolved.use_cache);
+                let attribute_to =
+                    crate::attribution::attribution_target(&account_id, resolved.use_cache);
                 if !commit_gap_fill_writes(
                     &state.column_fence,
                     &state.cache,
@@ -622,9 +671,12 @@ pub async fn prune_note_cache(state: State<'_, AppState>) -> Result<i32> {
     let ui = state.settings.load_ui()?;
     Ok(state
         .cache
-        .prune(ui.note_cache_limit, ui.note_cache_max_age_days, ui.note_cache_max_size_mb)
-        .await?
-        as i32)
+        .prune(
+            ui.note_cache_limit,
+            ui.note_cache_max_age_days,
+            ui.note_cache_max_size_mb,
+        )
+        .await? as i32)
 }
 
 /// 過去ページ（上スクロール）。`from cache` を含まず、かつ全ソースがストリーミング対応の
@@ -646,7 +698,8 @@ pub async fn fetch_backfill(
     // 世代はカラム定義を読む前に控える。取得中に update_column / close_column が走ったら、
     // 下の書き込みは捨てられる(Issue #446)。
     let (epoch, column) = begin_and_load_column(&state, &column_id)?;
-    let resolved = resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
+    let resolved =
+        resolve_sources(&state, &column.account_id, &column.kind, &column.filter).await?;
 
     let cache_eligible = backfill_cache_eligible(&resolved);
     let (boundaries, boundary_read_failed) = if cache_eligible {
@@ -680,7 +733,13 @@ pub async fn fetch_backfill(
                 && !server_muted_note(&state, &column.account_id, n)
                 && !state.is_word_muted(&column.account_id, n)
         });
-        if let Some(mut notes) = cache_backfill_page(effective.as_deref(), &until_id, cached, raw_loaded, INITIAL_LIMIT) {
+        if let Some(mut notes) = cache_backfill_page(
+            effective.as_deref(),
+            &until_id,
+            cached,
+            raw_loaded,
+            INITIAL_LIMIT,
+        ) {
             state.cache_metrics.record_backfill(BackfillOutcome::Hit);
             // キャッシュから読んだコピーなので、返す分だけ除去してよい(Issue #486)。
             state.strip_muted_replies(&column.account_id, &mut notes);
@@ -688,17 +747,30 @@ pub async fn fetch_backfill(
         }
         state
             .cache_metrics
-            .record_backfill(backfill_fallback_outcome(boundary_read_failed, effective.as_deref()));
+            .record_backfill(backfill_fallback_outcome(
+                boundary_read_failed,
+                effective.as_deref(),
+            ));
     }
 
-    let fetch = fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
+    let fetch =
+        fetch_and_filter_multi(&state, &column.account_id, &resolved, Some(&until_id)).await?;
     // 境界の延長は、ソースごとに、既存の境界と連続している場合のみ行う(plan_boundary_extend)。
     // 境界未確定のソースは連続性を検証できないので延長せず、カラム開き直し時の
     // open_stream_and_fetch が改めて確定させる。計画は、ここ(ロックの外)の古い境界ではなく、
     // commit_backfill_writes がロックの中で読む最新の境界から作る(Issue #456)。
     let extend_until = cache_eligible.then_some(until_id.as_str());
     // 取得中に update_column / close_column が走っていた(世代が古い)なら、何も書かず空で返す(Issue #446)。
-    match commit_backfill_writes(&state.column_fence, &state.cache, &column.id, &epoch, &fetch, extend_until).await {
+    match commit_backfill_writes(
+        &state.column_fence,
+        &state.cache,
+        &column.id,
+        &epoch,
+        &fetch,
+        extend_until,
+    )
+    .await
+    {
         None => return Ok(vec![]),
         Some(written) => written?,
     }
@@ -725,14 +797,24 @@ pub async fn fetch_notifications_backfill(
 /// グループ幅を更新（永続化）。
 #[tauri::command]
 #[specta::specta]
-pub async fn set_group_width(state: State<'_, AppState>, group_id: String, width: i32) -> Result<()> {
-    state.settings.set_group_width(&group_id, clamp_group_width(width))
+pub async fn set_group_width(
+    state: State<'_, AppState>,
+    group_id: String,
+    width: i32,
+) -> Result<()> {
+    state
+        .settings
+        .set_group_width(&group_id, clamp_group_width(width))
 }
 
 /// グループの幅モード（固定/自動調整）を更新。
 #[tauri::command]
 #[specta::specta]
-pub async fn set_group_auto(state: State<'_, AppState>, group_id: String, auto: bool) -> Result<()> {
+pub async fn set_group_auto(
+    state: State<'_, AppState>,
+    group_id: String,
+    auto: bool,
+) -> Result<()> {
     state.settings.set_group_auto(&group_id, auto)
 }
 
@@ -753,7 +835,9 @@ pub async fn move_tab(
     group_id: String,
     ordered_tab_ids: Vec<String>,
 ) -> Result<()> {
-    state.settings.move_tab(&tab_id, &group_id, &ordered_tab_ids)?;
+    state
+        .settings
+        .move_tab(&tab_id, &group_id, &ordered_tab_ids)?;
     state.settings.delete_empty_groups()?;
     Ok(())
 }
@@ -814,7 +898,9 @@ pub async fn uncapture_notes(
 #[tauri::command]
 #[specta::specta]
 pub async fn validate_filter(filter: FilterQuery) -> Result<()> {
-    CompiledFilter::compile(&filter).map(|_| ()).map_err(Error::Invalid)
+    CompiledFilter::compile(&filter)
+        .map(|_| ())
+        .map_err(Error::Invalid)
 }
 
 /// エキスパートモード用: `from <sources> where <expr>` 全文の構文検証のみ行う。
@@ -876,9 +962,12 @@ pub async fn set_column_notify(
     notify_sound_choice: String,
 ) -> Result<()> {
     crate::mml::validate_sound_choice(&notify_sound_choice)?;
-    state
-        .settings
-        .set_column_notify(&column_id, notify_desktop, notify_sound, &notify_sound_choice)
+    state.settings.set_column_notify(
+        &column_id,
+        notify_desktop,
+        notify_sound,
+        &notify_sound_choice,
+    )
 }
 
 /// アンテナ一覧（Antenna タブ作成用）。
@@ -972,7 +1061,9 @@ async fn resolve_sources(
     }
 
     let FilterQuery::Tql(text) = filter else {
-        return Err(Error::Invalid("TQLカラムには from 節を含むクエリが必要です".into()));
+        return Err(Error::Invalid(
+            "TQLカラムには from 節を含むクエリが必要です".into(),
+        ));
     };
     let q = parser::parse(text).map_err(Error::Invalid)?;
     if q.sources.is_empty() {
@@ -996,11 +1087,19 @@ async fn resolve_sources(
             ast::Source::Local => kinds.push(ColumnKind::Local),
             ast::Source::Hybrid => kinds.push(ColumnKind::Hybrid),
             ast::Source::Global => kinds.push(ColumnKind::Global),
-            ast::Source::List(id) => kinds.push(ColumnKind::List { list_id: id.clone() }),
-            ast::Source::Antenna(id) => kinds.push(ColumnKind::Antenna { antenna_id: id.clone() }),
-            ast::Source::Channel(id) => kinds.push(ColumnKind::Channel { channel_id: id.clone() }),
+            ast::Source::List(id) => kinds.push(ColumnKind::List {
+                list_id: id.clone(),
+            }),
+            ast::Source::Antenna(id) => kinds.push(ColumnKind::Antenna {
+                antenna_id: id.clone(),
+            }),
+            ast::Source::Channel(id) => kinds.push(ColumnKind::Channel {
+                channel_id: id.clone(),
+            }),
             ast::Source::Tag(t) => kinds.push(ColumnKind::Tag { tag: t.clone() }),
-            ast::Source::Search(query) => kinds.push(ColumnKind::Search { query: query.clone() }),
+            ast::Source::Search(query) => kinds.push(ColumnKind::Search {
+                query: query.clone(),
+            }),
         }
     }
     if kinds.is_empty() && !use_cache {
@@ -1010,7 +1109,11 @@ async fn resolve_sources(
         Some(expr) => CompiledFilter::from_expr(expr),
         None => CompiledFilter::PassAll,
     };
-    Ok(ResolvedSources { kinds, use_cache, filter })
+    Ok(ResolvedSources {
+        kinds,
+        use_cache,
+        filter,
+    })
 }
 
 /// タブのストリームを開き、初期ページ(ノート or 通知)を取得する。
@@ -1043,7 +1146,8 @@ async fn open_stream_and_fetch<R: Runtime>(
 
     let resolved = resolved.expect("非通知カラムは resolve_sources 済み");
     let fetch = fetch_and_filter_multi(state, &column.account_id, &resolved, None).await?;
-    let notes = commit_initial_fetch(app, state, column, &resolved, host, token, epoch, fetch).await?;
+    let notes =
+        commit_initial_fetch(app, state, column, &resolved, host, token, epoch, fetch).await?;
     Ok((notes, vec![]))
 }
 
@@ -1063,7 +1167,8 @@ async fn commit_initial_fetch<R: Runtime>(
     epoch: &Epoch,
     fetch: FilteredFetch,
 ) -> Result<Vec<Note>> {
-    let boundaries = backfill_cache_eligible(resolved).then(|| plan_boundary_initial(&fetch.source_outcomes));
+    let boundaries =
+        backfill_cache_eligible(resolved).then(|| plan_boundary_initial(&fetch.source_outcomes));
     commit_initial_writes(
         &state.column_fence,
         &state.cache,
@@ -1102,12 +1207,20 @@ async fn reestablish_boundary<R: Runtime>(
 ) -> Result<Option<Vec<Note>>> {
     // 応答しないサーバーで、これまで即時に表示できていたカラムの復元(と、直列に待つ後続のカラム)を
     // 止めない。取得だけを区切る(書き込みの前なので、中断しても何も残らない)。時間切れは、失敗と同じ扱い。
-    let Ok(fetch) = tokio::time::timeout(fetch_timeout, fetch_and_filter_multi(state, &column.account_id, resolved, None)).await
+    let Ok(fetch) = tokio::time::timeout(
+        fetch_timeout,
+        fetch_and_filter_multi(state, &column.account_id, resolved, None),
+    )
+    .await
     else {
         return Ok(None);
     };
     let fetch = fetch?;
-    if fetch.source_outcomes.iter().any(|o| matches!(o, SourceOutcome::Failed)) {
+    if fetch
+        .source_outcomes
+        .iter()
+        .any(|o| matches!(o, SourceOutcome::Failed))
+    {
         return Ok(None);
     }
     // フィルタを通るノートが0件(強いフィルタで、取得範囲に該当が無い)なら、確定しない。確定すると、
@@ -1116,7 +1229,9 @@ async fn reestablish_boundary<R: Runtime>(
     if fetch.notes.is_empty() {
         return Ok(None);
     }
-    commit_initial_fetch(app, state, column, resolved, host, token, epoch, fetch).await.map(Some)
+    commit_initial_fetch(app, state, column, resolved, host, token, epoch, fetch)
+        .await
+        .map(Some)
 }
 
 /// 解決済みソースのうちストリーミング対応のものだけ購読を開く（REST初期取得は済んでいる前提）。
@@ -1179,19 +1294,37 @@ struct GapFillResult {
 
 /// 収集済みノートを重複除去・整形し、`newest_known_id` に追いつけたかを判定する。
 /// ネットワークを伴わない純粋関数にして単体テストしやすくしている。
-fn finalize_gap_fill(mut collected: Vec<Note>, all_sources_reached_target: bool, limit: i32) -> GapFillResult {
+fn finalize_gap_fill(
+    mut collected: Vec<Note>,
+    all_sources_reached_target: bool,
+    limit: i32,
+) -> GapFillResult {
     let mut seen = std::collections::HashSet::new();
     collected.retain(|n| seen.insert(n.id.clone()));
-    collected.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    collected.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
     let keep = limit.max(0) as usize;
     // 切り詰めは created_at 順、境界は id 順なので、捨てたノートの id が残した最古より大きい
     // こともありうる。境界の下限には「捨てた id の最大値」を使う(Issue #432)。
-    let dropped_floor = collected.iter().skip(keep).map(|n| n.id.as_str()).max().map(str::to_string);
+    let dropped_floor = collected
+        .iter()
+        .skip(keep)
+        .map(|n| n.id.as_str())
+        .max()
+        .map(str::to_string);
     collected.truncate(keep);
     // 全ソースが追いついても、limit 超過で切り捨てがあれば newest_known 直上に穴ができる。
     // フロントにギャップマーカーを出させて、ユーザーが埋められるようにする。
-    let truncated = (!all_sources_reached_target || dropped_floor.is_some()) && !collected.is_empty();
-    let boundary_id = if truncated { collected.last().map(|n| n.id.clone()) } else { None };
+    let truncated =
+        (!all_sources_reached_target || dropped_floor.is_some()) && !collected.is_empty();
+    let boundary_id = if truncated {
+        collected.last().map(|n| n.id.clone())
+    } else {
+        None
+    };
     GapFillResult {
         notes: collected,
         truncated,
@@ -1218,7 +1351,10 @@ fn read_boundaries(
 
 /// キャッシュで賄えず API へ落ちたときの理由。境界の読み出し失敗は「未確定」と区別して
 /// `FallbackOther` に数える(DBエラーで `FallbackBoundaryUnset` が膨らむのを防ぐ)。
-fn backfill_fallback_outcome(boundary_read_failed: bool, effective: Option<&str>) -> BackfillOutcome {
+fn backfill_fallback_outcome(
+    boundary_read_failed: bool,
+    effective: Option<&str>,
+) -> BackfillOutcome {
     if effective.is_none() && !boundary_read_failed {
         BackfillOutcome::FallbackBoundaryUnset
     } else {
@@ -1322,7 +1458,11 @@ async fn fill_gap(
                     oldest_fetched[i] = Some(m.to_string());
                 }
             }
-            page.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+            page.sort_by(|a, b| {
+                b.created_at
+                    .cmp(&a.created_at)
+                    .then_with(|| b.id.cmp(&a.id))
+            });
             let oldest_this_page = page.last().map(|n| n.id.clone());
             for n in page {
                 if n.id.as_str() <= newest_known_id {
@@ -1350,7 +1490,10 @@ async fn fill_gap(
     result.sources = oldest_fetched
         .into_iter()
         .zip(reached_target)
-        .map(|(oldest_fetched, reached_target)| GapSourceState { oldest_fetched, reached_target })
+        .map(|(oldest_fetched, reached_target)| GapSourceState {
+            oldest_fetched,
+            reached_target,
+        })
         .collect();
     Ok(result)
 }
@@ -1365,7 +1508,11 @@ struct GapFillGuard<R: Runtime> {
 impl<R: Runtime> Drop for GapFillGuard<R> {
     fn drop(&mut self) {
         if let Some(state) = self.app.try_state::<AppState>() {
-            state.gap_fill_in_flight.lock().unwrap().remove(&self.column_id);
+            state
+                .gap_fill_in_flight
+                .lock()
+                .unwrap()
+                .remove(&self.column_id);
         }
     }
 }
@@ -1423,15 +1570,22 @@ pub(crate) async fn gap_fill_on_reconnect<R: Runtime>(app: &AppHandle<R>, column
     if gap_limit == 0 {
         return;
     }
-    let Ok(gap_result) =
-        fill_gap(&state, &column.account_id, &resolved, &newest_known_id, gap_limit).await
+    let Ok(gap_result) = fill_gap(
+        &state,
+        &column.account_id,
+        &resolved,
+        &newest_known_id,
+        gap_limit,
+    )
+    .await
     else {
         return;
     };
     // 打ち切られた(=穴が残りうる)なら境界を引き上げる。収集が0件でも未取得の範囲は
     // 残るので、空判定の前に行う(Issue #432)。取得中に update_column / close_column が
     // 走っていた(世代が古い)なら、何も書かず、イベントも出さない(Issue #446)。
-    let attribute_to = crate::attribution::attribution_target(&column.account_id, resolved.use_cache);
+    let attribute_to =
+        crate::attribution::attribution_target(&column.account_id, resolved.use_cache);
     if !commit_gap_fill_writes(
         &state.column_fence,
         &state.cache,
@@ -1656,11 +1810,16 @@ where
             frozen = vec![false; pass.outcomes.len()];
         } else {
             for (i, next) in pass.outcomes.iter().enumerate() {
-                let Some(prev) = merged_outcomes.get(i).cloned() else { break };
+                let Some(prev) = merged_outcomes.get(i).cloned() else {
+                    break;
+                };
                 if frozen[i] {
                     continue;
                 }
-                if matches!((&prev, next), (SourceOutcome::Fetched(_), SourceOutcome::Failed)) {
+                if matches!(
+                    (&prev, next),
+                    (SourceOutcome::Fetched(_), SourceOutcome::Failed)
+                ) {
                     frozen[i] = true;
                     continue;
                 }
@@ -1669,8 +1828,13 @@ where
         }
         let watermark = backfill_watermark(&pass.outcomes, pass.cache_min.as_deref());
         let is_last = pass_no >= BACKFILL_MAX_PASSES;
-        let fallback_notes = if is_last { Some(pass.notes.clone()) } else { None };
-        let (mut display, mut cacheable) = split_display_and_cacheable(pass.notes, use_cache, watermark.as_deref());
+        let fallback_notes = if is_last {
+            Some(pass.notes.clone())
+        } else {
+            None
+        };
+        let (mut display, mut cacheable) =
+            split_display_and_cacheable(pass.notes, use_cache, watermark.as_deref());
         if display_acc.is_empty() && display.is_empty() && watermark.is_some() && is_last {
             if let Some(notes) = fallback_notes {
                 (display, cacheable) = split_display_and_cacheable(notes, use_cache, None);
@@ -1685,7 +1849,11 @@ where
     }
 
     // 全パスの和集合(id 重複除去、created_at 降順)。1パスで終わった場合は split の結果と同じ。
-    let order = |a: &Note, b: &Note| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id));
+    let order = |a: &Note, b: &Note| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.id.cmp(&a.id))
+    };
     let mut seen = std::collections::HashSet::new();
     display_acc.retain(|n| seen.insert(n.id.clone()));
     display_acc.sort_by(order);
@@ -1694,15 +1862,28 @@ where
     all_cacheable.retain(|n| seen.insert(n.id.clone()));
     all_cacheable.sort_by(order);
     // `from cache` を含むカラムは境界の対象外なので、cacheable は画面用と同じ。
-    let cacheable = if use_cache { display_acc.clone() } else { all_cacheable };
-    Ok(FilteredFetch { notes: display_acc, cacheable, source_outcomes: merged_outcomes, attribute_to: None })
+    let cacheable = if use_cache {
+        display_acc.clone()
+    } else {
+        all_cacheable
+    };
+    Ok(FilteredFetch {
+        notes: display_acc,
+        cacheable,
+        source_outcomes: merged_outcomes,
+        attribute_to: None,
+    })
 }
 
 /// 取得結果をキャッシュへ書く。書くのは画面用の `notes`(truncate後)ではなく `cacheable`。
 /// backfill境界は「ソースごとのRESTページ全体が column_note に入っている」ことを前提に
 /// 進めるため、`notes` を書くと境界が完全と主張する範囲に欠落が出る。`fetch_backfill` と
 /// `open_stream_and_fetch` の両方がこれを経由することで、書き込み対象を1か所に固定する。
-async fn cache_fetched(cache: &NoteCacheStore, column_id: &str, fetch: &FilteredFetch) -> Result<()> {
+async fn cache_fetched(
+    cache: &NoteCacheStore,
+    column_id: &str,
+    fetch: &FilteredFetch,
+) -> Result<()> {
     cache.cache_notes(column_id, &fetch.cacheable).await?;
     if let Some(account_id) = fetch.attribute_to.as_deref() {
         crate::attribution::record(cache, account_id, &fetch.cacheable).await;
@@ -1733,7 +1914,8 @@ async fn commit_backfill_writes(
             // 延長を書かない(Issue #452)。
             if boundaries_ok {
                 if let Some(until_id) = extend_until {
-                    extend_boundaries_in_lock(cache, column_id, until_id, &fetch.source_outcomes).await;
+                    extend_boundaries_in_lock(cache, column_id, until_id, &fetch.source_outcomes)
+                        .await;
                 }
             }
             Ok::<(), Error>(())
@@ -1743,7 +1925,12 @@ async fn commit_backfill_writes(
 
 /// カラムのロックの中で、最新の境界を読み、`plan_boundary_extend` の計画で延長する。境界を読めなければ、
 /// 延長を飛ばす(保守的)。計画に入るのは、既存の行があるソースだけなので、境界の行は挿入されない。
-async fn extend_boundaries_in_lock(cache: &NoteCacheStore, column_id: &str, until_id: &str, outcomes: &[SourceOutcome]) {
+async fn extend_boundaries_in_lock(
+    cache: &NoteCacheStore,
+    column_id: &str,
+    until_id: &str,
+    outcomes: &[SourceOutcome],
+) {
     let prev = match cache.get_fetch_boundaries(column_id).await {
         Ok(prev) => prev,
         Err(e) => {
@@ -1787,7 +1974,11 @@ async fn commit_initial_writes(
             Ok::<(), Error>(())
         })
         .await
-        .unwrap_or_else(|| Err(Error::Invalid(format!("column {column_id} was modified while it was being opened"))))
+        .unwrap_or_else(|| {
+            Err(Error::Invalid(format!(
+                "column {column_id} was modified while it was being opened"
+            )))
+        })
 }
 
 /// ギャップ埋めの書き込み: 境界の引き上げと、収集したノートのキャッシュ。`epoch` が古ければ
@@ -1864,7 +2055,10 @@ fn plan_boundary_extend(
 
 /// 全ソースの境界が揃っているときだけ、カラム全体で完全な範囲 `id > E` の `E = max(b_i)` を返す。
 /// 1ソースでも境界が無ければ None(未確定)。`""`(枯渇済み)は他ソースの境界より小さいので塞がない。
-fn effective_boundary(boundaries: &std::collections::HashMap<u32, String>, source_count: usize) -> Option<String> {
+fn effective_boundary(
+    boundaries: &std::collections::HashMap<u32, String>,
+    source_count: usize,
+) -> Option<String> {
     if source_count == 0 {
         return None;
     }
@@ -1928,7 +2122,10 @@ fn plan_boundary_raise_after_gap(
         .iter()
         .filter_map(|(i, b)| match sources.get(*i as usize) {
             Some(s) if s.reached_target => Some((*i, raise(b, None))),
-            Some(GapSourceState { oldest_fetched: Some(o), .. }) => Some((*i, raise(b, Some(o)))),
+            Some(GapSourceState {
+                oldest_fetched: Some(o),
+                ..
+            }) => Some((*i, raise(b, Some(o)))),
             _ => None,
         })
         .collect();
@@ -1960,16 +2157,23 @@ async fn apply_gap_fill_boundaries(cache: &NoteCacheStore, column_id: &str, gap:
         return;
     };
     let prev: std::collections::HashMap<u32, String> = prev.into_iter().collect();
-    if let Some(entries) =
-        plan_boundary_raise_after_gap(&prev, &gap.sources, gap.all_reached, gap.dropped_floor.as_deref())
-    {
+    if let Some(entries) = plan_boundary_raise_after_gap(
+        &prev,
+        &gap.sources,
+        gap.all_reached,
+        gap.dropped_floor.as_deref(),
+    ) {
         let _ = cache.replace_fetch_boundaries(column_id, &entries).await;
     }
 }
 
 /// `resume_column` の復元一覧を絞る有効境界。キャッシュ優先の対象でないカラムや、
 /// 境界が未確定のカラムは None(絞らない)。
-async fn restore_boundary(state: &AppState, column_id: &str, resolved: &ResolvedSources) -> Option<String> {
+async fn restore_boundary(
+    state: &AppState,
+    column_id: &str,
+    resolved: &ResolvedSources,
+) -> Option<String> {
     if !backfill_cache_eligible(resolved) {
         return None;
     }
@@ -2011,7 +2215,11 @@ fn split_display_and_cacheable(
     // 複数ソースに同じノートが跨る場合の重複除去 + created_at 降順ソート
     let mut seen = std::collections::HashSet::new();
     filtered.retain(|n| seen.insert(n.id.clone()));
-    filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+    filtered.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
     let display: Vec<Note> = filtered
         .iter()
         .filter(|n| watermark.is_none_or(|w| n.id.as_str() >= w))
@@ -2047,7 +2255,9 @@ async fn search_cache_core(
         following_ids: None,
     };
     let where_sql = match &compiled {
-        CompiledFilter::Tql { expr, .. } => sql::build_where(expr, &sql_ctx).map_err(Error::Invalid)?,
+        CompiledFilter::Tql { expr, .. } => {
+            sql::build_where(expr, &sql_ctx).map_err(Error::Invalid)?
+        }
         _ => sql::SqlWhere::always_true(),
     };
     let raw = cache.search_cache(&where_sql, until_id, limit).await?;
@@ -2116,7 +2326,9 @@ fn check_search_request(query: &str, has_date: bool, caps: &SearchCapabilities) 
         return Err(Error::Invalid("search query is empty".into()));
     }
     if has_date && !caps.date_range {
-        return Err(Error::Invalid("date range search is not supported by this server".into()));
+        return Err(Error::Invalid(
+            "date range search is not supported by this server".into(),
+        ));
     }
     Ok(())
 }
@@ -2180,14 +2392,18 @@ fn apply_search_mutes(
 ) -> Vec<Note> {
     notes
         .into_iter()
-        .filter(|n| !crate::filter::mute::is_muted(n, mute) && !is_server_muted(n) && !is_word_muted(n))
+        .filter(|n| {
+            !crate::filter::mute::is_muted(n, mute) && !is_server_muted(n) && !is_word_muted(n)
+        })
         .collect()
 }
 
 /// 環境変数の値を、上書きするバージョン文字列として解釈する(空白は除き、空なら無し)。
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
 fn parse_version_override(raw: Option<&str>) -> Option<String> {
-    raw.map(str::trim).filter(|v| !v.is_empty()).map(String::from)
+    raw.map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(String::from)
 }
 
 /// **デバッグビルド限定**: `TSUMUGI_DEBUG_SERVER_VERSION` で、アプリが認識する接続先サーバーの
@@ -2196,7 +2412,11 @@ fn parse_version_override(raw: Option<&str>) -> Option<String> {
 /// 以降の API 呼び出しは本物のまま。リリースビルド(`debug_assertions` なし)には含めない。
 #[cfg(debug_assertions)]
 fn debug_server_version_override() -> Option<String> {
-    parse_version_override(std::env::var("TSUMUGI_DEBUG_SERVER_VERSION").ok().as_deref())
+    parse_version_override(
+        std::env::var("TSUMUGI_DEBUG_SERVER_VERSION")
+            .ok()
+            .as_deref(),
+    )
 }
 
 #[cfg(not(debug_assertions))]
@@ -2298,7 +2518,10 @@ pub async fn search_server_notes(
         until_id,
         limit,
         |until| {
-            let p = SearchParams { until_id: until, ..params.clone() };
+            let p = SearchParams {
+                until_id: until,
+                ..params.clone()
+            };
             async move { search_notes(client, &p).await }
         },
         |raw| {
@@ -2378,7 +2601,11 @@ async fn fetch_backfill_pass(
             Some(e) => sql::build_where(e, &sql_ctx).map_err(Error::Invalid)?,
             None => sql::SqlWhere::always_true(),
         };
-        if let Ok(cached) = state.cache.search_cache(&where_sql, until_id, INITIAL_LIMIT).await {
+        if let Ok(cached) = state
+            .cache
+            .search_cache(&where_sql, until_id, INITIAL_LIMIT)
+            .await
+        {
             // 検索結果が上限に達したときだけ、その最小idを透かしの候補にする(未満なら枯渇扱い)。
             if cached.len() as u32 >= INITIAL_LIMIT {
                 cache_min = cached.iter().map(|n| n.id.clone()).min();
@@ -2399,7 +2626,11 @@ async fn fetch_backfill_pass(
         })
         .collect();
 
-    Ok(BackfillPass { notes, outcomes, cache_min })
+    Ok(BackfillPass {
+        notes,
+        outcomes,
+        cache_min,
+    })
 }
 
 /// ノート本体 or renote 先のユーザがサーバ側ミュート/ブロック対象か。
@@ -2450,8 +2681,14 @@ mod tests {
         assert_eq!(parse_version_override(None), None);
         assert_eq!(parse_version_override(Some("")), None);
         assert_eq!(parse_version_override(Some("   ")), None);
-        assert_eq!(parse_version_override(Some("2025.9.0")), Some("2025.9.0".to_string()));
-        assert_eq!(parse_version_override(Some(" 2025.9.0 \n")), Some("2025.9.0".to_string()));
+        assert_eq!(
+            parse_version_override(Some("2025.9.0")),
+            Some("2025.9.0".to_string())
+        );
+        assert_eq!(
+            parse_version_override(Some(" 2025.9.0 \n")),
+            Some("2025.9.0".to_string())
+        );
     }
 
     fn note(id: &str, created_at: i64) -> Note {
@@ -2536,7 +2773,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n3", "n1"]
+        );
     }
 
     #[tokio::test]
@@ -2557,7 +2797,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n2", "n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n3", "n2", "n1"]
+        );
     }
 
     /// `created_at` と ID の順序が食い違っても、最後のノートの ID をカーソルにしたページ送りで
@@ -2595,13 +2838,27 @@ mod tests {
         let cache = cache_with(&[n1, note("n2", 200)]).await;
 
         let filter = FilterQuery::Tql(String::new());
-        let mute = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
-        let got =
-            search_cache_core(&cache, &filter, &EvalContext::default(), &mute, None, 10, |_| false, |_| false)
-                .await
-                .unwrap();
+        let mute = MuteConfig {
+            ng_words: vec!["spoiler".into()],
+            ..Default::default()
+        };
+        let got = search_cache_core(
+            &cache,
+            &filter,
+            &EvalContext::default(),
+            &mute,
+            None,
+            10,
+            |_| false,
+            |_| false,
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2"]
+        );
     }
 
     #[tokio::test]
@@ -2622,7 +2879,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n1"]
+        );
     }
 
     #[tokio::test]
@@ -2643,7 +2903,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n1"]
+        );
     }
 
     #[tokio::test]
@@ -2664,7 +2927,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2", "n1"]
+        );
     }
 
     #[test]
@@ -2678,7 +2944,8 @@ mod tests {
     }
 
     #[test]
-    fn finalize_gap_fill_marks_truncated_when_notes_were_dropped_even_if_all_sources_reached_target() {
+    fn finalize_gap_fill_marks_truncated_when_notes_were_dropped_even_if_all_sources_reached_target(
+    ) {
         // 全ソースが追いついても、limit 超過分の切り捨てで newest_known 直上に穴ができる。
         // マーカーを出して、ユーザーが埋められるようにする。基準は残した最古のノート。
         let collected = vec![note("n3", 30), note("n2", 20), note("n1", 10)];
@@ -2704,7 +2971,14 @@ mod tests {
         let collected = vec![note("n3", 30), note("n2", 20), note("n1", 10)];
         let result = finalize_gap_fill(collected, false, 2);
 
-        assert_eq!(result.notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["n3", "n2"]);
+        assert_eq!(
+            result
+                .notes
+                .iter()
+                .map(|n| n.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["n3", "n2"]
+        );
         assert!(result.truncated);
         assert_eq!(result.boundary_id.as_deref(), Some("n2"));
     }
@@ -2729,9 +3003,18 @@ mod tests {
     #[test]
     fn needs_boundary_refetch_is_true_only_for_an_eligible_column_without_an_effective_boundary() {
         assert!(needs_boundary_refetch(true, None), "対象 + 境界なし");
-        assert!(!needs_boundary_refetch(true, Some("n100")), "境界が確定済み");
-        assert!(!needs_boundary_refetch(true, Some("")), "全ソース枯渇済み(\"\")も確定済み");
-        assert!(!needs_boundary_refetch(false, None), "対象外(from cache / Streaming なしのソース)は境界を持たない");
+        assert!(
+            !needs_boundary_refetch(true, Some("n100")),
+            "境界が確定済み"
+        );
+        assert!(
+            !needs_boundary_refetch(true, Some("")),
+            "全ソース枯渇済み(\"\")も確定済み"
+        );
+        assert!(
+            !needs_boundary_refetch(false, None),
+            "対象外(from cache / Streaming なしのソース)は境界を持たない"
+        );
         assert!(!needs_boundary_refetch(false, Some("n100")));
     }
 
@@ -2762,7 +3045,11 @@ mod tests {
         let cached = vec![note("n2", 20), note("n1", 10)];
         let result = cache_backfill_page(Some("n001"), "n999", cached.clone(), 2, 2);
         assert_eq!(
-            result.unwrap().iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            result
+                .unwrap()
+                .iter()
+                .map(|n| n.id.as_str())
+                .collect::<Vec<_>>(),
             cached.iter().map(|n| n.id.as_str()).collect::<Vec<_>>()
         );
     }
@@ -2774,7 +3061,10 @@ mod tests {
         let result = cache_backfill_page(Some(""), "n999", cached.clone(), 2, 20);
         assert_eq!(result.unwrap().len(), cached.len());
         // 0件でも、末尾に達したという完全な答えとして返す
-        assert_eq!(cache_backfill_page(Some(""), "n999", vec![], 0, 20), Some(vec![]));
+        assert_eq!(
+            cache_backfill_page(Some(""), "n999", vec![], 0, 20),
+            Some(vec![])
+        );
     }
 
     #[test]
@@ -2793,15 +3083,27 @@ mod tests {
 
     #[test]
     fn backfill_fallback_outcome_classifies_unset_boundary_and_other() {
-        assert_eq!(backfill_fallback_outcome(false, None), BackfillOutcome::FallbackBoundaryUnset);
-        assert_eq!(backfill_fallback_outcome(false, Some("n100")), BackfillOutcome::FallbackOther);
-        assert_eq!(backfill_fallback_outcome(false, Some("")), BackfillOutcome::FallbackOther);
+        assert_eq!(
+            backfill_fallback_outcome(false, None),
+            BackfillOutcome::FallbackBoundaryUnset
+        );
+        assert_eq!(
+            backfill_fallback_outcome(false, Some("n100")),
+            BackfillOutcome::FallbackOther
+        );
+        assert_eq!(
+            backfill_fallback_outcome(false, Some("")),
+            BackfillOutcome::FallbackOther
+        );
     }
 
     #[test]
     fn backfill_fallback_outcome_counts_boundary_read_failure_as_other_not_unset() {
         // 読み出し失敗で境界が空に見えても「未確定」ではない(DBエラーをメトリクスで区別する)
-        assert_eq!(backfill_fallback_outcome(true, None), BackfillOutcome::FallbackOther);
+        assert_eq!(
+            backfill_fallback_outcome(true, None),
+            BackfillOutcome::FallbackOther
+        );
     }
 
     #[test]
@@ -2833,8 +3135,15 @@ mod tests {
 
     #[test]
     fn plan_boundary_initial_skips_failed_sources_and_maps_exhausted_to_empty_string() {
-        let outcomes = [fetched("n5"), SourceOutcome::Failed, SourceOutcome::Exhausted];
-        assert_eq!(plan_boundary_initial(&outcomes), vec![(0, "n5".to_string()), (2, String::new())]);
+        let outcomes = [
+            fetched("n5"),
+            SourceOutcome::Failed,
+            SourceOutcome::Exhausted,
+        ];
+        assert_eq!(
+            plan_boundary_initial(&outcomes),
+            vec![(0, "n5".to_string()), (2, String::new())]
+        );
         assert!(plan_boundary_initial(&[SourceOutcome::Failed]).is_empty());
         assert!(plan_boundary_initial(&[]).is_empty());
     }
@@ -2845,34 +3154,59 @@ mod tests {
         // source1 は連続(400>=300)。連続なソースだけ延長する。
         let prev = bmap(&[(0, "n500"), (1, "n300")]);
         let outcomes = [fetched("n380"), fetched("n350")];
-        assert_eq!(plan_boundary_extend(&prev, "n400", &outcomes), vec![(1, "n350".to_string())]);
+        assert_eq!(
+            plan_boundary_extend(&prev, "n400", &outcomes),
+            vec![(1, "n350".to_string())]
+        );
     }
 
     #[test]
     fn plan_boundary_extend_skips_failed_and_unknown_sources_and_extends_exhausted_to_empty() {
         let prev = bmap(&[(0, "n100"), (2, "n100")]); // source1 は境界未確定
-        let outcomes = [SourceOutcome::Failed, fetched("n50"), SourceOutcome::Exhausted];
+        let outcomes = [
+            SourceOutcome::Failed,
+            fetched("n50"),
+            SourceOutcome::Exhausted,
+        ];
         // 0: 失敗 / 1: 境界が無く連続性を検証できない / 2: 枯渇 → ""
-        assert_eq!(plan_boundary_extend(&prev, "n200", &outcomes), vec![(2, String::new())]);
+        assert_eq!(
+            plan_boundary_extend(&prev, "n200", &outcomes),
+            vec![(2, String::new())]
+        );
     }
 
     #[test]
     fn plan_boundary_extend_treats_until_id_equal_to_boundary_as_contiguous() {
         let prev = bmap(&[(0, "n300")]);
-        assert_eq!(plan_boundary_extend(&prev, "n300", &[fetched("n250")]), vec![(0, "n250".to_string())]);
+        assert_eq!(
+            plan_boundary_extend(&prev, "n300", &[fetched("n250")]),
+            vec![(0, "n250".to_string())]
+        );
     }
 
     #[test]
     fn effective_boundary_is_max_and_requires_every_source() {
-        assert_eq!(effective_boundary(&bmap(&[(0, "n100"), (1, "n300")]), 2), Some("n300".to_string()));
+        assert_eq!(
+            effective_boundary(&bmap(&[(0, "n100"), (1, "n300")]), 2),
+            Some("n300".to_string())
+        );
         // 枯渇済み("")は有効境界を塞がない
-        assert_eq!(effective_boundary(&bmap(&[(0, ""), (1, "n300")]), 2), Some("n300".to_string()));
-        assert_eq!(effective_boundary(&bmap(&[(0, ""), (1, "")]), 2), Some(String::new()));
+        assert_eq!(
+            effective_boundary(&bmap(&[(0, ""), (1, "n300")]), 2),
+            Some("n300".to_string())
+        );
+        assert_eq!(
+            effective_boundary(&bmap(&[(0, ""), (1, "")]), 2),
+            Some(String::new())
+        );
         // 1ソースでも境界が無ければ未確定
         assert_eq!(effective_boundary(&bmap(&[(0, "n100")]), 2), None);
         assert_eq!(effective_boundary(&bmap(&[(1, "n100")]), 2), None);
         // 余分な行(ソース数より大きい idx)は無視する
-        assert_eq!(effective_boundary(&bmap(&[(0, "n100"), (5, "n900")]), 1), Some("n100".to_string()));
+        assert_eq!(
+            effective_boundary(&bmap(&[(0, "n100"), (5, "n900")]), 1),
+            Some("n100".to_string())
+        );
         assert_eq!(effective_boundary(&bmap(&[]), 0), None);
     }
 
@@ -2884,22 +3218,42 @@ mod tests {
             filter: CompiledFilter::PassAll,
         };
         assert!(backfill_cache_eligible(&mk(vec![ColumnKind::Home], false)));
-        assert!(backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], false)));
-        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, ColumnKind::Local], true)));
+        assert!(backfill_cache_eligible(&mk(
+            vec![ColumnKind::Home, ColumnKind::Local],
+            false
+        )));
+        assert!(!backfill_cache_eligible(&mk(
+            vec![ColumnKind::Home, ColumnKind::Local],
+            true
+        )));
         assert!(!backfill_cache_eligible(&mk(vec![], true)));
         assert!(backfill_cache_eligible(&mk(
-            vec![ColumnKind::Home, ColumnKind::Local, ColumnKind::List { list_id: "l1".into() }],
+            vec![
+                ColumnKind::Home,
+                ColumnKind::Local,
+                ColumnKind::List {
+                    list_id: "l1".into()
+                }
+            ],
             false
         )));
         // ストリーミングを持たないソース(User/Tag/Search)はライブノートが column_note に入らないため対象外
-        let user = || ColumnKind::User { user_id: "u1".into() };
+        let user = || ColumnKind::User {
+            user_id: "u1".into(),
+        };
         let tag = || ColumnKind::Tag { tag: "rust".into() };
         let search = || ColumnKind::Search { query: "q".into() };
-        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, user()], false)));
+        assert!(!backfill_cache_eligible(&mk(
+            vec![ColumnKind::Home, user()],
+            false
+        )));
         assert!(!backfill_cache_eligible(&mk(vec![user()], false)));
         assert!(!backfill_cache_eligible(&mk(vec![tag()], false)));
         assert!(!backfill_cache_eligible(&mk(vec![search()], false)));
-        assert!(!backfill_cache_eligible(&mk(vec![ColumnKind::Home, search()], false)));
+        assert!(!backfill_cache_eligible(&mk(
+            vec![ColumnKind::Home, search()],
+            false
+        )));
     }
 
     #[test]
@@ -2913,7 +3267,10 @@ mod tests {
     }
 
     fn gs(oldest: Option<&str>, reached: bool) -> GapSourceState {
-        GapSourceState { oldest_fetched: oldest.map(str::to_string), reached_target: reached }
+        GapSourceState {
+            oldest_fetched: oldest.map(str::to_string),
+            reached_target: reached,
+        }
     }
 
     fn pairs(entries: &[(u32, &str)]) -> Vec<(u32, String)> {
@@ -2923,7 +3280,10 @@ mod tests {
     #[test]
     fn plan_boundary_raise_after_gap_none_when_gap_fully_filled() {
         let prev = bmap(&[(0, "n100")]);
-        assert_eq!(plan_boundary_raise_after_gap(&prev, &[gs(Some("n050"), true)], true, None), None);
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &[gs(Some("n050"), true)], true, None),
+            None
+        );
     }
 
     #[test]
@@ -2941,7 +3301,10 @@ mod tests {
         );
         // 既存境界の方が新しい(大きい)なら変わらない → None
         let prev = bmap(&[(0, "n900")]);
-        assert_eq!(plan_boundary_raise_after_gap(&prev, &[gs(Some("n300"), false)], false, Some("n350")), None);
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &[gs(Some("n300"), false)], false, Some("n350")),
+            None
+        );
     }
 
     #[test]
@@ -2981,7 +3344,10 @@ mod tests {
             Some(pairs(&[(0, "n300"), (1, "n300")]))
         );
         // 切り捨ても無ければ何もしない
-        assert_eq!(plan_boundary_raise_after_gap(&prev, &sources, true, None), None);
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &sources, true, None),
+            None
+        );
     }
 
     #[test]
@@ -2989,18 +3355,30 @@ mod tests {
         // 1ページも取れなかったソース(oldest_fetched=None)は未確定にする
         let prev = bmap(&[(0, "n100"), (1, "n200")]);
         let sources = [gs(None, false), gs(Some("n150"), true)];
-        assert_eq!(plan_boundary_raise_after_gap(&prev, &sources, false, None), Some(pairs(&[(1, "n200")])));
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &sources, false, None),
+            Some(pairs(&[(1, "n200")]))
+        );
         // ソース情報が無い(fill_gap が Err)なら全行を落とす
-        assert_eq!(plan_boundary_raise_after_gap(&prev, &[], false, None), Some(vec![]));
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &[], false, None),
+            Some(vec![])
+        );
     }
 
     #[test]
     fn plan_boundary_raise_after_gap_does_not_create_rows_for_unknown_sources() {
         let prev = bmap(&[(0, "n100")]);
         let sources = [gs(Some("n300"), false), gs(Some("n300"), false)];
-        assert_eq!(plan_boundary_raise_after_gap(&prev, &sources, false, None), Some(pairs(&[(0, "n300")])));
+        assert_eq!(
+            plan_boundary_raise_after_gap(&prev, &sources, false, None),
+            Some(pairs(&[(0, "n300")]))
+        );
         // 境界が空(cache_eligible でないカラム)なら何もしない
-        assert_eq!(plan_boundary_raise_after_gap(&bmap(&[]), &sources, false, None), None);
+        assert_eq!(
+            plan_boundary_raise_after_gap(&bmap(&[]), &sources, false, None),
+            None
+        );
     }
 
     #[test]
@@ -3012,18 +3390,32 @@ mod tests {
     #[test]
     fn finalize_gap_fill_reports_the_largest_dropped_id_even_when_all_sources_reached() {
         // 全ソースが追いついていても、limit 超過分は切り捨てられる(Issue #432 レビュー指摘1)。
-        let result = finalize_gap_fill(vec![note("n3", 30), note("n2", 20), note("n1", 10)], true, 2);
+        let result = finalize_gap_fill(
+            vec![note("n3", 30), note("n2", 20), note("n1", 10)],
+            true,
+            2,
+        );
         assert!(result.all_reached);
         assert_eq!(result.dropped_floor.as_deref(), Some("n1"));
 
         // 切り詰めは created_at 順、境界は id 順。捨てたノートの id が残した最古より大きくなりうる
         // ので、下限は「捨てた id の最大値」でなければならない(レビュー指摘3)。
         let result = finalize_gap_fill(vec![note("n5", 10), note("n9", 5)], true, 1);
-        assert_eq!(result.notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["n5"]);
+        assert_eq!(
+            result
+                .notes
+                .iter()
+                .map(|n| n.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["n5"]
+        );
         assert_eq!(result.dropped_floor.as_deref(), Some("n9"));
 
         // 切り捨てが無ければ None
-        assert_eq!(finalize_gap_fill(vec![note("n1", 10)], true, 100).dropped_floor, None);
+        assert_eq!(
+            finalize_gap_fill(vec![note("n1", 10)], true, 100).dropped_floor,
+            None
+        );
         assert_eq!(finalize_gap_fill(vec![], false, 100).dropped_floor, None);
     }
 
@@ -3034,14 +3426,21 @@ mod tests {
         assert_eq!(restrict_to_boundary(cached.clone(), None).len(), 3);
         // 境界 "n3" 以上だけ残す(fetch_backfill の retain と同じ >=)
         let kept = restrict_to_boundary(cached.clone(), Some("n3"));
-        assert_eq!(kept.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["n5", "n3"]);
+        assert_eq!(
+            kept.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            vec!["n5", "n3"]
+        );
         // 枯渇済み("")は何も落とさない
         assert_eq!(restrict_to_boundary(cached.clone(), Some("")).len(), 3);
         // すべて境界より古ければ空になる
         assert!(restrict_to_boundary(cached, Some("n9")).is_empty());
     }
 
-    fn gap_result(sources: Vec<GapSourceState>, all_reached: bool, dropped_floor: Option<&str>) -> GapFillResult {
+    fn gap_result(
+        sources: Vec<GapSourceState>,
+        all_reached: bool,
+        dropped_floor: Option<&str>,
+    ) -> GapFillResult {
         GapFillResult {
             notes: vec![],
             truncated: !all_reached,
@@ -3055,9 +3454,16 @@ mod tests {
     #[tokio::test]
     async fn apply_gap_fill_boundaries_raises_stored_boundaries_when_truncated() {
         let cache = cache_with(&[]).await;
-        cache.replace_fetch_boundaries("col1", &pairs(&[(0, "n100"), (1, "n200")])).await.unwrap();
+        cache
+            .replace_fetch_boundaries("col1", &pairs(&[(0, "n100"), (1, "n200")]))
+            .await
+            .unwrap();
 
-        let gap = gap_result(vec![gs(Some("n300"), false), gs(Some("n150"), true)], false, Some("n350"));
+        let gap = gap_result(
+            vec![gs(Some("n300"), false), gs(Some("n150"), true)],
+            false,
+            Some("n350"),
+        );
         apply_gap_fill_boundaries(&cache, "col1", &gap).await;
 
         let mut got = cache.get_fetch_boundaries("col1").await.unwrap();
@@ -3068,17 +3474,33 @@ mod tests {
     #[tokio::test]
     async fn apply_gap_fill_boundaries_leaves_boundaries_when_gap_fully_filled() {
         let cache = cache_with(&[]).await;
-        cache.replace_fetch_boundaries("col1", &pairs(&[(0, "n100")])).await.unwrap();
+        cache
+            .replace_fetch_boundaries("col1", &pairs(&[(0, "n100")]))
+            .await
+            .unwrap();
 
-        apply_gap_fill_boundaries(&cache, "col1", &gap_result(vec![gs(Some("n050"), true)], true, None)).await;
+        apply_gap_fill_boundaries(
+            &cache,
+            "col1",
+            &gap_result(vec![gs(Some("n050"), true)], true, None),
+        )
+        .await;
 
-        assert_eq!(cache.get_fetch_boundaries("col1").await.unwrap(), pairs(&[(0, "n100")]));
+        assert_eq!(
+            cache.get_fetch_boundaries("col1").await.unwrap(),
+            pairs(&[(0, "n100")])
+        );
     }
 
     #[tokio::test]
     async fn apply_gap_fill_boundaries_is_a_no_op_for_columns_without_boundaries() {
         let cache = cache_with(&[]).await;
-        apply_gap_fill_boundaries(&cache, "col1", &gap_result(vec![gs(None, false)], false, None)).await;
+        apply_gap_fill_boundaries(
+            &cache,
+            "col1",
+            &gap_result(vec![gs(None, false)], false, None),
+        )
+        .await;
         assert!(cache.get_fetch_boundaries("col1").await.unwrap().is_empty());
     }
 
@@ -3086,7 +3508,10 @@ mod tests {
     async fn apply_gap_fill_boundaries_clears_rows_when_fill_gap_errored() {
         // fill_gap が Err のとき resume_column は sources=[] / all_reached=false を渡す
         let cache = cache_with(&[]).await;
-        cache.replace_fetch_boundaries("col1", &pairs(&[(0, "n100")])).await.unwrap();
+        cache
+            .replace_fetch_boundaries("col1", &pairs(&[(0, "n100")]))
+            .await
+            .unwrap();
 
         apply_gap_fill_boundaries(&cache, "col1", &gap_result(vec![], false, None)).await;
 
@@ -3095,7 +3520,9 @@ mod tests {
 
     #[test]
     fn split_display_and_cacheable_dedupes_sorts_and_truncates_only_the_display() {
-        let filtered: Vec<Note> = (1..=25).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        let filtered: Vec<Note> = (1..=25)
+            .map(|i| note(&format!("n{i:02}"), i as i64))
+            .collect();
         let mut with_dup = filtered.clone();
         with_dup.push(note("n25", 25)); // 複数ソースに同じノートが跨る場合
 
@@ -3111,11 +3538,16 @@ mod tests {
 
     #[test]
     fn split_display_and_cacheable_hides_notes_older_than_the_watermark_from_the_display_only() {
-        let all: Vec<Note> = (1..=10).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        let all: Vec<Note> = (1..=10)
+            .map(|i| note(&format!("n{i:02}"), i as i64))
+            .collect();
 
         // 透かし n06: 画面用は n06 以上だけ(n10..n06)。cacheable は全件(10件)。
         let (display, cacheable) = split_display_and_cacheable(all.clone(), false, Some("n06"));
-        assert_eq!(display.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["n10", "n09", "n08", "n07", "n06"]);
+        assert_eq!(
+            display.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            vec!["n10", "n09", "n08", "n07", "n06"]
+        );
         assert_eq!(cacheable.len(), 10);
 
         // `from cache` を含むカラムは cacheable が画面用と同じ
@@ -3124,7 +3556,9 @@ mod tests {
         assert_eq!(display.len(), 5);
 
         // 透かしより新しいノートが無ければ画面用は空
-        assert!(split_display_and_cacheable(all, false, Some("n99")).0.is_empty());
+        assert!(split_display_and_cacheable(all, false, Some("n99"))
+            .0
+            .is_empty());
     }
 
     #[test]
@@ -3136,15 +3570,31 @@ mod tests {
         );
         // 枯渇済み・失敗したソースは制約しない
         assert_eq!(
-            backfill_watermark(&[SourceOutcome::Exhausted, fetched("n200"), SourceOutcome::Failed], None),
+            backfill_watermark(
+                &[
+                    SourceOutcome::Exhausted,
+                    fetched("n200"),
+                    SourceOutcome::Failed
+                ],
+                None
+            ),
             Some("n200".to_string())
         );
         // 制約するソースが無ければ None
-        assert_eq!(backfill_watermark(&[SourceOutcome::Exhausted, SourceOutcome::Failed], None), None);
+        assert_eq!(
+            backfill_watermark(&[SourceOutcome::Exhausted, SourceOutcome::Failed], None),
+            None
+        );
         assert_eq!(backfill_watermark(&[], None), None);
         // `from cache` の検索結果(INITIAL_LIMIT件に達したときの最小id)も1ソースとして含める
-        assert_eq!(backfill_watermark(&[fetched("n200")], Some("n600")), Some("n600".to_string()));
-        assert_eq!(backfill_watermark(&[], Some("n600")), Some("n600".to_string()));
+        assert_eq!(
+            backfill_watermark(&[fetched("n200")], Some("n600")),
+            Some("n600".to_string())
+        );
+        assert_eq!(
+            backfill_watermark(&[], Some("n600")),
+            Some("n600".to_string())
+        );
     }
 
     #[test]
@@ -3156,15 +3606,28 @@ mod tests {
         // 枯渇済みはそれ以降も枯渇済み
         assert_eq!(merge_source_outcome(Exhausted, fetched("n100")), Exhausted);
         // 取得成功同士は、より古い(小さい)idへ
-        assert_eq!(merge_source_outcome(fetched("n500"), fetched("n400")), fetched("n400"));
-        assert_eq!(merge_source_outcome(fetched("n300"), fetched("n400")), fetched("n300"));
+        assert_eq!(
+            merge_source_outcome(fetched("n500"), fetched("n400")),
+            fetched("n400")
+        );
+        assert_eq!(
+            merge_source_outcome(fetched("n300"), fetched("n400")),
+            fetched("n300")
+        );
         // 後続パスで枯渇したら枯渇済み
         assert_eq!(merge_source_outcome(fetched("n500"), Exhausted), Exhausted);
         // 後続パスの失敗は、それまでに取れた範囲を保つ
-        assert_eq!(merge_source_outcome(fetched("n500"), Failed), fetched("n500"));
+        assert_eq!(
+            merge_source_outcome(fetched("n500"), Failed),
+            fetched("n500")
+        );
     }
 
-    fn bp(notes: &[(&str, i64)], outcomes: Vec<SourceOutcome>, cache_min: Option<&str>) -> BackfillPass {
+    fn bp(
+        notes: &[(&str, i64)],
+        outcomes: Vec<SourceOutcome>,
+        cache_min: Option<&str>,
+    ) -> BackfillPass {
         BackfillPass {
             notes: notes.iter().map(|(id, c)| note(id, *c)).collect(),
             outcomes,
@@ -3174,7 +3637,10 @@ mod tests {
 
     /// id `n{lo}`..`n{hi}`(3桁、created_at は数値と同順)のノートを `hi` から `lo` の順に並べて作る。
     fn range_notes(lo: i64, hi: i64) -> Vec<Note> {
-        (lo..=hi).rev().map(|i| note(&format!("n{i:03}"), i)).collect()
+        (lo..=hi)
+            .rev()
+            .map(|i| note(&format!("n{i:03}"), i))
+            .collect()
     }
 
     fn ids(notes: &[Note]) -> Vec<&str> {
@@ -3209,7 +3675,10 @@ mod tests {
         // 透かしより古いノートもキャッシュには入る(境界は生ページ全体が column_note にある前提)
         assert_eq!(fetch.cacheable.len(), 22);
         assert_eq!(*calls.borrow(), vec![Some("n900".to_string())]);
-        assert_eq!(fetch.source_outcomes, vec![fetched("n500"), fetched("n200")]);
+        assert_eq!(
+            fetch.source_outcomes,
+            vec![fetched("n500"), fetched("n200")]
+        );
     }
 
     #[tokio::test]
@@ -3217,9 +3686,17 @@ mod tests {
         let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
         let mut script = std::collections::VecDeque::from(vec![
             // 1パス目: 返せるノートは全て透かし n500 より古い → 画面用は空
-            bp(&[("n300", 300), ("n250", 250)], vec![fetched("n500"), fetched("n250")], None),
+            bp(
+                &[("n300", 300), ("n250", 250)],
+                vec![fetched("n500"), fetched("n250")],
+                None,
+            ),
             // 2パス目(until_id = n500): 全ソースが枯渇 → 透かし無し、これで終わる
-            bp(&[("n480", 480), ("n470", 470)], vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted], None),
+            bp(
+                &[("n480", 480), ("n470", 470)],
+                vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted],
+                None,
+            ),
         ]);
 
         let fetch = collect_backfill_pages(Some("n900"), false, |until| {
@@ -3229,11 +3706,17 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(*calls.borrow(), vec![Some("n900".to_string()), Some("n500".to_string())]);
+        assert_eq!(
+            *calls.borrow(),
+            vec![Some("n900".to_string()), Some("n500".to_string())]
+        );
         assert_eq!(ids(&fetch.notes), vec!["n480", "n470"]);
         // cacheable は全パスの和集合
         assert_eq!(fetch.cacheable.len(), 4);
-        assert_eq!(fetch.source_outcomes, vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted]);
+        assert_eq!(
+            fetch.source_outcomes,
+            vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted]
+        );
     }
 
     /// 画面用が INITIAL_LIMIT 件に満たない間はパスを続け、各パスの画面用を積み上げる。
@@ -3244,7 +3727,11 @@ mod tests {
         let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
         let mut script = std::collections::VecDeque::from(vec![
             // 1パス目: 透かし n500 以上は2件だけ
-            bp(&[("n600", 600), ("n550", 550), ("n300", 300)], vec![fetched("n500"), fetched("n300")], None),
+            bp(
+                &[("n600", 600), ("n550", 550), ("n300", 300)],
+                vec![fetched("n500"), fetched("n300")],
+                None,
+            ),
             // 2パス目(until_id = n500): 透かし n400 以上が18件 → 合計 INITIAL_LIMIT 件で止まる
             BackfillPass {
                 notes: range_notes(481, 498),
@@ -3260,7 +3747,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(*calls.borrow(), vec![Some("n900".to_string()), Some("n500".to_string())]);
+        assert_eq!(
+            *calls.borrow(),
+            vec![Some("n900".to_string()), Some("n500".to_string())]
+        );
         assert_eq!(fetch.notes.len(), INITIAL_LIMIT as usize);
         assert_eq!(&ids(&fetch.notes)[..2], ["n600", "n550"]);
         assert_eq!(fetch.notes.last().unwrap().id, "n481");
@@ -3289,11 +3779,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collect_backfill_pages_gives_up_at_the_pass_limit_and_returns_the_last_pass_without_a_watermark() {
+    async fn collect_backfill_pages_gives_up_at_the_pass_limit_and_returns_the_last_pass_without_a_watermark(
+    ) {
         let calls = std::cell::RefCell::new(Vec::<Option<String>>::new());
         // どのパスも透かし n500 より古いノートしか返らない
         let mut script: std::collections::VecDeque<BackfillPass> = (0..BACKFILL_MAX_PASSES)
-            .map(|_| bp(&[("n100", 100)], vec![fetched("n500"), fetched("n100")], None))
+            .map(|_| {
+                bp(
+                    &[("n100", 100)],
+                    vec![fetched("n500"), fetched("n100")],
+                    None,
+                )
+            })
             .collect();
 
         let fetch = collect_backfill_pages(Some("n900"), false, |until| {
@@ -3311,8 +3808,16 @@ mod tests {
     #[tokio::test]
     async fn collect_backfill_pages_keeps_a_source_that_failed_on_the_first_pass_failed() {
         let mut script = std::collections::VecDeque::from(vec![
-            bp(&[("n300", 300)], vec![SourceOutcome::Failed, fetched("n500")], None),
-            bp(&[("n460", 460)], vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted], None),
+            bp(
+                &[("n300", 300)],
+                vec![SourceOutcome::Failed, fetched("n500")],
+                None,
+            ),
+            bp(
+                &[("n460", 460)],
+                vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted],
+                None,
+            ),
         ]);
 
         let fetch = collect_backfill_pages(Some("n900"), false, |_| {
@@ -3323,7 +3828,10 @@ mod tests {
 
         assert_eq!(ids(&fetch.notes), vec!["n460"]);
         // 先頭から連続して取得できていないソースは境界に使わせない
-        assert_eq!(fetch.source_outcomes, vec![SourceOutcome::Failed, SourceOutcome::Exhausted]);
+        assert_eq!(
+            fetch.source_outcomes,
+            vec![SourceOutcome::Failed, SourceOutcome::Exhausted]
+        );
     }
 
     /// 途中のパスで失敗したソースが後のパスで復帰しても、間の欠落を連続とみなして境界を書いてはいけない
@@ -3337,7 +3845,11 @@ mod tests {
             // X は失敗(透かしを制約しない)、Y は n300 まで
             bp(&[], vec![SourceOutcome::Failed, fetched("n300")], None),
             // X が復帰して枯渇、Y も枯渇
-            bp(&[], vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted], None),
+            bp(
+                &[],
+                vec![SourceOutcome::Exhausted, SourceOutcome::Exhausted],
+                None,
+            ),
         ]);
 
         let fetch = collect_backfill_pages(None, false, |until| {
@@ -3347,14 +3859,25 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(*calls.borrow(), vec![None, Some("n500".to_string()), Some("n300".to_string())]);
-        assert_eq!(fetch.source_outcomes, vec![fetched("n500"), SourceOutcome::Exhausted]);
+        assert_eq!(
+            *calls.borrow(),
+            vec![None, Some("n500".to_string()), Some("n300".to_string())]
+        );
+        assert_eq!(
+            fetch.source_outcomes,
+            vec![fetched("n500"), SourceOutcome::Exhausted]
+        );
     }
 
     #[tokio::test]
-    async fn collect_backfill_pages_treats_a_full_cache_search_page_as_a_source_for_the_watermark() {
+    async fn collect_backfill_pages_treats_a_full_cache_search_page_as_a_source_for_the_watermark()
+    {
         let mut script = std::collections::VecDeque::from(vec![
-            bp(&[("n700", 700), ("n300", 300)], vec![fetched("n200")], Some("n600")),
+            bp(
+                &[("n700", 700), ("n300", 300)],
+                vec![fetched("n200")],
+                Some("n600"),
+            ),
             // 2パス目(until_id = n600): 枯渇して終わる
             bp(&[], vec![SourceOutcome::Exhausted], None),
         ]);
@@ -3376,10 +3899,17 @@ mod tests {
     #[tokio::test]
     async fn caching_the_full_filtered_set_keeps_every_note_at_or_above_the_boundary() {
         // source A: 偶数 n02..n40、source B: 奇数 n01..n39(各20件、id と created_at は同順)
-        let mut all: Vec<Note> = (1..=40).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        let mut all: Vec<Note> = (1..=40)
+            .map(|i| note(&format!("n{i:02}"), i as i64))
+            .collect();
         all.reverse();
         let outcomes = [fetched("n02"), fetched("n01")];
-        let boundaries = bmap(&plan_boundary_initial(&outcomes).iter().map(|(i, b)| (*i, b.as_str())).collect::<Vec<_>>());
+        let boundaries = bmap(
+            &plan_boundary_initial(&outcomes)
+                .iter()
+                .map(|(i, b)| (*i, b.as_str()))
+                .collect::<Vec<_>>(),
+        );
         let e = effective_boundary(&boundaries, 2).unwrap();
         assert_eq!(e, "n02");
 
@@ -3389,7 +3919,11 @@ mod tests {
         // 全件キャッシュ: E 以上(n02..n40 の39件)がすべて取り出せる
         let store = cache_with(&cacheable).await;
         let got = store.load_cached_before("col1", "n99", 100).await.unwrap();
-        let at_or_above: Vec<&str> = got.iter().map(|n| n.id.as_str()).filter(|id| *id >= e.as_str()).collect();
+        let at_or_above: Vec<&str> = got
+            .iter()
+            .map(|n| n.id.as_str())
+            .filter(|id| *id >= e.as_str())
+            .collect();
         assert_eq!(at_or_above.len(), 39);
 
         // 対比: 画面へ返す20件だけをキャッシュすると、境界 E が完全と主張する範囲に欠落が出る
@@ -3403,7 +3937,9 @@ mod tests {
     /// 境界が完全と主張する範囲に欠落が出る。両呼び出し元が共有する `cache_fetched` で固定する。
     #[tokio::test]
     async fn cache_fetched_stores_the_cacheable_set_not_the_truncated_display_notes() {
-        let all: Vec<Note> = (1..=40).map(|i| note(&format!("n{i:02}"), i as i64)).collect();
+        let all: Vec<Note> = (1..=40)
+            .map(|i| note(&format!("n{i:02}"), i as i64))
+            .collect();
         let (notes, cacheable) = split_display_and_cacheable(all, false, None);
         assert_eq!((notes.len(), cacheable.len()), (20, 40));
         let fetch = FilteredFetch {
@@ -3443,10 +3979,26 @@ mod tests {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
         let epoch = fence.begin("c1");
 
-        commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
+        commit_gap_fill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &gap_with(vec![note("n600", 6)]),
+            None,
+        )
+        .await;
         assert!(!cache.account_has_note("acc1", "n600").await.unwrap());
 
-        commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), Some("acc1")).await;
+        commit_gap_fill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &gap_with(vec![note("n600", 6)]),
+            Some("acc1"),
+        )
+        .await;
         assert!(cache.account_has_note("acc1", "n600").await.unwrap());
     }
 
@@ -3457,12 +4009,24 @@ mod tests {
         let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory());
 
         // `kinds` が空なら、ネットワークは使わない(cache のみ / ソースなし)。
-        let uses_cache = ResolvedSources { kinds: vec![], use_cache: true, filter: CompiledFilter::PassAll };
-        let fetch = fetch_and_filter_multi(&state, "acc1", &uses_cache, None).await.unwrap();
+        let uses_cache = ResolvedSources {
+            kinds: vec![],
+            use_cache: true,
+            filter: CompiledFilter::PassAll,
+        };
+        let fetch = fetch_and_filter_multi(&state, "acc1", &uses_cache, None)
+            .await
+            .unwrap();
         assert_eq!(fetch.attribute_to, None);
 
-        let no_cache = ResolvedSources { kinds: vec![], use_cache: false, filter: CompiledFilter::PassAll };
-        let fetch = fetch_and_filter_multi(&state, "acc1", &no_cache, None).await.unwrap();
+        let no_cache = ResolvedSources {
+            kinds: vec![],
+            use_cache: false,
+            filter: CompiledFilter::PassAll,
+        };
+        let fetch = fetch_and_filter_multi(&state, "acc1", &no_cache, None)
+            .await
+            .unwrap();
         assert_eq!(fetch.attribute_to.as_deref(), Some("acc1"));
     }
 
@@ -3471,10 +4035,19 @@ mod tests {
         assert_eq!(normalize_search_host(None, "misskey.io"), None);
         assert_eq!(normalize_search_host(Some(""), "misskey.io"), None);
         assert_eq!(normalize_search_host(Some("   "), "misskey.io"), None);
-        assert_eq!(normalize_search_host(Some("."), "misskey.io"), Some(".".into()));
-        assert_eq!(normalize_search_host(Some("misskey.io"), "misskey.io"), Some(".".into()));
+        assert_eq!(
+            normalize_search_host(Some("."), "misskey.io"),
+            Some(".".into())
+        );
+        assert_eq!(
+            normalize_search_host(Some("misskey.io"), "misskey.io"),
+            Some(".".into())
+        );
         // 大文字小文字・前後空白は無視して自ホストと比較する
-        assert_eq!(normalize_search_host(Some("  Misskey.IO "), "misskey.io"), Some(".".into()));
+        assert_eq!(
+            normalize_search_host(Some("  Misskey.IO "), "misskey.io"),
+            Some(".".into())
+        );
         assert_eq!(
             normalize_search_host(Some(" example.com "), "misskey.io"),
             Some("example.com".into())
@@ -3488,10 +4061,19 @@ mod tests {
 
         assert!(check_search_request("rust", false, &no_date).is_ok());
         assert!(check_search_request("rust", true, &with_date).is_ok());
-        assert!(matches!(check_search_request("", false, &with_date), Err(Error::Invalid(_))));
-        assert!(matches!(check_search_request("  \t", false, &with_date), Err(Error::Invalid(_))));
+        assert!(matches!(
+            check_search_request("", false, &with_date),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            check_search_request("  \t", false, &with_date),
+            Err(Error::Invalid(_))
+        ));
         // 日時が指定されたのにサーバーが非対応なら拒否（UIが隠す前提の二重防御）
-        assert!(matches!(check_search_request("rust", true, &no_date), Err(Error::Invalid(_))));
+        assert!(matches!(
+            check_search_request("rust", true, &no_date),
+            Err(Error::Invalid(_))
+        ));
     }
 
     #[test]
@@ -3506,11 +4088,17 @@ mod tests {
         let mut spoiler = note("n1", 100);
         spoiler.text = Some("spoiler content".into());
         let notes = vec![spoiler, note("n2", 200), note("n3", 300), note("n4", 400)];
-        let mute = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+        let mute = MuteConfig {
+            ng_words: vec!["spoiler".into()],
+            ..Default::default()
+        };
 
         let got = apply_search_mutes(notes, &mute, |n| n.id == "n2", |n| n.id == "n3");
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n4"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n4"]
+        );
     }
 
     #[tokio::test]
@@ -3519,8 +4107,18 @@ mod tests {
         state.set_server_version("a1", "2026.9.1".into());
         state.set_server_version("a2", "2025.4.1-io.12b-fb6fbea074".into());
 
-        assert!(search_capabilities_for(&state, "a1").await.unwrap().date_range);
-        assert!(!search_capabilities_for(&state, "a2").await.unwrap().date_range);
+        assert!(
+            search_capabilities_for(&state, "a1")
+                .await
+                .unwrap()
+                .date_range
+        );
+        assert!(
+            !search_capabilities_for(&state, "a2")
+                .await
+                .unwrap()
+                .date_range
+        );
     }
 
     #[test]
@@ -3529,16 +4127,27 @@ mod tests {
         // 開始だけ・ページング前: Misskey は sinceId だけだと昇順で返すので、現在時刻で上限を補い新しい順に揃える
         assert_eq!(effective_until_date_ms(Some(1), None, None, now), Some(now));
         // 終了が指定されていればそのまま
-        assert_eq!(effective_until_date_ms(Some(1), Some(5), None, now), Some(5));
+        assert_eq!(
+            effective_until_date_ms(Some(1), Some(5), None, now),
+            Some(5)
+        );
         assert_eq!(effective_until_date_ms(None, Some(5), None, now), Some(5));
         // ページング中は untilId が上限なので補わない
-        assert_eq!(effective_until_date_ms(Some(1), None, Some("n9"), now), None);
+        assert_eq!(
+            effective_until_date_ms(Some(1), None, Some("n9"), now),
+            None
+        );
         // 開始も終了も無ければ何も足さない
         assert_eq!(effective_until_date_ms(None, None, None, now), None);
     }
 
     fn muted_ids(ids: &'static [&'static str]) -> impl Fn(Vec<Note>) -> Vec<Note> {
-        move |notes| notes.into_iter().filter(|n| !ids.contains(&n.id.as_str())).collect()
+        move |notes| {
+            notes
+                .into_iter()
+                .filter(|n| !ids.contains(&n.id.as_str()))
+                .collect()
+        }
     }
 
     #[tokio::test]
@@ -3561,7 +4170,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n1"]
+        );
         // 2回目は生の最後のid(n2)を untilId にして取り直す
         assert_eq!(*calls.borrow(), vec![None, Some("n2".to_string())]);
     }
@@ -3573,8 +4185,13 @@ mod tests {
             calls.set(calls.get() + 1);
             async { Ok(vec![note("n2", 2), note("n1", 1)]) }
         };
-        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n2"])).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n1"]);
+        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n2"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n1"]
+        );
         assert_eq!(calls.get(), 1);
 
         // 生応答が limit 未満＝最終ページ。全部ミュートでも取り直さず空（終端）を返す
@@ -3583,7 +4200,9 @@ mod tests {
             calls.set(calls.get() + 1);
             async { Ok(vec![note("n1", 1)]) }
         };
-        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n1"])).await.unwrap();
+        let got = collect_unmuted_page(None, 2, fetch, muted_ids(&["n1"]))
+            .await
+            .unwrap();
         assert!(got.is_empty());
         assert_eq!(calls.get(), 1);
     }
@@ -3598,7 +4217,9 @@ mod tests {
             async move { Ok(vec![note(&format!("a{n}"), 2), note(&format!("b{n}"), 1)]) }
         };
         let keep_none = |_notes: Vec<Note>| Vec::new();
-        let got = collect_unmuted_page(None, 2, fetch, keep_none).await.unwrap();
+        let got = collect_unmuted_page(None, 2, fetch, keep_none)
+            .await
+            .unwrap();
         assert!(got.is_empty());
         assert_eq!(calls.get(), SEARCH_MAX_PASSES);
     }
@@ -3624,14 +4245,21 @@ mod tests {
     fn fetch_of(ids: &[&str]) -> FilteredFetch {
         FilteredFetch {
             notes: vec![],
-            cacheable: ids.iter().enumerate().map(|(i, id)| note(id, i as i64 + 1)).collect(),
+            cacheable: ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| note(id, i as i64 + 1))
+                .collect(),
             source_outcomes: vec![],
             attribute_to: None,
         }
     }
 
     fn fetch_with_outcomes(ids: &[&str], outcomes: Vec<SourceOutcome>) -> FilteredFetch {
-        FilteredFetch { source_outcomes: outcomes, ..fetch_of(ids) }
+        FilteredFetch {
+            source_outcomes: outcomes,
+            ..fetch_of(ids)
+        }
     }
 
     fn pair(idx: u32, id: &str) -> (u32, String) {
@@ -3639,11 +4267,18 @@ mod tests {
     }
 
     /// `update_column` が行うこと(新しい定義の保存の代わりに新フィルタ側の境界を置く + clear)を模す。
-    async fn simulate_update_column(fence: &ColumnFence, cache: &NoteCacheStore, column_id: &str) -> Epoch {
+    async fn simulate_update_column(
+        fence: &ColumnFence,
+        cache: &NoteCacheStore,
+        column_id: &str,
+    ) -> Epoch {
         fence
             .invalidate(column_id, || async {
                 cache.clear_column_notes(column_id).await.unwrap();
-                cache.replace_fetch_boundaries(column_id, &[pair(0, "n900")]).await.unwrap();
+                cache
+                    .replace_fetch_boundaries(column_id, &[pair(0, "n900")])
+                    .await
+                    .unwrap();
             })
             .await
             .0
@@ -3652,15 +4287,28 @@ mod tests {
     #[tokio::test]
     async fn commit_backfill_writes_caches_notes_and_extends_boundaries_when_current() {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n500")])
+            .await
+            .unwrap();
         let epoch = fence.begin("c1");
 
-        let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
+        let written = commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n600"),
+        )
+        .await;
 
         assert!(matches!(written, Some(Ok(()))));
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n300")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n300")]
+        );
     }
 
     #[tokio::test]
@@ -3669,25 +4317,46 @@ mod tests {
         let epoch = fence.begin("c1"); // 旧定義で取得を始めた
         simulate_update_column(&fence, &cache, "c1").await;
 
-        let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n950")).await;
+        let written = commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n950"),
+        )
+        .await;
 
         assert!(written.is_none());
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
         // until_id(n950)は新フィルタの境界(n900)と連続しているので、書き込まれていれば、旧フィルタの延長(n300)で
         // 新フィルタの境界(n900)が古い方へ動く。世代が古いので、動かない
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n900")]
+        );
     }
 
     #[tokio::test]
     async fn commit_backfill_writes_leaves_no_orphans_after_close() {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
         let epoch = fence.begin("c1");
-        fence.invalidate("c1", || async { cache.clear_column_notes("c1").await.unwrap() }).await;
+        fence
+            .invalidate("c1", || async {
+                cache.clear_column_notes("c1").await.unwrap()
+            })
+            .await;
         fence.remove("c1"); // close_column
 
-        let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
+        let written = commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n600"),
+        )
+        .await;
 
         assert!(written.is_none());
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
@@ -3712,18 +4381,37 @@ mod tests {
 
         assert!(written.is_ok());
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n100")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n100")]
+        );
     }
 
     #[tokio::test]
     async fn commit_initial_writes_keeps_boundaries_untouched_when_none_given() {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n700")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n700")])
+            .await
+            .unwrap();
         let epoch = fence.begin("c1");
 
-        commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None, || {}).await.unwrap();
+        commit_initial_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_of(&["n400"]),
+            None,
+            || {},
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n700")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n700")]
+        );
     }
 
     #[tokio::test]
@@ -3746,7 +4434,10 @@ mod tests {
         // 古い取得は「空の成功」ではなく明示的な失敗にする(フロントが古い定義を適用しないように)
         assert!(matches!(written, Err(Error::Invalid(_))));
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n900")]
+        );
     }
 
     #[tokio::test]
@@ -3755,11 +4446,22 @@ mod tests {
         let epoch = fence.begin("c1");
         let opened = std::cell::Cell::new(false);
 
-        commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None, || opened.set(true))
-            .await
-            .unwrap();
+        commit_initial_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_of(&["n400"]),
+            None,
+            || opened.set(true),
+        )
+        .await
+        .unwrap();
 
-        assert!(opened.get(), "世代が現在ならストリームを開く処理(on_current)が走る");
+        assert!(
+            opened.get(),
+            "世代が現在ならストリームを開く処理(on_current)が走る"
+        );
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
     }
 
@@ -3770,8 +4472,16 @@ mod tests {
         simulate_update_column(&fence, &cache, "c1").await;
         let opened = std::cell::Cell::new(false);
 
-        let written =
-            commit_initial_writes(&fence, &cache, "c1", &epoch, &fetch_of(&["n400"]), None, || opened.set(true)).await;
+        let written = commit_initial_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_of(&["n400"]),
+            None,
+            || opened.set(true),
+        )
+        .await;
 
         assert!(written.is_err());
         assert!(!opened.get(), "古い世代では、旧定義のストリームを開かない");
@@ -3783,7 +4493,10 @@ mod tests {
             truncated: true,
             boundary_id: None,
             // 全ソースが追いついたが、limit で n450 以下を切り捨てた = 境界が n450 へ引き上がる
-            sources: vec![GapSourceState { oldest_fetched: None, reached_target: true }],
+            sources: vec![GapSourceState {
+                oldest_fetched: None,
+                reached_target: true,
+            }],
             all_reached: true,
             dropped_floor: Some("n450".to_string()),
         }
@@ -3792,14 +4505,28 @@ mod tests {
     #[tokio::test]
     async fn commit_gap_fill_writes_caches_notes_and_raises_boundaries_when_current() {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n400")])
+            .await
+            .unwrap();
         let epoch = fence.begin("c1");
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
+        let written = commit_gap_fill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &gap_with(vec![note("n600", 6)]),
+            None,
+        )
+        .await;
 
         assert!(written);
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n450")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n450")]
+        );
     }
 
     #[tokio::test]
@@ -3808,11 +4535,22 @@ mod tests {
         let epoch = fence.begin("c1");
         simulate_update_column(&fence, &cache, "c1").await;
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
+        let written = commit_gap_fill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &gap_with(vec![note("n600", 6)]),
+            None,
+        )
+        .await;
 
         assert!(!written);
         assert!(cache.load_cached("c1", 10).await.unwrap().is_empty());
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n900")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n900")]
+        );
     }
 
     /// `cache_notes` だけが失敗するキャッシュ(`column_note` が無い)。境界の読み書きは動く。
@@ -3820,21 +4558,40 @@ mod tests {
         let backend = std::sync::Arc::new(crate::store::SqliteBackend::new(
             crate::store::db::open_cache_in_memory().unwrap(),
         ));
-        backend.conn().lock().unwrap().execute_batch("DROP TABLE column_note;").unwrap();
+        backend
+            .conn()
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TABLE column_note;")
+            .unwrap();
         NoteCacheStore::new_from_arc(backend)
     }
 
     #[tokio::test]
     async fn commit_gap_fill_writes_does_not_raise_boundaries_when_caching_the_notes_fails() {
         let (fence, cache) = (ColumnFence::default(), cache_failing_on_note_writes());
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n400")])
+            .await
+            .unwrap();
         let epoch = fence.begin("c1");
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), Some("acc1")).await;
+        let written = commit_gap_fill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &gap_with(vec![note("n600", 6)]),
+            Some("acc1"),
+        )
+        .await;
 
         assert!(written, "世代は現在のままなので、書き込みの試行は行われた");
         // ノートが無いまま境界だけが n450 へ進むと、範囲に穴が残る(Issue #611)
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n400")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n400")]
+        );
     }
 
     /// `set_mute` が行うこと(境界の書きロックの中で、全カラムの境界を捨てる)を模す。
@@ -3845,18 +4602,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn commit_backfill_writes_caches_notes_but_does_not_resurrect_boundaries_after_set_mute() {
+    async fn commit_backfill_writes_caches_notes_but_does_not_resurrect_boundaries_after_set_mute()
+    {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n500")])
+            .await
+            .unwrap();
         let epoch = fence.begin("c1"); // 旧ミュートで取得を始めた
         simulate_set_mute(&fence, &cache).await;
 
-        let written =
-            commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600")).await;
+        let written = commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n600"),
+        )
+        .await;
 
         assert!(matches!(written, Some(Ok(()))));
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1); // ノートは書かれる
-        // ロックの中で読む境界は、捨てた後なので空で、延長は計画されない(復活しない)
+                                                                         // ロックの中で読む境界は、捨てた後なので空で、延長は計画されない(復活しない)
         assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
     }
 
@@ -3864,15 +4632,28 @@ mod tests {
     async fn commit_backfill_writes_extends_boundaries_when_the_epoch_was_begun_after_set_mute() {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
         simulate_set_mute(&fence, &cache).await;
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n500")])
+            .await
+            .unwrap();
         let epoch = fence.begin("c1"); // ミュート変更の後に取得を始めた(対照)
 
-        commit_backfill_writes(&fence, &cache, "c1", &epoch, &fetch_with_outcomes(&["n400"], vec![fetched("n300")]), Some("n600"))
-            .await
-            .unwrap()
-            .unwrap();
+        commit_backfill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &fetch_with_outcomes(&["n400"], vec![fetched("n300")]),
+            Some("n600"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n300")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n300")]
+        );
     }
 
     #[tokio::test]
@@ -3893,7 +4674,10 @@ mod tests {
         )
         .await;
 
-        assert!(written.is_ok(), "ミュートを変えても、カラムは開ける(Err にしない)");
+        assert!(
+            written.is_ok(),
+            "ミュートを変えても、カラムは開ける(Err にしない)"
+        );
         assert!(opened.get(), "ストリームは開く");
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
         // 旧ミュートの結果に基づく境界は書かない。未確定のままなら、次回の backfill は API 経由になる
@@ -3906,7 +4690,15 @@ mod tests {
         let epoch = fence.begin("c1");
         simulate_set_mute(&fence, &cache).await; // 境界は空
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
+        let written = commit_gap_fill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &gap_with(vec![note("n600", 6)]),
+            None,
+        )
+        .await;
 
         assert!(written);
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
@@ -3915,18 +4707,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn commit_gap_fill_writes_still_raises_boundaries_when_only_the_boundary_epoch_is_stale() {
+    async fn commit_gap_fill_writes_still_raises_boundaries_when_only_the_boundary_epoch_is_stale()
+    {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
         let epoch = fence.begin("c1");
         simulate_set_mute(&fence, &cache).await;
         // ミュート変更の後に、別の取得が作った行
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n400")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n400")])
+            .await
+            .unwrap();
 
-        let written = commit_gap_fill_writes(&fence, &cache, "c1", &epoch, &gap_with(vec![note("n600", 6)]), None).await;
+        let written = commit_gap_fill_writes(
+            &fence,
+            &cache,
+            "c1",
+            &epoch,
+            &gap_with(vec![note("n600", 6)]),
+            None,
+        )
+        .await;
 
         assert!(written);
         // 引き上げを飛ばすと、打ち切られたギャップが境界で覆われないまま残る
-        assert_eq!(cache.get_fetch_boundaries("c1").await.unwrap(), vec![pair(0, "n450")]);
+        assert_eq!(
+            cache.get_fetch_boundaries("c1").await.unwrap(),
+            vec![pair(0, "n450")]
+        );
     }
 
     fn test_column(id: &str) -> Column {
@@ -3972,7 +4779,12 @@ mod tests {
         state.set_test_api_base(mock.uri());
         state
             .settings
-            .upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 400, auto: false })
+            .upsert_group(&ColumnGroup {
+                id: "g1".into(),
+                order: 0,
+                width: 400,
+                auto: false,
+            })
             .unwrap();
         state
     }
@@ -4010,7 +4822,10 @@ mod tests {
             "user": { "id": "u1", "username": "alice", "host": null },
             "visibility": "home"
         }]);
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200).set_body_json(page)).mount(mock).await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page))
+            .mount(mock)
+            .await;
     }
 
     /// ノート n9(u1)が、返信先 r1(u_muted)への返信になっているページ。
@@ -4030,7 +4845,10 @@ mod tests {
                 "visibility": "home"
             }
         }]);
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200).set_body_json(page)).mount(mock).await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page))
+            .mount(mock)
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -4038,17 +4856,30 @@ mod tests {
         let mock = MockServer::start().await;
         mount_reply_page(&mock).await;
         let state = command_state(&mock);
-        state.set_server_mutes("acc1", std::collections::HashSet::from(["u_muted".to_string()]));
+        state.set_server_mutes(
+            "acc1",
+            std::collections::HashSet::from(["u_muted".to_string()]),
+        );
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
         let app = tauri::test::mock_app();
-        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter)
+            .await
+            .unwrap();
         let (host, token) = state.host_token("acc1").unwrap();
         let epoch = state.column_fence.begin("c1");
 
-        let (notes, _) = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &epoch)
-            .await
-            .unwrap();
+        let (notes, _) = open_stream_and_fetch(
+            app.handle(),
+            &state,
+            &column,
+            Some(resolved),
+            host,
+            token,
+            &epoch,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(notes.len(), 1, "返信ノート本体は残る");
         assert!(notes[0].reply.is_none(), "ミュート対象の返信先は外す");
@@ -4069,13 +4900,23 @@ mod tests {
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
         let app = tauri::test::mock_app();
-        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter)
+            .await
+            .unwrap();
         let (host, token) = state.host_token("acc1").unwrap();
         let epoch = state.column_fence.begin("c1");
 
-        let (notes, _) = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &epoch)
-            .await
-            .unwrap();
+        let (notes, _) = open_stream_and_fetch(
+            app.handle(),
+            &state,
+            &column,
+            Some(resolved),
+            host,
+            token,
+            &epoch,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(notes[0].reply.as_ref().map(|r| r.id.as_str()), Some("r1"));
     }
@@ -4088,16 +4929,41 @@ mod tests {
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
         let app = tauri::test::mock_app();
-        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter)
+            .await
+            .unwrap();
         let (host, token) = state.host_token("acc1").unwrap();
         let stale = state.column_fence.begin("c1");
         state.column_fence.invalidate("c1", || async {}).await; // 取得中に update_column / close_column が走った
 
-        let result = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &stale).await;
+        let result = open_stream_and_fetch(
+            app.handle(),
+            &state,
+            &column,
+            Some(resolved),
+            host,
+            token,
+            &stale,
+        )
+        .await;
 
-        assert!(matches!(result, Err(Error::Invalid(_))), "古ければ、空の成功ではなく Err を返す");
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
-        assert!(state.cache.load_cached("c1", 10).await.unwrap().is_empty(), "ノートを書かない");
+        assert!(
+            matches!(result, Err(Error::Invalid(_))),
+            "古ければ、空の成功ではなく Err を返す"
+        );
+        assert!(
+            state
+                .cache
+                .get_fetch_boundaries("c1")
+                .await
+                .unwrap()
+                .is_empty(),
+            "境界を書かない"
+        );
+        assert!(
+            state.cache.load_cached("c1", 10).await.unwrap().is_empty(),
+            "ノートを書かない"
+        );
         assert_eq!(state.connections.open_count(), 0, "ストリームを開かない");
     }
 
@@ -4109,14 +4975,29 @@ mod tests {
         let column = command_column("c1", ColumnKind::Tag { tag: "foo".into() }); // ストリームを開かないソース
         state.settings.upsert_column(&column).unwrap();
         let app = tauri::test::mock_app();
-        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter)
+            .await
+            .unwrap();
         let (host, token) = state.host_token("acc1").unwrap();
         let current = state.column_fence.begin("c1");
 
-        let result = open_stream_and_fetch(app.handle(), &state, &column, Some(resolved), host, token, &current).await;
+        let result = open_stream_and_fetch(
+            app.handle(),
+            &state,
+            &column,
+            Some(resolved),
+            host,
+            token,
+            &current,
+        )
+        .await;
 
         let (notes, notifications) = result.unwrap();
-        assert_eq!(notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n9"], "ページが実際にパースされて流れる");
+        assert_eq!(
+            notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n9"],
+            "ページが実際にパースされて流れる"
+        );
         assert!(notifications.is_empty());
     }
 
@@ -4132,16 +5013,34 @@ mod tests {
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n5", 500)]).await.unwrap();
-        state.cache.replace_fetch_boundaries("c1", &[(0, "n1".to_string())]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n5", 500)])
+            .await
+            .unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(0, "n1".to_string())])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
-        assert_eq!(opened_ids(&opened), ["n5"], "境界が確定済みなら、キャッシュをそのまま返す");
+        assert_eq!(
+            opened_ids(&opened),
+            ["n5"],
+            "境界が確定済みなら、キャッシュをそのまま返す"
+        );
         assert_eq!(state.cache_metrics.resume_hit(), 1);
         assert_eq!(state.cache_metrics.resume_fallback(), 0);
-        assert_eq!(mock.received_requests().await.unwrap().len(), 0, "起動時にRESTを叩かない");
+        assert_eq!(
+            mock.received_requests().await.unwrap().len(),
+            0,
+            "起動時にRESTを叩かない"
+        );
         assert_eq!(state.connections.open_count(), 1, "ストリームは開く");
     }
 
@@ -4150,14 +5049,24 @@ mod tests {
         let mock = MockServer::start().await;
         mount_empty_pages(&mock).await;
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Local)).unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Local))
+            .unwrap();
         let app = tauri::test::mock_app();
 
-        reconnect_column_core(app.handle(), &state, "c1").await.unwrap();
+        reconnect_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
         assert_eq!(state.connections.open_count(), 1, "ストリームを開く");
         assert!(
-            state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(),
+            state
+                .cache
+                .get_fetch_boundaries("c1")
+                .await
+                .unwrap()
+                .is_empty(),
             "初期取得はしないので、境界は作られない"
         );
     }
@@ -4166,26 +5075,43 @@ mod tests {
     async fn reconnect_column_core_opens_the_stream_for_a_notifications_column() {
         let mock = MockServer::start().await;
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Notifications)).unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Notifications))
+            .unwrap();
         let app = tauri::test::mock_app();
 
-        reconnect_column_core(app.handle(), &state, "c1").await.unwrap();
+        reconnect_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
         assert_eq!(state.connections.open_count(), 1);
-        assert_eq!(mock.received_requests().await.unwrap().len(), 0, "REST は呼ばない");
+        assert_eq!(
+            mock.received_requests().await.unwrap().len(),
+            0,
+            "REST は呼ばない"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn reconnect_column_core_fills_the_gap_of_a_notifications_column_from_the_stalled_watermark() {
+    async fn reconnect_column_core_fills_the_gap_of_a_notifications_column_from_the_stalled_watermark(
+    ) {
         let mock = MockServer::start().await;
         mount_empty_pages(&mock).await;
         let app = tauri::test::mock_app();
         app.manage(command_state(&mock));
         let state = app.state::<AppState>();
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Notifications)).unwrap();
-        state.connections.stall_notification_mark_for_test("c1", "9tj000005");
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Notifications))
+            .unwrap();
+        state
+            .connections
+            .stall_notification_mark_for_test("c1", "9tj000005");
 
-        reconnect_column_core(app.handle(), &state, "c1").await.unwrap();
+        reconnect_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
         // 新しいタスクの最初の接続は再接続ではないので、停止中に届いた通知はここで補う(Issue #684)。
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -4196,7 +5122,10 @@ mod tests {
         .await
         .expect("ウォーターマークから REST で補完する");
         assert!(
-            state.connections.take_stalled_notification_mark("c1").is_none(),
+            state
+                .connections
+                .take_stalled_notification_mark("c1")
+                .is_none(),
             "退避分は使ったら消える"
         );
     }
@@ -4207,7 +5136,9 @@ mod tests {
         let state = command_state(&mock);
         let app = tauri::test::mock_app();
 
-        assert!(reconnect_column_core(app.handle(), &state, "closed").await.is_err());
+        assert!(reconnect_column_core(app.handle(), &state, "closed")
+            .await
+            .is_err());
         assert_eq!(state.connections.open_count(), 0);
     }
 
@@ -4216,29 +5147,47 @@ mod tests {
         let mock = MockServer::start().await;
         mount_empty_pages(&mock).await;
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Local)).unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Local))
+            .unwrap();
         let app = tauri::test::mock_app();
         let (epoch, column) = begin_and_load_column(&state, "c1").unwrap();
         // 世代を控えたあとに update_column / close_column が走った。
         state.column_fence.invalidate("c1", || async {}).await;
 
-        reconnect_column_with(app.handle(), &state, &column, &epoch).await.unwrap();
+        reconnect_column_with(app.handle(), &state, &column, &epoch)
+            .await
+            .unwrap();
 
-        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
+        assert_eq!(
+            state.connections.open_count(),
+            0,
+            "古い定義のストリームを開かない"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn reconnect_column_with_does_not_open_a_notifications_stream_for_a_stale_definition() {
         let mock = MockServer::start().await;
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Notifications)).unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Notifications))
+            .unwrap();
         let app = tauri::test::mock_app();
         let (epoch, column) = begin_and_load_column(&state, "c1").unwrap();
         state.column_fence.invalidate("c1", || async {}).await;
 
-        reconnect_column_with(app.handle(), &state, &column, &epoch).await.unwrap();
+        reconnect_column_with(app.handle(), &state, &column, &epoch)
+            .await
+            .unwrap();
 
-        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
+        assert_eq!(
+            state.connections.open_count(),
+            0,
+            "古い定義のストリームを開かない"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -4250,7 +5199,9 @@ mod tests {
         state.settings.upsert_column(&column).unwrap();
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
         assert_eq!(opened_ids(&opened), ["n9"], "キャッシュが空なら初回取得");
         assert_eq!(state.cache_metrics.resume_fallback(), 1);
@@ -4276,10 +5227,16 @@ mod tests {
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap(); // キャッシュ有り、境界なし
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap(); // キャッシュ有り、境界なし
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
         assert_eq!(opened_ids(&opened), ["n9"], "取得した新しいページを返す");
         assert_eq!(
@@ -4287,13 +5244,27 @@ mod tests {
             vec![(0, "n9".to_string())],
             "境界が確定する"
         );
-        let mut cached: Vec<String> =
-            state.cache.load_cached("c1", 10).await.unwrap().into_iter().map(|n| n.id).collect();
+        let mut cached: Vec<String> = state
+            .cache
+            .load_cached("c1", 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         cached.sort();
         assert_eq!(cached, ["n1", "n9"], "既存のキャッシュ行は消えない");
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 1);
-        assert_eq!(state.cache_metrics.resume_hit(), 0, "キャッシュ表示ではない");
-        assert_eq!(state.cache_metrics.resume_fallback(), 0, "キャッシュが空だったわけでもない");
+        assert_eq!(
+            state.cache_metrics.resume_hit(),
+            0,
+            "キャッシュ表示ではない"
+        );
+        assert_eq!(
+            state.cache_metrics.resume_fallback(),
+            0,
+            "キャッシュが空だったわけでもない"
+        );
         assert_eq!(state.connections.open_count(), 1, "ストリームを開く");
     }
 
@@ -4304,37 +5275,83 @@ mod tests {
         let state = command_state(&mock);
         let column = tql_two_source_column("c1");
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
-        state.cache.replace_fetch_boundaries("c1", &[(1, "n0".to_string())]).await.unwrap(); // source 0 の行が欠ける
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(1, "n0".to_string())])
+            .await
+            .unwrap(); // source 0 の行が欠ける
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
         assert_eq!(opened_ids(&opened), ["n9"]);
         let mut boundaries = state.cache.get_fetch_boundaries("c1").await.unwrap();
         boundaries.sort();
-        assert_eq!(boundaries, vec![(0, "n9".to_string()), (1, "n9".to_string())], "全ソース分そろう");
+        assert_eq!(
+            boundaries,
+            vec![(0, "n9".to_string()), (1, "n9".to_string())],
+            "全ソース分そろう"
+        );
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn resume_column_core_keeps_the_cache_when_the_refetch_fails() {
         let mock = MockServer::start().await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(500)).mount(&mock).await; // オフライン相当
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock)
+            .await; // オフライン相当
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
-        assert_eq!(opened_ids(&opened), ["n1"], "空表示にせず、キャッシュを返す");
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界は未確定のまま");
-        assert_eq!(state.cache_metrics.resume_hit(), 1, "キャッシュ表示として数える");
+        assert_eq!(
+            opened_ids(&opened),
+            ["n1"],
+            "空表示にせず、キャッシュを返す"
+        );
+        assert!(
+            state
+                .cache
+                .get_fetch_boundaries("c1")
+                .await
+                .unwrap()
+                .is_empty(),
+            "境界は未確定のまま"
+        );
+        assert_eq!(
+            state.cache_metrics.resume_hit(),
+            1,
+            "キャッシュ表示として数える"
+        );
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
-        assert!(!mock.received_requests().await.unwrap().is_empty(), "取得は試みた");
-        assert_eq!(state.connections.open_count(), 1, "ストリームはフォールバック側で1回だけ開く");
+        assert!(
+            !mock.received_requests().await.unwrap().is_empty(),
+            "取得は試みた"
+        );
+        assert_eq!(
+            state.connections.open_count(),
+            1,
+            "ストリームはフォールバック側で1回だけ開く"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -4360,16 +5377,37 @@ mod tests {
         let state = command_state(&mock);
         let column = tql_two_source_column("c1");
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
-        assert_eq!(opened_ids(&opened), ["n1"], "部分的な結果で、キャッシュの表示を置き換えない");
-        let cached: Vec<String> =
-            state.cache.load_cached("c1", 10).await.unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(
+            opened_ids(&opened),
+            ["n1"],
+            "部分的な結果で、キャッシュの表示を置き換えない"
+        );
+        let cached: Vec<String> = state
+            .cache
+            .load_cached("c1", 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(cached, ["n1"], "取得できた分も書かない");
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
+        assert!(state
+            .cache
+            .get_fetch_boundaries("c1")
+            .await
+            .unwrap()
+            .is_empty());
         assert_eq!(state.cache_metrics.resume_hit(), 1);
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
     }
@@ -4386,14 +5424,20 @@ mod tests {
         }]);
         Mock::given(method("POST"))
             .respond_with(
-                ResponseTemplate::new(200).set_body_json(page).set_delay(std::time::Duration::from_millis(300)),
+                ResponseTemplate::new(200)
+                    .set_body_json(page)
+                    .set_delay(std::time::Duration::from_millis(300)),
             )
             .mount(&mock)
             .await;
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
 
         let (result, _) = tokio::join!(resume_column_core(app.handle(), &state, "c1"), async {
@@ -4401,9 +5445,24 @@ mod tests {
             state.column_fence.invalidate("c1", || async {}).await; // 取得中に update_column / close_column が走った
         });
 
-        assert!(matches!(result, Err(Error::Invalid(_))), "古ければ、フォールバックせず Err を返す");
-        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
+        assert!(
+            matches!(result, Err(Error::Invalid(_))),
+            "古ければ、フォールバックせず Err を返す"
+        );
+        assert_eq!(
+            state.connections.open_count(),
+            0,
+            "古い定義のストリームを開かない"
+        );
+        assert!(
+            state
+                .cache
+                .get_fetch_boundaries("c1")
+                .await
+                .unwrap()
+                .is_empty(),
+            "境界を書かない"
+        );
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
     }
 
@@ -4414,28 +5473,49 @@ mod tests {
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Tag { tag: "foo".into() }); // Streaming を持たないソース
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
-        assert_eq!(opened_ids(&opened), ["n1"], "対象外のカラムは従来どおりキャッシュを返す");
-        assert_eq!(mock.received_requests().await.unwrap().len(), 0, "起動時にRESTを叩かない");
+        assert_eq!(
+            opened_ids(&opened),
+            ["n1"],
+            "対象外のカラムは従来どおりキャッシュを返す"
+        );
+        assert_eq!(
+            mock.received_requests().await.unwrap().len(),
+            0,
+            "起動時にRESTを叩かない"
+        );
         assert_eq!(state.cache_metrics.resume_hit(), 1);
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn resume_column_core_returns_an_error_when_the_column_changes_during_a_failing_refetch() {
+    async fn resume_column_core_returns_an_error_when_the_column_changes_during_a_failing_refetch()
+    {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(500).set_delay(std::time::Duration::from_millis(300)))
+            .respond_with(
+                ResponseTemplate::new(500).set_delay(std::time::Duration::from_millis(300)),
+            )
             .mount(&mock)
             .await;
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
 
         let (result, _) = tokio::join!(resume_column_core(app.handle(), &state, "c1"), async {
@@ -4443,8 +5523,15 @@ mod tests {
             state.column_fence.invalidate("c1", || async {}).await; // 取得中に update_column / close_column が走った
         });
 
-        assert!(matches!(result, Err(Error::Invalid(_))), "取得が失敗した場合でも、古ければ Err を返す");
-        assert_eq!(state.connections.open_count(), 0, "古い定義のストリームを開かない");
+        assert!(
+            matches!(result, Err(Error::Invalid(_))),
+            "取得が失敗した場合でも、古ければ Err を返す"
+        );
+        assert_eq!(
+            state.connections.open_count(),
+            0,
+            "古い定義のストリームを開かない"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -4454,16 +5541,38 @@ mod tests {
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
 
-        let opened = resume_column_core(app.handle(), &state, "c1").await.unwrap();
+        let opened = resume_column_core(app.handle(), &state, "c1")
+            .await
+            .unwrap();
 
-        assert_eq!(opened_ids(&opened), ["n1"], "空のページで、見えていたキャッシュを消さない");
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
+        assert_eq!(
+            opened_ids(&opened),
+            ["n1"],
+            "空のページで、見えていたキャッシュを消さない"
+        );
+        assert!(
+            state
+                .cache
+                .get_fetch_boundaries("c1")
+                .await
+                .unwrap()
+                .is_empty(),
+            "境界を書かない"
+        );
         assert_eq!(state.cache_metrics.resume_hit(), 1);
         assert_eq!(state.cache_metrics.resume_boundary_refetch(), 0);
-        assert_eq!(state.connections.open_count(), 1, "ストリームはフォールバック側で1回だけ開く");
+        assert_eq!(
+            state.connections.open_count(),
+            1,
+            "ストリームはフォールバック側で1回だけ開く"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -4477,15 +5586,25 @@ mod tests {
             "visibility": "home"
         }]);
         Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(page).set_delay(std::time::Duration::from_millis(1500)))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(page)
+                    .set_delay(std::time::Duration::from_millis(1500)),
+            )
             .mount(&mock)
             .await;
         let state = command_state(&mock);
         let column = command_column("c1", ColumnKind::Local);
         state.settings.upsert_column(&column).unwrap();
-        state.cache.cache_notes("c1", &[note("n1", 100)]).await.unwrap();
+        state
+            .cache
+            .cache_notes("c1", &[note("n1", 100)])
+            .await
+            .unwrap();
         let app = tauri::test::mock_app();
-        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter).await.unwrap();
+        let resolved = resolve_sources(&state, "acc1", &column.kind, &column.filter)
+            .await
+            .unwrap();
         let (host, token) = state.host_token("acc1").unwrap();
         let epoch = state.column_fence.begin("c1");
 
@@ -4502,19 +5621,45 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(result, Ok(None)), "応答しないサーバーは、失敗として扱う");
-        assert!(started.elapsed() < std::time::Duration::from_millis(1000), "応答を待ち続けない");
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "境界を書かない");
-        assert_eq!(state.connections.open_count(), 0, "ストリームは呼び出し側が開く");
+        assert!(
+            matches!(result, Ok(None)),
+            "応答しないサーバーは、失敗として扱う"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(1000),
+            "応答を待ち続けない"
+        );
+        assert!(
+            state
+                .cache
+                .get_fetch_boundaries("c1")
+                .await
+                .unwrap()
+                .is_empty(),
+            "境界を書かない"
+        );
+        assert_eq!(
+            state.connections.open_count(),
+            0,
+            "ストリームは呼び出し側が開く"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn update_column_core_saves_the_new_definition_clears_the_cache_and_stales_earlier_epochs() {
+    async fn update_column_core_saves_the_new_definition_clears_the_cache_and_stales_earlier_epochs(
+    ) {
         let mock = MockServer::start().await;
         mount_empty_pages(&mock).await;
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
-        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap(); // 旧定義で貯めた境界
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Home))
+            .unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(0, "n100".to_string())])
+            .await
+            .unwrap(); // 旧定義で貯めた境界
         let in_flight = state.column_fence.begin("c1"); // 旧定義で取得を始めた
         let app = tauri::test::mock_app();
 
@@ -4533,8 +5678,19 @@ mod tests {
         let saved = state.settings.load_columns().unwrap();
         assert_eq!(saved[0].kind, ColumnKind::Tag { tag: "foo".into() });
         assert_eq!(saved[0].title.as_deref(), Some("新しい名前"));
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "旧定義の境界は消える");
-        let late = state.column_fence.write_if_current("c1", &in_flight, |_| async {}).await;
+        assert!(
+            state
+                .cache
+                .get_fetch_boundaries("c1")
+                .await
+                .unwrap()
+                .is_empty(),
+            "旧定義の境界は消える"
+        );
+        let late = state
+            .column_fence
+            .write_if_current("c1", &in_flight, |_| async {})
+            .await;
         assert!(late.is_none(), "旧定義の取得の書き込みは捨てられる");
     }
 
@@ -4555,24 +5711,48 @@ mod tests {
         .await;
 
         assert!(matches!(result, Err(Error::Invalid(_))));
-        assert!(!state.column_fence.tracks("ghost"), "未知のカラムのエントリを作らない");
+        assert!(
+            !state.column_fence.tracks("ghost"),
+            "未知のカラムのエントリを作らない"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn close_column_core_removes_the_column_clears_the_cache_and_stales_earlier_epochs() {
         let mock = MockServer::start().await;
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
-        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Home))
+            .unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(0, "n100".to_string())])
+            .await
+            .unwrap();
         let in_flight = state.column_fence.begin("c1");
 
         close_column_core(&state, "c1").await.unwrap();
 
         assert!(state.settings.load_columns().unwrap().is_empty());
-        assert!(state.settings.load_groups().unwrap().is_empty(), "空になったグループも消える");
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
-        assert!(!state.column_fence.tracks("c1"), "フェンスのエントリが残らない");
-        let late = state.column_fence.write_if_current("c1", &in_flight, |_| async {}).await;
+        assert!(
+            state.settings.load_groups().unwrap().is_empty(),
+            "空になったグループも消える"
+        );
+        assert!(state
+            .cache
+            .get_fetch_boundaries("c1")
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(
+            !state.column_fence.tracks("c1"),
+            "フェンスのエントリが残らない"
+        );
+        let late = state
+            .column_fence
+            .write_if_current("c1", &in_flight, |_| async {})
+            .await;
         assert!(late.is_none(), "閉じる前の取得の書き込みは捨てられる");
     }
 
@@ -4592,21 +5772,33 @@ mod tests {
         use crate::tts::queue::SpeechItem;
         let mock = MockServer::start().await;
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Home))
+            .unwrap();
         let item = |note: &str, col: &str| SpeechItem {
             note_id: note.into(),
             column_id: col.into(),
             text: "t".into(),
             voice_id: "1".into(),
-            params: SynthParams { speed_scale: 1.0, volume: 1.0 },
+            params: SynthParams {
+                speed_scale: 1.0,
+                volume: 1.0,
+            },
         };
         state.speech.enqueue(item("n1", "c1"), 5);
         state.speech.enqueue(item("n2", "other"), 5);
 
         close_column_core(&state, "c1").await.unwrap();
 
-        let left: Vec<_> = std::iter::from_fn(|| state.speech.pop_for_command_test()).map(|i| i.note_id).collect();
-        assert_eq!(left, ["n2"], "閉じたカラムの読み上げの待ち項目だけが消える(Issue #625)");
+        let left: Vec<_> = std::iter::from_fn(|| state.speech.pop_for_command_test())
+            .map(|i| i.note_id)
+            .collect();
+        assert_eq!(
+            left,
+            ["n2"],
+            "閉じたカラムの読み上げの待ち項目だけが消える(Issue #625)"
+        );
     }
 
     #[tokio::test]
@@ -4625,19 +5817,33 @@ mod tests {
         .await;
 
         assert!(matches!(written, Some(Ok(()))));
-        assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1, "ノートは書かれる");
-        assert!(cache.get_fetch_boundaries("c1").await.unwrap().is_empty(), "行が無いソースは、延長で挿入しない");
+        assert_eq!(
+            cache.load_cached("c1", 10).await.unwrap().len(),
+            1,
+            "ノートは書かれる"
+        );
+        assert!(
+            cache.get_fetch_boundaries("c1").await.unwrap().is_empty(),
+            "行が無いソースは、延長で挿入しない"
+        );
     }
 
     #[tokio::test]
-    async fn commit_backfill_writes_does_not_extend_a_boundary_rebuilt_after_set_mute_by_an_older_epoch() {
+    async fn commit_backfill_writes_does_not_extend_a_boundary_rebuilt_after_set_mute_by_an_older_epoch(
+    ) {
         let (fence, cache) = (ColumnFence::default(), mem_cache());
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n500")])
+            .await
+            .unwrap();
         let epoch = fence.begin("c1"); // 旧ミュートで取得を始めた
         simulate_set_mute(&fence, &cache).await;
         // set_mute の後に、新ミュートで開き直されたカラムが、境界を作り直した(open_stream_and_fetch)。
         // ロックの中で読む境界は空ではないので、`boundaries_ok` のガードが無いと、旧ミュートの結果で延長してしまう
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n500")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n500")])
+            .await
+            .unwrap();
 
         let written = commit_backfill_writes(
             &fence,
@@ -4662,7 +5868,8 @@ mod tests {
         let fence = ColumnFence::default();
         // 境界のテーブルを失った DB。`get_fetch_boundaries` が実際の SQL エラーになる(ノートの表は生きている)
         let conn = crate::store::db::open_cache_in_memory().unwrap();
-        conn.execute("DROP TABLE column_source_boundary", []).unwrap();
+        conn.execute("DROP TABLE column_source_boundary", [])
+            .unwrap();
         let cache = NoteCacheStore::new(crate::store::SqliteBackend::new(conn));
         let epoch = fence.begin("c1");
 
@@ -4676,7 +5883,10 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(written, Some(Ok(()))), "境界を読めなくても、ノートのキャッシュは成功する");
+        assert!(
+            matches!(written, Some(Ok(()))),
+            "境界を読めなくても、ノートのキャッシュは成功する"
+        );
         assert_eq!(cache.load_cached("c1", 10).await.unwrap().len(), 1);
     }
 
@@ -4687,7 +5897,10 @@ mod tests {
 
         let fence = Arc::new(ColumnFence::default());
         let cache = Arc::new(mem_cache());
-        cache.replace_fetch_boundaries("c1", &[pair(0, "n100")]).await.unwrap();
+        cache
+            .replace_fetch_boundaries("c1", &[pair(0, "n100")])
+            .await
+            .unwrap();
         let fetch_epoch = fence.begin("c1"); // fetch_backfill が、境界 n100 のもとで取得を始めた
         let gap_epoch = fence.begin("c1"); // 並行するギャップ埋め
         let (ready_tx, mut ready_rx) = mpsc::unbounded_channel();
@@ -4700,7 +5913,10 @@ mod tests {
                         ready_tx.send(()).unwrap();
                         gate.acquire().await.unwrap().forget();
                         // 打ち切られたギャップ埋めが、境界を n350 へ引き上げる(完全と言える範囲を縮める)
-                        cache.replace_fetch_boundaries("c1", &[pair(0, "n350")]).await.unwrap();
+                        cache
+                            .replace_fetch_boundaries("c1", &[pair(0, "n350")])
+                            .await
+                            .unwrap();
                     })
                     .await
             })
@@ -4743,14 +5959,31 @@ mod tests {
         mount_one_note_page(&mock).await; // ノート n9 の1ページ
         let app = tauri::test::mock_app();
         let state = command_state(&mock);
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Local)).unwrap();
-        state.cache.replace_fetch_boundaries("c1", &[(0, "n95".to_string())]).await.unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Local))
+            .unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(0, "n95".to_string())])
+            .await
+            .unwrap();
         app.manage(state);
 
-        let notes = fetch_backfill(app.state::<AppState>(), "c1".into(), "n99".into(), true).await.unwrap();
+        let notes = fetch_backfill(app.state::<AppState>(), "c1".into(), "n99".into(), true)
+            .await
+            .unwrap();
 
-        assert_eq!(notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n9"]);
-        let boundaries = app.state::<AppState>().cache.get_fetch_boundaries("c1").await.unwrap();
+        assert_eq!(
+            notes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n9"]
+        );
+        let boundaries = app
+            .state::<AppState>()
+            .cache
+            .get_fetch_boundaries("c1")
+            .await
+            .unwrap();
         assert_eq!(boundaries.len(), 1);
         assert!(
             boundaries[0].1.as_str() < "n95",
@@ -4759,7 +5992,11 @@ mod tests {
     }
 
     /// `update_column_core` が `Err` を返したあと、定義・境界・世代・ストリームが変わっていないこと。
-    async fn assert_update_left_nothing_changed(state: &AppState, original_kind: &ColumnKind, before: &Epoch) {
+    async fn assert_update_left_nothing_changed(
+        state: &AppState,
+        original_kind: &ColumnKind,
+        before: &Epoch,
+    ) {
         let saved = state.settings.load_columns().unwrap();
         assert_eq!(saved[0].kind, *original_kind, "定義は旧定義のまま");
         assert_eq!(
@@ -4767,8 +6004,14 @@ mod tests {
             vec![(0, "n100".to_string())],
             "キャッシュ(境界)は破棄されない"
         );
-        let still_current = state.column_fence.write_if_current("c1", before, |_| async {}).await;
-        assert!(still_current.is_some(), "世代は進まない(実行中の取得を捨てない)");
+        let still_current = state
+            .column_fence
+            .write_if_current("c1", before, |_| async {})
+            .await;
+        assert!(
+            still_current.is_some(),
+            "世代は進まない(実行中の取得を捨てない)"
+        );
         // ストリームが閉じないことは、ここでは検証しない: `open_count()` はアカウント単位の接続数で、事前に
         // 接続を開いていないテストでは、`invalidate` の後で失敗する旧い順序でも 0 のままになるため。
     }
@@ -4778,9 +6021,16 @@ mod tests {
         let mock = MockServer::start().await;
         mount_empty_pages(&mock).await;
         let state = command_state(&mock);
-        let column = Column { group_id: "ghost".into(), ..command_column("c1", ColumnKind::Home) };
+        let column = Column {
+            group_id: "ghost".into(),
+            ..command_column("c1", ColumnKind::Home)
+        };
         state.settings.upsert_column(&column).unwrap();
-        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(0, "n100".to_string())])
+            .await
+            .unwrap();
         let before = state.column_fence.begin("c1");
         let app = tauri::test::mock_app();
 
@@ -4803,10 +6053,22 @@ mod tests {
         let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory()); // アカウントを登録しない
         state
             .settings
-            .upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 400, auto: false })
+            .upsert_group(&ColumnGroup {
+                id: "g1".into(),
+                order: 0,
+                width: 400,
+                auto: false,
+            })
             .unwrap();
-        state.settings.upsert_column(&command_column("c1", ColumnKind::Home)).unwrap();
-        state.cache.replace_fetch_boundaries("c1", &[(0, "n100".to_string())]).await.unwrap();
+        state
+            .settings
+            .upsert_column(&command_column("c1", ColumnKind::Home))
+            .unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(0, "n100".to_string())])
+            .await
+            .unwrap();
         let before = state.column_fence.begin("c1");
         let app = tauri::test::mock_app();
 
@@ -4828,7 +6090,10 @@ mod tests {
     async fn filter_notifications_strips_a_muted_reply_target_and_keeps_the_notification() {
         let mock = MockServer::start().await;
         let state = command_state(&mock);
-        state.set_server_mutes("acc1", std::collections::HashSet::from(["u_muted".to_string()]));
+        state.set_server_mutes(
+            "acc1",
+            std::collections::HashSet::from(["u_muted".to_string()]),
+        );
         let mut reply_note = note("n1", 1);
         reply_note.reply_id = Some("r1".into());
         let mut target = note("r1", 0);

@@ -116,7 +116,11 @@ impl MisskeyClient {
             return Ok(serde_json::from_slice(&bytes)?);
         }
 
-        Err(Self::map_error(endpoint, status, String::from_utf8(bytes.to_vec()).ok()))
+        Err(Self::map_error(
+            endpoint,
+            status,
+            String::from_utf8(bytes.to_vec()).ok(),
+        ))
     }
 
     /// `body`（任意の Serialize）を JSON オブジェクト化し、token があれば `i` を差し込む。
@@ -236,7 +240,10 @@ mod tests {
     fn debug_redacts_token() {
         let c = client(Some("super-secret"));
         let dbg = format!("{c:?}");
-        assert!(!dbg.contains("super-secret"), "token leaked in Debug: {dbg}");
+        assert!(
+            !dbg.contains("super-secret"),
+            "token leaked in Debug: {dbg}"
+        );
         assert!(dbg.contains("redacted"));
     }
 
@@ -256,11 +263,21 @@ mod tests {
     #[tokio::test]
     async fn post_times_out_when_server_never_responds() {
         let port = silent_server().await;
-        let http = build_http_client_with("tsumugi-test", Duration::from_secs(5), Duration::from_millis(200)).unwrap();
-        let c = MisskeyClient::new_with_api_base(http, format!("http://127.0.0.1:{port}/api"), None);
-        let res = tokio::time::timeout(Duration::from_secs(5), c.post::<_, Value>("i", &json!({}))).await;
+        let http = build_http_client_with(
+            "tsumugi-test",
+            Duration::from_secs(5),
+            Duration::from_millis(200),
+        )
+        .unwrap();
+        let c =
+            MisskeyClient::new_with_api_base(http, format!("http://127.0.0.1:{port}/api"), None);
+        let res =
+            tokio::time::timeout(Duration::from_secs(5), c.post::<_, Value>("i", &json!({}))).await;
         let err = res.expect("タイムアウトせず永久に待っている").unwrap_err();
-        assert!(matches!(err, Error::Network(ref m) if m.starts_with("timeout")), "unexpected: {err:?}");
+        assert!(
+            matches!(err, Error::Network(ref m) if m.starts_with("timeout")),
+            "unexpected: {err:?}"
+        );
     }
 
     /// 実 Misskey に対する疎通確認（token 無しで /i → 認証エラーになること）。
@@ -285,7 +302,8 @@ mod tests {
         );
         assert!(matches!(e, Error::Unauthorized(_)));
 
-        let e = MisskeyClient::map_error("notes/create", reqwest::StatusCode::TOO_MANY_REQUESTS, None);
+        let e =
+            MisskeyClient::map_error("notes/create", reqwest::StatusCode::TOO_MANY_REQUESTS, None);
         assert!(matches!(e, Error::RateLimited));
 
         let e = MisskeyClient::map_error(
@@ -323,8 +341,14 @@ mod tests {
 
         match res {
             Err(Error::NotFound(detail)) => {
-                assert!(detail.contains("NO_SUCH_NOTE"), "detail should contain error code: {detail}");
-                assert!(detail.contains("No such note."), "detail should contain error message: {detail}");
+                assert!(
+                    detail.contains("NO_SUCH_NOTE"),
+                    "detail should contain error code: {detail}"
+                );
+                assert!(
+                    detail.contains("No such note."),
+                    "detail should contain error message: {detail}"
+                );
             }
             other => panic!("expected NotFound, got {other:?}"),
         }

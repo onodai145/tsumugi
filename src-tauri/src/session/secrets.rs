@@ -198,7 +198,10 @@ mod real_keyring_tests {
         delete_cache_backend_password().unwrap();
         assert!(load_cache_backend_password().unwrap().is_none());
         save_cache_backend_password("pg-pass-123").unwrap();
-        assert_eq!(load_cache_backend_password().unwrap().as_deref(), Some("pg-pass-123"));
+        assert_eq!(
+            load_cache_backend_password().unwrap().as_deref(),
+            Some("pg-pass-123")
+        );
         delete_cache_backend_password().unwrap();
         assert!(load_cache_backend_password().unwrap().is_none());
     }

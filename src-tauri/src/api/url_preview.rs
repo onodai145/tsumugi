@@ -64,7 +64,8 @@ fn normalize(raw: RawUrlPreview, target_url: &str) -> UrlPreview {
 }
 
 /// 取得先が `net_guard` に拒否されたときのメッセージ(Issue #549)。
-pub(crate) const BLOCKED_MESSAGE: &str = "取得先が許可されていません(ローカル/社内ネットワークのアドレス)";
+pub(crate) const BLOCKED_MESSAGE: &str =
+    "取得先が許可されていません(ローカル/社内ネットワークのアドレス)";
 
 /// `proxy_base`（例: `"https://misskey.io/url"` またはユーザ設定のカスタムプロキシURL）に
 /// `?url=<target_url>` を付与してGETし、応答を [`UrlPreview`] へ正規化する。
@@ -79,7 +80,8 @@ pub async fn fetch_url_preview(
     proxy_base: &str,
     target_url: &str,
 ) -> Result<UrlPreview> {
-    let base = url::Url::parse(proxy_base).map_err(|e| Error::Invalid(format!("invalid url: {e}")))?;
+    let base =
+        url::Url::parse(proxy_base).map_err(|e| Error::Invalid(format!("invalid url: {e}")))?;
     if let Err(blocked) = crate::net_guard::validate_url(&base, allow) {
         log::warn!("url preview blocked before request: {blocked}");
         return Err(Error::Invalid(BLOCKED_MESSAGE.to_string()));
@@ -129,8 +131,14 @@ mod tests {
         assert_eq!(preview.url, "https://example.com/article");
         assert_eq!(preview.title.as_deref(), Some("記事タイトル"));
         assert_eq!(preview.description.as_deref(), Some("説明文"));
-        assert_eq!(preview.thumbnail.as_deref(), Some("https://example.com/thumb.png"));
-        assert_eq!(preview.icon.as_deref(), Some("https://example.com/favicon.ico"));
+        assert_eq!(
+            preview.thumbnail.as_deref(),
+            Some("https://example.com/thumb.png")
+        );
+        assert_eq!(
+            preview.icon.as_deref(),
+            Some("https://example.com/favicon.ico")
+        );
         assert_eq!(preview.sitename.as_deref(), Some("Example"));
         assert!(preview.sensitive);
         let player = preview.player.unwrap();
@@ -165,9 +173,14 @@ mod tests {
     async fn real_url_preview_from_misskey_io() {
         let http = reqwest::Client::new();
         let allow = crate::net_guard::FetchAllowlist::default();
-        let preview = fetch_url_preview(&http, &allow, "https://misskey.io/url", "https://misskey.io/")
-            .await
-            .expect("fetch_url_preview should succeed against misskey.io");
+        let preview = fetch_url_preview(
+            &http,
+            &allow,
+            "https://misskey.io/url",
+            "https://misskey.io/",
+        )
+        .await
+        .expect("fetch_url_preview should succeed against misskey.io");
         assert!(
             preview.title.as_deref().is_some_and(|t| !t.is_empty()),
             "expected a non-empty title, got {:?}",

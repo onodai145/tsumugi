@@ -163,7 +163,9 @@ fn parse_haptic_comment(comment: &[u8]) -> Option<bool> {
     if !key.eq_ignore_ascii_case(b"ANDROID_HAPTIC") {
         return None;
     }
-    let channels = std::str::from_utf8(value).ok().and_then(|s| s.parse::<u32>().ok());
+    let channels = std::str::from_utf8(value)
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok());
     Some(channels.is_some_and(|n| n >= 1))
 }
 
@@ -262,7 +264,9 @@ impl SoundPlayer {
                             let _ = done.send(SpeakOutcome::Failed(format!("デコードに失敗: {e}")));
                         }
                         DecodeOutcome::Panicked => {
-                            let _ = done.send(SpeakOutcome::Failed("デコード処理がパニックしました".into()));
+                            let _ = done.send(SpeakOutcome::Failed(
+                                "デコード処理がパニックしました".into(),
+                            ));
                         }
                     },
                     Cmd::StopSpeech => lane.stop(),
@@ -286,7 +290,8 @@ impl SoundPlayer {
         if self.tx.send(Cmd::Speak { wav, done }).is_err() {
             return SpeakOutcome::Failed("再生スレッドが終了しているため再生できません".into());
         }
-        rx.await.unwrap_or_else(|_| SpeakOutcome::Failed("再生スレッドが終了しました".into()))
+        rx.await
+            .unwrap_or_else(|_| SpeakOutcome::Failed("再生スレッドが終了しました".into()))
     }
 
     /// 再生中の読み上げを止める(待っている `speak` は `Stopped` で返る)。
@@ -410,26 +415,52 @@ mod tests {
 
     #[test]
     fn haptic_tag_values() {
-        assert!(has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC=1"])));
-        assert!(has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC=2"])));
+        assert!(has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC=1"
+        ])));
+        assert!(has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC=2"
+        ])));
         // 他のコメントと並んでいても見つかる
-        assert!(has_haptic_channel(&ogg_with_comments(&["TITLE=x", "ANDROID_HAPTIC=1", "ARTIST=y"])));
+        assert!(has_haptic_channel(&ogg_with_comments(&[
+            "TITLE=x",
+            "ANDROID_HAPTIC=1",
+            "ARTIST=y"
+        ])));
         // 0・数値でない・負・u32 を超える・空は触覚なし
-        assert!(!has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC=0"])));
-        assert!(!has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC=abc"])));
-        assert!(!has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC=-1"])));
-        assert!(!has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC=99999999999"])));
-        assert!(!has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC="])));
+        assert!(!has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC=0"
+        ])));
+        assert!(!has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC=abc"
+        ])));
+        assert!(!has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC=-1"
+        ])));
+        assert!(!has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC=99999999999"
+        ])));
+        assert!(!has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC="
+        ])));
         // '=' が無い・キーが似ているだけのものは別のコメント
         assert!(!has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC"])));
-        assert!(!has_haptic_channel(&ogg_with_comments(&["XANDROID_HAPTIC=1"])));
-        assert!(!has_haptic_channel(&ogg_with_comments(&["ANDROID_HAPTIC_X=1"])));
+        assert!(!has_haptic_channel(&ogg_with_comments(&[
+            "XANDROID_HAPTIC=1"
+        ])));
+        assert!(!has_haptic_channel(&ogg_with_comments(&[
+            "ANDROID_HAPTIC_X=1"
+        ])));
     }
 
     #[test]
     fn haptic_tag_key_is_case_insensitive() {
-        assert!(has_haptic_channel(&ogg_with_comments(&["android_haptic=1"])));
-        assert!(has_haptic_channel(&ogg_with_comments(&["Android_Haptic=1"])));
+        assert!(has_haptic_channel(&ogg_with_comments(&[
+            "android_haptic=1"
+        ])));
+        assert!(has_haptic_channel(&ogg_with_comments(&[
+            "Android_Haptic=1"
+        ])));
     }
 
     #[test]
@@ -464,8 +495,14 @@ mod tests {
     #[test]
     fn comment_header_beyond_the_scan_window_is_not_detected() {
         // 先頭 64KiB の外にあるコメントヘッダは見ない(既知の制約)
-        assert!(has_haptic_channel(&ogg_with_comments_after(60_000, &["ANDROID_HAPTIC=1"])));
-        assert!(!has_haptic_channel(&ogg_with_comments_after(70_000, &["ANDROID_HAPTIC=1"])));
+        assert!(has_haptic_channel(&ogg_with_comments_after(
+            60_000,
+            &["ANDROID_HAPTIC=1"]
+        )));
+        assert!(!has_haptic_channel(&ogg_with_comments_after(
+            70_000,
+            &["ANDROID_HAPTIC=1"]
+        )));
     }
 
     #[test]
@@ -508,8 +545,12 @@ mod tests {
     #[tokio::test]
     async fn speak_on_a_player_without_a_thread_fails_instead_of_hanging() {
         let p = SoundPlayer::new_for_test();
-        let r = tokio::time::timeout(std::time::Duration::from_secs(2), p.speak(vec![0, 1, 2])).await;
-        assert!(matches!(r, Ok(crate::speech_lane::SpeakOutcome::Failed(_))), "{r:?}");
+        let r =
+            tokio::time::timeout(std::time::Duration::from_secs(2), p.speak(vec![0, 1, 2])).await;
+        assert!(
+            matches!(r, Ok(crate::speech_lane::SpeakOutcome::Failed(_))),
+            "{r:?}"
+        );
         p.stop_speech(); // 受信側がいなくても panic しない
     }
 }

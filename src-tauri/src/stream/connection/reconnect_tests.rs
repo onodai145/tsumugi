@@ -260,13 +260,19 @@ impl Harness {
 
     /// 次に emit された ColumnNote のノートIDを返す。
     async fn next_note_id(&mut self) -> String {
-        within(self.notes.recv()).await.expect("note channel closed").note.id
+        within(self.notes.recv())
+            .await
+            .expect("note channel closed")
+            .note
+            .id
     }
 
     /// `column_id` 宛ての次の接続状態イベントを返す。
     async fn next_state(&mut self, column_id: &str) -> ConnectionState {
         loop {
-            let ev = within(self.states.recv()).await.expect("state channel closed");
+            let ev = within(self.states.recv())
+                .await
+                .expect("state channel closed");
             if ev.column_id == column_id {
                 return ev.state;
             }
@@ -285,7 +291,10 @@ async fn initial_connect_subscribes_channel_and_reports_connected() {
 
     assert_eq!(msg["type"], "connect");
     assert_eq!(msg["body"]["channel"], "main");
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Connected));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Connected
+    ));
 }
 
 #[tokio::test]
@@ -296,16 +305,28 @@ async fn reconnects_and_resubscribes_channel_with_fresh_sub_id_after_server_clos
 
     let mut first = server.accept().await;
     let first_connect = first.recv_json().await;
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Connected));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Connected
+    ));
 
     first.close().await;
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Reconnecting));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Reconnecting
+    ));
 
     // backoff 明けの再接続試行で Connecting、確立で Connected の順に遷移する。
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Connecting));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Connecting
+    ));
     let mut second = server.accept().await;
     let second_connect = second.recv_json().await;
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Connected));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Connected
+    ));
 
     assert_eq!(second_connect["type"], "connect");
     assert_eq!(second_connect["body"]["channel"], "main");
@@ -388,9 +409,15 @@ async fn reconnects_when_server_goes_silent_past_read_timeout() {
 
     // 接続は保持したまま何も読み書きしない(= Ping に Pong が返らない、TCPだけ生きている状態)。
     let _silent = server.accept().await;
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Connected));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Connected
+    ));
 
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Reconnecting));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Reconnecting
+    ));
     let mut second = server.accept().await;
     assert_eq!(second.recv_json().await["type"], "connect");
 }
@@ -415,8 +442,14 @@ async fn cancel_disconnects_channels_and_stops_the_task() {
 #[test]
 fn next_backoff_doubles_and_caps_at_max() {
     let max = Duration::from_secs(30);
-    assert_eq!(next_backoff(Duration::from_secs(1), max), Duration::from_secs(2));
-    assert_eq!(next_backoff(Duration::from_secs(16), max), Duration::from_secs(30));
+    assert_eq!(
+        next_backoff(Duration::from_secs(1), max),
+        Duration::from_secs(2)
+    );
+    assert_eq!(
+        next_backoff(Duration::from_secs(16), max),
+        Duration::from_secs(30)
+    );
     assert_eq!(next_backoff(max, max), max);
 }
 
@@ -497,7 +530,9 @@ async fn channel_note_strips_muted_reply_from_emit_but_keeps_it_in_cache() {
         .mount_events(&app);
     let handle = app.handle().clone();
     // AppState を管理しないと mute/cache/strip の分岐ごと飛ばされ、テストが空振りになる。
-    app.manage(AppState::new_for_test(crate::store::SettingsStore::new_in_memory()));
+    app.manage(AppState::new_for_test(
+        crate::store::SettingsStore::new_in_memory(),
+    ));
     let state = handle.state::<AppState>();
     state.set_server_mutes("acc1", HashSet::from(["u_muted".to_string()]));
 
@@ -559,13 +594,21 @@ async fn channel_note_strips_muted_reply_from_emit_but_keeps_it_in_cache() {
     assert!(matches!(result, HandleResult::CaptureNote { .. }));
 
     // emit されたノートは返信先が外れ、「↩ 返信」用の reply_id は残る。
-    let emitted = within(notes.recv()).await.expect("note channel closed").note;
+    let emitted = within(notes.recv())
+        .await
+        .expect("note channel closed")
+        .note;
     assert_eq!(emitted.id, "n9");
     assert!(emitted.reply.is_none(), "emit では返信先を外す");
     assert_eq!(emitted.reply_id.as_deref(), Some("r1"));
 
     // キャッシュには元の返信先が残る。
-    let cached = state.cache.get_note("n9").await.unwrap().expect("n9 is cached");
+    let cached = state
+        .cache
+        .get_note("n9")
+        .await
+        .unwrap()
+        .expect("n9 is cached");
     let cached_reply = cached.reply.expect("キャッシュには元の返信先を残す");
     assert_eq!(cached_reply.id, "r1");
 }
@@ -573,10 +616,16 @@ async fn channel_note_strips_muted_reply_from_emit_but_keeps_it_in_cache() {
 #[test]
 fn is_auth_failure_is_true_only_for_a_401_handshake_response() {
     use tokio_tungstenite::tungstenite::Error as WsError;
-    let http_error =
-        |code: u16| WsError::Http(Box::new(http::Response::builder().status(code).body(None).unwrap()));
+    let http_error = |code: u16| {
+        WsError::Http(Box::new(
+            http::Response::builder().status(code).body(None).unwrap(),
+        ))
+    };
     assert!(is_auth_failure(&http_error(401)));
-    assert!(!is_auth_failure(&http_error(403)), "403 は WAF などの一時的な拒否もありうるので止めない");
+    assert!(
+        !is_auth_failure(&http_error(403)),
+        "403 は WAF などの一時的な拒否もありうるので止めない"
+    );
     assert!(!is_auth_failure(&http_error(500)));
     assert!(!is_auth_failure(&WsError::ConnectionClosed));
 }
@@ -611,10 +660,19 @@ async fn an_unauthorized_reconnect_reports_error_and_stops_retrying() {
 
     let mut first = server.accept().await;
     assert_eq!(first.recv_json().await["type"], "connect");
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Connected));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Connected
+    ));
     first.close().await;
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Reconnecting));
-    assert!(matches!(h.next_state("col1").await, ConnectionState::Connecting));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Reconnecting
+    ));
+    assert!(matches!(
+        h.next_state("col1").await,
+        ConnectionState::Connecting
+    ));
 
     // トークンが失効した: 再接続のハンドシェイクが 401 になる。
     server.reject_with_status(401).await;
@@ -649,7 +707,12 @@ async fn try_send_hands_the_command_back_when_the_receiver_is_gone() {
     let (tx, rx) = mpsc::unbounded_channel();
     drop(rx);
 
-    match try_send(&tx, AccountCommand::RemoveChannel { column_id: "c1".into() }) {
+    match try_send(
+        &tx,
+        AccountCommand::RemoveChannel {
+            column_id: "c1".into(),
+        },
+    ) {
         Err(AccountCommand::RemoveChannel { column_id }) => assert_eq!(column_id, "c1"),
         _ => panic!("the command must be handed back"),
     }
@@ -658,7 +721,15 @@ async fn try_send_hands_the_command_back_when_the_receiver_is_gone() {
 /// `acc1` のタスクが止まる(401 を受ける)まで待つ。
 async fn wait_until_account_task_stops(manager: &ConnectionManager) {
     within(async {
-        while !manager.accounts.lock().unwrap().get("acc1").unwrap().cmd.is_closed() {
+        while !manager
+            .accounts
+            .lock()
+            .unwrap()
+            .get("acc1")
+            .unwrap()
+            .cmd
+            .is_closed()
+        {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -693,7 +764,10 @@ async fn add_channel_replaces_an_account_task_that_stopped_after_an_auth_failure
     // 再認証後の再接続: 新しいトークンで、タスクが作り直される。
     open("col2", "new-token");
     let (mut conn, uri) = server.accept_with_uri().await;
-    assert!(uri.contains("i=new-token"), "the replacement task must use the new token: {uri}");
+    assert!(
+        uri.contains("i=new-token"),
+        "the replacement task must use the new token: {uri}"
+    );
     assert_eq!(conn.recv_json().await["type"], "connect");
 
     // 続けて同じアカウントの別カラムを足しても、タスクは増えず、同じ接続に相乗りする。
@@ -750,8 +824,15 @@ async fn auth_failure_keeps_the_watermark_of_a_notification_column_still_waiting
     server.reject_with_status(401).await;
     wait_until_account_task_stops(&manager).await;
 
-    assert_eq!(manager.take_stalled_notification_mark("col1").as_deref(), Some("9tj000005"));
-    assert_eq!(manager.take_stalled_notification_mark("col1"), None, "取り出したら消える");
+    assert_eq!(
+        manager.take_stalled_notification_mark("col1").as_deref(),
+        Some("9tj000005")
+    );
+    assert_eq!(
+        manager.take_stalled_notification_mark("col1"),
+        None,
+        "取り出したら消える"
+    );
 }
 
 #[tokio::test]
@@ -775,7 +856,10 @@ async fn auth_failure_keeps_the_watermark_of_a_subscribed_notification_column() 
     server.reject_with_status(401).await;
     wait_until_account_task_stops(&manager).await;
 
-    assert_eq!(manager.take_stalled_notification_mark("col1").as_deref(), Some("9tj000005"));
+    assert_eq!(
+        manager.take_stalled_notification_mark("col1").as_deref(),
+        Some("9tj000005")
+    );
 }
 
 #[tokio::test]

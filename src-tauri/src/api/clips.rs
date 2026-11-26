@@ -39,7 +39,9 @@ pub async fn list_clips(client: &MisskeyClient) -> Result<Vec<Clip>> {
 
 /// クリップ新規作成。`clips/create`。isPublic/description は既定値(非公開・なし)のまま。
 pub async fn create_clip(client: &MisskeyClient, name: &str) -> Result<Clip> {
-    let raw: RawClip = client.post("clips/create", &json!({ "name": name })).await?;
+    let raw: RawClip = client
+        .post("clips/create", &json!({ "name": name }))
+        .await?;
     Ok(raw.into())
 }
 

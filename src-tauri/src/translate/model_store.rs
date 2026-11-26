@@ -46,7 +46,9 @@ pub fn partial_bytes(models_dir: &Path, sha256: &str) -> u64 {
 
 /// 全リビジョンの `.part`（`<モデルのファイル名>*.part`）。削除と、古い `.part` の掃除に使う。
 pub fn part_files(models_dir: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = std::fs::read_dir(models_dir) else { return vec![] };
+    let Ok(rd) = std::fs::read_dir(models_dir) else {
+        return vec![];
+    };
     rd.filter_map(|e| e.ok())
         .filter(|e| {
             let n = e.file_name();
@@ -70,7 +72,9 @@ pub enum LocalModelStatus {
     },
     Verifying,
     Ready,
-    Failed { reason: String },
+    Failed {
+        reason: String,
+    },
 }
 
 /// ディスク上の状態（`Ready` か `NotInstalled`）。
@@ -126,7 +130,9 @@ mod tests {
     fn the_pinned_constants_match_the_official_values() {
         assert_eq!(MODEL_REVISION.len(), 40);
         assert_eq!(MODEL_SHA256.len(), 64);
-        assert!(MODEL_SHA256.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        assert!(MODEL_SHA256
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
         // URL はリビジョンとファイル名を含み、公式リポジトリを指す（黙って別物に変わらない）。
         assert_eq!(
             MODEL_URL,
@@ -139,9 +145,15 @@ mod tests {
     #[test]
     fn part_path_sits_next_to_the_model_and_carries_the_revision_hash() {
         let p = part_path(Path::new("/data/models"), MODEL_SHA256);
-        assert_eq!(p, Path::new("/data/models").join(format!("{MODEL_FILE_NAME}.70891ec7.part")));
+        assert_eq!(
+            p,
+            Path::new("/data/models").join(format!("{MODEL_FILE_NAME}.70891ec7.part"))
+        );
         // リビジョンを変えると別の .part になる（古い .part に継ぎ足して、最後にハッシュ不一致、を避ける）。
-        assert_ne!(part_path(Path::new("/d"), "aaaaaaaa11"), part_path(Path::new("/d"), "bbbbbbbb22"));
+        assert_ne!(
+            part_path(Path::new("/d"), "aaaaaaaa11"),
+            part_path(Path::new("/d"), "bbbbbbbb22")
+        );
     }
 
     #[test]
@@ -191,8 +203,15 @@ mod tests {
 
     #[test]
     fn status_serializes_with_a_camel_case_tag() {
-        let j = serde_json::to_value(LocalModelStatus::Downloading { downloaded: 1, total: 2 }).unwrap();
-        assert_eq!(j, serde_json::json!({"type": "downloading", "downloaded": 1, "total": 2}));
+        let j = serde_json::to_value(LocalModelStatus::Downloading {
+            downloaded: 1,
+            total: 2,
+        })
+        .unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({"type": "downloading", "downloaded": 1, "total": 2})
+        );
         let j = serde_json::to_value(LocalModelStatus::NotInstalled).unwrap();
         assert_eq!(j, serde_json::json!({"type": "notInstalled"}));
     }

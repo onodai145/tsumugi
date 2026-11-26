@@ -2,7 +2,10 @@
 //! 設計書: docs/superpowers/specs/2026-11-02-issue-544-settings-import-export-design.md
 //! トークンはキーリング管轄でここには現れない。入力ファイルは信頼できない外部データとして扱う。
 
-use crate::domain::{clamp_group_width, Account, Column, ColumnGroup, ColumnKind, FilterQuery, MuteConfig, NotifyConfig, PaneNode, UiPrefs};
+use crate::domain::{
+    clamp_group_width, Account, Column, ColumnGroup, ColumnKind, FilterQuery, MuteConfig,
+    NotifyConfig, PaneNode, UiPrefs,
+};
 use crate::error::{Error, Result};
 use crate::store::settings::SettingsData;
 use serde::{Deserialize, Serialize};
@@ -104,10 +107,13 @@ pub fn parse_export(bytes: &[u8]) -> Result<ExportFile> {
     }
     if let Some(v) = value.get("version").and_then(|v| v.as_u64()) {
         if v > u64::from(EXPORT_VERSION) {
-            return Err(Error::Invalid(format!("より新しいバージョン(v{v})で書き出されたファイルです")));
+            return Err(Error::Invalid(format!(
+                "より新しいバージョン(v{v})で書き出されたファイルです"
+            )));
         }
     }
-    serde_json::from_value(value).map_err(|e| Error::Invalid(format!("設定ファイルの内容が不正です: {e}")))
+    serde_json::from_value(value)
+        .map_err(|e| Error::Invalid(format!("設定ファイルの内容が不正です: {e}")))
 }
 
 /// インポートの計画。`data` を `SettingsStore::replace` に渡す。
@@ -131,7 +137,9 @@ fn is_bare_host(host: &str) -> bool {
         && !host.starts_with('.')
         && !host.ends_with('.')
         && !host.contains("..")
-        && host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-')
+        && host
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '.' || c == '-')
 }
 
 /// アカウントの `host` として妥当か。素のホスト名に、任意で `:<1..=65535>` のポートが付いた形だけ通す
@@ -211,7 +219,10 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         return Err(invalid("tsumugiの設定ファイルではありません"));
     }
     if file.version != EXPORT_VERSION {
-        return Err(invalid(format!("未対応のバージョン(v{})です", file.version)));
+        return Err(invalid(format!(
+            "未対応のバージョン(v{})です",
+            file.version
+        )));
     }
     let d = file.data;
 
@@ -248,13 +259,19 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
             }
             None => {
                 if current.accounts.iter().any(|la| la.id == fa.id) {
-                    return Err(invalid("アカウントのIDがこの端末の別のアカウントと衝突しています"));
+                    return Err(invalid(
+                        "アカウントのIDがこの端末の別のアカウントと衝突しています",
+                    ));
                 }
                 id_map.insert(fa.id.clone(), fa.id.clone());
                 // ファイルのURLは信頼しない。アバターやInstance Tickerの画像としてWebViewが
                 // 読み込むと、IPアドレスの漏えいや追跡に使われる。再ログインと
                 // `refreshInstanceMeta` で正しい値が入る。
-                accounts.push(Account { avatar_url: None, instance: None, ..fa.clone() });
+                accounts.push(Account {
+                    avatar_url: None,
+                    instance: None,
+                    ..fa.clone()
+                });
                 accounts_needing_login.push(fa.id.clone());
             }
         }
@@ -293,7 +310,10 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
     let mut ui = d.ui;
     ui.background_kind = None;
     ui.background_path = None;
-    ui.default_account_id = id_map.get(&ui.default_account_id).cloned().unwrap_or_default();
+    ui.default_account_id = id_map
+        .get(&ui.default_account_id)
+        .cloned()
+        .unwrap_or_default();
     ui.note_cache_limit = ui.note_cache_limit.clamp(0, 100_000);
     ui.note_cache_max_age_days = ui.note_cache_max_age_days.clamp(0, 3_650);
     ui.note_cache_max_size_mb = ui.note_cache_max_size_mb.clamp(0, 10_000);
@@ -317,7 +337,8 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         has_custom_themes: !ui.custom_themes.is_empty() || !ui.custom_syntax_themes.is_empty(),
         has_custom_endpoints: {
             let defaults = UiPrefs::default();
-            ui.search_engine_url != defaults.search_engine_url || ui.summaly_proxy_url != defaults.summaly_proxy_url
+            ui.search_engine_url != defaults.search_engine_url
+                || ui.summaly_proxy_url != defaults.summaly_proxy_url
         },
     };
     // MCP設定はファイルから取り込まず、現在の値を引き継ぐ。存在しないアカウントのIDだけ除く。
@@ -348,13 +369,19 @@ pub fn plan_import(current: &SettingsData, file: ExportFile) -> Result<ImportPla
         // 読み上げの設定(接続先の URL を含む)はファイルで書き換えない。現在の値を維持する。
         speech: current.speech.clone(),
     };
-    Ok(ImportPlan { data, preview, accounts_needing_login })
+    Ok(ImportPlan {
+        data,
+        preview,
+        accounts_needing_login,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{BackgroundKind, ColumnKind, FilterQuery, PaneChild, PaneNode, SplitDirection};
+    use crate::domain::{
+        BackgroundKind, ColumnKind, FilterQuery, PaneChild, PaneNode, SplitDirection,
+    };
 
     pub(super) fn account(id: &str, host: &str, user_id: &str) -> Account {
         Account {
@@ -371,7 +398,12 @@ mod tests {
     }
 
     pub(super) fn group(id: &str, order: i32) -> ColumnGroup {
-        ColumnGroup { id: id.into(), order, width: 300, auto: false }
+        ColumnGroup {
+            id: id.into(),
+            order,
+            width: 300,
+            auto: false,
+        }
     }
 
     pub(super) fn column(id: &str, account_id: &str, group_id: &str) -> Column {
@@ -427,7 +459,8 @@ mod tests {
     #[test]
     fn build_export_drops_background_paths_and_device_specific_data() {
         let mut d = settings_data();
-        d.server_mute_snapshots.insert("a1".into(), Default::default());
+        d.server_mute_snapshots
+            .insert("a1".into(), Default::default());
 
         let file = build_export(&d, "1.2.3", "2026-11-02T00:00:00Z");
 
@@ -437,12 +470,24 @@ mod tests {
         assert_eq!(file.exported_at, "2026-11-02T00:00:00Z");
         assert_eq!(file.data.ui.background_kind, None);
         assert_eq!(file.data.ui.background_path, None);
-        assert_eq!(file.data.ui.custom_css, "body { color: red }", "それ以外のUI設定は残る");
+        assert_eq!(
+            file.data.ui.custom_css, "body { color: red }",
+            "それ以外のUI設定は残る"
+        );
         assert_eq!(file.data.accounts, d.accounts);
         let json = serde_json::to_string(&file).unwrap();
-        assert!(!json.contains("cacheBackend"), "キャッシュDBの接続設定は含めない");
-        assert!(!json.contains("serverMuteSnapshots"), "同期スナップショットは含めない");
-        assert!(!json.contains("/home/me/bg.png"), "端末ローカルのパスは含めない");
+        assert!(
+            !json.contains("cacheBackend"),
+            "キャッシュDBの接続設定は含めない"
+        );
+        assert!(
+            !json.contains("serverMuteSnapshots"),
+            "同期スナップショットは含めない"
+        );
+        assert!(
+            !json.contains("/home/me/bg.png"),
+            "端末ローカルのパスは含めない"
+        );
     }
 
     #[test]
@@ -475,10 +520,14 @@ mod tests {
 
     #[test]
     fn parse_export_rejects_files_that_are_not_tsumugi_settings() {
-        let err = parse_export(br#"{"hello":"world"}"#).unwrap_err().to_string();
+        let err = parse_export(br#"{"hello":"world"}"#)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("tsumugiの設定ファイルではありません"), "{err}");
 
-        let err = parse_export(br#"{"format":"other","version":1,"data":{}}"#).unwrap_err().to_string();
+        let err = parse_export(br#"{"format":"other","version":1,"data":{}}"#)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("tsumugiの設定ファイルではありません"), "{err}");
     }
 
@@ -511,7 +560,10 @@ mod tests {
     }
 
     fn plan_err(current: &SettingsData, file: ExportFile) -> String {
-        plan_import(current, file).err().expect("拒否されるはず").to_string()
+        plan_import(current, file)
+            .err()
+            .expect("拒否されるはず")
+            .to_string()
     }
 
     #[test]
@@ -523,7 +575,10 @@ mod tests {
 
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
 
-        assert_eq!(plan.data.mcp, current.mcp, "ファイルでMCPの公開が変わってはいけない");
+        assert_eq!(
+            plan.data.mcp, current.mcp,
+            "ファイルでMCPの公開が変わってはいけない"
+        );
     }
 
     #[test]
@@ -533,7 +588,10 @@ mod tests {
 
         let file = build_export(&d, "1.2.3", "2026-11-02T00:00:00Z");
 
-        assert!(!file.data.ui.low_bandwidth, "端末依存の設定はエクスポートに含めない");
+        assert!(
+            !file.data.ui.low_bandwidth,
+            "端末依存の設定はエクスポートに含めない"
+        );
     }
 
     #[test]
@@ -558,20 +616,31 @@ mod tests {
         let mut current = current_with_local_account();
         current.local_model_license_version = Some("2026-11-09".into());
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
-        assert_eq!(plan.data.local_model_license_version.as_deref(), Some("2026-11-09"));
+        assert_eq!(
+            plan.data.local_model_license_version.as_deref(),
+            Some("2026-11-09")
+        );
 
         // ファイル側に同意版の項目はない（エクスポートに含めない）ので、取り込みで同意済みにはならない。
         let current = current_with_local_account();
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
-        assert_eq!(plan.data.local_model_license_version, None, "インポートで同意済みになってはいけない");
+        assert_eq!(
+            plan.data.local_model_license_version, None,
+            "インポートで同意済みになってはいけない"
+        );
     }
 
     #[test]
     fn export_does_not_include_the_local_model_license_version() {
         let mut d = settings_data();
         d.local_model_license_version = Some("2026-11-09".into());
-        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-14T00:00:00Z")).unwrap().to_lowercase();
-        assert!(!json.contains("local_model") && !json.contains("localmodel"), "同意はエクスポートに含めない: {json}");
+        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-14T00:00:00Z"))
+            .unwrap()
+            .to_lowercase();
+        assert!(
+            !json.contains("local_model") && !json.contains("localmodel"),
+            "同意はエクスポートに含めない: {json}"
+        );
     }
 
     #[test]
@@ -583,7 +652,10 @@ mod tests {
 
         let current = current_with_local_account();
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
-        assert_eq!(plan.data.speech_core_terms_version, None, "インポートで規約に同意済みになってはいけない");
+        assert_eq!(
+            plan.data.speech_core_terms_version, None,
+            "インポートで規約に同意済みになってはいけない"
+        );
     }
 
     #[test]
@@ -591,8 +663,15 @@ mod tests {
         let mut d = settings_data();
         d.speech_core_terms_version = Some("v1".into());
         d.speech.engine = crate::domain::SpeechEngineKind::VoicevoxCore;
-        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-20T00:00:00Z")).unwrap().to_lowercase();
-        assert!(!json.contains("speech_core") && !json.contains("speechcore") && !json.contains("voicevoxcore"), "{json}");
+        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-20T00:00:00Z"))
+            .unwrap()
+            .to_lowercase();
+        assert!(
+            !json.contains("speech_core")
+                && !json.contains("speechcore")
+                && !json.contains("voicevoxcore"),
+            "{json}"
+        );
     }
 
     #[test]
@@ -602,7 +681,10 @@ mod tests {
 
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
 
-        assert_eq!(plan.data.mcp.exposed_account_ids, vec!["local1".to_string()]);
+        assert_eq!(
+            plan.data.mcp.exposed_account_ids,
+            vec!["local1".to_string()]
+        );
     }
 
     #[test]
@@ -611,10 +693,17 @@ mod tests {
         d.mcp.enabled = true;
         d.mcp.exposed_account_ids = vec!["a1".into()];
 
-        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-10T00:00:00Z")).unwrap();
+        let json =
+            serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-10T00:00:00Z")).unwrap();
 
-        assert!(!json.to_lowercase().contains("mcp"), "MCP設定はエクスポートに含めない: {json}");
-        assert!(!json.contains("exposed"), "公開アカウントの一覧は含めない: {json}");
+        assert!(
+            !json.to_lowercase().contains("mcp"),
+            "MCP設定はエクスポートに含めない: {json}"
+        );
+        assert!(
+            !json.contains("exposed"),
+            "公開アカウントの一覧は含めない: {json}"
+        );
     }
 
     #[test]
@@ -628,12 +717,20 @@ mod tests {
 
         let plan = plan_import(&current, file_with(data)).unwrap();
 
-        assert_eq!(plan.data.accounts.len(), 1, "端末側のアカウントがそのまま残る");
+        assert_eq!(
+            plan.data.accounts.len(),
+            1,
+            "端末側のアカウントがそのまま残る"
+        );
         assert_eq!(plan.data.accounts[0].id, "local1");
         assert_eq!(plan.data.columns[0].account_id, "local1");
         assert_eq!(plan.data.ui.default_account_id, "local1");
         assert!(plan.accounts_needing_login.is_empty());
-        assert_eq!(plan.data.columns.len(), 1, "端末側のカラムはファイルの内容で置き換わる");
+        assert_eq!(
+            plan.data.columns.len(),
+            1,
+            "端末側のカラムはファイルの内容で置き換わる"
+        );
         assert_eq!(plan.data.columns[0].id, "c1");
     }
 
@@ -658,7 +755,11 @@ mod tests {
         let plan = plan_import(&current, file_with(data)).unwrap();
 
         let ids: Vec<&str> = plan.data.accounts.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, vec!["local1", "file2"], "端末側のアカウントは残り、ファイル側が追加される");
+        assert_eq!(
+            ids,
+            vec!["local1", "file2"],
+            "端末側のアカウントは残り、ファイル側が追加される"
+        );
         assert_eq!(plan.accounts_needing_login, vec!["file2".to_string()]);
         assert_eq!(plan.preview.accounts_needing_login, 1);
     }
@@ -679,7 +780,10 @@ mod tests {
         let plan = plan_import(&current, file_with(data)).unwrap();
 
         let stored = plan.data.accounts.iter().find(|a| a.id == "file2").unwrap();
-        assert_eq!(stored.avatar_url, None, "ファイル由来のURLは<img>に読み込ませない");
+        assert_eq!(
+            stored.avatar_url, None,
+            "ファイル由来のURLは<img>に読み込ませない"
+        );
         assert_eq!(stored.instance, None);
         assert_eq!(stored.host, "other.example", "それ以外のフィールドは残る");
     }
@@ -698,13 +802,19 @@ mod tests {
 
         let plan = plan_import(&current, file_with(data)).unwrap();
 
-        assert_eq!(plan.data.accounts, vec![local], "端末側のアカウントがそのまま残る");
+        assert_eq!(
+            plan.data.accounts,
+            vec![local],
+            "端末側のアカウントがそのまま残る"
+        );
     }
 
     #[test]
     fn device_specific_settings_are_carried_over_from_the_current_state() {
         let mut current = current_with_local_account();
-        current.server_mute_snapshots.insert("local1".into(), Default::default());
+        current
+            .server_mute_snapshots
+            .insert("local1".into(), Default::default());
 
         let plan = plan_import(&current, file_with(empty_data())).unwrap();
 
@@ -747,12 +857,21 @@ mod tests {
     #[test]
     fn preview_counts_and_flags_custom_content() {
         let mut data = empty_data();
-        data.accounts = vec![account("f1", "a.example", "u1"), account("f2", "b.example", "u2")];
+        data.accounts = vec![
+            account("f1", "a.example", "u1"),
+            account("f2", "b.example", "u2"),
+        ];
         data.groups = vec![group("g1", 0)];
-        data.columns = vec![column("c1", "f1", "g1"), column("c2", "f2", "g1"), column("c3", "f2", "g1")];
+        data.columns = vec![
+            column("c1", "f1", "g1"),
+            column("c2", "f2", "g1"),
+            column("c3", "f2", "g1"),
+        ];
         data.ui.custom_css = "  body{}  ".into();
 
-        let preview = plan_import(&SettingsData::default(), file_with(data)).unwrap().preview;
+        let preview = plan_import(&SettingsData::default(), file_with(data))
+            .unwrap()
+            .preview;
 
         assert_eq!(
             preview,
@@ -778,12 +897,22 @@ mod tests {
         // URLプレビューの取得先を変えたら立つ
         let mut data = empty_data();
         data.ui.summaly_proxy_url = "https://evil.example/summaly".into();
-        assert!(plan_import(&SettingsData::default(), file_with(data)).unwrap().preview.has_custom_endpoints);
+        assert!(
+            plan_import(&SettingsData::default(), file_with(data))
+                .unwrap()
+                .preview
+                .has_custom_endpoints
+        );
 
         // 検索エンジンのURLを変えたら立つ
         let mut data = empty_data();
         data.ui.search_engine_url = format!("{}x", defaults.search_engine_url);
-        assert!(plan_import(&SettingsData::default(), file_with(data)).unwrap().preview.has_custom_endpoints);
+        assert!(
+            plan_import(&SettingsData::default(), file_with(data))
+                .unwrap()
+                .preview
+                .has_custom_endpoints
+        );
     }
 
     #[test]
@@ -827,11 +956,21 @@ mod tests {
 
         let mut trusted = SettingsData::default();
         trusted.ui.summaly_proxy_url = "https://p.example/url".into();
-        assert!(!plan_import(&trusted, file_with(data.clone())).unwrap().data.summaly_proxy_imported);
+        assert!(
+            !plan_import(&trusted, file_with(data.clone()))
+                .unwrap()
+                .data
+                .summaly_proxy_imported
+        );
 
         let mut untrusted = trusted.clone();
         untrusted.summaly_proxy_imported = true;
-        assert!(plan_import(&untrusted, file_with(data)).unwrap().data.summaly_proxy_imported);
+        assert!(
+            plan_import(&untrusted, file_with(data))
+                .unwrap()
+                .data
+                .summaly_proxy_imported
+        );
     }
 
     #[test]
@@ -840,12 +979,19 @@ mod tests {
         current.ui.summaly_proxy_url = "https://a.example/url".into();
         let mut data = empty_data();
         data.ui.summaly_proxy_url = "https://b.example/url".into();
-        assert!(plan_import(&current, file_with(data)).unwrap().data.summaly_proxy_imported);
+        assert!(
+            plan_import(&current, file_with(data))
+                .unwrap()
+                .data
+                .summaly_proxy_imported
+        );
     }
 
     #[test]
     fn an_empty_data_section_is_planned_as_zero_columns() {
-        let preview = plan_import(&current_with_local_account(), file_with(empty_data())).unwrap().preview;
+        let preview = plan_import(&current_with_local_account(), file_with(empty_data()))
+            .unwrap()
+            .preview;
 
         assert_eq!(preview.column_count, 0);
         assert_eq!(preview.account_count, 0);
@@ -855,7 +1001,9 @@ mod tests {
     fn rejects_wrong_format_and_unsupported_version() {
         let mut f = file_with(empty_data());
         f.format = "other".into();
-        assert!(plan_err(&SettingsData::default(), f).contains("tsumugiの設定ファイルではありません"));
+        assert!(
+            plan_err(&SettingsData::default(), f).contains("tsumugiの設定ファイルではありません")
+        );
 
         let mut f = file_with(empty_data());
         f.version = 0;
@@ -865,8 +1013,13 @@ mod tests {
     #[test]
     fn rejects_duplicate_ids() {
         let mut data = empty_data();
-        data.accounts = vec![account("x", "a.example", "u1"), account("x", "b.example", "u2")];
-        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("アカウントのIDが重複"));
+        data.accounts = vec![
+            account("x", "a.example", "u1"),
+            account("x", "b.example", "u2"),
+        ];
+        assert!(
+            plan_err(&SettingsData::default(), file_with(data)).contains("アカウントのIDが重複")
+        );
 
         let mut data = empty_data();
         data.groups = vec![group("g", 0), group("g", 1)];
@@ -882,7 +1035,10 @@ mod tests {
     #[test]
     fn rejects_the_same_host_and_user_listed_twice() {
         let mut data = empty_data();
-        data.accounts = vec![account("f1", "misskey.io", "u1"), account("f2", "MISSKEY.io", "u1")];
+        data.accounts = vec![
+            account("f1", "misskey.io", "u1"),
+            account("f2", "MISSKEY.io", "u1"),
+        ];
 
         let err = plan_err(&SettingsData::default(), file_with(data));
 
@@ -934,16 +1090,28 @@ mod tests {
         for ok in ["misskey.io", "127.0.0.1", "xn--abc.example"] {
             let mut data = empty_data();
             data.accounts = vec![account("f1", ok, "u1")];
-            assert!(plan_import(&SettingsData::default(), file_with(data)).is_ok(), "{ok}");
+            assert!(
+                plan_import(&SettingsData::default(), file_with(data)).is_ok(),
+                "{ok}"
+            );
         }
     }
 
     #[test]
     fn accepts_hosts_with_a_port() {
-        for ok in ["misskey.local:8443", "127.0.0.1:3000", "xn--abc.example:443", "misskey.io:65535", "misskey.io:1"] {
+        for ok in [
+            "misskey.local:8443",
+            "127.0.0.1:3000",
+            "xn--abc.example:443",
+            "misskey.io:65535",
+            "misskey.io:1",
+        ] {
             let mut data = empty_data();
             data.accounts = vec![account("f1", ok, "u1")];
-            assert!(plan_import(&SettingsData::default(), file_with(data)).is_ok(), "{ok}");
+            assert!(
+                plan_import(&SettingsData::default(), file_with(data)).is_ok(),
+                "{ok}"
+            );
         }
     }
 
@@ -982,12 +1150,14 @@ mod tests {
         let mut data = empty_data();
         data.groups = vec![group("g", 0)];
         data.columns = vec![column("c", "ghost-account", "g")];
-        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("存在しないアカウントを参照"));
+        assert!(plan_err(&SettingsData::default(), file_with(data))
+            .contains("存在しないアカウントを参照"));
 
         let mut data = empty_data();
         data.accounts = vec![account("a", "a.example", "u1")];
         data.columns = vec![column("c", "a", "ghost-group")];
-        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("存在しないグループを参照"));
+        assert!(plan_err(&SettingsData::default(), file_with(data))
+            .contains("存在しないグループを参照"));
 
         let mut data = empty_data();
         data.groups = vec![group("g", 0)];
@@ -995,11 +1165,20 @@ mod tests {
             id: "s".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::new_leaf("g"), size: 1.0, auto: false },
-                PaneChild { node: PaneNode::new_leaf("ghost-group"), size: 1.0, auto: false },
+                PaneChild {
+                    node: PaneNode::new_leaf("g"),
+                    size: 1.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::new_leaf("ghost-group"),
+                    size: 1.0,
+                    auto: false,
+                },
             ],
         });
-        assert!(plan_err(&SettingsData::default(), file_with(data)).contains("ペイン配置が存在しないグループを参照"));
+        assert!(plan_err(&SettingsData::default(), file_with(data))
+            .contains("ペイン配置が存在しないグループを参照"));
     }
 
     #[test]
@@ -1016,14 +1195,29 @@ mod tests {
         };
         let deep = "(".repeat(100_000);
         // エキスパートモード(from 節つきの全文)
-        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Tql, FilterQuery::Tql(format!("from home where {deep}"))));
+        let err = plan_err(
+            &SettingsData::default(),
+            setup(
+                ColumnKind::Tql,
+                FilterQuery::Tql(format!("from home where {deep}")),
+            ),
+        );
         assert!(err.contains("TQL"), "{err}");
-        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Tql, FilterQuery::Tql("from nope".into())));
+        let err = plan_err(
+            &SettingsData::default(),
+            setup(ColumnKind::Tql, FilterQuery::Tql("from nope".into())),
+        );
         assert!(err.contains("TQL"), "{err}");
         // 単一ソースのカラム(where 述語だけ)
-        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Home, FilterQuery::Tql(deep.clone())));
+        let err = plan_err(
+            &SettingsData::default(),
+            setup(ColumnKind::Home, FilterQuery::Tql(deep.clone())),
+        );
         assert!(err.contains("TQL"), "{err}");
-        let err = plan_err(&SettingsData::default(), setup(ColumnKind::Home, FilterQuery::Tql("nope == 1".into())));
+        let err = plan_err(
+            &SettingsData::default(),
+            setup(ColumnKind::Home, FilterQuery::Tql("nope == 1".into())),
+        );
         assert!(err.contains("TQL"), "{err}");
     }
 
@@ -1074,19 +1268,34 @@ mod tests {
     }
 
     fn sized_group(id: &str, order: i32, width: i32) -> ColumnGroup {
-        ColumnGroup { id: id.into(), order, width, auto: false }
+        ColumnGroup {
+            id: id.into(),
+            order,
+            width,
+            auto: false,
+        }
     }
 
     fn leaf_child(group_id: &str, size: f32, auto: bool) -> PaneChild {
-        PaneChild { node: PaneNode::new_leaf(group_id), size, auto }
+        PaneChild {
+            node: PaneNode::new_leaf(group_id),
+            size,
+            auto,
+        }
     }
 
     fn split_of(direction: SplitDirection, children: Vec<PaneChild>) -> PaneNode {
-        PaneNode::Split { id: "s".into(), direction, children }
+        PaneNode::Split {
+            id: "s".into(),
+            direction,
+            children,
+        }
     }
 
     fn imported_sizes(root: &PaneNode) -> Vec<f32> {
-        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = root else {
+            panic!("expected Split")
+        };
         children.iter().map(|c| c.size).collect()
     }
 
@@ -1094,7 +1303,11 @@ mod tests {
         let mut data = empty_data();
         data.groups = vec![group("g1", 0), group("g2", 1), group("g3", 2)];
         data.pane_layout = Some(layout);
-        plan_import(&SettingsData::default(), file_with(data)).unwrap().data.pane_layout.unwrap()
+        plan_import(&SettingsData::default(), file_with(data))
+            .unwrap()
+            .data
+            .pane_layout
+            .unwrap()
     }
 
     #[test]
@@ -1140,7 +1353,11 @@ mod tests {
     fn row_split_sizes_are_clamped_to_the_pixel_range() {
         let layout = split_of(
             SplitDirection::Row,
-            vec![leaf_child("g1", 5.0, false), leaf_child("g2", 400.0, false), leaf_child("g3", 99_999.0, false)],
+            vec![
+                leaf_child("g1", 5.0, false),
+                leaf_child("g2", 400.0, false),
+                leaf_child("g3", 99_999.0, false),
+            ],
         );
 
         let imported = import_pane_layout(layout);
@@ -1152,7 +1369,11 @@ mod tests {
     fn column_split_sizes_are_clamped_to_one_to_hundred_percent() {
         let layout = split_of(
             SplitDirection::Column,
-            vec![leaf_child("g1", 0.0, false), leaf_child("g2", 50.0, false), leaf_child("g3", 5_000.0, false)],
+            vec![
+                leaf_child("g1", 0.0, false),
+                leaf_child("g2", 50.0, false),
+                leaf_child("g3", 5_000.0, false),
+            ],
         );
 
         let imported = import_pane_layout(layout);
@@ -1173,15 +1394,24 @@ mod tests {
     fn non_finite_pane_sizes_fall_back_to_the_default_for_their_direction() {
         let row = split_of(
             SplitDirection::Row,
-            vec![leaf_child("g1", f32::INFINITY, false), leaf_child("g2", f32::NAN, false)],
+            vec![
+                leaf_child("g1", f32::INFINITY, false),
+                leaf_child("g2", f32::NAN, false),
+            ],
         );
         let column = split_of(
             SplitDirection::Column,
-            vec![leaf_child("g1", f32::NEG_INFINITY, false), leaf_child("g2", f32::NAN, false)],
+            vec![
+                leaf_child("g1", f32::NEG_INFINITY, false),
+                leaf_child("g2", f32::NAN, false),
+            ],
         );
 
         assert_eq!(imported_sizes(&import_pane_layout(row)), vec![300.0, 300.0]);
-        assert_eq!(imported_sizes(&import_pane_layout(column)), vec![50.0, 50.0]);
+        assert_eq!(
+            imported_sizes(&import_pane_layout(column)),
+            vec![50.0, 50.0]
+        );
     }
 
     #[test]
@@ -1196,12 +1426,17 @@ mod tests {
             size: 99_999.0,
             auto: false,
         };
-        let layout = split_of(SplitDirection::Row, vec![leaf_child("g1", 5.0, false), inner]);
+        let layout = split_of(
+            SplitDirection::Row,
+            vec![leaf_child("g1", 5.0, false), inner],
+        );
 
         let imported = import_pane_layout(layout);
 
         assert_eq!(imported_sizes(&imported), vec![220.0, 720.0]);
-        let PaneNode::Split { children, .. } = &imported else { unreachable!() };
+        let PaneNode::Split { children, .. } = &imported else {
+            unreachable!()
+        };
         assert_eq!(imported_sizes(&children[1].node), vec![1.0, 100.0]);
     }
 
@@ -1210,7 +1445,10 @@ mod tests {
         // serde_jsonは非有限のf32を null として書き出すため、残すと次回の読み込みで設定ファイルが壊れる。
         let layout = split_of(
             SplitDirection::Column,
-            vec![leaf_child("g1", f32::INFINITY, true), leaf_child("g2", f32::NAN, true)],
+            vec![
+                leaf_child("g1", f32::INFINITY, true),
+                leaf_child("g2", f32::NAN, true),
+            ],
         );
 
         let imported = import_pane_layout(layout);
@@ -1223,7 +1461,11 @@ mod tests {
         // autoの子のsizeはflexで無視されるので触らない(解除時の初期値として残る)。
         let layout = split_of(
             SplitDirection::Column,
-            vec![leaf_child("g1", 0.0, true), leaf_child("g2", 33.5, false), leaf_child("g3", 66.5, false)],
+            vec![
+                leaf_child("g1", 0.0, true),
+                leaf_child("g2", 33.5, false),
+                leaf_child("g3", 66.5, false),
+            ],
         );
 
         let imported = import_pane_layout(layout);
@@ -1268,8 +1510,12 @@ mod tests {
 
         let mut d = settings_data();
         d.speech.external_url = "http://192.168.1.10:50021".into();
-        let json = serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-19T00:00:00Z")).unwrap();
-        assert!(!json.contains("192.168.1.10"), "エンジンの URL はエクスポートに含めない: {json}");
+        let json =
+            serde_json::to_string(&build_export(&d, "1.2.3", "2026-11-19T00:00:00Z")).unwrap();
+        assert!(
+            !json.contains("192.168.1.10"),
+            "エンジンの URL はエクスポートに含めない: {json}"
+        );
     }
 
     #[test]
@@ -1279,7 +1525,12 @@ mod tests {
         data.accounts = vec![account("file1", "misskey.io", "u1")];
         data.groups = vec![group("g1", 0)];
         let mut c = column("c1", "file1", "g1");
-        c.speech = crate::domain::ColumnSpeech { enabled: true, speak_author: false, queue_limit: 200, voice_id: "7".into() };
+        c.speech = crate::domain::ColumnSpeech {
+            enabled: true,
+            speak_author: false,
+            queue_limit: 200,
+            voice_id: "7".into(),
+        };
         data.columns = vec![c];
         data.ui.default_account_id = "file1".into();
 

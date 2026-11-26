@@ -112,7 +112,9 @@ async fn migrate_fetch_boundary(pool: &sqlx::PgPool) -> Result<()> {
     )
     .execute(&mut *tx)
     .await?;
-    sqlx::query("DROP TABLE column_fetch_boundary").execute(&mut *tx).await?;
+    sqlx::query("DROP TABLE column_fetch_boundary")
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -129,12 +131,26 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .table(NoteTable::Table)
         .if_not_exists()
         .col(ColumnDef::new(NoteTable::Id).text().primary_key())
-        .col(ColumnDef::new(NoteTable::CreatedAt).big_integer().not_null())
+        .col(
+            ColumnDef::new(NoteTable::CreatedAt)
+                .big_integer()
+                .not_null(),
+        )
         .col(ColumnDef::new(NoteTable::Text).text())
-        .col(ColumnDef::new(NoteTable::TextLength).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(NoteTable::TextLength)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         .col(ColumnDef::new(NoteTable::Cw).text())
         .col(ColumnDef::new(NoteTable::Visibility).text().not_null())
-        .col(ColumnDef::new(NoteTable::LocalOnly).boolean().not_null().default(false))
+        .col(
+            ColumnDef::new(NoteTable::LocalOnly)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
         .col(ColumnDef::new(NoteTable::UserId).text().not_null())
         .col(ColumnDef::new(NoteTable::ReplyId).text())
         .col(ColumnDef::new(NoteTable::ReplyUserId).text())
@@ -142,20 +158,65 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(NoteTable::ChannelId).text())
         .col(ColumnDef::new(NoteTable::Via).text())
         .col(ColumnDef::new(NoteTable::Lang).text())
-        .col(ColumnDef::new(NoteTable::FilesCount).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(NoteTable::FilesCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         // has_poll/has_link/is_pinned/is_renoted_by_me/is_favorited_by_meはSQLite版と同じ
         // 0/1のINTEGER規約に揃える(BOOLEANにすると`filter/sql.rs::bool_field`が発行する
         // `= 1`比較がPostgresでは`operator does not exist: boolean = integer`になるため。
         // `filter/sql.rs`自体は変更しない方針なのでDDL側をSQLiteの規約に合わせる)。
-        .col(ColumnDef::new(NoteTable::HasPoll).small_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::HasLink).small_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::IsPinned).small_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::ReactionCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::RenoteCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::ReplyCount).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(NoteTable::HasPoll)
+                .small_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::HasLink)
+                .small_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::IsPinned)
+                .small_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::ReactionCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::RenoteCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::ReplyCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         .col(ColumnDef::new(NoteTable::MyReaction).text())
-        .col(ColumnDef::new(NoteTable::IsRenotedByMe).small_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::IsFavoritedByMe).small_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(NoteTable::IsRenotedByMe)
+                .small_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::IsFavoritedByMe)
+                .small_integer()
+                .not_null()
+                .default(0),
+        )
         .col(ColumnDef::new(NoteTable::Payload).text().not_null())
         .build(PostgresQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(note)).await?;
@@ -185,12 +246,42 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::Name).text())
         .col(ColumnDef::new(UserTable::AvatarUrl).text())
         // is_bot/is_catも同じ理由(`bool_field`の`= 1`比較)でSMALLINTにする。
-        .col(ColumnDef::new(UserTable::IsBot).small_integer().not_null().default(0))
-        .col(ColumnDef::new(UserTable::IsCat).small_integer().not_null().default(0))
-        .col(ColumnDef::new(UserTable::FollowersCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(UserTable::FollowingCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(UserTable::NotesCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(UserTable::Emojis).text().not_null().default("{}"))
+        .col(
+            ColumnDef::new(UserTable::IsBot)
+                .small_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(UserTable::IsCat)
+                .small_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(UserTable::FollowersCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(UserTable::FollowingCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(UserTable::NotesCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(UserTable::Emojis)
+                .text()
+                .not_null()
+                .default("{}"),
+        )
         .col(ColumnDef::new(UserTable::Bio).text())
         .col(ColumnDef::new(UserTable::BannerUrl).text())
         .col(ColumnDef::new(UserTable::AvatarBlurhash).text())
@@ -199,7 +290,8 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
     // Issue #41: 猫耳表示の色抽出用。sea_query の CREATE TABLE IF NOT EXISTS は既存テーブルへの
     // 列追加を行わないため、`user` テーブルが既に存在する既存インストール向けに明示的な
     // ALTER TABLE ... ADD COLUMN IF NOT EXISTS を別途実行する(Postgres専用構文、冪等)。
-    pool.execute("ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS avatar_blurhash TEXT").await?;
+    pool.execute("ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS avatar_blurhash TEXT")
+        .await?;
 
     // Issue #409: インスタンス単位の表示情報。user.instance_* から移行する(旧列があるときだけ)。
     let instance = Table::create()
@@ -354,8 +446,17 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .if_not_exists()
         .col(ColumnDef::new(ColumnNoteTable::ColumnId).text().not_null())
         .col(ColumnDef::new(ColumnNoteTable::NoteId).text().not_null())
-        .col(ColumnDef::new(ColumnNoteTable::ReceivedAt).big_integer().not_null())
-        .col(ColumnDef::new(ColumnNoteTable::CreatedAt).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(ColumnNoteTable::ReceivedAt)
+                .big_integer()
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnNoteTable::CreatedAt)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         .primary_key(
             Index::create()
                 .col(ColumnNoteTable::ColumnId)
@@ -380,14 +481,23 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
         .col((ColumnNoteTable::CreatedAt, IndexOrder::Desc))
         .col((ColumnNoteTable::NoteId, IndexOrder::Desc))
         .build(PostgresQueryBuilder);
-    pool.execute(sqlx::AssertSqlSafe(idx_cn_column_created)).await?;
+    pool.execute(sqlx::AssertSqlSafe(idx_cn_column_created))
+        .await?;
 
     let note_account = Table::create()
         .table(NoteAccountTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(NoteAccountTable::AccountId).text().not_null())
+        .col(
+            ColumnDef::new(NoteAccountTable::AccountId)
+                .text()
+                .not_null(),
+        )
         .col(ColumnDef::new(NoteAccountTable::NoteId).text().not_null())
-        .primary_key(Index::create().col(NoteAccountTable::AccountId).col(NoteAccountTable::NoteId))
+        .primary_key(
+            Index::create()
+                .col(NoteAccountTable::AccountId)
+                .col(NoteAccountTable::NoteId),
+        )
         .build(PostgresQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(note_account)).await?;
 
@@ -402,16 +512,29 @@ pub(crate) async fn ensure_schema(pool: &sqlx::PgPool) -> Result<()> {
     let column_source_boundary = Table::create()
         .table(ColumnSourceBoundaryTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(ColumnSourceBoundaryTable::ColumnId).text().not_null())
-        .col(ColumnDef::new(ColumnSourceBoundaryTable::SourceIdx).integer().not_null())
-        .col(ColumnDef::new(ColumnSourceBoundaryTable::OldestFetchedId).text().not_null())
+        .col(
+            ColumnDef::new(ColumnSourceBoundaryTable::ColumnId)
+                .text()
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnSourceBoundaryTable::SourceIdx)
+                .integer()
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnSourceBoundaryTable::OldestFetchedId)
+                .text()
+                .not_null(),
+        )
         .primary_key(
             Index::create()
                 .col(ColumnSourceBoundaryTable::ColumnId)
                 .col(ColumnSourceBoundaryTable::SourceIdx),
         )
         .build(PostgresQueryBuilder);
-    pool.execute(sqlx::AssertSqlSafe(column_source_boundary)).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_source_boundary))
+        .await?;
 
     migrate_fetch_boundary(pool).await?;
 
@@ -723,7 +846,13 @@ async fn upsert_note_tx(tx: &mut sqlx::PgTransaction<'_>, n: &Note) -> Result<()
     let current_file_keys: std::collections::HashSet<(String, String, bool)> = n
         .files
         .iter()
-        .map(|f| (f.mime_type.clone(), mime_category(&f.mime_type).to_string(), f.is_sensitive))
+        .map(|f| {
+            (
+                f.mime_type.clone(),
+                mime_category(&f.mime_type).to_string(),
+                f.is_sensitive,
+            )
+        })
         .collect();
     let existing_files: Vec<(String, String, i16)> = sqlx::query_as(
         "SELECT mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = $1",
@@ -733,7 +862,11 @@ async fn upsert_note_tx(tx: &mut sqlx::PgTransaction<'_>, n: &Note) -> Result<()
     .await?;
     for (mime_type, mime_category_val, is_sensitive) in existing_files {
         let is_sensitive_bool = is_sensitive != 0;
-        let key = (mime_type.clone(), mime_category_val.clone(), is_sensitive_bool);
+        let key = (
+            mime_type.clone(),
+            mime_category_val.clone(),
+            is_sensitive_bool,
+        );
         if !current_file_keys.contains(&key) {
             sqlx::query(
                 "DELETE FROM note_file WHERE note_id = $1 AND mime_type = $2 AND mime_category = $3 AND is_sensitive = $4",
@@ -783,16 +916,27 @@ async fn self_heal_node(pool: &sqlx::PgPool, node: &mut serde_json::Value) -> Re
     Ok(changed)
 }
 
-async fn self_heal_legacy_row(pool: &sqlx::PgPool, note_id: &str, value: &mut serde_json::Value) -> Result<()> {
+async fn self_heal_legacy_row(
+    pool: &sqlx::PgPool,
+    note_id: &str,
+    value: &mut serde_json::Value,
+) -> Result<()> {
     let changed = self_heal_node(pool, value).await?;
     if changed {
         let new_payload = serde_json::to_string(value)?;
-        sqlx::query("UPDATE note SET payload = $1 WHERE id = $2").bind(new_payload).bind(note_id).execute(pool).await?;
+        sqlx::query("UPDATE note SET payload = $1 WHERE id = $2")
+            .bind(new_payload)
+            .bind(note_id)
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }
 
-async fn resolve_payload_rows(pool: &sqlx::PgPool, rows: Vec<(String, String)>) -> Result<Vec<Note>> {
+async fn resolve_payload_rows(
+    pool: &sqlx::PgPool,
+    rows: Vec<(String, String)>,
+) -> Result<Vec<Note>> {
     let mut values: Vec<(String, serde_json::Value)> = Vec::with_capacity(rows.len());
     for (id, payload) in rows {
         match serde_json::from_str::<serde_json::Value>(&payload) {
@@ -860,7 +1004,8 @@ impl NoteCacheBackend for PostgresBackend {
     }
 
     async fn cache_note(&self, column_id: &str, note: &Note) -> Result<()> {
-        self.cache_notes(column_id, std::slice::from_ref(note)).await
+        self.cache_notes(column_id, std::slice::from_ref(note))
+            .await
     }
 
     async fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>> {
@@ -878,7 +1023,12 @@ impl NoteCacheBackend for PostgresBackend {
         resolve_payload_rows(&self.pool, rows).await
     }
 
-    async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
+    async fn load_cached_before(
+        &self,
+        column_id: &str,
+        until_id: &str,
+        limit: u32,
+    ) -> Result<Vec<Note>> {
         // `note_id < $2`はPostgresのデフォルトのテキスト照合順序(collation)がSQLiteの
         // バイナリバイト比較と一致していることに依存している。MisskeyのID(base36/aidx系、
         // 小文字英数字)では両者は現状一致するため今日的には問題ないが、ID体系が将来
@@ -896,15 +1046,25 @@ impl NoteCacheBackend for PostgresBackend {
         .fetch_all(&self.pool)
         .await?;
         let mut out = resolve_payload_rows(&self.pool, rows).await?;
-        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+        out.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         Ok(out)
     }
 
     async fn get_note(&self, note_id: &str) -> Result<Option<Note>> {
         let row: Option<(String, String)> =
-            sqlx::query_as("SELECT id, payload FROM note WHERE id = $1").bind(note_id).fetch_optional(&self.pool).await?;
+            sqlx::query_as("SELECT id, payload FROM note WHERE id = $1")
+                .bind(note_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(match row {
-            Some(r) => resolve_payload_rows(&self.pool, vec![r]).await?.into_iter().next(),
+            Some(r) => resolve_payload_rows(&self.pool, vec![r])
+                .await?
+                .into_iter()
+                .next(),
             None => None,
         })
     }
@@ -914,8 +1074,14 @@ impl NoteCacheBackend for PostgresBackend {
     }
 
     async fn clear_column_notes(&self, column_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM column_note WHERE column_id = $1").bind(column_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1").bind(column_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_note WHERE column_id = $1")
+            .bind(column_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1")
+            .bind(column_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -949,23 +1115,28 @@ impl NoteCacheBackend for PostgresBackend {
     }
 
     async fn forget_account_notes(&self, account_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM note_account WHERE account_id = $1").bind(account_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM note_account WHERE account_id = $1")
+            .bind(account_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool> {
-        let (found,): (bool,) =
-            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account WHERE account_id = $1 AND note_id = $2)")
-                .bind(account_id)
-                .bind(note_id)
-                .fetch_one(&self.pool)
-                .await?;
+        let (found,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM note_account WHERE account_id = $1 AND note_id = $2)",
+        )
+        .bind(account_id)
+        .bind(note_id)
+        .fetch_one(&self.pool)
+        .await?;
         Ok(found)
     }
 
     async fn note_account_is_empty(&self) -> Result<bool> {
-        let (any,): (bool,) =
-            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account)").fetch_one(&self.pool).await?;
+        let (any,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account)")
+            .fetch_one(&self.pool)
+            .await?;
         Ok(!any)
     }
 
@@ -980,7 +1151,11 @@ impl NoteCacheBackend for PostgresBackend {
         Ok(rows.into_iter().map(|(i, b)| (i as u32, b)).collect())
     }
 
-    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+    async fn replace_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1")
             .bind(column_id)
@@ -1000,7 +1175,11 @@ impl NoteCacheBackend for PostgresBackend {
         Ok(())
     }
 
-    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+    async fn extend_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -1024,18 +1203,24 @@ impl NoteCacheBackend for PostgresBackend {
     }
 
     async fn clear_all_fetch_boundaries(&self) -> Result<()> {
-        sqlx::query("DELETE FROM column_source_boundary").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_source_boundary")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     async fn note_count(&self) -> Result<i32> {
-        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note").fetch_one(&self.pool).await?;
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note")
+            .fetch_one(&self.pool)
+            .await?;
         Ok(count as i32)
     }
 
     async fn notes_since(&self, since_epoch_secs: i32) -> Result<i32> {
-        let (count,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM note WHERE created_at >= $1").bind(since_epoch_secs as i64).fetch_one(&self.pool).await?;
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note WHERE created_at >= $1")
+            .bind(since_epoch_secs as i64)
+            .fetch_one(&self.pool)
+            .await?;
         Ok(count as i32)
     }
 
@@ -1061,10 +1246,17 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
     if ids.is_empty() {
         return Ok(0);
     }
-    let deleted = sqlx::query("DELETE FROM note WHERE id = ANY($1)").bind(ids).execute(&mut **tx).await?.rows_affected() as i64;
+    let deleted = sqlx::query("DELETE FROM note WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected() as i64;
 
     let affected_columns: Vec<(String,)> =
-        sqlx::query_as("SELECT DISTINCT column_id FROM column_note WHERE note_id = ANY($1)").bind(ids).fetch_all(&mut **tx).await?;
+        sqlx::query_as("SELECT DISTINCT column_id FROM column_note WHERE note_id = ANY($1)")
+            .bind(ids)
+            .fetch_all(&mut **tx)
+            .await?;
     // MIN/MAX(note_id)による大小比較も、上のload_cached_beforeと同様Postgresのデフォルト
     // テキスト照合順序がSQLiteのバイナリバイト比較と一致することに依存している。
     let max_deleted_rows: Vec<(String, String)> = sqlx::query_as(
@@ -1073,12 +1265,26 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
     .bind(ids)
     .fetch_all(&mut **tx)
     .await?;
-    let max_deleted_by_column: std::collections::HashMap<String, String> = max_deleted_rows.into_iter().collect();
+    let max_deleted_by_column: std::collections::HashMap<String, String> =
+        max_deleted_rows.into_iter().collect();
 
     // `table`はソース中に直書きした固定リストのみを走査し、`ids`は`.bind()`経由でのみ渡す
     // ため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
-    for table in ["column_note", "note_account", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
-        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE note_id = ANY($1)"))).bind(ids).execute(&mut **tx).await?;
+    for table in [
+        "column_note",
+        "note_account",
+        "note_reaction",
+        "note_tag",
+        "note_mention",
+        "note_emoji",
+        "note_file",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE note_id = ANY($1)"
+        )))
+        .bind(ids)
+        .execute(&mut **tx)
+        .await?;
     }
 
     for (column_id,) in &affected_columns {
@@ -1091,7 +1297,9 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
         match survivor.map(|(s,)| s) {
             Some(oldest) => {
                 let candidate = match max_deleted_by_column.get(column_id) {
-                    Some(max_deleted) if max_deleted.as_str() > oldest.as_str() => max_deleted.clone(),
+                    Some(max_deleted) if max_deleted.as_str() > oldest.as_str() => {
+                        max_deleted.clone()
+                    }
                     _ => oldest,
                 };
                 sqlx::query(
@@ -1103,29 +1311,45 @@ async fn delete_matching_ids(tx: &mut sqlx::PgTransaction<'_>, ids: &[String]) -
                 .await?;
             }
             None => {
-                sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1").bind(column_id).execute(&mut **tx).await?;
+                sqlx::query("DELETE FROM column_source_boundary WHERE column_id = $1")
+                    .bind(column_id)
+                    .execute(&mut **tx)
+                    .await?;
             }
         }
     }
     Ok(deleted)
 }
 
-async fn prune_impl(pool: &sqlx::PgPool, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
+async fn prune_impl(
+    pool: &sqlx::PgPool,
+    keep: i32,
+    max_age_days: i32,
+    max_size_mb: i32,
+) -> Result<usize> {
     let mut deleted: i64 = 0;
     let mut tx = pool.begin().await?;
 
     if max_age_days > 0 {
         let cutoff = crate::store::note_cache::now_epoch() - max_age_days as i64 * 86_400;
-        let ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM note WHERE created_at < $1").bind(cutoff).fetch_all(&mut *tx).await?;
+        let ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM note WHERE created_at < $1")
+            .bind(cutoff)
+            .fetch_all(&mut *tx)
+            .await?;
         let ids: Vec<String> = ids.into_iter().map(|(id,)| id).collect();
         deleted += delete_matching_ids(&mut tx, &ids).await?;
     }
     if keep > 0 {
-        let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note").fetch_one(&mut *tx).await?;
+        let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note")
+            .fetch_one(&mut *tx)
+            .await?;
         let overflow = total - keep as i64;
         if overflow > 0 {
             let ids: Vec<(String,)> =
-                sqlx::query_as("SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT $1").bind(overflow).fetch_all(&mut *tx).await?;
+                sqlx::query_as("SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT $1")
+                    .bind(overflow)
+                    .fetch_all(&mut *tx)
+                    .await?;
             let ids: Vec<String> = ids.into_iter().map(|(id,)| id).collect();
             deleted += delete_matching_ids(&mut tx, &ids).await?;
         }
@@ -1153,7 +1377,10 @@ async fn search_cache_impl(
     // 一切埋め込まず`w.params`(下でbind)経由のみで渡す設計のため、
     // `sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
     let w = where_sql.render(Dialect::Postgres);
-    let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN \"user\" u ON u.id = n.user_id WHERE ({})", w.sql);
+    let mut sql = format!(
+        "SELECT n.id, n.payload FROM note n JOIN \"user\" u ON u.id = n.user_id WHERE ({})",
+        w.sql
+    );
     let mut next_placeholder = w.params.len() + 1;
     if until_id.is_some() {
         sql.push_str(&format!(" AND n.id < ${next_placeholder}"));
@@ -1180,7 +1407,10 @@ async fn search_cache_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testcontainers_modules::{postgres::Postgres, testcontainers::{runners::AsyncRunner, ContainerAsync}};
+    use testcontainers_modules::{
+        postgres::Postgres,
+        testcontainers::{runners::AsyncRunner, ContainerAsync},
+    };
 
     /// Docker上の使い捨てPostgresへ接続し、スキーマが2回適用してもエラーにならず
     /// (冪等)、テーブルが実際に作成されることを確認する。CI常時実行はしない方針
@@ -1191,7 +1421,9 @@ mod tests {
         let container = Postgres::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(5432).await.unwrap();
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .connect(&format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres"))
+            .connect(&format!(
+                "postgres://postgres:postgres@127.0.0.1:{port}/postgres"
+            ))
             .await
             .unwrap();
 
@@ -1215,7 +1447,9 @@ mod tests {
         let container = Postgres::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(5432).await.unwrap();
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .connect(&format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres"))
+            .connect(&format!(
+                "postgres://postgres:postgres@127.0.0.1:{port}/postgres"
+            ))
             .await
             .unwrap();
 
@@ -1248,7 +1482,10 @@ mod tests {
 
         ensure_schema(&pool).await.unwrap();
 
-        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM instance").fetch_one(&pool).await.unwrap();
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM instance")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(total, 2, "ローカル(host NULL)と全列NULLのホストは移さない");
         let (name, icon, theme): (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
             "SELECT name, icon_url, theme_color FROM instance WHERE host = 'conflict.example'",
@@ -1256,7 +1493,11 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(name.as_deref(), Some("Zzz"), "食い違う旧行は列ごとのMAXで1行に集約");
+        assert_eq!(
+            name.as_deref(),
+            Some("Zzz"),
+            "食い違う旧行は列ごとのMAXで1行に集約"
+        );
         assert_eq!(icon.as_deref(), Some("https://conflict.example/a.ico"));
         assert_eq!(theme.as_deref(), Some("#123456"));
 
@@ -1275,10 +1516,11 @@ mod tests {
             .await
             .unwrap();
         ensure_schema(&pool).await.unwrap();
-        let name: String = sqlx::query_scalar("SELECT name FROM instance WHERE host = 'remote.example'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let name: String =
+            sqlx::query_scalar("SELECT name FROM instance WHERE host = 'remote.example'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(name, "Renamed");
     }
 
@@ -1296,7 +1538,10 @@ mod tests {
             password: "postgres".into(),
         };
         let backend = PostgresBackend::connect(&params).await.unwrap();
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM note").fetch_one(backend.pool()).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM note")
+            .fetch_one(backend.pool())
+            .await
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -1310,18 +1555,51 @@ mod tests {
             visibility: Visibility::Home,
             local_only: false,
             user: User {
-                id: "u1".into(), username: "alice".into(), host: None, name: Some("Alice".into()),
-                avatar_url: None, is_bot: false, is_cat: false,
-                followers_count: 5, following_count: 3, notes_count: 42,
-                emojis: std::collections::HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
+                id: "u1".into(),
+                username: "alice".into(),
+                host: None,
+                name: Some("Alice".into()),
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 5,
+                following_count: 3,
+                notes_count: 42,
+                emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
+                avatar_blurhash: None,
+                instance: None,
             },
-            reply_id: None, reply_user_id: None, reply: None, renote_id: None, renote: None,
-            files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into(), size: None }],
-            poll: None, tags: vec!["rust".into()], mentions: vec![],
-            emojis: std::collections::HashMap::new(), channel_id: None, via: None, lang: None,
+            reply_id: None,
+            reply_user_id: None,
+            reply: None,
+            renote_id: None,
+            renote: None,
+            files: vec![DriveFile {
+                id: "f1".into(),
+                mime_type: "image/png".into(),
+                is_sensitive: false,
+                url: "http://x/f1".into(),
+                thumbnail_url: None,
+                name: "f1.png".into(),
+                size: None,
+            }],
+            poll: None,
+            tags: vec!["rust".into()],
+            mentions: vec![],
+            emojis: std::collections::HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
             reactions: std::collections::HashMap::from([("👍".into(), 3u32)]),
-            reaction_count: 3, renote_count: 1, reply_count: 0,
-            my_reaction: Some("👍".into()), is_renoted_by_me: false, is_favorited_by_me: false, is_pinned: false,
+            reaction_count: 3,
+            renote_count: 1,
+            reply_count: 0,
+            my_reaction: Some("👍".into()),
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
         }
     }
 
@@ -1342,9 +1620,18 @@ mod tests {
     async fn backend() -> TestBackend {
         let container = Postgres::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(5432).await.unwrap();
-        let params = PostgresConnectParams { host: "127.0.0.1".into(), port, database: "postgres".into(), user: "postgres".into(), password: "postgres".into() };
+        let params = PostgresConnectParams {
+            host: "127.0.0.1".into(),
+            port,
+            database: "postgres".into(),
+            user: "postgres".into(),
+            password: "postgres".into(),
+        };
         let backend = PostgresBackend::connect(&params).await.unwrap();
-        TestBackend { backend, _container: container }
+        TestBackend {
+            backend,
+            _container: container,
+        }
     }
 
     fn b(idx: u32, id: &str) -> (u32, String) {
@@ -1353,24 +1640,38 @@ mod tests {
 
     /// source_idx=0 だけの境界を置き換える(単一ソース時代のテストを新APIへ移すためのヘルパー)。
     async fn set0(s: &PostgresBackend, column_id: &str, id: &str) {
-        s.replace_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+        s.replace_fetch_boundaries(column_id, &[b(0, id)])
+            .await
+            .unwrap();
     }
 
     async fn extend0(s: &PostgresBackend, column_id: &str, id: &str) {
-        s.extend_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+        s.extend_fetch_boundaries(column_id, &[b(0, id)])
+            .await
+            .unwrap();
     }
 
     async fn b0(s: &PostgresBackend, column_id: &str) -> Option<String> {
-        s.get_fetch_boundaries(column_id).await.unwrap().into_iter().find(|(i, _)| *i == 0).map(|(_, v)| v)
+        s.get_fetch_boundaries(column_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|(i, _)| *i == 0)
+            .map(|(_, v)| v)
     }
 
     #[tokio::test]
     #[ignore]
     async fn cache_roundtrip_preserves_note_and_order() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 150)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 150)])
+            .await
+            .unwrap();
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2", "n3", "n1"]
+        );
         assert_eq!(got[0].reactions.get("👍"), Some(&3));
     }
 
@@ -1392,9 +1693,16 @@ mod tests {
         let reply = got[0].reply.as_ref().expect("reply should be restored");
         assert_eq!(reply.user.name.as_deref(), Some("Bob"));
 
-        sqlx::query("DELETE FROM \"user\" WHERE id = 'u_bob'").execute(s.pool()).await.unwrap();
+        sqlx::query("DELETE FROM \"user\" WHERE id = 'u_bob'")
+            .execute(s.pool())
+            .await
+            .unwrap();
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.len(), 1, "返信先ユーザーの欠落でノート行ごと捨ててはいけない");
+        assert_eq!(
+            got.len(),
+            1,
+            "返信先ユーザーの欠落でノート行ごと捨ててはいけない"
+        );
         assert!(got[0].reply.is_none());
     }
 
@@ -1411,7 +1719,10 @@ mod tests {
         n.my_reaction = None;
         s.update_note(&n).await.unwrap();
 
-        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'").fetch_one(s.pool()).await.unwrap();
+        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'")
+            .fetch_one(s.pool())
+            .await
+            .unwrap();
         assert_eq!(rc, 0);
     }
 
@@ -1425,7 +1736,10 @@ mod tests {
         s.cache_note("col1", &n).await.unwrap();
 
         let (stored,): (Option<String>,) =
-            sqlx::query_as("SELECT reply_user_id FROM note WHERE id = 'n1'").fetch_one(s.pool()).await.unwrap();
+            sqlx::query_as("SELECT reply_user_id FROM note WHERE id = 'n1'")
+                .fetch_one(s.pool())
+                .await
+                .unwrap();
         assert_eq!(stored.as_deref(), Some("bob-id"));
     }
 
@@ -1433,11 +1747,16 @@ mod tests {
     #[ignore]
     async fn prune_removes_oldest_beyond_keep_and_related_rows() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
         let deleted = s.prune(2, 0, 0).await.unwrap();
         assert_eq!(deleted, 1);
         assert_eq!(s.note_count().await.unwrap(), 2);
-        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'").fetch_one(s.pool()).await.unwrap();
+        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'")
+            .fetch_one(s.pool())
+            .await
+            .unwrap();
         assert_eq!(rc, 0);
     }
 
@@ -1449,7 +1768,9 @@ mod tests {
     #[ignore]
     async fn prune_removes_boundary_row_when_column_fully_emptied() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         set0(&s, "col1", "n1").await;
 
         let deleted = s.prune(0, 1, 0).await.unwrap();
@@ -1464,12 +1785,20 @@ mod tests {
     async fn search_cache_applies_predicate_and_until_id_boundary() {
         use crate::filter::{parser, sql};
         let s = backend().await;
-        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)]).await.unwrap();
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)])
+            .await
+            .unwrap();
+        let ctx = sql::SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
         let expr = parser::parse_predicate("has_files").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, Some("a3"), 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a2", "a1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["a2", "a1"]
+        );
     }
 
     #[tokio::test]
@@ -1478,7 +1807,10 @@ mod tests {
         use crate::filter::{parser, sql};
         let s = backend().await;
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        let ctx = sql::SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
         let expr = parser::parse_predicate("text match \"rust\"").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
@@ -1563,21 +1895,48 @@ mod tests {
         let x = note("x", 420); // 帰属なし
         s.cache_notes("col1", &[p, h, f, l, o, x]).await.unwrap();
         let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        s.record_note_accounts("a1", &ids(&["p", "h", "f", "l"])).await.unwrap();
+        s.record_note_accounts("a1", &ids(&["p", "h", "f", "l"]))
+            .await
+            .unwrap();
         s.record_note_accounts("a2", &ids(&["o"])).await.unwrap();
 
         let q = build_search("a1", "one.example", &SearchParams::default()).unwrap();
-        let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
+        let got: Vec<String> = s
+            .search_cache(&q.where_sql, q.until_id.as_deref(), q.limit)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(got, vec!["p", "h"]);
 
         // フィルタ付き(パラメータが複数)でも、アカウントIDの位置がずれない。
-        let q = build_search("a1", "one.example", &SearchParams { text: Some("hello".into()), limit: Some(1), ..Default::default() }).unwrap();
-        let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
+        let q = build_search(
+            "a1",
+            "one.example",
+            &SearchParams {
+                text: Some("hello".into()),
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let got: Vec<String> = s
+            .search_cache(&q.where_sql, q.until_id.as_deref(), q.limit)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(got, vec!["p"]);
 
         for (id, expected) in [("p", 1), ("h", 1), ("f", 0), ("l", 0), ("o", 0), ("x", 0)] {
             let q = build_get("a1", id).unwrap();
-            let n = s.search_cache(&q.where_sql, None, q.limit).await.unwrap().len();
+            let n = s
+                .search_cache(&q.where_sql, None, q.limit)
+                .await
+                .unwrap()
+                .len();
             assert_eq!(n, expected, "note {id}");
         }
     }
@@ -1596,23 +1955,39 @@ mod tests {
         let mut with_poll = note("p1", 300);
         with_poll.poll = Some(Poll {
             choices: vec![
-                PollChoice { text: "a".into(), votes: 0, is_voted: false },
-                PollChoice { text: "b".into(), votes: 0, is_voted: false },
+                PollChoice {
+                    text: "a".into(),
+                    votes: 0,
+                    is_voted: false,
+                },
+                PollChoice {
+                    text: "b".into(),
+                    votes: 0,
+                    is_voted: false,
+                },
             ],
             multiple: false,
             expires_at: None,
         });
         let mut without_poll = note("p2", 200);
         without_poll.poll = None;
-        s.cache_notes("col1", &[with_poll, without_poll]).await.unwrap();
+        s.cache_notes("col1", &[with_poll, without_poll])
+            .await
+            .unwrap();
 
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        let ctx = sql::SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
 
         // has_poll = 1 相当
         let expr = parser::parse_predicate("has_poll").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["p1"]
+        );
 
         // pinned = 1 相当
         let mut pinned = note("p3", 100);
@@ -1621,7 +1996,10 @@ mod tests {
         let expr = parser::parse_predicate("pinned").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p3"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["p3"]
+        );
 
         // bot = 1 相当(u.is_bot)。他のテストノートと同じuser id("u1")を使うと、
         // usersテーブルの同一行を共有しているため`is_bot`の上書きが全ノートに波及して
@@ -1633,7 +2011,10 @@ mod tests {
         let expr = parser::parse_predicate("bot").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p4"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["p4"]
+        );
     }
 
     #[tokio::test]
@@ -1655,20 +2036,34 @@ mod tests {
         let s = backend().await;
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
 
-        s.replace_fetch_boundaries("col1", &[b(1, "n2"), b(0, "n1"), b(2, "")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2"), b(2, "")]);
+        s.replace_fetch_boundaries("col1", &[b(1, "n2"), b(0, "n1"), b(2, "")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n1"), b(1, "n2"), b(2, "")]
+        );
 
-        s.extend_fetch_boundaries("col1", &[b(0, "n0"), b(1, "n9"), b(3, "n5")]).await.unwrap();
+        s.extend_fetch_boundaries("col1", &[b(0, "n0"), b(1, "n9"), b(3, "n5")])
+            .await
+            .unwrap();
         assert_eq!(
             s.get_fetch_boundaries("col1").await.unwrap(),
             vec![b(0, "n0"), b(1, "n2"), b(2, ""), b(3, "n5")]
         );
 
         // prune: 全ソース行が生存最古IDまで引き上がる
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "")]).await.unwrap();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "")])
+            .await
+            .unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
         assert_eq!(s.prune(2, 0, 0).await.unwrap(), 1);
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n2"), b(1, "n2")]);
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n2"), b(1, "n2")]
+        );
 
         s.clear_column_notes("col1").await.unwrap();
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
@@ -1678,15 +2073,27 @@ mod tests {
     #[ignore]
     async fn extend_fetch_boundaries_moves_to_empty_string_and_never_back() {
         let s = backend().await;
-        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n300")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n300")])
+            .await
+            .unwrap();
 
         // 既存行を ""(枯渇済み)へ延長できる
-        s.extend_fetch_boundaries("col1", &[b(0, "")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, ""), b(1, "n300")]);
+        s.extend_fetch_boundaries("col1", &[b(0, "")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, ""), b(1, "n300")]
+        );
 
         // 枯渇済みは、後から通常のIDで延長しても戻らない
-        s.extend_fetch_boundaries("col1", &[b(0, "n1")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, ""), b(1, "n300")]);
+        s.extend_fetch_boundaries("col1", &[b(0, "n1")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, ""), b(1, "n300")]
+        );
     }
 
     #[tokio::test]
@@ -1694,7 +2101,9 @@ mod tests {
     async fn prune_removes_every_source_row_when_multi_source_column_fully_pruned() {
         let s = backend().await;
         s.cache_notes("col1", &[note("old", 100)]).await.unwrap();
-        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, ""), b(2, "old")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, ""), b(2, "old")])
+            .await
+            .unwrap();
 
         assert_eq!(s.prune(0, 1, 0).await.unwrap(), 1);
 
@@ -1706,12 +2115,19 @@ mod tests {
     #[ignore]
     async fn replace_fetch_boundaries_rejects_duplicate_source_idx_and_rolls_back() {
         let s = backend().await;
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")])
+            .await
+            .unwrap();
 
-        let result = s.replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")]).await;
+        let result = s
+            .replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")])
+            .await;
 
         assert!(result.is_err());
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2")]);
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n1"), b(1, "n2")]
+        );
     }
 
     /// 旧 `column_fetch_boundary` を持つ既存インストールが `ensure_schema` で
@@ -1722,7 +2138,9 @@ mod tests {
         let container = Postgres::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(5432).await.unwrap();
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .connect(&format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres"))
+            .connect(&format!(
+                "postgres://postgres:postgres@127.0.0.1:{port}/postgres"
+            ))
             .await
             .unwrap();
 
@@ -1745,7 +2163,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             rows,
-            vec![("c1".to_string(), 0, "n100".to_string()), ("c2".to_string(), 0, "n200".to_string())]
+            vec![
+                ("c1".to_string(), 0, "n100".to_string()),
+                ("c2".to_string(), 0, "n200".to_string())
+            ]
         );
         let legacy: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'column_fetch_boundary'",
@@ -1756,15 +2177,19 @@ mod tests {
         assert_eq!(legacy, 0, "旧テーブルは DROP される");
 
         // 移行後に更新した値は ensure_schema を再実行しても戻らない
-        sqlx::query("UPDATE column_source_boundary SET oldest_fetched_id = 'n50' WHERE column_id = 'c1'")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE column_source_boundary SET oldest_fetched_id = 'n50' WHERE column_id = 'c1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         ensure_schema(&pool).await.unwrap();
-        let v: String = sqlx::query_scalar("SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id = 'c1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let v: String = sqlx::query_scalar(
+            "SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id = 'c1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(v, "n50");
     }
 
@@ -1777,7 +2202,8 @@ mod tests {
     /// 書きロックが無ければ、`clear` が書き込みより先に走り、後から入る書き込みが境界を復活させる。
     #[tokio::test]
     #[ignore]
-    async fn clear_all_fetch_boundaries_inside_the_boundary_write_lock_completes_and_blocks_stale_writes() {
+    async fn clear_all_fetch_boundaries_inside_the_boundary_write_lock_completes_and_blocks_stale_writes(
+    ) {
         use crate::fence::ColumnFence;
         use std::sync::Arc;
         use std::time::Duration;
@@ -1795,7 +2221,12 @@ mod tests {
         let mut writers = Vec::new();
         for c in columns {
             let epoch = fence.begin(c);
-            let (s, fence, ready_tx, gate) = (Arc::clone(&s), Arc::clone(&fence), ready_tx.clone(), Arc::clone(&gate));
+            let (s, fence, ready_tx, gate) = (
+                Arc::clone(&s),
+                Arc::clone(&fence),
+                ready_tx.clone(),
+                Arc::clone(&gate),
+            );
             writers.push(tokio::spawn(async move {
                 fence
                     .write_if_current(c, &epoch, |boundaries_ok| async move {
@@ -1816,24 +2247,51 @@ mod tests {
 
         let invalidate = {
             let (s, fence) = (Arc::clone(&s), Arc::clone(&fence));
-            tokio::spawn(async move { fence.invalidate_boundaries(|| async { s.clear_all_fetch_boundaries().await }).await })
+            tokio::spawn(async move {
+                fence
+                    .invalidate_boundaries(|| async { s.clear_all_fetch_boundaries().await })
+                    .await
+            })
         };
         tokio::task::yield_now().await;
         tokio::task::yield_now().await; // invalidate_boundaries が、書きロックの待ちに入る
         tokio::time::sleep(Duration::from_millis(200)).await; // 書きロックが無い実装なら、この間に clear が終わる
-        assert!(!invalidate.is_finished(), "書きロックは、読みロックを持つ実行中の書き込みの完了を待つ");
+        assert!(
+            !invalidate.is_finished(),
+            "書きロックは、読みロックを持つ実行中の書き込みの完了を待つ"
+        );
 
         gate.add_permits(columns.len()); // 実行中の書き込みを放す
         let cleared = tokio::time::timeout(Duration::from_secs(30), invalidate).await; // デッドロック検出の上限
-        assert!(cleared.expect("書きロックの中の clear_all_fetch_boundaries が詰まらない").unwrap().is_ok());
+        assert!(cleared
+            .expect("書きロックの中の clear_all_fetch_boundaries が詰まらない")
+            .unwrap()
+            .is_ok());
         for writer in writers {
-            assert_eq!(writer.await.unwrap(), Some(true), "実行中の書き込みは、書きロックより先に完了する");
+            assert_eq!(
+                writer.await.unwrap(),
+                Some(true),
+                "実行中の書き込みは、書きロックより先に完了する"
+            );
         }
         for c in columns {
-            assert!(s.get_fetch_boundaries(c).await.unwrap().is_empty(), "{c}: 書き込みの後で clear が走り、空になる");
+            assert!(
+                s.get_fetch_boundaries(c).await.unwrap().is_empty(),
+                "{c}: 書き込みの後で clear が走り、空になる"
+            );
         }
-        let late = fence.write_if_current("c1", &late_epoch, |boundaries_ok| async move { boundaries_ok }).await;
-        assert_eq!(late, Some(false), "invalidate_boundaries より前に控えた世代の境界の書き込みは、古い扱い");
+        let late = fence
+            .write_if_current(
+                "c1",
+                &late_epoch,
+                |boundaries_ok| async move { boundaries_ok },
+            )
+            .await;
+        assert_eq!(
+            late,
+            Some(false),
+            "invalidate_boundaries より前に控えた世代の境界の書き込みは、古い扱い"
+        );
     }
 
     #[tokio::test]
@@ -1842,8 +2300,12 @@ mod tests {
         let s = backend().await;
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
 
-        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
 
         assert!(s.account_has_note("acc1", "n1").await.unwrap());
         assert!(!s.account_has_note("acc1", "ghost").await.unwrap());
@@ -1854,8 +2316,12 @@ mod tests {
     #[ignore]
     async fn note_account_is_removed_together_with_the_note_by_prune() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()])
+            .await
+            .unwrap();
 
         s.prune(2, 0, 0).await.unwrap();
 
@@ -1870,7 +2336,9 @@ mod tests {
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
         assert!(s.note_account_is_empty().await.unwrap());
 
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
 
         assert!(!s.note_account_is_empty().await.unwrap());
     }
@@ -1896,7 +2364,9 @@ mod tests {
     #[ignore]
     async fn note_account_forget_and_backfill_and_clear_column() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         s.cache_notes("col2", &[note("n3", 300)]).await.unwrap();
 
         s.backfill_note_accounts("acc1", "col1").await.unwrap();

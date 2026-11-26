@@ -1416,8 +1416,9 @@ mod tests {
             label: String,
             mml: String,
         }
-        let samples: Vec<Sample> = serde_json::from_str(include_str!("../../frontend/src/lib/mmlSampleData.json"))
-            .expect("mmlSampleData.json は {id,label,mml} の配列");
+        let samples: Vec<Sample> =
+            serde_json::from_str(include_str!("../../frontend/src/lib/mmlSampleData.json"))
+                .expect("mmlSampleData.json は {id,label,mml} の配列");
         assert!(samples.len() >= 3, "サンプルは 3 つ以上");
         let mut ids: Vec<&str> = samples.iter().map(|s| s.id.as_str()).collect();
         ids.sort_unstable();
@@ -1429,7 +1430,10 @@ mod tests {
             assert!(!score.notes.is_empty(), "{}: 音が無い", s.id);
         }
         let parsed: Vec<MmlScore> = samples.iter().map(|s| must_parse(&s.mml)).collect();
-        assert!(parsed.iter().any(|p| p.track_count >= 2), "複数トラックの例が要る");
+        assert!(
+            parsed.iter().any(|p| p.track_count >= 2),
+            "複数トラックの例が要る"
+        );
         assert!(
             samples.iter().any(|s| s.mml.contains('@')),
             "音色(@)を使う例が要る"
@@ -2087,7 +2091,10 @@ mod tests {
     #[test]
     fn timbre_serializes_as_its_mml_name() {
         for t in Timbre::ALL {
-            assert_eq!(serde_json::to_value(t).unwrap(), serde_json::json!(t.name()));
+            assert_eq!(
+                serde_json::to_value(t).unwrap(),
+                serde_json::json!(t.name())
+            );
         }
         let note = &must_parse("c").notes[0];
         assert_eq!(serde_json::to_value(note).unwrap()["timbre"], "fm");
@@ -2128,7 +2135,10 @@ mod tests {
             vec![Timbre::Square, Timbre::Pulse, Timbre::Square, Timbre::Pulse]
         );
         // 繰り返しの外には 1 周目の最後の状態が残る
-        assert_eq!(timbres("[@1c]2 d"), vec![Timbre::Square, Timbre::Square, Timbre::Square]);
+        assert_eq!(
+            timbres("[@1c]2 d"),
+            vec![Timbre::Square, Timbre::Square, Timbre::Square]
+        );
     }
 
     #[test]

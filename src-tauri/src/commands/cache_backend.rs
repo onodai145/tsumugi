@@ -10,7 +10,10 @@ use tauri::{Manager, State};
 #[tauri::command]
 #[specta::specta]
 pub async fn get_cache_backend(state: State<'_, AppState>) -> Result<CacheBackendConfig, String> {
-    state.settings.load_cache_backend().map_err(|e| e.to_string())
+    state
+        .settings
+        .load_cache_backend()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -21,12 +24,19 @@ pub async fn set_cache_backend(
     config: CacheBackendConfig,
     password: Option<String>,
 ) -> Result<(), String> {
-    let new_backend: std::sync::Arc<dyn crate::store::note_cache::NoteCacheBackend> = match &config {
+    let new_backend: std::sync::Arc<dyn crate::store::note_cache::NoteCacheBackend> = match &config
+    {
         CacheBackendConfig::Sqlite => {
-            let conn = crate::store::db::open_cache(&state.cache_dir.join("cache.db")).map_err(|e| e.to_string())?;
+            let conn = crate::store::db::open_cache(&state.cache_dir.join("cache.db"))
+                .map_err(|e| e.to_string())?;
             std::sync::Arc::new(crate::store::SqliteBackend::new(conn))
         }
-        CacheBackendConfig::Postgres { host, port, database, user } => {
+        CacheBackendConfig::Postgres {
+            host,
+            port,
+            database,
+            user,
+        } => {
             let password = password.ok_or("password is required for Postgres backend")?;
             let params = crate::store::postgres_backend::PostgresConnectParams {
                 host: host.clone(),
@@ -42,7 +52,12 @@ pub async fn set_cache_backend(
             crate::session::save_cache_backend_password(&password).map_err(|e| e.to_string())?;
             std::sync::Arc::new(backend)
         }
-        CacheBackendConfig::MySql { host, port, database, user } => {
+        CacheBackendConfig::MySql {
+            host,
+            port,
+            database,
+            user,
+        } => {
             let password = password.ok_or("password is required for MySQL backend")?;
             let params = crate::store::mysql_backend::MySqlConnectParams {
                 host: host.clone(),
@@ -64,7 +79,10 @@ pub async fn set_cache_backend(
     // 逆順にすると、swap成功直後にsave_cache_backendが失敗した場合に「プロセスは新
     // バックエンドで動いているが、永続化された設定は旧バックエンドのまま」という
     // 不整合window(再起動すると旧バックエンドに戻ってしまう)が生じるため。
-    state.settings.save_cache_backend(&config).map_err(|e| e.to_string())?;
+    state
+        .settings
+        .save_cache_backend(&config)
+        .map_err(|e| e.to_string())?;
     state.cache.swap_backend(new_backend);
     // 切り替え先に既存のキャッシュがある場合に備えて、帰属を埋め直す(Issue #557)。切り替えの応答を
     // 遅らせないよう、待たずに裏で実行する。

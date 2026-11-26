@@ -182,7 +182,9 @@ async fn migrate_fetch_boundary(pool: &sqlx::MySqlPool) -> Result<()> {
     )
     .execute(pool)
     .await?;
-    sqlx::query("DROP TABLE column_fetch_boundary").execute(pool).await?;
+    sqlx::query("DROP TABLE column_fetch_boundary")
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -198,12 +200,26 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .table(NoteTable::Table)
         .if_not_exists()
         .col(ColumnDef::new(NoteTable::Id).string_len(64).primary_key())
-        .col(ColumnDef::new(NoteTable::CreatedAt).big_integer().not_null())
+        .col(
+            ColumnDef::new(NoteTable::CreatedAt)
+                .big_integer()
+                .not_null(),
+        )
         .col(long_text(&mut ColumnDef::new(NoteTable::Text)))
-        .col(ColumnDef::new(NoteTable::TextLength).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(NoteTable::TextLength)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         .col(long_text(&mut ColumnDef::new(NoteTable::Cw)))
         .col(ColumnDef::new(NoteTable::Visibility).text().not_null())
-        .col(ColumnDef::new(NoteTable::LocalOnly).boolean().not_null().default(false))
+        .col(
+            ColumnDef::new(NoteTable::LocalOnly)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
         .col(ColumnDef::new(NoteTable::UserId).string_len(64).not_null())
         .col(ColumnDef::new(NoteTable::ReplyId).text())
         .col(ColumnDef::new(NoteTable::ReplyUserId).text())
@@ -211,19 +227,64 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(NoteTable::ChannelId).text())
         .col(ColumnDef::new(NoteTable::Via).text())
         .col(ColumnDef::new(NoteTable::Lang).text())
-        .col(ColumnDef::new(NoteTable::FilesCount).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(NoteTable::FilesCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         // has_poll/has_link/is_pinned/is_renoted_by_me/is_favorited_by_meは
         // Postgres版と違いBOOLEANのままでよい(MySQLのBOOLEANはTINYINT(1)のエイリアスで、
         // filter/sql.rs::bool_fieldが発行する`= 1`比較がそのまま通ることを実DBで確認済み)。
-        .col(ColumnDef::new(NoteTable::HasPoll).boolean().not_null().default(false))
-        .col(ColumnDef::new(NoteTable::HasLink).boolean().not_null().default(false))
-        .col(ColumnDef::new(NoteTable::IsPinned).boolean().not_null().default(false))
-        .col(ColumnDef::new(NoteTable::ReactionCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::RenoteCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(NoteTable::ReplyCount).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(NoteTable::HasPoll)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .col(
+            ColumnDef::new(NoteTable::HasLink)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .col(
+            ColumnDef::new(NoteTable::IsPinned)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .col(
+            ColumnDef::new(NoteTable::ReactionCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::RenoteCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(NoteTable::ReplyCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         .col(ColumnDef::new(NoteTable::MyReaction).text())
-        .col(ColumnDef::new(NoteTable::IsRenotedByMe).boolean().not_null().default(false))
-        .col(ColumnDef::new(NoteTable::IsFavoritedByMe).boolean().not_null().default(false))
+        .col(
+            ColumnDef::new(NoteTable::IsRenotedByMe)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .col(
+            ColumnDef::new(NoteTable::IsFavoritedByMe)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
         .col(long_text(&mut ColumnDef::new(NoteTable::Payload)).not_null())
         .build(MysqlQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(note)).await?;
@@ -252,11 +313,36 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .col(ColumnDef::new(UserTable::Host).text())
         .col(ColumnDef::new(UserTable::Name).text())
         .col(ColumnDef::new(UserTable::AvatarUrl).text())
-        .col(ColumnDef::new(UserTable::IsBot).boolean().not_null().default(false))
-        .col(ColumnDef::new(UserTable::IsCat).boolean().not_null().default(false))
-        .col(ColumnDef::new(UserTable::FollowersCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(UserTable::FollowingCount).big_integer().not_null().default(0))
-        .col(ColumnDef::new(UserTable::NotesCount).big_integer().not_null().default(0))
+        .col(
+            ColumnDef::new(UserTable::IsBot)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .col(
+            ColumnDef::new(UserTable::IsCat)
+                .boolean()
+                .not_null()
+                .default(false),
+        )
+        .col(
+            ColumnDef::new(UserTable::FollowersCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(UserTable::FollowingCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .col(
+            ColumnDef::new(UserTable::NotesCount)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
         .col(ColumnDef::new(UserTable::Emojis).text().not_null())
         .col(long_text(&mut ColumnDef::new(UserTable::Bio)))
         .col(ColumnDef::new(UserTable::BannerUrl).text())
@@ -274,7 +360,11 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     let instance = Table::create()
         .table(InstanceTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(InstanceTable::Host).string_len(255).primary_key())
+        .col(
+            ColumnDef::new(InstanceTable::Host)
+                .string_len(255)
+                .primary_key(),
+        )
         .col(ColumnDef::new(InstanceTable::Name).text())
         .col(ColumnDef::new(InstanceTable::IconUrl).text())
         .col(ColumnDef::new(InstanceTable::ThemeColor).text())
@@ -325,40 +415,128 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
         .build(MysqlQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(note_file)).await?;
 
-    let idx_nr_note = Index::create().if_not_exists().name("idx_nr_note").table(NoteReactionTable::Table).col(NoteReactionTable::NoteId).build(MysqlQueryBuilder);
+    let idx_nr_note = Index::create()
+        .if_not_exists()
+        .name("idx_nr_note")
+        .table(NoteReactionTable::Table)
+        .col(NoteReactionTable::NoteId)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nr_note.as_str()).await?;
-    let idx_nt_note = Index::create().if_not_exists().name("idx_nt_note").table(NoteTagTable::Table).col(NoteTagTable::NoteId).build(MysqlQueryBuilder);
+    let idx_nt_note = Index::create()
+        .if_not_exists()
+        .name("idx_nt_note")
+        .table(NoteTagTable::Table)
+        .col(NoteTagTable::NoteId)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nt_note.as_str()).await?;
-    let idx_nm_note = Index::create().if_not_exists().name("idx_nm_note").table(NoteMentionTable::Table).col(NoteMentionTable::NoteId).build(MysqlQueryBuilder);
+    let idx_nm_note = Index::create()
+        .if_not_exists()
+        .name("idx_nm_note")
+        .table(NoteMentionTable::Table)
+        .col(NoteMentionTable::NoteId)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nm_note.as_str()).await?;
-    let idx_ne_note = Index::create().if_not_exists().name("idx_ne_note").table(NoteEmojiTable::Table).col(NoteEmojiTable::NoteId).build(MysqlQueryBuilder);
+    let idx_ne_note = Index::create()
+        .if_not_exists()
+        .name("idx_ne_note")
+        .table(NoteEmojiTable::Table)
+        .col(NoteEmojiTable::NoteId)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_ne_note.as_str()).await?;
-    let idx_nf_note = Index::create().if_not_exists().name("idx_nf_note").table(NoteFileTable::Table).col(NoteFileTable::NoteId).build(MysqlQueryBuilder);
+    let idx_nf_note = Index::create()
+        .if_not_exists()
+        .name("idx_nf_note")
+        .table(NoteFileTable::Table)
+        .col(NoteFileTable::NoteId)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nf_note.as_str()).await?;
 
-    let idx_nr_unique = Index::create().if_not_exists().unique().name("idx_nr_unique").table(NoteReactionTable::Table).col(NoteReactionTable::NoteId).col(NoteReactionTable::EmojiKey).build(MysqlQueryBuilder);
+    let idx_nr_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nr_unique")
+        .table(NoteReactionTable::Table)
+        .col(NoteReactionTable::NoteId)
+        .col(NoteReactionTable::EmojiKey)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nr_unique.as_str()).await?;
-    let idx_nt_unique = Index::create().if_not_exists().unique().name("idx_nt_unique").table(NoteTagTable::Table).col(NoteTagTable::NoteId).col(NoteTagTable::Tag).build(MysqlQueryBuilder);
+    let idx_nt_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nt_unique")
+        .table(NoteTagTable::Table)
+        .col(NoteTagTable::NoteId)
+        .col(NoteTagTable::Tag)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nt_unique.as_str()).await?;
-    let idx_nm_unique = Index::create().if_not_exists().unique().name("idx_nm_unique").table(NoteMentionTable::Table).col(NoteMentionTable::NoteId).col(NoteMentionTable::UserId).build(MysqlQueryBuilder);
+    let idx_nm_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nm_unique")
+        .table(NoteMentionTable::Table)
+        .col(NoteMentionTable::NoteId)
+        .col(NoteMentionTable::UserId)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nm_unique.as_str()).await?;
-    let idx_ne_unique = Index::create().if_not_exists().unique().name("idx_ne_unique").table(NoteEmojiTable::Table).col(NoteEmojiTable::NoteId).col(NoteEmojiTable::Emoji).build(MysqlQueryBuilder);
+    let idx_ne_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_ne_unique")
+        .table(NoteEmojiTable::Table)
+        .col(NoteEmojiTable::NoteId)
+        .col(NoteEmojiTable::Emoji)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_ne_unique.as_str()).await?;
-    let idx_nf_unique = Index::create().if_not_exists().unique().name("idx_nf_unique").table(NoteFileTable::Table).col(NoteFileTable::NoteId).col(NoteFileTable::MimeType).col(NoteFileTable::MimeCategory).col(NoteFileTable::IsSensitive).build(MysqlQueryBuilder);
+    let idx_nf_unique = Index::create()
+        .if_not_exists()
+        .unique()
+        .name("idx_nf_unique")
+        .table(NoteFileTable::Table)
+        .col(NoteFileTable::NoteId)
+        .col(NoteFileTable::MimeType)
+        .col(NoteFileTable::MimeCategory)
+        .col(NoteFileTable::IsSensitive)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_nf_unique.as_str()).await?;
 
     let column_note = Table::create()
         .table(ColumnNoteTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(ColumnNoteTable::ColumnId).string_len(64).not_null())
-        .col(ColumnDef::new(ColumnNoteTable::NoteId).string_len(64).not_null())
-        .col(ColumnDef::new(ColumnNoteTable::ReceivedAt).big_integer().not_null())
-        .col(ColumnDef::new(ColumnNoteTable::CreatedAt).big_integer().not_null().default(0))
-        .primary_key(Index::create().col(ColumnNoteTable::ColumnId).col(ColumnNoteTable::NoteId))
+        .col(
+            ColumnDef::new(ColumnNoteTable::ColumnId)
+                .string_len(64)
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnNoteTable::NoteId)
+                .string_len(64)
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnNoteTable::ReceivedAt)
+                .big_integer()
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnNoteTable::CreatedAt)
+                .big_integer()
+                .not_null()
+                .default(0),
+        )
+        .primary_key(
+            Index::create()
+                .col(ColumnNoteTable::ColumnId)
+                .col(ColumnNoteTable::NoteId),
+        )
         .build(MysqlQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(column_note)).await?;
 
-    let idx_cn_column = Index::create().if_not_exists().name("idx_cn_column").table(ColumnNoteTable::Table).col(ColumnNoteTable::ColumnId).build(MysqlQueryBuilder);
+    let idx_cn_column = Index::create()
+        .if_not_exists()
+        .name("idx_cn_column")
+        .table(ColumnNoteTable::Table)
+        .col(ColumnNoteTable::ColumnId)
+        .build(MysqlQueryBuilder);
     execute_index(pool, idx_cn_column.as_str()).await?;
 
     let idx_cn_column_created = Index::create()
@@ -374,9 +552,21 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     let note_account = Table::create()
         .table(NoteAccountTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(NoteAccountTable::AccountId).string_len(64).not_null())
-        .col(ColumnDef::new(NoteAccountTable::NoteId).string_len(64).not_null())
-        .primary_key(Index::create().col(NoteAccountTable::AccountId).col(NoteAccountTable::NoteId))
+        .col(
+            ColumnDef::new(NoteAccountTable::AccountId)
+                .string_len(64)
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(NoteAccountTable::NoteId)
+                .string_len(64)
+                .not_null(),
+        )
+        .primary_key(
+            Index::create()
+                .col(NoteAccountTable::AccountId)
+                .col(NoteAccountTable::NoteId),
+        )
         .build(MysqlQueryBuilder);
     pool.execute(sqlx::AssertSqlSafe(note_account)).await?;
 
@@ -391,12 +581,29 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
     let column_source_boundary = Table::create()
         .table(ColumnSourceBoundaryTable::Table)
         .if_not_exists()
-        .col(ColumnDef::new(ColumnSourceBoundaryTable::ColumnId).string_len(64).not_null())
-        .col(ColumnDef::new(ColumnSourceBoundaryTable::SourceIdx).integer().not_null())
-        .col(ColumnDef::new(ColumnSourceBoundaryTable::OldestFetchedId).text().not_null())
-        .primary_key(Index::create().col(ColumnSourceBoundaryTable::ColumnId).col(ColumnSourceBoundaryTable::SourceIdx))
+        .col(
+            ColumnDef::new(ColumnSourceBoundaryTable::ColumnId)
+                .string_len(64)
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnSourceBoundaryTable::SourceIdx)
+                .integer()
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(ColumnSourceBoundaryTable::OldestFetchedId)
+                .text()
+                .not_null(),
+        )
+        .primary_key(
+            Index::create()
+                .col(ColumnSourceBoundaryTable::ColumnId)
+                .col(ColumnSourceBoundaryTable::SourceIdx),
+        )
         .build(MysqlQueryBuilder);
-    pool.execute(sqlx::AssertSqlSafe(column_source_boundary)).await?;
+    pool.execute(sqlx::AssertSqlSafe(column_source_boundary))
+        .await?;
 
     migrate_fetch_boundary(pool).await?;
 
@@ -406,71 +613,132 @@ pub(crate) async fn ensure_schema(pool: &sqlx::MySqlPool) -> Result<()> {
 #[derive(sea_query::Iden)]
 enum NoteTable {
     #[iden = "note"]
-    Table, Id, CreatedAt, Text, TextLength, Cw, Visibility, LocalOnly, UserId,
-    ReplyId, ReplyUserId, RenoteId, ChannelId, Via, Lang, FilesCount, HasPoll,
-    HasLink, IsPinned, ReactionCount, RenoteCount, ReplyCount, MyReaction,
-    IsRenotedByMe, IsFavoritedByMe, Payload,
+    Table,
+    Id,
+    CreatedAt,
+    Text,
+    TextLength,
+    Cw,
+    Visibility,
+    LocalOnly,
+    UserId,
+    ReplyId,
+    ReplyUserId,
+    RenoteId,
+    ChannelId,
+    Via,
+    Lang,
+    FilesCount,
+    HasPoll,
+    HasLink,
+    IsPinned,
+    ReactionCount,
+    RenoteCount,
+    ReplyCount,
+    MyReaction,
+    IsRenotedByMe,
+    IsFavoritedByMe,
+    Payload,
 }
 
 #[derive(sea_query::Iden)]
 enum UserTable {
     #[iden = "user"]
-    Table, Id, Username, Host, Name, AvatarUrl, IsBot, IsCat, FollowersCount,
-    FollowingCount, NotesCount, Emojis, Bio, BannerUrl, AvatarBlurhash,
+    Table,
+    Id,
+    Username,
+    Host,
+    Name,
+    AvatarUrl,
+    IsBot,
+    IsCat,
+    FollowersCount,
+    FollowingCount,
+    NotesCount,
+    Emojis,
+    Bio,
+    BannerUrl,
+    AvatarBlurhash,
 }
 
 #[derive(sea_query::Iden)]
 enum InstanceTable {
     #[iden = "instance"]
-    Table, Host, Name, IconUrl, ThemeColor,
+    Table,
+    Host,
+    Name,
+    IconUrl,
+    ThemeColor,
 }
 
 #[derive(sea_query::Iden)]
 enum NoteReactionTable {
     #[iden = "note_reaction"]
-    Table, NoteId, EmojiKey, Count,
+    Table,
+    NoteId,
+    EmojiKey,
+    Count,
 }
 
 #[derive(sea_query::Iden)]
 enum NoteTagTable {
     #[iden = "note_tag"]
-    Table, NoteId, Tag,
+    Table,
+    NoteId,
+    Tag,
 }
 
 #[derive(sea_query::Iden)]
 enum NoteMentionTable {
     #[iden = "note_mention"]
-    Table, NoteId, UserId,
+    Table,
+    NoteId,
+    UserId,
 }
 
 #[derive(sea_query::Iden)]
 enum NoteEmojiTable {
     #[iden = "note_emoji"]
-    Table, NoteId, Emoji,
+    Table,
+    NoteId,
+    Emoji,
 }
 
 #[derive(sea_query::Iden)]
 enum NoteFileTable {
     #[iden = "note_file"]
-    Table, NoteId, MimeType, MimeCategory, IsSensitive,
+    Table,
+    NoteId,
+    MimeType,
+    MimeCategory,
+    IsSensitive,
 }
 
 #[derive(sea_query::Iden)]
 enum ColumnNoteTable {
     #[iden = "column_note"]
-    Table, ColumnId, NoteId, ReceivedAt, CreatedAt,
+    Table,
+    ColumnId,
+    NoteId,
+    ReceivedAt,
+    CreatedAt,
 }
 
 #[derive(sea_query::Iden)]
 enum NoteAccountTable {
     #[iden = "note_account"]
-    Table, AccountId, NoteId,
+    Table,
+    AccountId,
+    NoteId,
 }
 
 #[derive(sea_query::Iden)]
 enum ColumnSourceBoundaryTable {
     #[iden = "column_source_boundary"]
-    Table, ColumnId, SourceIdx, OldestFetchedId,
+    Table,
+    ColumnId,
+    SourceIdx,
+    OldestFetchedId,
 }
 
 use crate::domain::Note;
@@ -608,17 +876,37 @@ async fn upsert_note_tx(tx: &mut sqlx::MySqlTransaction<'_>, n: &Note) -> Result
     // 旧行の掃除。Postgresの`= ANY($N)`配列バインドはMySQLで使えないため、
     // `NOT IN (?,?,...)`を要素数ぶん動的に組み立てる(Global Constraints参照)。
     // 集合が空の場合は`NOT IN ()`が構文エラーになるため、全削除のSQLへ分岐する。
-    delete_stale_by_key(tx, "note_reaction", "emoji_key", &n.id, &n.reactions.keys().cloned().collect::<Vec<_>>()).await?;
+    delete_stale_by_key(
+        tx,
+        "note_reaction",
+        "emoji_key",
+        &n.id,
+        &n.reactions.keys().cloned().collect::<Vec<_>>(),
+    )
+    .await?;
     delete_stale_by_key(tx, "note_tag", "tag", &n.id, &n.tags).await?;
     delete_stale_by_key(tx, "note_mention", "user_id", &n.id, &n.mentions).await?;
-    delete_stale_by_key(tx, "note_emoji", "emoji", &n.id, &n.emojis.keys().cloned().collect::<Vec<_>>()).await?;
+    delete_stale_by_key(
+        tx,
+        "note_emoji",
+        "emoji",
+        &n.id,
+        &n.emojis.keys().cloned().collect::<Vec<_>>(),
+    )
+    .await?;
 
     // note_fileは複合キーで`NOT IN`が使えないため、SQLite/Postgres版と同様に
     // 既存行を取得してRust側で差分判定し、現存しないキーの組だけ個別にDELETEする。
     let current_file_keys: std::collections::HashSet<(String, String, bool)> = n
         .files
         .iter()
-        .map(|f| (f.mime_type.clone(), mime_category(&f.mime_type).to_string(), f.is_sensitive))
+        .map(|f| {
+            (
+                f.mime_type.clone(),
+                mime_category(&f.mime_type).to_string(),
+                f.is_sensitive,
+            )
+        })
         .collect();
     let existing_files: Vec<(String, String, bool)> = sqlx::query_as(
         "SELECT mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = ?",
@@ -660,11 +948,19 @@ async fn delete_stale_by_key(
 ) -> Result<()> {
     if current_keys.is_empty() {
         let sql = format!("DELETE FROM {table} WHERE note_id = ?");
-        sqlx::query(sqlx::AssertSqlSafe(sql)).bind(note_id).execute(&mut **tx).await?;
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(note_id)
+            .execute(&mut **tx)
+            .await?;
         return Ok(());
     }
-    let placeholders = current_keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql = format!("DELETE FROM {table} WHERE note_id = ? AND {key_col} NOT IN ({placeholders})");
+    let placeholders = current_keys
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql =
+        format!("DELETE FROM {table} WHERE note_id = ? AND {key_col} NOT IN ({placeholders})");
     let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(note_id);
     for k in current_keys {
         query = query.bind(k);
@@ -704,16 +1000,27 @@ async fn self_heal_node(pool: &sqlx::MySqlPool, node: &mut serde_json::Value) ->
     Ok(changed)
 }
 
-async fn self_heal_legacy_row(pool: &sqlx::MySqlPool, note_id: &str, value: &mut serde_json::Value) -> Result<()> {
+async fn self_heal_legacy_row(
+    pool: &sqlx::MySqlPool,
+    note_id: &str,
+    value: &mut serde_json::Value,
+) -> Result<()> {
     let changed = self_heal_node(pool, value).await?;
     if changed {
         let new_payload = serde_json::to_string(value)?;
-        sqlx::query("UPDATE note SET payload = ? WHERE id = ?").bind(new_payload).bind(note_id).execute(pool).await?;
+        sqlx::query("UPDATE note SET payload = ? WHERE id = ?")
+            .bind(new_payload)
+            .bind(note_id)
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }
 
-async fn resolve_payload_rows(pool: &sqlx::MySqlPool, rows: Vec<(String, String)>) -> Result<Vec<Note>> {
+async fn resolve_payload_rows(
+    pool: &sqlx::MySqlPool,
+    rows: Vec<(String, String)>,
+) -> Result<Vec<Note>> {
     let mut values: Vec<(String, serde_json::Value)> = Vec::with_capacity(rows.len());
     for (id, payload) in rows {
         match serde_json::from_str::<serde_json::Value>(&payload) {
@@ -777,7 +1084,8 @@ impl NoteCacheBackend for MySqlBackend {
     }
 
     async fn cache_note(&self, column_id: &str, note: &Note) -> Result<()> {
-        self.cache_notes(column_id, std::slice::from_ref(note)).await
+        self.cache_notes(column_id, std::slice::from_ref(note))
+            .await
     }
 
     async fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>> {
@@ -795,7 +1103,12 @@ impl NoteCacheBackend for MySqlBackend {
         resolve_payload_rows(&self.pool, rows).await
     }
 
-    async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
+    async fn load_cached_before(
+        &self,
+        column_id: &str,
+        until_id: &str,
+        limit: u32,
+    ) -> Result<Vec<Note>> {
         // `note_id < ?`はMySQLのデフォルト照合順序に依存する(Global Constraints参照)。
         let rows: Vec<(String, String)> = sqlx::query_as(
             "SELECT n.id, n.payload FROM column_note cn
@@ -810,15 +1123,25 @@ impl NoteCacheBackend for MySqlBackend {
         .fetch_all(&self.pool)
         .await?;
         let mut out = resolve_payload_rows(&self.pool, rows).await?;
-        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+        out.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         Ok(out)
     }
 
     async fn get_note(&self, note_id: &str) -> Result<Option<Note>> {
         let row: Option<(String, String)> =
-            sqlx::query_as("SELECT id, payload FROM note WHERE id = ?").bind(note_id).fetch_optional(&self.pool).await?;
+            sqlx::query_as("SELECT id, payload FROM note WHERE id = ?")
+                .bind(note_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(match row {
-            Some(r) => resolve_payload_rows(&self.pool, vec![r]).await?.into_iter().next(),
+            Some(r) => resolve_payload_rows(&self.pool, vec![r])
+                .await?
+                .into_iter()
+                .next(),
             None => None,
         })
     }
@@ -828,8 +1151,14 @@ impl NoteCacheBackend for MySqlBackend {
     }
 
     async fn clear_column_notes(&self, column_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM column_note WHERE column_id = ?").bind(column_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?").bind(column_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_note WHERE column_id = ?")
+            .bind(column_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?")
+            .bind(column_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -864,23 +1193,28 @@ impl NoteCacheBackend for MySqlBackend {
     }
 
     async fn forget_account_notes(&self, account_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM note_account WHERE account_id = ?").bind(account_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM note_account WHERE account_id = ?")
+            .bind(account_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     async fn account_has_note(&self, account_id: &str, note_id: &str) -> Result<bool> {
-        let (found,): (i64,) =
-            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account WHERE account_id = ? AND note_id = ?)")
-                .bind(account_id)
-                .bind(note_id)
-                .fetch_one(&self.pool)
-                .await?;
+        let (found,): (i64,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM note_account WHERE account_id = ? AND note_id = ?)",
+        )
+        .bind(account_id)
+        .bind(note_id)
+        .fetch_one(&self.pool)
+        .await?;
         Ok(found != 0)
     }
 
     async fn note_account_is_empty(&self) -> Result<bool> {
-        let (any,): (i64,) =
-            sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account)").fetch_one(&self.pool).await?;
+        let (any,): (i64,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM note_account)")
+            .fetch_one(&self.pool)
+            .await?;
         Ok(any == 0)
     }
 
@@ -895,7 +1229,11 @@ impl NoteCacheBackend for MySqlBackend {
         Ok(rows.into_iter().map(|(i, b)| (i as u32, b)).collect())
     }
 
-    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+    async fn replace_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?")
             .bind(column_id)
@@ -913,7 +1251,11 @@ impl NoteCacheBackend for MySqlBackend {
         Ok(())
     }
 
-    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+    async fn extend_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -936,18 +1278,24 @@ impl NoteCacheBackend for MySqlBackend {
     }
 
     async fn clear_all_fetch_boundaries(&self) -> Result<()> {
-        sqlx::query("DELETE FROM column_source_boundary").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM column_source_boundary")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     async fn note_count(&self) -> Result<i32> {
-        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note").fetch_one(&self.pool).await?;
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note")
+            .fetch_one(&self.pool)
+            .await?;
         Ok(count as i32)
     }
 
     async fn notes_since(&self, since_epoch_secs: i32) -> Result<i32> {
-        let (count,): (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM note WHERE created_at >= ?").bind(since_epoch_secs as i64).fetch_one(&self.pool).await?;
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note WHERE created_at >= ?")
+            .bind(since_epoch_secs as i64)
+            .fetch_one(&self.pool)
+            .await?;
         Ok(count as i32)
     }
 
@@ -996,7 +1344,8 @@ async fn delete_matching_ids_with_chunk_size(
 
     let mut deleted: i64 = 0;
     let mut affected_columns: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut max_deleted_by_column: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut max_deleted_by_column: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
 
     for chunk in ids.chunks(chunk_size.max(1)) {
         let (chunk_deleted, chunk_affected_columns, chunk_max_deleted_by_column) =
@@ -1027,7 +1376,9 @@ async fn delete_matching_ids_with_chunk_size(
         match survivor.map(|(s,)| s) {
             Some(oldest) => {
                 let candidate = match max_deleted_by_column.get(column_id) {
-                    Some(max_deleted) if max_deleted.as_str() > oldest.as_str() => max_deleted.clone(),
+                    Some(max_deleted) if max_deleted.as_str() > oldest.as_str() => {
+                        max_deleted.clone()
+                    }
                     _ => oldest,
                 };
                 sqlx::query(
@@ -1040,7 +1391,10 @@ async fn delete_matching_ids_with_chunk_size(
                 .await?;
             }
             None => {
-                sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?").bind(column_id).execute(&mut **tx).await?;
+                sqlx::query("DELETE FROM column_source_boundary WHERE column_id = ?")
+                    .bind(column_id)
+                    .execute(&mut **tx)
+                    .await?;
             }
         }
     }
@@ -1073,7 +1427,8 @@ async fn delete_matching_ids_chunk(
     }
     let deleted = q.execute(&mut **tx).await?.rows_affected() as i64;
 
-    let sql = format!("SELECT DISTINCT column_id FROM column_note WHERE note_id IN ({placeholders})");
+    let sql =
+        format!("SELECT DISTINCT column_id FROM column_note WHERE note_id IN ({placeholders})");
     let mut q = sqlx::query_as::<_, (String,)>(sqlx::AssertSqlSafe(sql));
     for id in ids {
         q = q.bind(id);
@@ -1088,9 +1443,18 @@ async fn delete_matching_ids_chunk(
         q = q.bind(id);
     }
     let max_deleted_rows: Vec<(String, String)> = q.fetch_all(&mut **tx).await?;
-    let max_deleted_by_column: std::collections::HashMap<String, String> = max_deleted_rows.into_iter().collect();
+    let max_deleted_by_column: std::collections::HashMap<String, String> =
+        max_deleted_rows.into_iter().collect();
 
-    for table in ["column_note", "note_account", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
+    for table in [
+        "column_note",
+        "note_account",
+        "note_reaction",
+        "note_tag",
+        "note_mention",
+        "note_emoji",
+        "note_file",
+    ] {
         let sql = format!("DELETE FROM {table} WHERE note_id IN ({placeholders})");
         let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
         for id in ids {
@@ -1099,25 +1463,42 @@ async fn delete_matching_ids_chunk(
         q.execute(&mut **tx).await?;
     }
 
-    Ok((deleted, affected_columns.into_iter().map(|(c,)| c).collect(), max_deleted_by_column))
+    Ok((
+        deleted,
+        affected_columns.into_iter().map(|(c,)| c).collect(),
+        max_deleted_by_column,
+    ))
 }
 
-async fn prune_impl(pool: &sqlx::MySqlPool, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
+async fn prune_impl(
+    pool: &sqlx::MySqlPool,
+    keep: i32,
+    max_age_days: i32,
+    max_size_mb: i32,
+) -> Result<usize> {
     let mut deleted: i64 = 0;
     let mut tx = pool.begin().await?;
 
     if max_age_days > 0 {
         let cutoff = crate::store::note_cache::now_epoch() - max_age_days as i64 * 86_400;
-        let ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM note WHERE created_at < ?").bind(cutoff).fetch_all(&mut *tx).await?;
+        let ids: Vec<(String,)> = sqlx::query_as("SELECT id FROM note WHERE created_at < ?")
+            .bind(cutoff)
+            .fetch_all(&mut *tx)
+            .await?;
         let ids: Vec<String> = ids.into_iter().map(|(id,)| id).collect();
         deleted += delete_matching_ids(&mut tx, &ids).await?;
     }
     if keep > 0 {
-        let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note").fetch_one(&mut *tx).await?;
+        let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note")
+            .fetch_one(&mut *tx)
+            .await?;
         let overflow = total - keep as i64;
         if overflow > 0 {
             let ids: Vec<(String,)> =
-                sqlx::query_as("SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?").bind(overflow).fetch_all(&mut *tx).await?;
+                sqlx::query_as("SELECT id FROM note ORDER BY created_at ASC, id ASC LIMIT ?")
+                    .bind(overflow)
+                    .fetch_all(&mut *tx)
+                    .await?;
             let ids: Vec<String> = ids.into_iter().map(|(id,)| id).collect();
             deleted += delete_matching_ids(&mut tx, &ids).await?;
         }
@@ -1147,7 +1528,10 @@ async fn search_cache_impl(
     // `w`はTQLコンパイラ(`filter/sql.rs`)が生成する固定文字列で、値は一切埋め込まず
     // `w.params`(下でbind)経由のみで渡す設計のため、`sqlx::AssertSqlSafe`でのラップは安全(監査済み)。
     let w = where_sql.render(Dialect::MySql);
-    let mut sql = format!("SELECT n.id, n.payload FROM note n JOIN `user` u ON u.id = n.user_id WHERE ({})", w.sql);
+    let mut sql = format!(
+        "SELECT n.id, n.payload FROM note n JOIN `user` u ON u.id = n.user_id WHERE ({})",
+        w.sql
+    );
     if until_id.is_some() {
         sql.push_str(" AND n.id < ?");
     }
@@ -1172,7 +1556,10 @@ async fn search_cache_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use testcontainers_modules::{mysql::Mysql, testcontainers::{runners::AsyncRunner, ContainerAsync}};
+    use testcontainers_modules::{
+        mysql::Mysql,
+        testcontainers::{runners::AsyncRunner, ContainerAsync},
+    };
 
     /// Docker上の使い捨てMySQLへ接続し、スキーマが2回適用してもエラーにならず
     /// (冪等)、テーブルが実際に作成されることを確認する。CI常時実行はしない方針
@@ -1240,7 +1627,10 @@ mod tests {
 
         ensure_schema(&pool).await.unwrap();
 
-        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM `instance`").fetch_one(&pool).await.unwrap();
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM `instance`")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(total, 2, "ローカル(host NULL)と全列NULLのホストは移さない");
         let (name, icon, theme): (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
             "SELECT name, icon_url, theme_color FROM `instance` WHERE host = 'conflict.example'",
@@ -1248,7 +1638,11 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(name.as_deref(), Some("Zzz"), "食い違う旧行は列ごとのMAXで1行に集約");
+        assert_eq!(
+            name.as_deref(),
+            Some("Zzz"),
+            "食い違う旧行は列ごとのMAXで1行に集約"
+        );
         assert_eq!(icon.as_deref(), Some("https://conflict.example/a.ico"));
         assert_eq!(theme.as_deref(), Some("#123456"));
 
@@ -1267,10 +1661,11 @@ mod tests {
             .await
             .unwrap();
         ensure_schema(&pool).await.unwrap();
-        let name: String = sqlx::query_scalar("SELECT name FROM `instance` WHERE host = 'remote.example'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let name: String =
+            sqlx::query_scalar("SELECT name FROM `instance` WHERE host = 'remote.example'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(name, "Renamed");
     }
 
@@ -1288,7 +1683,10 @@ mod tests {
             password: "".into(),
         };
         let backend = MySqlBackend::connect(&params).await.unwrap();
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM note").fetch_one(backend.pool()).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM note")
+            .fetch_one(backend.pool())
+            .await
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -1305,11 +1703,8 @@ mod tests {
             .await
             .unwrap();
 
-        let result = execute_index(
-            &pool,
-            "CREATE INDEX idx_bogus ON nonexistent_table (col)",
-        )
-        .await;
+        let result =
+            execute_index(&pool, "CREATE INDEX idx_bogus ON nonexistent_table (col)").await;
 
         assert!(
             result.is_err(),
@@ -1332,7 +1727,9 @@ mod tests {
             .unwrap();
 
         pool.execute("CREATE TABLE dup_test (v INT)").await.unwrap();
-        pool.execute("INSERT INTO dup_test VALUES (1), (1)").await.unwrap();
+        pool.execute("INSERT INTO dup_test VALUES (1), (1)")
+            .await
+            .unwrap();
 
         let result = execute_index(&pool, "CREATE UNIQUE INDEX idx_dup ON dup_test (v)").await;
 
@@ -1352,18 +1749,51 @@ mod tests {
             visibility: Visibility::Home,
             local_only: false,
             user: User {
-                id: "u1".into(), username: "alice".into(), host: None, name: Some("Alice".into()),
-                avatar_url: None, is_bot: false, is_cat: false,
-                followers_count: 5, following_count: 3, notes_count: 42,
-                emojis: std::collections::HashMap::new(), bio: None, banner_url: None, avatar_blurhash: None, instance: None,
+                id: "u1".into(),
+                username: "alice".into(),
+                host: None,
+                name: Some("Alice".into()),
+                avatar_url: None,
+                is_bot: false,
+                is_cat: false,
+                followers_count: 5,
+                following_count: 3,
+                notes_count: 42,
+                emojis: std::collections::HashMap::new(),
+                bio: None,
+                banner_url: None,
+                avatar_blurhash: None,
+                instance: None,
             },
-            reply_id: None, reply_user_id: None, reply: None, renote_id: None, renote: None,
-            files: vec![DriveFile { id: "f1".into(), mime_type: "image/png".into(), is_sensitive: false, url: "http://x/f1".into(), thumbnail_url: None, name: "f1.png".into(), size: None }],
-            poll: None, tags: vec!["rust".into()], mentions: vec![],
-            emojis: std::collections::HashMap::new(), channel_id: None, via: None, lang: None,
+            reply_id: None,
+            reply_user_id: None,
+            reply: None,
+            renote_id: None,
+            renote: None,
+            files: vec![DriveFile {
+                id: "f1".into(),
+                mime_type: "image/png".into(),
+                is_sensitive: false,
+                url: "http://x/f1".into(),
+                thumbnail_url: None,
+                name: "f1.png".into(),
+                size: None,
+            }],
+            poll: None,
+            tags: vec!["rust".into()],
+            mentions: vec![],
+            emojis: std::collections::HashMap::new(),
+            channel_id: None,
+            via: None,
+            lang: None,
             reactions: std::collections::HashMap::from([("👍".into(), 3u32)]),
-            reaction_count: 3, renote_count: 1, reply_count: 0,
-            my_reaction: Some("👍".into()), is_renoted_by_me: false, is_favorited_by_me: false, is_pinned: false,
+            reaction_count: 3,
+            renote_count: 1,
+            reply_count: 0,
+            my_reaction: Some("👍".into()),
+            is_renoted_by_me: false,
+            is_favorited_by_me: false,
+            is_pinned: false,
         }
     }
 
@@ -1389,16 +1819,36 @@ mod tests {
         use sqlx::Connection;
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let password = std::env::var("TSUMUGI_TEST_MYSQL_PASSWORD").unwrap_or_default();
-        let database = format!("tsumugi_test_{}_{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+        let database = format!(
+            "tsumugi_test_{}_{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        );
         let mut admin = sqlx::MySqlConnection::connect_with(
-            &sqlx::mysql::MySqlConnectOptions::new().host("127.0.0.1").port(port).username("root").password(&password),
+            &sqlx::mysql::MySqlConnectOptions::new()
+                .host("127.0.0.1")
+                .port(port)
+                .username("root")
+                .password(&password),
         )
         .await
         .unwrap();
-        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE `{database}`"))).execute(&mut admin).await.unwrap();
-        let params = MySqlConnectParams { host: "127.0.0.1".into(), port, database, user: "root".into(), password };
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE `{database}`")))
+            .execute(&mut admin)
+            .await
+            .unwrap();
+        let params = MySqlConnectParams {
+            host: "127.0.0.1".into(),
+            port,
+            database,
+            user: "root".into(),
+            password,
+        };
         let backend = MySqlBackend::connect(&params).await.unwrap();
-        TestBackend { backend, _container: None }
+        TestBackend {
+            backend,
+            _container: None,
+        }
     }
 
     async fn backend() -> TestBackend {
@@ -1407,9 +1857,18 @@ mod tests {
         }
         let container = Mysql::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(3306).await.unwrap();
-        let params = MySqlConnectParams { host: "127.0.0.1".into(), port, database: "test".into(), user: "root".into(), password: "".into() };
+        let params = MySqlConnectParams {
+            host: "127.0.0.1".into(),
+            port,
+            database: "test".into(),
+            user: "root".into(),
+            password: "".into(),
+        };
         let backend = MySqlBackend::connect(&params).await.unwrap();
-        TestBackend { backend, _container: Some(container) }
+        TestBackend {
+            backend,
+            _container: Some(container),
+        }
     }
 
     fn b(idx: u32, id: &str) -> (u32, String) {
@@ -1418,24 +1877,38 @@ mod tests {
 
     /// source_idx=0 だけの境界を置き換える(単一ソース時代のテストを新APIへ移すためのヘルパー)。
     async fn set0(s: &MySqlBackend, column_id: &str, id: &str) {
-        s.replace_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+        s.replace_fetch_boundaries(column_id, &[b(0, id)])
+            .await
+            .unwrap();
     }
 
     async fn extend0(s: &MySqlBackend, column_id: &str, id: &str) {
-        s.extend_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+        s.extend_fetch_boundaries(column_id, &[b(0, id)])
+            .await
+            .unwrap();
     }
 
     async fn b0(s: &MySqlBackend, column_id: &str) -> Option<String> {
-        s.get_fetch_boundaries(column_id).await.unwrap().into_iter().find(|(i, _)| *i == 0).map(|(_, v)| v)
+        s.get_fetch_boundaries(column_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|(i, _)| *i == 0)
+            .map(|(_, v)| v)
     }
 
     #[tokio::test]
     #[ignore]
     async fn cache_roundtrip_preserves_note_and_order() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 150)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 150)])
+            .await
+            .unwrap();
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2", "n3", "n1"]
+        );
         assert_eq!(got[0].reactions.get("👍"), Some(&3));
     }
 
@@ -1457,9 +1930,16 @@ mod tests {
         let reply = got[0].reply.as_ref().expect("reply should be restored");
         assert_eq!(reply.user.name.as_deref(), Some("Bob"));
 
-        sqlx::query("DELETE FROM `user` WHERE id = 'u_bob'").execute(s.pool()).await.unwrap();
+        sqlx::query("DELETE FROM `user` WHERE id = 'u_bob'")
+            .execute(s.pool())
+            .await
+            .unwrap();
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.len(), 1, "返信先ユーザーの欠落でノート行ごと捨ててはいけない");
+        assert_eq!(
+            got.len(),
+            1,
+            "返信先ユーザーの欠落でノート行ごと捨ててはいけない"
+        );
         assert!(got[0].reply.is_none());
     }
 
@@ -1476,7 +1956,10 @@ mod tests {
         n.my_reaction = None;
         s.update_note(&n).await.unwrap();
 
-        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'").fetch_one(s.pool()).await.unwrap();
+        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'")
+            .fetch_one(s.pool())
+            .await
+            .unwrap();
         assert_eq!(rc, 0);
     }
 
@@ -1490,7 +1973,10 @@ mod tests {
         s.cache_note("col1", &n).await.unwrap();
 
         let (stored,): (Option<String>,) =
-            sqlx::query_as("SELECT reply_user_id FROM note WHERE id = 'n1'").fetch_one(s.pool()).await.unwrap();
+            sqlx::query_as("SELECT reply_user_id FROM note WHERE id = 'n1'")
+                .fetch_one(s.pool())
+                .await
+                .unwrap();
         assert_eq!(stored.as_deref(), Some("bob-id"));
     }
 
@@ -1498,11 +1984,16 @@ mod tests {
     #[ignore]
     async fn prune_removes_oldest_beyond_keep_and_related_rows() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
         let deleted = s.prune(2, 0, 0).await.unwrap();
         assert_eq!(deleted, 1);
         assert_eq!(s.note_count().await.unwrap(), 2);
-        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'").fetch_one(s.pool()).await.unwrap();
+        let (rc,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'")
+            .fetch_one(s.pool())
+            .await
+            .unwrap();
         assert_eq!(rc, 0);
     }
 
@@ -1511,12 +2002,20 @@ mod tests {
     async fn search_cache_applies_predicate_and_until_id_boundary() {
         use crate::filter::{parser, sql};
         let s = backend().await;
-        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)]).await.unwrap();
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)])
+            .await
+            .unwrap();
+        let ctx = sql::SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
         let expr = parser::parse_predicate("has_files").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, Some("a3"), 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a2", "a1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["a2", "a1"]
+        );
     }
 
     /// 部分一致の契約(Issue #583)。SQLite と同じケースを通る(`search_contract.rs`)。
@@ -1597,21 +2096,48 @@ mod tests {
         let x = note("x", 420); // 帰属なし
         s.cache_notes("col1", &[p, h, f, l, o, x]).await.unwrap();
         let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        s.record_note_accounts("a1", &ids(&["p", "h", "f", "l"])).await.unwrap();
+        s.record_note_accounts("a1", &ids(&["p", "h", "f", "l"]))
+            .await
+            .unwrap();
         s.record_note_accounts("a2", &ids(&["o"])).await.unwrap();
 
         let q = build_search("a1", "one.example", &SearchParams::default()).unwrap();
-        let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
+        let got: Vec<String> = s
+            .search_cache(&q.where_sql, q.until_id.as_deref(), q.limit)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(got, vec!["p", "h"]);
 
         // フィルタ付き(パラメータが複数)でも、アカウントIDの位置がずれない。
-        let q = build_search("a1", "one.example", &SearchParams { text: Some("hello".into()), limit: Some(1), ..Default::default() }).unwrap();
-        let got: Vec<String> = s.search_cache(&q.where_sql, q.until_id.as_deref(), q.limit).await.unwrap().into_iter().map(|n| n.id).collect();
+        let q = build_search(
+            "a1",
+            "one.example",
+            &SearchParams {
+                text: Some("hello".into()),
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let got: Vec<String> = s
+            .search_cache(&q.where_sql, q.until_id.as_deref(), q.limit)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(got, vec!["p"]);
 
         for (id, expected) in [("p", 1), ("h", 1), ("f", 0), ("l", 0), ("o", 0), ("x", 0)] {
             let q = build_get("a1", id).unwrap();
-            let n = s.search_cache(&q.where_sql, None, q.limit).await.unwrap().len();
+            let n = s
+                .search_cache(&q.where_sql, None, q.limit)
+                .await
+                .unwrap()
+                .len();
             assert_eq!(n, expected, "note {id}");
         }
     }
@@ -1630,23 +2156,39 @@ mod tests {
         let mut with_poll = note("p1", 300);
         with_poll.poll = Some(Poll {
             choices: vec![
-                PollChoice { text: "a".into(), votes: 0, is_voted: false },
-                PollChoice { text: "b".into(), votes: 0, is_voted: false },
+                PollChoice {
+                    text: "a".into(),
+                    votes: 0,
+                    is_voted: false,
+                },
+                PollChoice {
+                    text: "b".into(),
+                    votes: 0,
+                    is_voted: false,
+                },
             ],
             multiple: false,
             expires_at: None,
         });
         let mut without_poll = note("p2", 200);
         without_poll.poll = None;
-        s.cache_notes("col1", &[with_poll, without_poll]).await.unwrap();
+        s.cache_notes("col1", &[with_poll, without_poll])
+            .await
+            .unwrap();
 
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        let ctx = sql::SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
 
         // has_poll = 1 相当
         let expr = parser::parse_predicate("has_poll").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["p1"]
+        );
 
         // pinned = 1 相当
         let mut pinned = note("p3", 100);
@@ -1655,7 +2197,10 @@ mod tests {
         let expr = parser::parse_predicate("pinned").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p3"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["p3"]
+        );
 
         // bot = 1 相当(u.is_bot)。他のテストノートと同じuser id("u1")を使うと、
         // usersテーブルの同一行を共有しているため`is_bot`の上書きが全ノートに波及して
@@ -1667,7 +2212,10 @@ mod tests {
         let expr = parser::parse_predicate("bot").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["p4"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["p4"]
+        );
     }
 
     #[tokio::test]
@@ -1692,15 +2240,30 @@ mod tests {
     /// (MAX(note_id)のチャンクをまたいだマージが正しく機能していることの検証)。
     async fn setup_chunking_fixture(s: &MySqlBackend) {
         // col1: n1..n5の5件。col2: n2,n4のみ(2列にまたがるnoteを含める)。
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300), note("n4", 400), note("n5", 500)]).await.unwrap();
-        s.cache_notes("col2", &[note("n2", 200), note("n4", 400)]).await.unwrap();
+        s.cache_notes(
+            "col1",
+            &[
+                note("n1", 100),
+                note("n2", 200),
+                note("n3", 300),
+                note("n4", 400),
+                note("n5", 500),
+            ],
+        )
+        .await
+        .unwrap();
+        s.cache_notes("col2", &[note("n2", 200), note("n4", 400)])
+            .await
+            .unwrap();
         set0(&s, "col1", "n1").await;
         set0(&s, "col2", "n2").await;
     }
 
     async fn delete_via_chunk_size(s: &MySqlBackend, ids: &[String], chunk_size: usize) -> i64 {
         let mut tx = s.pool().begin().await.unwrap();
-        let deleted = delete_matching_ids_with_chunk_size(&mut tx, ids, chunk_size).await.unwrap();
+        let deleted = delete_matching_ids_with_chunk_size(&mut tx, ids, chunk_size)
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         deleted
     }
@@ -1723,7 +2286,10 @@ mod tests {
         assert_eq!(deleted_chunked, 3);
         assert_eq!(deleted_chunked, deleted_single);
 
-        assert_eq!(s_chunked.note_count().await.unwrap(), s_single.note_count().await.unwrap());
+        assert_eq!(
+            s_chunked.note_count().await.unwrap(),
+            s_single.note_count().await.unwrap()
+        );
         assert_eq!(s_chunked.note_count().await.unwrap(), 2); // n4, n5が残存
 
         // col1: 残存はn4,n5 → MIN=n4。max_deleted_by_column[col1]=n3 < n4なのでoldest=n4を採用。
@@ -1745,7 +2311,10 @@ mod tests {
     async fn delete_matching_ids_chunking_removes_boundary_when_column_emptied() {
         let s = backend().await;
         setup_chunking_fixture(&s).await;
-        let ids: Vec<String> = ["n1", "n2", "n3", "n4", "n5"].iter().map(|s| s.to_string()).collect();
+        let ids: Vec<String> = ["n1", "n2", "n3", "n4", "n5"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
         let deleted = delete_via_chunk_size(&s, &ids, 2).await;
 
@@ -1761,19 +2330,33 @@ mod tests {
         let s = backend().await;
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
 
-        s.replace_fetch_boundaries("col1", &[b(1, "n2"), b(0, "n1"), b(2, "")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2"), b(2, "")]);
+        s.replace_fetch_boundaries("col1", &[b(1, "n2"), b(0, "n1"), b(2, "")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n1"), b(1, "n2"), b(2, "")]
+        );
 
-        s.extend_fetch_boundaries("col1", &[b(0, "n0"), b(1, "n9"), b(3, "n5")]).await.unwrap();
+        s.extend_fetch_boundaries("col1", &[b(0, "n0"), b(1, "n9"), b(3, "n5")])
+            .await
+            .unwrap();
         assert_eq!(
             s.get_fetch_boundaries("col1").await.unwrap(),
             vec![b(0, "n0"), b(1, "n2"), b(2, ""), b(3, "n5")]
         );
 
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "")]).await.unwrap();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "")])
+            .await
+            .unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
         assert_eq!(s.prune(2, 0, 0).await.unwrap(), 1);
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n2"), b(1, "n2")]);
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n2"), b(1, "n2")]
+        );
 
         s.clear_column_notes("col1").await.unwrap();
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
@@ -1783,15 +2366,27 @@ mod tests {
     #[ignore]
     async fn extend_fetch_boundaries_moves_to_empty_string_and_never_back() {
         let s = backend().await;
-        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n300")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n300")])
+            .await
+            .unwrap();
 
         // 既存行を ""(枯渇済み)へ延長できる
-        s.extend_fetch_boundaries("col1", &[b(0, "")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, ""), b(1, "n300")]);
+        s.extend_fetch_boundaries("col1", &[b(0, "")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, ""), b(1, "n300")]
+        );
 
         // 枯渇済みは、後から通常のIDで延長しても戻らない
-        s.extend_fetch_boundaries("col1", &[b(0, "n1")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, ""), b(1, "n300")]);
+        s.extend_fetch_boundaries("col1", &[b(0, "n1")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, ""), b(1, "n300")]
+        );
     }
 
     #[tokio::test]
@@ -1799,7 +2394,9 @@ mod tests {
     async fn prune_removes_every_source_row_when_multi_source_column_fully_pruned() {
         let s = backend().await;
         s.cache_notes("col1", &[note("old", 100)]).await.unwrap();
-        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, ""), b(2, "old")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, ""), b(2, "old")])
+            .await
+            .unwrap();
 
         assert_eq!(s.prune(0, 1, 0).await.unwrap(), 1);
 
@@ -1811,12 +2408,19 @@ mod tests {
     #[ignore]
     async fn replace_fetch_boundaries_rejects_duplicate_source_idx_and_rolls_back() {
         let s = backend().await;
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")])
+            .await
+            .unwrap();
 
-        let result = s.replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")]).await;
+        let result = s
+            .replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")])
+            .await;
 
         assert!(result.is_err());
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2")]);
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n1"), b(1, "n2")]
+        );
     }
 
     #[tokio::test]
@@ -1848,7 +2452,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             rows,
-            vec![("c1".to_string(), 0, "n100".to_string()), ("c2".to_string(), 0, "n200".to_string())]
+            vec![
+                ("c1".to_string(), 0, "n100".to_string()),
+                ("c2".to_string(), 0, "n200".to_string())
+            ]
         );
         let legacy: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'column_fetch_boundary' AND table_schema = 'test'",
@@ -1858,15 +2465,19 @@ mod tests {
         .unwrap();
         assert_eq!(legacy, 0, "旧テーブルは DROP される");
 
-        sqlx::query("UPDATE column_source_boundary SET oldest_fetched_id = 'n50' WHERE column_id = 'c1'")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE column_source_boundary SET oldest_fetched_id = 'n50' WHERE column_id = 'c1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         ensure_schema(&pool).await.unwrap();
-        let v: String = sqlx::query_scalar("SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id = 'c1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let v: String = sqlx::query_scalar(
+            "SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id = 'c1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(v, "n50");
     }
 
@@ -1879,7 +2490,8 @@ mod tests {
     /// 書きロックが無ければ、`clear` が書き込みより先に走り、後から入る書き込みが境界を復活させる。
     #[tokio::test]
     #[ignore]
-    async fn clear_all_fetch_boundaries_inside_the_boundary_write_lock_completes_and_blocks_stale_writes() {
+    async fn clear_all_fetch_boundaries_inside_the_boundary_write_lock_completes_and_blocks_stale_writes(
+    ) {
         use crate::fence::ColumnFence;
         use std::sync::Arc;
         use std::time::Duration;
@@ -1897,7 +2509,12 @@ mod tests {
         let mut writers = Vec::new();
         for c in columns {
             let epoch = fence.begin(c);
-            let (s, fence, ready_tx, gate) = (Arc::clone(&s), Arc::clone(&fence), ready_tx.clone(), Arc::clone(&gate));
+            let (s, fence, ready_tx, gate) = (
+                Arc::clone(&s),
+                Arc::clone(&fence),
+                ready_tx.clone(),
+                Arc::clone(&gate),
+            );
             writers.push(tokio::spawn(async move {
                 fence
                     .write_if_current(c, &epoch, |boundaries_ok| async move {
@@ -1918,24 +2535,51 @@ mod tests {
 
         let invalidate = {
             let (s, fence) = (Arc::clone(&s), Arc::clone(&fence));
-            tokio::spawn(async move { fence.invalidate_boundaries(|| async { s.clear_all_fetch_boundaries().await }).await })
+            tokio::spawn(async move {
+                fence
+                    .invalidate_boundaries(|| async { s.clear_all_fetch_boundaries().await })
+                    .await
+            })
         };
         tokio::task::yield_now().await;
         tokio::task::yield_now().await; // invalidate_boundaries が、書きロックの待ちに入る
         tokio::time::sleep(Duration::from_millis(200)).await; // 書きロックが無い実装なら、この間に clear が終わる
-        assert!(!invalidate.is_finished(), "書きロックは、読みロックを持つ実行中の書き込みの完了を待つ");
+        assert!(
+            !invalidate.is_finished(),
+            "書きロックは、読みロックを持つ実行中の書き込みの完了を待つ"
+        );
 
         gate.add_permits(columns.len()); // 実行中の書き込みを放す
         let cleared = tokio::time::timeout(Duration::from_secs(30), invalidate).await; // デッドロック検出の上限
-        assert!(cleared.expect("書きロックの中の clear_all_fetch_boundaries が詰まらない").unwrap().is_ok());
+        assert!(cleared
+            .expect("書きロックの中の clear_all_fetch_boundaries が詰まらない")
+            .unwrap()
+            .is_ok());
         for writer in writers {
-            assert_eq!(writer.await.unwrap(), Some(true), "実行中の書き込みは、書きロックより先に完了する");
+            assert_eq!(
+                writer.await.unwrap(),
+                Some(true),
+                "実行中の書き込みは、書きロックより先に完了する"
+            );
         }
         for c in columns {
-            assert!(s.get_fetch_boundaries(c).await.unwrap().is_empty(), "{c}: 書き込みの後で clear が走り、空になる");
+            assert!(
+                s.get_fetch_boundaries(c).await.unwrap().is_empty(),
+                "{c}: 書き込みの後で clear が走り、空になる"
+            );
         }
-        let late = fence.write_if_current("c1", &late_epoch, |boundaries_ok| async move { boundaries_ok }).await;
-        assert_eq!(late, Some(false), "invalidate_boundaries より前に控えた世代の境界の書き込みは、古い扱い");
+        let late = fence
+            .write_if_current(
+                "c1",
+                &late_epoch,
+                |boundaries_ok| async move { boundaries_ok },
+            )
+            .await;
+        assert_eq!(
+            late,
+            Some(false),
+            "invalidate_boundaries より前に控えた世代の境界の書き込みは、古い扱い"
+        );
     }
 
     #[tokio::test]
@@ -1944,8 +2588,12 @@ mod tests {
         let s = backend().await;
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
 
-        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
 
         assert!(s.account_has_note("acc1", "n1").await.unwrap());
         assert!(!s.account_has_note("acc1", "ghost").await.unwrap());
@@ -1957,7 +2605,9 @@ mod tests {
     #[ignore]
     async fn note_account_records_a_large_id_list_in_chunks() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         let mut ids: Vec<String> = (0..70_000).map(|i| format!("ghost{i}")).collect();
         ids.push("n1".to_string());
         ids.push("n2".to_string());
@@ -1972,8 +2622,12 @@ mod tests {
     #[ignore]
     async fn note_account_is_removed_together_with_the_note_by_prune() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()])
+            .await
+            .unwrap();
 
         s.prune(2, 0, 0).await.unwrap();
 
@@ -1988,7 +2642,9 @@ mod tests {
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
         assert!(s.note_account_is_empty().await.unwrap());
 
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
 
         assert!(!s.note_account_is_empty().await.unwrap());
     }
@@ -2014,7 +2670,9 @@ mod tests {
     #[ignore]
     async fn note_account_forget_and_backfill_and_clear_column() {
         let s = backend().await;
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         s.cache_notes("col2", &[note("n3", 300)]).await.unwrap();
 
         s.backfill_note_accounts("acc1", "col1").await.unwrap();

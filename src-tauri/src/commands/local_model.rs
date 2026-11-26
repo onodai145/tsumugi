@@ -37,16 +37,23 @@ pub(crate) fn info(s: &AppState) -> LocalModelInfo {
         size_bytes: s.local_models.size_bytes(),
         license_version: LICENSE_VERSION.into(),
         license_url: LICENSE_URL.into(),
-        license_accepted: s.settings.local_model_license_version().as_deref() == Some(LICENSE_VERSION),
+        license_accepted: s.settings.local_model_license_version().as_deref()
+            == Some(LICENSE_VERSION),
         partial_bytes: s.local_models.partial_bytes(),
         supported: is_supported(),
     }
 }
 
 /// ライセンスへの同意を Rust 側で強制してから、ダウンロードを始める。同意は、開始できたあとに記録する。
-pub(crate) async fn start_core(s: &AppState, accepted_license_version: &str, notify: Notify) -> Result<()> {
+pub(crate) async fn start_core(
+    s: &AppState,
+    accepted_license_version: &str,
+    notify: Notify,
+) -> Result<()> {
     if accepted_license_version != LICENSE_VERSION {
-        return Err(Error::Invalid("ライセンスへの同意が必要です（版が一致しません）".into()));
+        return Err(Error::Invalid(
+            "ライセンスへの同意が必要です（版が一致しません）".into(),
+        ));
     }
     if !is_supported() {
         return Err(invalid(ERR_UNSUPPORTED));
@@ -98,7 +105,10 @@ pub async fn cancel_local_model_download(state: State<'_, AppState>) -> Result<(
 #[specta::specta]
 pub async fn delete_local_model(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     state.local_models.delete().await?;
-    let _ = LocalModelStatusChanged { status: state.local_models.status() }.emit(&app);
+    let _ = LocalModelStatusChanged {
+        status: state.local_models.status(),
+    }
+    .emit(&app);
     Ok(())
 }
 
@@ -132,14 +142,20 @@ mod tests {
     async fn a_wrong_license_version_is_rejected_and_nothing_is_recorded() {
         let s = state();
         let r = start_core(&s, "1999-01-01", noop_notify()).await;
-        assert!(matches!(r, Err(Error::Invalid(ref m)) if m.contains("ライセンス")), "{r:?}");
+        assert!(
+            matches!(r, Err(Error::Invalid(ref m)) if m.contains("ライセンス")),
+            "{r:?}"
+        );
         assert_eq!(s.settings.local_model_license_version(), None);
     }
 
     #[tokio::test]
     async fn an_empty_license_version_is_rejected() {
         let s = state();
-        assert!(matches!(start_core(&s, "", noop_notify()).await, Err(Error::Invalid(_))));
+        assert!(matches!(
+            start_core(&s, "", noop_notify()).await,
+            Err(Error::Invalid(_))
+        ));
         assert_eq!(s.settings.local_model_license_version(), None);
     }
 
@@ -147,32 +163,53 @@ mod tests {
     async fn the_right_version_on_an_unconfigured_state_reports_unsupported_and_is_not_recorded() {
         let s = state();
         let r = start_core(&s, LICENSE_VERSION, noop_notify()).await;
-        assert!(matches!(r, Err(Error::Invalid(ref m)) if m == ERR_UNSUPPORTED), "{r:?}");
-        assert_eq!(s.settings.local_model_license_version(), None, "開始できなかったら同意を記録しない");
+        assert!(
+            matches!(r, Err(Error::Invalid(ref m)) if m == ERR_UNSUPPORTED),
+            "{r:?}"
+        );
+        assert_eq!(
+            s.settings.local_model_license_version(),
+            None,
+            "開始できなかったら同意を記録しない"
+        );
     }
 
     #[cfg(llama_target)]
     #[tokio::test]
     async fn the_right_version_starts_and_records_the_acceptance() {
+        use sha2::{Digest, Sha256};
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
-        use sha2::{Digest, Sha256};
 
         let data = vec![7u8; 10_000];
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone())).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone()))
+            .mount(&server)
+            .await;
         let spec = ModelSpec {
             url: format!("{}/m.gguf", server.uri()),
             size: data.len() as u64,
             sha256: format!("{:x}", Sha256::digest(&data)),
         };
-        let dir: PathBuf = std::env::temp_dir().join(format!("tsumugi_cmd_{}", uuid::Uuid::new_v4()));
-        let models = Arc::new(LocalModels::with_spec(dir, reqwest::Client::new(), Arc::new(LocalTranslate::unconfigured()), spec));
+        let dir: PathBuf =
+            std::env::temp_dir().join(format!("tsumugi_cmd_{}", uuid::Uuid::new_v4()));
+        let models = Arc::new(LocalModels::with_spec(
+            dir,
+            reqwest::Client::new(),
+            Arc::new(LocalTranslate::unconfigured()),
+            spec,
+        ));
         let s = state().with_local_models(models);
 
         assert!(!info(&s).license_accepted);
-        start_core(&s, LICENSE_VERSION, noop_notify()).await.unwrap();
-        assert_eq!(s.settings.local_model_license_version().as_deref(), Some(LICENSE_VERSION));
+        start_core(&s, LICENSE_VERSION, noop_notify())
+            .await
+            .unwrap();
+        assert_eq!(
+            s.settings.local_model_license_version().as_deref(),
+            Some(LICENSE_VERSION)
+        );
         assert!(info(&s).license_accepted);
 
         tokio::time::timeout(Duration::from_secs(20), async {
@@ -194,7 +231,10 @@ mod tests {
 
         let data = vec![7u8; 10_000];
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone())).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(data.clone()))
+            .mount(&server)
+            .await;
         let spec = ModelSpec {
             url: format!("{}/m.gguf", server.uri()),
             size: data.len() as u64,
@@ -208,12 +248,17 @@ mod tests {
             spec,
         ));
         let settings_disk = BrokenDisk::new();
-        let settings =
-            SettingsStore::new(settings_disk.path("settings.json"), settings_disk.path("backgrounds")).unwrap();
+        let settings = SettingsStore::new(
+            settings_disk.path("settings.json"),
+            settings_disk.path("backgrounds"),
+        )
+        .unwrap();
         let s = AppState::new_for_test(settings).with_local_models(models);
         settings_disk.break_dir(); // 同意の保存は失敗する
 
-        start_core(&s, LICENSE_VERSION, noop_notify()).await.unwrap();
+        start_core(&s, LICENSE_VERSION, noop_notify())
+            .await
+            .unwrap();
 
         tokio::time::timeout(Duration::from_secs(20), async {
             while info(&s).status != LocalModelStatus::Ready {
@@ -236,9 +281,16 @@ mod tests {
         assert_eq!(i.supported, is_supported());
         assert_eq!(i.status, LocalModelStatus::NotInstalled);
         assert_eq!(i.partial_bytes, 0);
-        s.settings.set_local_model_license_version("1999-01-01").unwrap();
-        assert!(!info(&s).license_accepted, "古い版の同意は、現行の同意ではない");
-        s.settings.set_local_model_license_version(LICENSE_VERSION).unwrap();
+        s.settings
+            .set_local_model_license_version("1999-01-01")
+            .unwrap();
+        assert!(
+            !info(&s).license_accepted,
+            "古い版の同意は、現行の同意ではない"
+        );
+        s.settings
+            .set_local_model_license_version(LICENSE_VERSION)
+            .unwrap();
         assert!(info(&s).license_accepted);
     }
 

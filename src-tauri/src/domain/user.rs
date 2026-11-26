@@ -90,8 +90,12 @@ mod tests {
 
     #[test]
     fn with_theme_color_fallback_fills_default_gray_when_missing() {
-        let info = InstanceInfo { name: None, icon_url: None, theme_color: None }
-            .with_theme_color_fallback();
+        let info = InstanceInfo {
+            name: None,
+            icon_url: None,
+            theme_color: None,
+        }
+        .with_theme_color_fallback();
         assert_eq!(info.theme_color, Some("#777777".to_string()));
     }
 

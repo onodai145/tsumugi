@@ -73,9 +73,9 @@ pub fn classify(e: &Error) -> Failure {
         Error::Network(m) if m.starts_with("timeout:") => {
             Failure::Fatal("通信がタイムアウトしました。投稿されたか確認してください".into())
         }
-        Error::Network(_) => {
-            Failure::Fatal("通信エラーのため投稿結果が不明です。投稿されたか確認してください".into())
-        }
+        Error::Network(_) => Failure::Fatal(
+            "通信エラーのため投稿結果が不明です。投稿されたか確認してください".into(),
+        ),
         other => Failure::Fatal(other.to_string()),
     }
 }
@@ -117,10 +117,15 @@ async fn attempt(
     };
     let result = match client {
         Ok(client) => {
-            match tokio::time::timeout(timeout, create_note(&client, &to_note_draft(&entry.input))).await {
+            match tokio::time::timeout(timeout, create_note(&client, &to_note_draft(&entry.input)))
+                .await
+            {
                 Ok(r) => r,
                 // `error.rs` の `From<reqwest::Error>` と同じ接頭辞にして、`classify` の timeout 経路に乗せる
-                Err(_) => Err(Error::Network(format!("timeout: no response within {}s", timeout.as_secs()))),
+                Err(_) => Err(Error::Network(format!(
+                    "timeout: no response within {}s",
+                    timeout.as_secs()
+                ))),
             }
         }
         Err(e) => Err(e),
@@ -129,19 +134,31 @@ async fn attempt(
         if let Err(e) = state.scheduled_posts.finish_failed(id, &message) {
             log::warn!("scheduled post {id}: failed to record failure: {e}");
         }
-        Some(Outcome::Failed { account_id: account_id.clone(), id: id.to_string(), message })
+        Some(Outcome::Failed {
+            account_id: account_id.clone(),
+            id: id.to_string(),
+            message,
+        })
     };
     match result {
         Ok(note) => {
             if let Err(e) = state.scheduled_posts.finish_posted(id) {
                 log::warn!("scheduled post {id}: posted but failed to remove: {e}");
             }
-            Some(Outcome::Posted { account_id, id: id.to_string(), note_id: note.id })
+            Some(Outcome::Posted {
+                account_id,
+                id: id.to_string(),
+                note_id: note.id,
+            })
         }
         Err(e) => match classify(&e) {
             Failure::Retry if allow_retry && (entry.attempts as usize) < RETRY_DELAYS_SEC.len() => {
                 let delay = RETRY_DELAYS_SEC[entry.attempts as usize];
-                if let Err(err) = state.scheduled_posts.finish_retry(id, entry.attempts + 1, clock() + delay) {
+                if let Err(err) =
+                    state
+                        .scheduled_posts
+                        .finish_retry(id, entry.attempts + 1, clock() + delay)
+                {
                     log::warn!("scheduled post {id}: failed to schedule retry: {err}");
                 }
                 None
@@ -154,9 +171,20 @@ async fn attempt(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    Posted { account_id: String, id: String, note_id: String },
-    Failed { account_id: String, id: String, message: String },
-    Expired { account_id: String, id: String },
+    Posted {
+        account_id: String,
+        id: String,
+        note_id: String,
+    },
+    Failed {
+        account_id: String,
+        id: String,
+        message: String,
+    },
+    Expired {
+        account_id: String,
+        id: String,
+    },
 }
 
 /// 期限が来た予約を処理する。猶予を超えていれば `Expired`、そうでなければ送信する。
@@ -164,17 +192,29 @@ pub enum Outcome {
 /// 処理開始からの経過秒を足した時刻を使う(`process_due_with`)。
 pub async fn process_due(state: &AppState, now: i64) -> Vec<Outcome> {
     let start = Instant::now();
-    process_due_with(state, &|| now + start.elapsed().as_secs() as i64, SEND_TIMEOUT).await
+    process_due_with(
+        state,
+        &|| now + start.elapsed().as_secs() as i64,
+        SEND_TIMEOUT,
+    )
+    .await
 }
 
 /// `process_due` の本体。時計(`clock`)と送信のタイムアウトを引数に取る(テストで差し替える)。
 /// 猶予の判定・再試行の基準は、予約 1 件ごとに時計を読み直した時刻を使う。
-async fn process_due_with(state: &AppState, clock: &(dyn Fn() -> i64 + Sync), timeout: Duration) -> Vec<Outcome> {
+async fn process_due_with(
+    state: &AppState,
+    clock: &(dyn Fn() -> i64 + Sync),
+    timeout: Duration,
+) -> Vec<Outcome> {
     let mut out = Vec::new();
     for e in state.scheduled_posts.due(clock()) {
         if clock() - e.scheduled_at > MISSED_GRACE_SEC {
             if state.scheduled_posts.mark_expired(&e.id).unwrap_or(false) {
-                out.push(Outcome::Expired { account_id: e.account_id.clone(), id: e.id.clone() });
+                out.push(Outcome::Expired {
+                    account_id: e.account_id.clone(),
+                    id: e.id.clone(),
+                });
             }
             continue;
         }
@@ -197,7 +237,8 @@ pub async fn post_now(state: &AppState, account_id: &str, id: &str, now: i64) ->
         LocalScheduleStatus::Posting => return Err(Error::Invalid("投稿処理中です".into())),
         LocalScheduleStatus::Pending => {
             return Err(Error::Invalid(
-                "予約時刻前の予約は「今すぐ投稿」できません。取り消して通常の投稿にしてください".into(),
+                "予約時刻前の予約は「今すぐ投稿」できません。取り消して通常の投稿にしてください"
+                    .into(),
             ))
         }
     }
@@ -211,13 +252,21 @@ pub async fn post_now(state: &AppState, account_id: &str, id: &str, now: i64) ->
 pub fn emit_outcome(app: &tauri::AppHandle, outcome: &Outcome) {
     use crate::events::{ScheduledPostFailed, ScheduledPostPosted};
     let result = match outcome {
-        Outcome::Posted { account_id, id, note_id } => ScheduledPostPosted {
+        Outcome::Posted {
+            account_id,
+            id,
+            note_id,
+        } => ScheduledPostPosted {
             account_id: account_id.clone(),
             id: id.clone(),
             note_id: note_id.clone(),
         }
         .emit(app),
-        Outcome::Failed { account_id, id, message } => ScheduledPostFailed {
+        Outcome::Failed {
+            account_id,
+            id,
+            message,
+        } => ScheduledPostFailed {
             account_id: account_id.clone(),
             id: id.clone(),
             message: message.clone(),
@@ -269,7 +318,9 @@ pub fn schedule_local(
     if scheduled_at <= now {
         return Err(Error::Invalid("予約日時は現在より後にしてください".into()));
     }
-    let entry = state.scheduled_posts.add(account_id, scheduled_at, input, now)?;
+    let entry = state
+        .scheduled_posts
+        .add(account_id, scheduled_at, input, now)?;
     state.scheduler_wakeup.notify_one();
     Ok(entry.to_local_note())
 }
@@ -335,9 +386,21 @@ mod tests {
         i.visibility = VisibilityInput::Home;
         i.reaction_acceptance = ReactionAcceptanceInput::LikeOnly;
         i.file_ids = vec!["f1".into()];
-        i.reply_note = Some(DraftNoteSnapshot { id: "r1".into(), username: "alice".into(), text: Some("x".into()) });
-        i.quote_note = Some(DraftNoteSnapshot { id: "q1".into(), username: "bob".into(), text: None });
-        i.poll = Some(PollDraftSnapshot { choices: vec!["a".into(), "b".into()], multiple: true, expires_at: Some(123_000) });
+        i.reply_note = Some(DraftNoteSnapshot {
+            id: "r1".into(),
+            username: "alice".into(),
+            text: Some("x".into()),
+        });
+        i.quote_note = Some(DraftNoteSnapshot {
+            id: "q1".into(),
+            username: "bob".into(),
+            text: None,
+        });
+        i.poll = Some(PollDraftSnapshot {
+            choices: vec!["a".into(), "b".into()],
+            multiple: true,
+            expires_at: Some(123_000),
+        });
         let d = to_note_draft(&i);
         assert_eq!(d.text.as_deref(), Some("こんにちは"));
         assert_eq!(d.cw.as_deref(), Some("注意"));
@@ -346,8 +409,14 @@ mod tests {
         assert_eq!(d.reply_id.as_deref(), Some("r1"));
         assert_eq!(d.renote_id.as_deref(), Some("q1"));
         let poll = d.poll.unwrap();
-        assert_eq!((poll.choices, poll.multiple, poll.expires_at), (vec!["a".to_string(), "b".to_string()], true, Some(123_000)));
-        assert_eq!(d.reaction_acceptance, Some(ReactionAcceptanceInput::LikeOnly));
+        assert_eq!(
+            (poll.choices, poll.multiple, poll.expires_at),
+            (vec!["a".to_string(), "b".to_string()], true, Some(123_000))
+        );
+        assert_eq!(
+            d.reaction_acceptance,
+            Some(ReactionAcceptanceInput::LikeOnly)
+        );
     }
 
     #[test]
@@ -375,7 +444,10 @@ mod tests {
     /// Review Focus 1: 再試行は「確実に届いていない」場合だけ。接頭辞への依存もここで固定する。
     #[test]
     fn classify_retries_only_when_the_request_surely_did_not_arrive() {
-        assert_eq!(classify(&Error::Network("connect: refused".into())), Failure::Retry);
+        assert_eq!(
+            classify(&Error::Network("connect: refused".into())),
+            Failure::Retry
+        );
         assert_eq!(classify(&Error::RateLimited), Failure::Retry);
         for e in [
             Error::Network("timeout: deadline".into()),
@@ -386,16 +458,25 @@ mod tests {
             Error::Api("notes/create: SOME_CODE x".into()),
             Error::Invalid("unknown account".into()),
         ] {
-            assert!(matches!(classify(&e), Failure::Fatal(_)), "{e:?} must not be retried");
+            assert!(
+                matches!(classify(&e), Failure::Fatal(_)),
+                "{e:?} must not be retried"
+            );
         }
-        let Failure::Fatal(msg) = classify(&Error::Network("timeout: x".into())) else { panic!() };
+        let Failure::Fatal(msg) = classify(&Error::Network("timeout: x".into())) else {
+            panic!()
+        };
         assert!(msg.contains("投稿されたか確認"), "{msg}");
     }
 
     /// `error.rs` の `From<reqwest::Error>` が付ける接頭辞に依存している。ここが変わると再試行の判定が変わる。
     #[tokio::test]
     async fn a_refused_connection_is_classified_as_retry() {
-        let err = reqwest::Client::new().post("http://127.0.0.1:1/").send().await.unwrap_err();
+        let err = reqwest::Client::new()
+            .post("http://127.0.0.1:1/")
+            .send()
+            .await
+            .unwrap_err();
         assert_eq!(classify(&Error::from(err)), Failure::Retry);
     }
 
@@ -407,7 +488,11 @@ mod tests {
         assert_eq!(next_sleep(1_000, Some(1_010)), 10);
         assert_eq!(next_sleep(1_000, Some(9_999)), MAX_SLEEP_SEC as u64);
         assert_eq!(next_sleep(1_000, Some(1_000)), 1);
-        assert_eq!(next_sleep(1_000, Some(500)), 1, "overdue entries must not spin");
+        assert_eq!(
+            next_sleep(1_000, Some(500)),
+            1,
+            "overdue entries must not spin"
+        );
     }
 
     // ---- process_due ----
@@ -417,17 +502,29 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/notes/create"))
-            .and(body_partial_json(json!({ "text": "hello", "visibility": "public" })))
+            .and(body_partial_json(
+                json!({ "text": "hello", "visibility": "public" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(created_note()))
             .expect(1)
             .mount(&mock)
             .await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let e = s.scheduled_posts.add("acc1", NOW - 10, test_input("hello"), NOW - 100).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 10, test_input("hello"), NOW - 100)
+            .unwrap();
 
         let out = process_due(&s, NOW).await;
-        assert_eq!(out, vec![Outcome::Posted { account_id: "acc1".into(), id: e.id.clone(), note_id: "n1".into() }]);
+        assert_eq!(
+            out,
+            vec![Outcome::Posted {
+                account_id: "acc1".into(),
+                id: e.id.clone(),
+                note_id: "n1".into()
+            }]
+        );
         assert!(s.scheduled_posts.get(&e.id).is_none());
         // 2 回目は何も送らない(`expect(1)` は MockServer の drop で検証される)
         assert!(process_due(&s, NOW + 1).await.is_empty());
@@ -438,9 +535,15 @@ mod tests {
         let mock = mock_create(200, created_note()).await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let e = s.scheduled_posts.add("acc1", NOW + 60, test_input("later"), NOW).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW + 60, test_input("later"), NOW)
+            .unwrap();
         assert!(process_due(&s, NOW).await.is_empty());
-        assert_eq!(s.scheduled_posts.get(&e.id).unwrap().status, LocalScheduleStatus::Pending);
+        assert_eq!(
+            s.scheduled_posts.get(&e.id).unwrap().status,
+            LocalScheduleStatus::Pending
+        );
         assert!(mock.received_requests().await.unwrap().is_empty());
     }
 
@@ -450,14 +553,32 @@ mod tests {
         let mock = mock_create(200, created_note()).await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let old = s.scheduled_posts.add("acc1", NOW - MISSED_GRACE_SEC - 1, test_input("old"), 0).unwrap();
-        let edge = s.scheduled_posts.add("acc1", NOW - MISSED_GRACE_SEC, test_input("edge"), 0).unwrap();
+        let old = s
+            .scheduled_posts
+            .add("acc1", NOW - MISSED_GRACE_SEC - 1, test_input("old"), 0)
+            .unwrap();
+        let edge = s
+            .scheduled_posts
+            .add("acc1", NOW - MISSED_GRACE_SEC, test_input("edge"), 0)
+            .unwrap();
 
         let out = process_due(&s, NOW).await;
-        assert!(out.contains(&Outcome::Expired { account_id: "acc1".into(), id: old.id.clone() }));
-        assert!(out.iter().any(|o| matches!(o, Outcome::Posted { id, .. } if *id == edge.id)));
-        assert_eq!(s.scheduled_posts.get(&old.id).unwrap().status, LocalScheduleStatus::Expired);
-        assert_eq!(mock.received_requests().await.unwrap().len(), 1, "only the edge entry is posted");
+        assert!(out.contains(&Outcome::Expired {
+            account_id: "acc1".into(),
+            id: old.id.clone()
+        }));
+        assert!(out
+            .iter()
+            .any(|o| matches!(o, Outcome::Posted { id, .. } if *id == edge.id)));
+        assert_eq!(
+            s.scheduled_posts.get(&old.id).unwrap().status,
+            LocalScheduleStatus::Expired
+        );
+        assert_eq!(
+            mock.received_requests().await.unwrap().len(),
+            1,
+            "only the edge entry is posted"
+        );
         // 期限切れは、その後何度処理しても投稿されない
         assert!(process_due(&s, NOW + 3_600).await.is_empty());
         assert_eq!(mock.received_requests().await.unwrap().len(), 1);
@@ -467,24 +588,38 @@ mod tests {
     async fn connection_failures_are_retried_with_backoff_then_fail() {
         let s = state();
         s.set_test_api_base("http://127.0.0.1:1".into()); // 接続拒否
-        let e = s.scheduled_posts.add("acc1", NOW - 1, test_input("x"), 0).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 1, test_input("x"), 0)
+            .unwrap();
 
         // 1〜3 回目の失敗: 再試行を予約する(outcome なし)
         let mut t = NOW;
         for (i, delay) in RETRY_DELAYS_SEC.iter().enumerate() {
-            assert!(process_due(&s, t).await.is_empty(), "retry {i} produces no outcome");
+            assert!(
+                process_due(&s, t).await.is_empty(),
+                "retry {i} produces no outcome"
+            );
             let got = s.scheduled_posts.get(&e.id).unwrap();
             assert_eq!(got.status, LocalScheduleStatus::Pending);
             assert_eq!(got.attempts, i as u32 + 1);
             assert_eq!(got.next_attempt_at, Some(t + delay));
-            assert!(process_due(&s, t + delay - 1).await.is_empty(), "not before the retry time");
+            assert!(
+                process_due(&s, t + delay - 1).await.is_empty(),
+                "not before the retry time"
+            );
             t += delay;
         }
         // 4 回目も失敗: 再試行を使い切って Failed
         let out = process_due(&s, t).await;
-        let [Outcome::Failed { message, .. }] = out.as_slice() else { panic!("{out:?}") };
+        let [Outcome::Failed { message, .. }] = out.as_slice() else {
+            panic!("{out:?}")
+        };
         assert!(message.contains("再試行"), "{message}");
-        assert_eq!(s.scheduled_posts.get(&e.id).unwrap().status, LocalScheduleStatus::Failed);
+        assert_eq!(
+            s.scheduled_posts.get(&e.id).unwrap().status,
+            LocalScheduleStatus::Failed
+        );
     }
 
     #[tokio::test]
@@ -503,23 +638,38 @@ mod tests {
             .await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let e = s.scheduled_posts.add("acc1", NOW - 1, test_input("x"), 0).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 1, test_input("x"), 0)
+            .unwrap();
 
         assert!(process_due(&s, NOW).await.is_empty());
-        assert_eq!(s.scheduled_posts.get(&e.id).unwrap().next_attempt_at, Some(NOW + 30));
+        assert_eq!(
+            s.scheduled_posts.get(&e.id).unwrap().next_attempt_at,
+            Some(NOW + 30)
+        );
         let out = process_due(&s, NOW + 30).await;
         assert!(matches!(out.as_slice(), [Outcome::Posted { .. }]));
     }
 
     #[tokio::test]
     async fn an_auth_error_fails_without_retrying() {
-        let mock = mock_create(401, json!({ "error": { "code": "AUTHENTICATION_FAILED", "message": "x", "id": "i" } })).await;
+        let mock = mock_create(
+            401,
+            json!({ "error": { "code": "AUTHENTICATION_FAILED", "message": "x", "id": "i" } }),
+        )
+        .await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let e = s.scheduled_posts.add("acc1", NOW - 1, test_input("x"), 0).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 1, test_input("x"), 0)
+            .unwrap();
 
         let out = process_due(&s, NOW).await;
-        let [Outcome::Failed { message, .. }] = out.as_slice() else { panic!("{out:?}") };
+        let [Outcome::Failed { message, .. }] = out.as_slice() else {
+            panic!("{out:?}")
+        };
         assert!(message.contains("unauthorized"), "{message}");
         let got = s.scheduled_posts.get(&e.id).unwrap();
         assert_eq!((got.status, got.attempts), (LocalScheduleStatus::Failed, 0));
@@ -532,7 +682,10 @@ mod tests {
         let mock = mock_create(200, created_note()).await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let e = s.scheduled_posts.add("acc1", NOW - 1, test_input("x"), 0).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 1, test_input("x"), 0)
+            .unwrap();
         s.scheduled_posts.begin_post(&e.id).unwrap();
         assert!(process_due(&s, NOW).await.is_empty());
         assert!(mock.received_requests().await.unwrap().is_empty());
@@ -547,32 +700,70 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/notes/create"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(created_note()).set_delay(Duration::from_secs(3)))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(created_note())
+                    .set_delay(Duration::from_secs(3)),
+            )
             .mount(&mock)
             .await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let first = s.scheduled_posts.add("acc1", NOW - 10, test_input("first"), 0).unwrap();
-        let second = s.scheduled_posts.add("acc1", NOW - 5, test_input("second"), 0).unwrap();
+        let first = s
+            .scheduled_posts
+            .add("acc1", NOW - 10, test_input("first"), 0)
+            .unwrap();
+        let second = s
+            .scheduled_posts
+            .add("acc1", NOW - 5, test_input("second"), 0)
+            .unwrap();
 
         // タイムアウト(200ms)が過ぎたら、時計が猶予より大きく進む
         let timeout = Duration::from_millis(200);
         let start = std::time::Instant::now();
-        let clock = move || if start.elapsed() >= timeout { NOW + 2 * MISSED_GRACE_SEC } else { NOW };
+        let clock = move || {
+            if start.elapsed() >= timeout {
+                NOW + 2 * MISSED_GRACE_SEC
+            } else {
+                NOW
+            }
+        };
         let out = process_due_with(&s, &clock, timeout).await;
 
         assert_eq!(out.len(), 2, "{out:?}");
-        let Outcome::Failed { id, message, .. } = &out[0] else { panic!("{out:?}") };
+        let Outcome::Failed { id, message, .. } = &out[0] else {
+            panic!("{out:?}")
+        };
         assert_eq!(*id, first.id);
-        assert!(message.contains("タイムアウト") && message.contains("投稿されたか確認"), "{message}");
-        assert_eq!(out[1], Outcome::Expired { account_id: "acc1".into(), id: second.id.clone() });
+        assert!(
+            message.contains("タイムアウト") && message.contains("投稿されたか確認"),
+            "{message}"
+        );
+        assert_eq!(
+            out[1],
+            Outcome::Expired {
+                account_id: "acc1".into(),
+                id: second.id.clone()
+            }
+        );
 
         let got = s.scheduled_posts.get(&first.id).unwrap();
-        assert_eq!((got.status, got.attempts), (LocalScheduleStatus::Failed, 0), "not scheduled for retry");
-        assert_eq!(s.scheduled_posts.get(&second.id).unwrap().status, LocalScheduleStatus::Expired);
+        assert_eq!(
+            (got.status, got.attempts),
+            (LocalScheduleStatus::Failed, 0),
+            "not scheduled for retry"
+        );
+        assert_eq!(
+            s.scheduled_posts.get(&second.id).unwrap().status,
+            LocalScheduleStatus::Expired
+        );
         // 再送もされず、2 件目も送られていない
         assert_eq!(mock.received_requests().await.unwrap().len(), 1);
-        assert!(process_due_with(&s, &|| NOW + 4 * MISSED_GRACE_SEC, timeout).await.is_empty());
+        assert!(
+            process_due_with(&s, &|| NOW + 4 * MISSED_GRACE_SEC, timeout)
+                .await
+                .is_empty()
+        );
         assert_eq!(mock.received_requests().await.unwrap().len(), 1);
     }
 
@@ -581,7 +772,10 @@ mod tests {
     async fn a_retry_is_scheduled_relative_to_the_time_after_the_attempt() {
         let s = state();
         s.set_test_api_base("http://127.0.0.1:1".into()); // 接続拒否
-        let e = s.scheduled_posts.add("acc1", NOW - 1, test_input("x"), 0).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 1, test_input("x"), 0)
+            .unwrap();
         let calls = std::sync::atomic::AtomicI64::new(0);
         let clock = || NOW + 10 * (calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1); // 呼ぶたびに進む
         let n = || calls.load(std::sync::atomic::Ordering::SeqCst);
@@ -589,7 +783,10 @@ mod tests {
         let got = s.scheduled_posts.get(&e.id).unwrap();
         // due 判定・猶予判定・再試行の基準で、時計は少なくとも 2 回以上読まれ、後の読み取りが基準になる
         assert!(n() >= 2);
-        assert_eq!(got.next_attempt_at, Some(NOW + 10 * n() + RETRY_DELAYS_SEC[0]));
+        assert_eq!(
+            got.next_attempt_at,
+            Some(NOW + 10 * n() + RETRY_DELAYS_SEC[0])
+        );
     }
 
     /// `process_due(state, now)` の公開シグネチャは、処理開始からの経過秒で `now` を進める時計に委譲する。
@@ -598,8 +795,13 @@ mod tests {
         let mock = mock_create(200, created_note()).await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        s.scheduled_posts.add("acc1", NOW - 10, test_input("hello"), 0).unwrap();
-        assert!(matches!(process_due(&s, NOW).await.as_slice(), [Outcome::Posted { .. }]));
+        s.scheduled_posts
+            .add("acc1", NOW - 10, test_input("hello"), 0)
+            .unwrap();
+        assert!(matches!(
+            process_due(&s, NOW).await.as_slice(),
+            [Outcome::Posted { .. }]
+        ));
     }
 
     // ---- post_now ----
@@ -609,7 +811,10 @@ mod tests {
         let mock = mock_create(200, created_note()).await;
         let s = state();
         s.set_test_api_base(mock.uri());
-        let e = s.scheduled_posts.add("acc1", NOW - 10_000, test_input("late"), 0).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 10_000, test_input("late"), 0)
+            .unwrap();
         s.scheduled_posts.mark_expired(&e.id).unwrap();
 
         let out = post_now(&s, "acc1", &e.id, NOW).await.unwrap();
@@ -622,7 +827,10 @@ mod tests {
     async fn post_now_failure_marks_failed_without_retrying() {
         let s = state();
         s.set_test_api_base("http://127.0.0.1:1".into());
-        let e = s.scheduled_posts.add("acc1", NOW - 10_000, test_input("late"), 0).unwrap();
+        let e = s
+            .scheduled_posts
+            .add("acc1", NOW - 10_000, test_input("late"), 0)
+            .unwrap();
         s.scheduled_posts.mark_expired(&e.id).unwrap();
 
         let out = post_now(&s, "acc1", &e.id, NOW).await.unwrap();
@@ -634,13 +842,31 @@ mod tests {
     #[tokio::test]
     async fn post_now_rejects_pending_posting_other_accounts_and_missing() {
         let s = state();
-        let pending = s.scheduled_posts.add("acc1", NOW + 60, test_input("a"), 0).unwrap();
-        let posting = s.scheduled_posts.add("acc1", NOW - 10, test_input("b"), 0).unwrap();
+        let pending = s
+            .scheduled_posts
+            .add("acc1", NOW + 60, test_input("a"), 0)
+            .unwrap();
+        let posting = s
+            .scheduled_posts
+            .add("acc1", NOW - 10, test_input("b"), 0)
+            .unwrap();
         s.scheduled_posts.begin_post(&posting.id).unwrap();
-        assert!(matches!(post_now(&s, "acc1", &pending.id, NOW).await, Err(Error::Invalid(_))));
-        assert!(matches!(post_now(&s, "acc1", &posting.id, NOW).await, Err(Error::Invalid(_))));
-        assert!(matches!(post_now(&s, "acc2", &pending.id, NOW).await, Err(Error::NotFound(_))));
-        assert!(matches!(post_now(&s, "acc1", "missing", NOW).await, Err(Error::NotFound(_))));
+        assert!(matches!(
+            post_now(&s, "acc1", &pending.id, NOW).await,
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            post_now(&s, "acc1", &posting.id, NOW).await,
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            post_now(&s, "acc2", &pending.id, NOW).await,
+            Err(Error::NotFound(_))
+        ));
+        assert!(matches!(
+            post_now(&s, "acc1", "missing", NOW).await,
+            Err(Error::NotFound(_))
+        ));
     }
 
     // ---- schedule_local / list_local / cancel_local ----
@@ -649,20 +875,35 @@ mod tests {
     async fn schedule_local_stores_the_entry_and_wakes_the_scheduler() {
         let s = state();
         let n = schedule_local(&s, "acc1", test_input("hi"), NOW + 60, NOW).unwrap();
-        assert_eq!((n.note.scheduled_at, n.status), (NOW + 60, LocalScheduleStatus::Pending));
+        assert_eq!(
+            (n.note.scheduled_at, n.status),
+            (NOW + 60, LocalScheduleStatus::Pending)
+        );
         assert_eq!(list_local(&s, "acc1").len(), 1);
         // notify_one の許可証が残っているので、待たずに起きる
-        tokio::time::timeout(std::time::Duration::from_millis(50), s.scheduler_wakeup.notified())
-            .await
-            .expect("scheduler should be woken");
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            s.scheduler_wakeup.notified(),
+        )
+        .await
+        .expect("scheduler should be woken");
     }
 
     #[test]
     fn schedule_local_rejects_past_times_and_unknown_accounts() {
         let s = state();
-        assert!(matches!(schedule_local(&s, "acc1", test_input("x"), NOW, NOW), Err(Error::Invalid(_))));
-        assert!(matches!(schedule_local(&s, "acc1", test_input("x"), NOW - 1, NOW), Err(Error::Invalid(_))));
-        assert!(matches!(schedule_local(&s, "nobody", test_input("x"), NOW + 60, NOW), Err(Error::Invalid(_))));
+        assert!(matches!(
+            schedule_local(&s, "acc1", test_input("x"), NOW, NOW),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            schedule_local(&s, "acc1", test_input("x"), NOW - 1, NOW),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            schedule_local(&s, "nobody", test_input("x"), NOW + 60, NOW),
+            Err(Error::Invalid(_))
+        ));
         assert!(list_local(&s, "acc1").is_empty());
     }
 

@@ -5,10 +5,10 @@ use crate::commands::mute::{apply_mute_config, read_file_bytes, write_file_bytes
 use crate::error::{Error, Result};
 use crate::session::AccountManager;
 use crate::state::AppState;
+use crate::store::settings::SettingsData;
 use crate::store::settings_transfer::{
     build_export, parse_export, plan_import, ExportFile, ImportPlan, ImportPreview, ImportResult,
 };
-use crate::store::settings::SettingsData;
 use tauri::{AppHandle, State};
 
 fn now_rfc3339() -> String {
@@ -23,7 +23,11 @@ fn now_rfc3339() -> String {
 
 /// 書き出すJSON(整形済み)。
 pub(crate) fn export_settings_bytes(state: &AppState) -> Result<Vec<u8>> {
-    let file = build_export(&state.settings.snapshot(), env!("CARGO_PKG_VERSION"), &now_rfc3339());
+    let file = build_export(
+        &state.settings.snapshot(),
+        env!("CARGO_PKG_VERSION"),
+        &now_rfc3339(),
+    );
     Ok(serde_json::to_vec_pretty(&file)?)
 }
 
@@ -45,7 +49,9 @@ fn plan_checked(state: &AppState, current: &SettingsData, file: ExportFile) -> R
     let mut plan = plan_import(current, file)?;
     for id in &plan.accounts_needing_login {
         if has_token_or_reject(state, id)? {
-            return Err(Error::Invalid("アカウントのIDがこの端末の保存済みトークンと衝突しています".into()));
+            return Err(Error::Invalid(
+                "アカウントのIDがこの端末の保存済みトークンと衝突しています".into(),
+            ));
         }
     }
     // 取り込み後にトークンを持たないアカウント全体。ファイルにだけあって新しく追加されるものに加え、
@@ -92,7 +98,7 @@ pub(crate) async fn import_settings_bytes(state: &AppState, bytes: &[u8]) -> Res
         *accounts = next;
     }
     state.refresh_fetch_allowlist(); // トークンなしのアカウントのホストは入らない
-    // ミュート設定を反映し、カラムごとのbackfill境界を捨てる(カラムが置き換わったため)。
+                                     // ミュート設定を反映し、カラムごとのbackfill境界を捨てる(カラムが置き換わったため)。
     apply_mute_config(state, plan.data.mute.clone()).await?;
 
     Ok(ImportResult {
@@ -120,7 +126,11 @@ pub(crate) fn accounts_without_token_ids(state: &AppState) -> Result<Vec<String>
 /// 設定を `path` に書き出す。Androidでは `path` は `content://` URI でもよい。
 #[tauri::command]
 #[specta::specta]
-pub async fn export_settings(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<()> {
+pub async fn export_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<()> {
     let bytes = export_settings_bytes(&state)?;
     write_file_bytes(&app, &path, &bytes).await
 }
@@ -128,7 +138,11 @@ pub async fn export_settings(app: AppHandle, state: State<'_, AppState>, path: S
 /// 設定ファイルを検証して概要を返す。何も書き込まない。
 #[tauri::command]
 #[specta::specta]
-pub async fn inspect_settings_file(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<ImportPreview> {
+pub async fn inspect_settings_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<ImportPreview> {
     let bytes = read_file_bytes(&app, &path).await?;
     inspect_settings_bytes(&state, &bytes)
 }
@@ -136,7 +150,11 @@ pub async fn inspect_settings_file(app: AppHandle, state: State<'_, AppState>, p
 /// 設定ファイルを読み込み、現在の設定を置き換える。呼び出し元はこのあとWebViewをリロードする。
 #[tauri::command]
 #[specta::specta]
-pub async fn import_settings(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<ImportResult> {
+pub async fn import_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<ImportResult> {
     let bytes = read_file_bytes(&app, &path).await?;
     import_settings_bytes(&state, &bytes).await
 }
@@ -152,7 +170,9 @@ pub async fn accounts_without_token(state: State<'_, AppState>) -> Result<Vec<St
 mod tests {
     use super::*;
     use crate::domain::{Account, Column, ColumnGroup, ColumnKind, FilterQuery};
-    use crate::store::settings_transfer::{parse_export, ExportData, ExportFile, EXPORT_FORMAT, EXPORT_VERSION};
+    use crate::store::settings_transfer::{
+        parse_export, ExportData, ExportFile, EXPORT_FORMAT, EXPORT_VERSION,
+    };
     use crate::store::SettingsStore;
 
     fn account(id: &str, host: &str, user_id: &str) -> Account {
@@ -190,20 +210,41 @@ mod tests {
     fn state_with_local_account() -> AppState {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
         state.register_test_account("local1");
-        state.settings.upsert_account(&account("local1", "misskey.test", "u1")).unwrap();
         state
             .settings
-            .upsert_group(&ColumnGroup { id: "old-g".into(), order: 0, width: 300, auto: false })
+            .upsert_account(&account("local1", "misskey.test", "u1"))
             .unwrap();
-        state.settings.upsert_column(&Column { group_id: "old-g".into(), ..column("old-c", "local1") }).unwrap();
+        state
+            .settings
+            .upsert_group(&ColumnGroup {
+                id: "old-g".into(),
+                order: 0,
+                width: 300,
+                auto: false,
+            })
+            .unwrap();
+        state
+            .settings
+            .upsert_column(&Column {
+                group_id: "old-g".into(),
+                ..column("old-c", "local1")
+            })
+            .unwrap();
         state
     }
 
     /// 端末側にあるが、トークンを持たないアカウント(以前のインポートの取り込み直後など)。
     fn state_with_tokenless_local_account() -> AppState {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        state.accounts.lock().unwrap().upsert(account("local1", "misskey.test", "u1"));
-        state.settings.upsert_account(&account("local1", "misskey.test", "u1")).unwrap();
+        state
+            .accounts
+            .lock()
+            .unwrap()
+            .upsert(account("local1", "misskey.test", "u1"));
+        state
+            .settings
+            .upsert_account(&account("local1", "misskey.test", "u1"))
+            .unwrap();
         state
     }
 
@@ -221,7 +262,12 @@ mod tests {
     fn data_with(accounts: Vec<Account>, columns: Vec<Column>) -> ExportData {
         ExportData {
             accounts,
-            groups: vec![ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }],
+            groups: vec![ColumnGroup {
+                id: "g1".into(),
+                order: 0,
+                width: 300,
+                auto: false,
+            }],
             columns,
             mute: Default::default(),
             notify: Default::default(),
@@ -239,26 +285,39 @@ mod tests {
         let file = parse_export(&bytes).unwrap();
         assert_eq!(file.data.accounts.len(), 1);
         assert_eq!(file.data.columns.len(), 1);
-        assert!(!String::from_utf8(bytes).unwrap().contains("\"token\""), "トークンは含めない");
+        assert!(
+            !String::from_utf8(bytes).unwrap().contains("\"token\""),
+            "トークンは含めない"
+        );
     }
 
     #[test]
     fn inspect_does_not_change_anything() {
         let state = state_with_local_account();
-        let bytes = file_bytes(data_with(vec![account("f1", "other.example", "u9")], vec![column("c1", "f1")]));
+        let bytes = file_bytes(data_with(
+            vec![account("f1", "other.example", "u9")],
+            vec![column("c1", "f1")],
+        ));
 
         let preview = inspect_settings_bytes(&state, &bytes).unwrap();
 
         assert_eq!(preview.column_count, 1);
         assert_eq!(preview.accounts_needing_login, 1);
-        assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c", "検証だけでは何も置き換わらない");
+        assert_eq!(
+            state.settings.load_columns().unwrap()[0].id,
+            "old-c",
+            "検証だけでは何も置き換わらない"
+        );
     }
 
     #[tokio::test]
     async fn import_replaces_settings_keeps_the_local_account_and_reports_new_ones() {
         let state = state_with_local_account();
         let bytes = file_bytes(data_with(
-            vec![account("file1", "misskey.test", "u1"), account("file2", "other.example", "u9")],
+            vec![
+                account("file1", "misskey.test", "u1"),
+                account("file2", "other.example", "u9"),
+            ],
             vec![column("c1", "file1"), column("c2", "file2")],
         ));
 
@@ -267,19 +326,39 @@ mod tests {
         assert_eq!(result.column_count, 2);
         assert_eq!(result.accounts_needing_login, vec!["file2".to_string()]);
         let columns = state.settings.load_columns().unwrap();
-        let by_id = |id: &str| columns.iter().find(|c| c.id == id).unwrap().account_id.clone();
+        let by_id = |id: &str| {
+            columns
+                .iter()
+                .find(|c| c.id == id)
+                .unwrap()
+                .account_id
+                .clone()
+        };
         assert_eq!(by_id("c1"), "local1", "端末側のアカウントIDに付け替わる");
         assert_eq!(by_id("c2"), "file2");
-        assert!(columns.iter().all(|c| c.id != "old-c"), "端末側のカラムは置き換わる");
-        assert_eq!(state.accounts.lock().unwrap().list().len(), 2, "実行中のアカウント一覧も更新される");
-        assert_eq!(accounts_without_token_ids(&state).unwrap(), vec!["file2".to_string()]);
+        assert!(
+            columns.iter().all(|c| c.id != "old-c"),
+            "端末側のカラムは置き換わる"
+        );
+        assert_eq!(
+            state.accounts.lock().unwrap().list().len(),
+            2,
+            "実行中のアカウント一覧も更新される"
+        );
+        assert_eq!(
+            accounts_without_token_ids(&state).unwrap(),
+            vec!["file2".to_string()]
+        );
     }
 
     #[tokio::test]
     async fn import_never_adds_hosts_of_token_less_accounts_to_the_fetch_allowlist() {
         let state = state_with_local_account();
         let bytes = file_bytes(data_with(
-            vec![account("evil1", "127.0.0.1", "u8"), account("evil2", "internal.example", "u9")],
+            vec![
+                account("evil1", "127.0.0.1", "u8"),
+                account("evil2", "internal.example", "u9"),
+            ],
             vec![],
         ));
 
@@ -287,7 +366,10 @@ mod tests {
 
         assert!(!state.fetch_allowlist.contains_host("127.0.0.1"));
         assert!(!state.fetch_allowlist.contains_host("internal.example"));
-        assert!(state.fetch_allowlist.contains_host("misskey.test"), "トークンのあるアカウントは残る");
+        assert!(
+            state.fetch_allowlist.contains_host("misskey.test"),
+            "トークンのあるアカウントは残る"
+        );
     }
 
     #[tokio::test]
@@ -297,9 +379,16 @@ mod tests {
         state.secrets.set("ghost", "tok").unwrap();
         let bytes = file_bytes(data_with(vec![account("ghost", "127.0.0.1", "u9")], vec![]));
 
-        let err = import_settings_bytes(&state, &bytes).await.err().expect("拒否されるはず").to_string();
+        let err = import_settings_bytes(&state, &bytes)
+            .await
+            .err()
+            .expect("拒否されるはず")
+            .to_string();
         assert!(err.contains("保存済みトークンと衝突"), "{err}");
-        let err = inspect_settings_bytes(&state, &bytes).err().expect("プレビューも同じ結果").to_string();
+        let err = inspect_settings_bytes(&state, &bytes)
+            .err()
+            .expect("プレビューも同じ結果")
+            .to_string();
         assert!(err.contains("保存済みトークンと衝突"), "{err}");
 
         assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c");
@@ -340,12 +429,23 @@ mod tests {
         // 細工したファイルのホストが結びつきうる。
         let mut state = state_with_local_account();
         state.secrets = Box::new(FailingStore);
-        let bytes = file_bytes(data_with(vec![account("ghost", "127.0.0.1", "u9")], vec![column("c1", "ghost")]));
+        let bytes = file_bytes(data_with(
+            vec![account("ghost", "127.0.0.1", "u9")],
+            vec![column("c1", "ghost")],
+        ));
 
-        let err = import_settings_bytes(&state, &bytes).await.err().expect("拒否されるはず");
+        let err = import_settings_bytes(&state, &bytes)
+            .await
+            .err()
+            .expect("拒否されるはず");
         assert!(matches!(err, Error::Secret(_)), "{err}");
-        assert!(err.to_string().contains("キーリングを読み取れない"), "{err}");
-        let err = inspect_settings_bytes(&state, &bytes).err().expect("プレビューも同じ結果");
+        assert!(
+            err.to_string().contains("キーリングを読み取れない"),
+            "{err}"
+        );
+        let err = inspect_settings_bytes(&state, &bytes)
+            .err()
+            .expect("プレビューも同じ結果");
         assert!(matches!(err, Error::Secret(_)), "{err}");
 
         assert_eq!(state.settings.load_columns().unwrap()[0].id, "old-c");
@@ -361,7 +461,9 @@ mod tests {
         let mut state = state_with_local_account();
         state.secrets = Box::new(FailingStore);
 
-        let err = accounts_without_token_ids(&state).err().expect("keyringを読めなければ失敗する");
+        let err = accounts_without_token_ids(&state)
+            .err()
+            .expect("keyringを読めなければ失敗する");
 
         assert!(matches!(err, Error::Secret(_)), "{err}");
     }
@@ -370,18 +472,27 @@ mod tests {
     fn inspect_counts_a_matched_local_account_that_has_no_token() {
         let state = state_with_tokenless_local_account();
         // ファイル側の file1 は、端末側の local1(host+userIdが同じ)に付け替わる。
-        let bytes = file_bytes(data_with(vec![account("file1", "misskey.test", "u1")], vec![]));
+        let bytes = file_bytes(data_with(
+            vec![account("file1", "misskey.test", "u1")],
+            vec![],
+        ));
 
         let preview = inspect_settings_bytes(&state, &bytes).unwrap();
 
-        assert_eq!(preview.accounts_needing_login, 1, "端末側でトークンが無いアカウントも数える");
+        assert_eq!(
+            preview.accounts_needing_login, 1,
+            "端末側でトークンが無いアカウントも数える"
+        );
     }
 
     #[test]
     fn inspect_counts_a_local_only_account_that_has_no_token() {
         let state = state_with_tokenless_local_account(); // local1(misskey.test / u1)
-        // ファイルには別ホストのアカウントだけがある。local1 はファイルに無いまま、端末に残る。
-        let bytes = file_bytes(data_with(vec![account("file1", "other.example", "u9")], vec![]));
+                                                          // ファイルには別ホストのアカウントだけがある。local1 はファイルに無いまま、端末に残る。
+        let bytes = file_bytes(data_with(
+            vec![account("file1", "other.example", "u9")],
+            vec![],
+        ));
 
         let preview = inspect_settings_bytes(&state, &bytes).unwrap();
 
@@ -394,7 +505,10 @@ mod tests {
     #[test]
     fn inspect_does_not_count_a_matched_local_account_that_has_a_token() {
         let state = state_with_local_account(); // local1 はトークンあり
-        let bytes = file_bytes(data_with(vec![account("file1", "misskey.test", "u1")], vec![]));
+        let bytes = file_bytes(data_with(
+            vec![account("file1", "misskey.test", "u1")],
+            vec![],
+        ));
 
         let preview = inspect_settings_bytes(&state, &bytes).unwrap();
 
@@ -405,7 +519,10 @@ mod tests {
     async fn import_reports_every_account_left_without_a_token() {
         let state = state_with_tokenless_local_account();
         let bytes = file_bytes(data_with(
-            vec![account("file1", "misskey.test", "u1"), account("file2", "other.example", "u9")],
+            vec![
+                account("file1", "misskey.test", "u1"),
+                account("file2", "other.example", "u9"),
+            ],
             vec![],
         ));
 
@@ -418,6 +535,9 @@ mod tests {
         assert_eq!(ids, vec!["file2".to_string(), "local1".to_string()]);
         let mut actual = accounts_without_token_ids(&state).unwrap();
         actual.sort();
-        assert_eq!(actual, ids, "取り込み結果は、実際にトークンの無いアカウントと一致する");
+        assert_eq!(
+            actual, ids,
+            "取り込み結果は、実際にトークンの無いアカウントと一致する"
+        );
     }
 }

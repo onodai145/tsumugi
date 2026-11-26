@@ -8,7 +8,10 @@ use crate::api::notes::{ReactionAcceptanceInput, VisibilityInput};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, atomic::{AtomicI64, Ordering}};
+use std::sync::{
+    atomic::{AtomicI64, Ordering},
+    Mutex,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -93,12 +96,18 @@ pub struct DraftStore {
 impl DraftStore {
     pub fn new(path: PathBuf) -> Result<Self> {
         let data = load_json_or_default(&path)?;
-        Ok(Self { backing: Backing::File(path), data: Mutex::new(data) })
+        Ok(Self {
+            backing: Backing::File(path),
+            data: Mutex::new(data),
+        })
     }
 
     #[cfg(test)]
     pub(crate) fn new_in_memory() -> Self {
-        Self { backing: Backing::Memory, data: Mutex::new(DraftData::default()) }
+        Self {
+            backing: Backing::Memory,
+            data: Mutex::new(DraftData::default()),
+        }
     }
 
     #[allow(irrefutable_let_patterns)]
@@ -161,7 +170,9 @@ impl DraftStore {
     pub fn delete_manual(&self, account_id: &str, draft_id: &str) -> Result<()> {
         self.update_if_saved(|drafts| {
             drafts.retain(|d| {
-                !(d.account_id == account_id && d.id == draft_id && matches!(d.kind, DraftKind::Manual))
+                !(d.account_id == account_id
+                    && d.id == draft_id
+                    && matches!(d.kind, DraftKind::Manual))
             })
         })
     }
@@ -287,7 +298,10 @@ mod tests {
         let s = DraftStore::new_in_memory();
         s.save_auto("acc1", &input("v1")).unwrap();
         s.save_auto("acc1", &input("v2")).unwrap();
-        let got = s.get_auto("acc1").unwrap().expect("auto draft should exist");
+        let got = s
+            .get_auto("acc1")
+            .unwrap()
+            .expect("auto draft should exist");
         assert_eq!(got.text, "v2");
         assert!(matches!(got.kind, DraftKind::Auto));
         // 手動下書きの一覧には出ない
@@ -354,7 +368,11 @@ mod tests {
     }
 
     fn manual_texts(s: &DraftStore) -> Vec<String> {
-        s.list_manual("acc1").unwrap().into_iter().map(|d| d.text).collect()
+        s.list_manual("acc1")
+            .unwrap()
+            .into_iter()
+            .map(|d| d.text)
+            .collect()
     }
 
     fn auto_text(s: &DraftStore) -> Option<String> {
@@ -408,7 +426,8 @@ mod tests {
 
     #[test]
     fn persists_to_plain_text_json_file_and_reloads() {
-        let path = std::env::temp_dir().join(format!("tsumugi-drafts-test-{}.json", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("tsumugi-drafts-test-{}.json", uuid::Uuid::new_v4()));
         {
             let s = DraftStore::new(path.clone()).unwrap();
             s.save_manual("acc1", &input("hello")).unwrap();

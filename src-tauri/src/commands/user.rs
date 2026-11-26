@@ -34,7 +34,11 @@ pub(crate) fn relation_flag(is_self: bool, flag: Option<bool>) -> Option<bool> {
 /// リモートユーザーの元ページの URL を選ぶ(純粋関数、テスト用に分離)。`url` → `uri` の順で、最初に
 /// ホストを持つ http/https として解釈できるものを返す。ローカルユーザー(`host` が `None`)では `None`。
 /// 値は外部サーバーが返すので信用せず、`javascript:` / `data:` などは読み飛ばす。
-pub(crate) fn sanitize_profile_url(host: Option<&str>, url: Option<&str>, uri: Option<&str>) -> Option<String> {
+pub(crate) fn sanitize_profile_url(
+    host: Option<&str>,
+    url: Option<&str>,
+    uri: Option<&str>,
+) -> Option<String> {
     host?;
     [url, uri].into_iter().flatten().find_map(|candidate| {
         let parsed = url::Url::parse(candidate).ok()?;
@@ -78,7 +82,11 @@ pub async fn get_user_profile(
         is_muted: relation_flag(is_self, raw.is_muted),
         is_blocking: relation_flag(is_self, raw.is_blocking),
         is_renote_muted: relation_flag(is_self, raw.is_renote_muted),
-        profile_url: sanitize_profile_url(raw.user.host.as_deref(), raw.url.as_deref(), raw.uri.as_deref()),
+        profile_url: sanitize_profile_url(
+            raw.user.host.as_deref(),
+            raw.url.as_deref(),
+            raw.uri.as_deref(),
+        ),
         user: raw.user.into(),
         is_self,
     })
@@ -87,7 +95,11 @@ pub async fn get_user_profile(
 /// フォローする。
 #[tauri::command]
 #[specta::specta]
-pub async fn follow_user(state: State<'_, AppState>, account_id: String, user_id: String) -> Result<()> {
+pub async fn follow_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<()> {
     let client = state.client_for(&account_id)?;
     api::users::follow(&client, &user_id).await
 }
@@ -95,7 +107,11 @@ pub async fn follow_user(state: State<'_, AppState>, account_id: String, user_id
 /// フォロー解除する。
 #[tauri::command]
 #[specta::specta]
-pub async fn unfollow_user(state: State<'_, AppState>, account_id: String, user_id: String) -> Result<()> {
+pub async fn unfollow_user(
+    state: State<'_, AppState>,
+    account_id: String,
+    user_id: String,
+) -> Result<()> {
     let client = state.client_for(&account_id)?;
     api::users::unfollow(&client, &user_id).await
 }
@@ -112,7 +128,9 @@ pub async fn get_user_notes(
 ) -> Result<Vec<Note>> {
     let client = state.client_for(&account_id)?;
     let kind = ColumnKind::User { user_id };
-    let (endpoint, body) = kind.rest_request(20, until_id.as_deref()).expect("User kind always has rest_request");
+    let (endpoint, body) = kind
+        .rest_request(20, until_id.as_deref())
+        .expect("User kind always has rest_request");
     api::notes::fetch_notes(&client, endpoint, &body).await
 }
 
@@ -127,7 +145,10 @@ pub async fn get_user_followers(
 ) -> Result<Vec<FollowListEntry>> {
     let client = state.client_for(&account_id)?;
     let entries = api::users::followers(&client, &user_id, until_id.as_deref()).await?;
-    Ok(entries.into_iter().map(|(user, cursor)| FollowListEntry { user, cursor }).collect())
+    Ok(entries
+        .into_iter()
+        .map(|(user, cursor)| FollowListEntry { user, cursor })
+        .collect())
 }
 
 /// フォロー中一覧（ページング）。
@@ -141,7 +162,10 @@ pub async fn get_user_following(
 ) -> Result<Vec<FollowListEntry>> {
     let client = state.client_for(&account_id)?;
     let entries = api::users::following(&client, &user_id, until_id.as_deref()).await?;
-    Ok(entries.into_iter().map(|(user, cursor)| FollowListEntry { user, cursor }).collect())
+    Ok(entries
+        .into_iter()
+        .map(|(user, cursor)| FollowListEntry { user, cursor })
+        .collect())
 }
 
 /// 通報コメントの上限(文字数)。上流 `users/report-abuse` の `maxLength`。
@@ -155,7 +179,9 @@ pub(crate) fn validate_report_comment(comment: &str) -> Result<String> {
         return Err(Error::Invalid("通報の内容を入力してください".into()));
     }
     if trimmed.chars().count() > REPORT_COMMENT_MAX_CHARS {
-        return Err(Error::Invalid(format!("通報の内容は{REPORT_COMMENT_MAX_CHARS}文字以内にしてください")));
+        return Err(Error::Invalid(format!(
+            "通報の内容は{REPORT_COMMENT_MAX_CHARS}文字以内にしてください"
+        )));
     }
     Ok(trimmed.to_string())
 }
@@ -291,7 +317,14 @@ mod tests {
 
     #[test]
     fn profile_url_rejects_non_http_schemes_and_garbage() {
-        for bad in ["javascript:alert(1)", "data:text/html,<b>x</b>", "file:///etc/passwd", "", "not a url", "https://"] {
+        for bad in [
+            "javascript:alert(1)",
+            "data:text/html,<b>x</b>",
+            "file:///etc/passwd",
+            "",
+            "not a url",
+            "https://",
+        ] {
             assert_eq!(
                 sanitize_profile_url(Some("remote.example"), Some(bad), Some(bad)),
                 None,
@@ -302,7 +335,10 @@ mod tests {
 
     #[test]
     fn report_comment_is_trimmed_and_must_not_be_blank() {
-        assert_eq!(validate_report_comment("  スパムです \n").unwrap(), "スパムです");
+        assert_eq!(
+            validate_report_comment("  スパムです \n").unwrap(),
+            "スパムです"
+        );
         assert!(validate_report_comment("").is_err());
         assert!(validate_report_comment("  \n\t ").is_err());
     }

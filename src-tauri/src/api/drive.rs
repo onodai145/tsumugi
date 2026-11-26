@@ -23,7 +23,12 @@ pub async fn upload_bytes(
         .part("file", part);
 
     let url = format!("https://{host}/api/drive/files/create");
-    let resp = http.post(&url).timeout(crate::api::client::UPLOAD_TIMEOUT).multipart(form).send().await?;
+    let resp = http
+        .post(&url)
+        .timeout(crate::api::client::UPLOAD_TIMEOUT)
+        .multipart(form)
+        .send()
+        .await?;
     let status = resp.status();
     if !status.is_success() {
         let code = resp
@@ -31,7 +36,12 @@ pub async fn upload_bytes(
             .await
             .ok()
             .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("error").and_then(|e| e.get("code")).and_then(|c| c.as_str()).map(str::to_string))
+            .and_then(|v| {
+                v.get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(|c| c.as_str())
+                    .map(str::to_string)
+            })
             .unwrap_or_default();
         return Err(match status.as_u16() {
             401 => Error::Unauthorized(format!("drive/files/create: {code}")),
@@ -76,7 +86,9 @@ pub async fn list_files(
 /// 再構成するために使う)。対象が削除済み等で存在しない場合は Err を返す
 /// (呼び出し側で個別に無視できるよう、ここではエラーを握りつぶさない)。
 pub async fn show_file(client: &MisskeyClient, file_id: &str) -> Result<DriveFile> {
-    let raw: RawFile = client.post("drive/files/show", &json!({ "fileId": file_id })).await?;
+    let raw: RawFile = client
+        .post("drive/files/show", &json!({ "fileId": file_id }))
+        .await?;
     Ok(raw.into())
 }
 
@@ -97,13 +109,19 @@ struct RawFolder {
 /// 指定フォルダ直下のサブフォルダ一覧（`folder_id: None` はルート直下）。
 ///
 /// 取得件数は最大100件固定でページングは未実装（`list_folders_body`参照）。
-pub async fn list_folders(client: &MisskeyClient, folder_id: Option<&str>) -> Result<Vec<SourceItem>> {
+pub async fn list_folders(
+    client: &MisskeyClient,
+    folder_id: Option<&str>,
+) -> Result<Vec<SourceItem>> {
     let raw: Vec<RawFolder> = client
         .post("drive/folders", &list_folders_body(folder_id))
         .await?;
     Ok(raw
         .into_iter()
-        .map(|f| SourceItem { id: f.id, name: f.name })
+        .map(|f| SourceItem {
+            id: f.id,
+            name: f.name,
+        })
         .collect())
 }
 

@@ -73,7 +73,6 @@ pub async fn translate_note(
         .await
 }
 
-
 /// `notes/create` 等の入力。フロントの NoteDraft をそのまま受ける想定。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Default)]
 #[serde(rename_all = "camelCase")]
@@ -256,7 +255,10 @@ pub async fn delete_favorite(client: &MisskeyClient, note_id: &str) -> Result<()
 /// 投票（choice は 0-based index）。
 pub async fn vote_poll(client: &MisskeyClient, note_id: &str, choice: u32) -> Result<()> {
     let _: serde_json::Value = client
-        .post("notes/polls/vote", &json!({ "noteId": note_id, "choice": choice }))
+        .post(
+            "notes/polls/vote",
+            &json!({ "noteId": note_id, "choice": choice }),
+        )
         .await?;
     Ok(())
 }
@@ -359,18 +361,36 @@ mod tests {
         assert_eq!(body["limit"], 20);
         assert!(body.get("untilId").is_none());
 
-        let (ep, body) = ColumnKind::List { list_id: "L1".into() }.rest_request(20, Some("n9")).unwrap();
+        let (ep, body) = ColumnKind::List {
+            list_id: "L1".into(),
+        }
+        .rest_request(20, Some("n9"))
+        .unwrap();
         assert_eq!(ep, "notes/user-list-timeline");
         assert_eq!(body["listId"], "L1");
         assert_eq!(body["untilId"], "n9");
 
-        let (ep, body) = ColumnKind::Search { query: "rust".into() }.rest_request(20, None).unwrap();
+        let (ep, body) = ColumnKind::Search {
+            query: "rust".into(),
+        }
+        .rest_request(20, None)
+        .unwrap();
         assert_eq!(ep, "notes/search");
         assert_eq!(body["query"], "rust");
 
         // Search はストリーミング無し
-        assert!(ColumnKind::Search { query: "x".into() }.stream_request().is_none());
-        assert_eq!(ColumnKind::List { list_id: "L".into() }.stream_request().unwrap().0, "userList");
+        assert!(ColumnKind::Search { query: "x".into() }
+            .stream_request()
+            .is_none());
+        assert_eq!(
+            ColumnKind::List {
+                list_id: "L".into()
+            }
+            .stream_request()
+            .unwrap()
+            .0,
+            "userList"
+        );
     }
 
     fn make_user(id: &str, username: &str) -> User {
@@ -435,7 +455,11 @@ mod tests {
 
     #[test]
     fn build_search_body_omits_conditions_that_are_none() {
-        let body = build_search_body(&SearchParams { query: "x".into(), limit: 10, ..Default::default() });
+        let body = build_search_body(&SearchParams {
+            query: "x".into(),
+            limit: 10,
+            ..Default::default()
+        });
         assert_eq!(body, json!({ "query": "x", "limit": 10 }));
     }
 
@@ -451,7 +475,9 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/notes/translate"))
-            .and(body_partial_json(json!({ "noteId": "n1", "targetLang": "ja" })))
+            .and(body_partial_json(
+                json!({ "noteId": "n1", "targetLang": "ja" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "sourceLang": "EN",
                 "text": "こんにちは"
@@ -459,7 +485,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let t = translate_note(&mock_client(mock.uri()), "n1", "ja").await.unwrap();
+        let t = translate_note(&mock_client(mock.uri()), "n1", "ja")
+            .await
+            .unwrap();
         assert_eq!(
             t,
             Some(crate::domain::Translation {
@@ -481,7 +509,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let t = translate_note(&mock_client(mock.uri()), "n1", "ja").await.unwrap();
+        let t = translate_note(&mock_client(mock.uri()), "n1", "ja")
+            .await
+            .unwrap();
         assert_eq!(t, None);
     }
 
@@ -499,7 +529,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let err = translate_note(&mock_client(mock.uri()), "n1", "ja").await.unwrap_err();
+        let err = translate_note(&mock_client(mock.uri()), "n1", "ja")
+            .await
+            .unwrap_err();
         match err {
             crate::error::Error::Api(detail) => assert!(detail.contains("UNAVAILABLE"), "{detail}"),
             other => panic!("expected Api, got {other:?}"),

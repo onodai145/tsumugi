@@ -73,9 +73,7 @@ pub async fn check_miauth(
     let body: CheckResponse = resp.json().await.map_err(Error::from)?;
     match (body.ok, body.token, body.user) {
         (true, Some(token), Some(user)) => Ok((token, user)),
-        (true, _, _) => Err(Error::Api(
-            "miauth check ok but token/user missing".into(),
-        )),
+        (true, _, _) => Err(Error::Api("miauth check ok but token/user missing".into())),
         (false, _, _) => Err(Error::Unauthorized(
             "authorization not completed in browser".into(),
         )),
@@ -107,10 +105,9 @@ mod tests {
 
     #[test]
     fn check_response_deserializes() {
-        let r: CheckResponse = serde_json::from_str(
-            r#"{"ok":true,"token":"abc","user":{"id":"u1","username":"me"}}"#,
-        )
-        .unwrap();
+        let r: CheckResponse =
+            serde_json::from_str(r#"{"ok":true,"token":"abc","user":{"id":"u1","username":"me"}}"#)
+                .unwrap();
         assert!(r.ok);
         assert_eq!(r.token.as_deref(), Some("abc"));
         assert_eq!(r.user.unwrap().username, "me");
@@ -125,7 +122,12 @@ mod tests {
 
     #[test]
     fn requests_write_blocks_and_write_report_abuse() {
-        for permission in ["write:blocks", "write:report-abuse", "write:account", "write:mutes"] {
+        for permission in [
+            "write:blocks",
+            "write:report-abuse",
+            "write:account",
+            "write:mutes",
+        ] {
             assert!(PERMISSIONS.contains(&permission), "{permission} が無い");
         }
         let u = build_miauth_url("misskey.io", "11111111-2222-3333-4444-555555555555").unwrap();

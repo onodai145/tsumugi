@@ -87,7 +87,9 @@ mod windows_pipe {
 
         // クライアントがsporadicにNotFoundで失敗しないよう、常に次のサーバーインスタンスを
         // 用意してから接続済みのものをタスクへ渡す(tokioのnamed_pipeドキュメント推奨パターン)。
-        let mut server = ServerOptions::new().first_pipe_instance(true).create(&name)?;
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&name)?;
         loop {
             server.connect().await?;
             let connected = server;
@@ -164,7 +166,8 @@ async fn eval_js(app: &AppHandle, js: String) -> Result<String, String> {
             }
         })
         .map_err(|e| e.to_string())?;
-    rx.await.map_err(|_| "eval callback was dropped".to_string())
+    rx.await
+        .map_err(|_| "eval callback was dropped".to_string())
 }
 
 fn http_response(status: u16, reason: &str, body: &str) -> String {
@@ -185,7 +188,10 @@ async fn read_http_body<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result
             break pos;
         }
         if buf.len() > MAX_HEADER_BYTES {
-            return Err(std::io::Error::new(ErrorKind::InvalidData, "header too large"));
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                "header too large",
+            ));
         }
         let n = stream.read(&mut chunk).await?;
         if n == 0 {
@@ -210,7 +216,10 @@ async fn read_http_body<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result
         })
         .unwrap_or(0);
     if content_length > MAX_BODY_BYTES {
-        return Err(std::io::Error::new(ErrorKind::InvalidData, "body too large"));
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "body too large",
+        ));
     }
 
     let mut body = buf[header_end + 4..].to_vec();

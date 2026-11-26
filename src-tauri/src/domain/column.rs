@@ -99,7 +99,11 @@ impl ColumnKind {
     }
 
     /// 初期ページ/過去ページ取得の REST エンドポイント + ボディ（未対応ソースは None）。
-    pub fn rest_request(&self, limit: u32, until_id: Option<&str>) -> Option<(&'static str, serde_json::Value)> {
+    pub fn rest_request(
+        &self,
+        limit: u32,
+        until_id: Option<&str>,
+    ) -> Option<(&'static str, serde_json::Value)> {
         use serde_json::json;
         let mut body = json!({ "limit": limit });
         if let Some(u) = until_id {
@@ -151,7 +155,9 @@ mod tests {
 
     #[test]
     fn antenna_channel_have_stream_and_rest() {
-        let a = ColumnKind::Antenna { antenna_id: "a1".into() };
+        let a = ColumnKind::Antenna {
+            antenna_id: "a1".into(),
+        };
         let (ch, p) = a.stream_request().unwrap();
         assert_eq!(ch, "antenna");
         assert_eq!(p["antennaId"], "a1");
@@ -159,21 +165,27 @@ mod tests {
         assert_eq!(ep, "antennas/notes");
         assert_eq!(body["antennaId"], "a1");
 
-        let c = ColumnKind::Channel { channel_id: "c1".into() };
+        let c = ColumnKind::Channel {
+            channel_id: "c1".into(),
+        };
         assert_eq!(c.stream_request().unwrap().0, "channel");
         assert_eq!(c.rest_request(20, None).unwrap().0, "channels/timeline");
     }
 
     #[test]
     fn user_and_tag_are_rest_only() {
-        let u = ColumnKind::User { user_id: "u1".into() };
+        let u = ColumnKind::User {
+            user_id: "u1".into(),
+        };
         assert!(u.stream_request().is_none());
         let (ep, body) = u.rest_request(20, Some("x")).unwrap();
         assert_eq!(ep, "users/notes");
         assert_eq!(body["userId"], "u1");
         assert_eq!(body["untilId"], "x");
 
-        let t = ColumnKind::Tag { tag: "misskey".into() };
+        let t = ColumnKind::Tag {
+            tag: "misskey".into(),
+        };
         assert!(t.stream_request().is_none());
         let (ep, body) = t.rest_request(20, None).unwrap();
         assert_eq!(ep, "notes/search-by-tag");
@@ -183,7 +195,9 @@ mod tests {
     #[test]
     fn struct_variant_fields_serialize_camelcase() {
         // tag=type, フィールドは camelCase（antennaId 等）で往復すること
-        let a = ColumnKind::Antenna { antenna_id: "a1".into() };
+        let a = ColumnKind::Antenna {
+            antenna_id: "a1".into(),
+        };
         let v = serde_json::to_value(&a).unwrap();
         assert_eq!(v["type"], "antenna");
         assert_eq!(v["antennaId"], "a1");

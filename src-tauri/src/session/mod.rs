@@ -7,8 +7,8 @@ pub mod secrets;
 pub use account_manager::AccountManager;
 // MemoryStore はテスト・ヘッドレス用（Phase 2 の統合テストで使用）。
 #[allow(unused_imports)]
-pub use secrets::{KeyringStore, MemoryStore, SecretStore};
-#[allow(unused_imports)]
 pub(crate) use secrets::{
     delete_cache_backend_password, load_cache_backend_password, save_cache_backend_password,
 };
+#[allow(unused_imports)]
+pub use secrets::{KeyringStore, MemoryStore, SecretStore};

@@ -82,7 +82,9 @@ pub async fn check_latest_release(state: State<'_, AppState>) -> Result<Option<L
 
 async fn fetch_latest_release(http: &reqwest::Client) -> Result<Option<LatestRelease>> {
     let resp = http
-        .get(format!("https://api.github.com/repos/{RELEASES_REPO}/releases/latest"))
+        .get(format!(
+            "https://api.github.com/repos/{RELEASES_REPO}/releases/latest"
+        ))
         .header("Accept", "application/vnd.github+json")
         .send()
         .await?;

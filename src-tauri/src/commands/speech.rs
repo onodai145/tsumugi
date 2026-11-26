@@ -22,9 +22,16 @@ pub(crate) fn get_settings_core(s: &AppState) -> SpeechSettings {
 }
 
 /// 検証・整形して保存する。オフにしたら、待ち行列を空にして再生中の読み上げも止める。
-pub(crate) fn set_settings_core(s: &AppState, mut settings: SpeechSettings) -> Result<SpeechSettings> {
+pub(crate) fn set_settings_core(
+    s: &AppState,
+    mut settings: SpeechSettings,
+) -> Result<SpeechSettings> {
     settings.validate().map_err(Error::Invalid)?;
-    settings.external_url = settings.external_url.trim().trim_end_matches('/').to_string();
+    settings.external_url = settings
+        .external_url
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
     settings.default_voice_id = settings.default_voice_id.trim().to_string();
     let saved = s.settings.update_speech(|v| *v = settings)?;
     if !saved.enabled {
@@ -36,7 +43,11 @@ pub(crate) fn set_settings_core(s: &AppState, mut settings: SpeechSettings) -> R
 
 /// カラムの読み上げ設定を保存し、**丸めたあとの値**を返す(UI が保存された値を表示できるように)。
 /// オフにしたら、そのカラムの待ち項目だけを消す。
-pub(crate) fn set_column_speech_core(s: &AppState, column_id: &str, speech: ColumnSpeech) -> Result<ColumnSpeech> {
+pub(crate) fn set_column_speech_core(
+    s: &AppState,
+    column_id: &str,
+    speech: ColumnSpeech,
+) -> Result<ColumnSpeech> {
     let speech = speech.normalized();
     if !s.settings.set_column_speech(column_id, speech.clone())? {
         return Err(Error::NotFound(format!("column {column_id}")));
@@ -54,12 +65,20 @@ fn engine_is_configured(settings: &SpeechSettings) -> bool {
 }
 
 fn params_of(settings: &SpeechSettings) -> SynthParams {
-    SynthParams { speed_scale: settings.speed_scale, volume: settings.volume }
+    SynthParams {
+        speed_scale: settings.speed_scale,
+        volume: settings.volume,
+    }
 }
 
 /// 整形済みの読み上げ文を、キューに積む。全体・カラムのどちらかがオフなら、何もせず `Ok`
 /// (設定を切り替えた直後の競合を許す)。
-pub(crate) fn enqueue_note_core(s: &AppState, column_id: &str, note_id: &str, text: &str) -> Result<()> {
+pub(crate) fn enqueue_note_core(
+    s: &AppState,
+    column_id: &str,
+    note_id: &str,
+    text: &str,
+) -> Result<()> {
     let settings = s.settings.load_speech();
     let column = s
         .settings
@@ -78,7 +97,11 @@ pub(crate) fn enqueue_note_core(s: &AppState, column_id: &str, note_id: &str, te
     if !engine_is_configured(&settings) {
         return Err(invalid(ERR_NOT_CONFIGURED));
     }
-    let voice_id = if column.speech.voice_id.is_empty() { settings.default_voice_id.clone() } else { column.speech.voice_id.clone() };
+    let voice_id = if column.speech.voice_id.is_empty() {
+        settings.default_voice_id.clone()
+    } else {
+        column.speech.voice_id.clone()
+    };
     if voice_id.is_empty() {
         return Err(invalid(ERR_NO_VOICE));
     }
@@ -135,13 +158,20 @@ pub async fn get_speech_settings(state: State<'_, AppState>) -> Result<SpeechSet
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_speech_settings(state: State<'_, AppState>, settings: SpeechSettings) -> Result<SpeechSettings> {
+pub async fn set_speech_settings(
+    state: State<'_, AppState>,
+    settings: SpeechSettings,
+) -> Result<SpeechSettings> {
     set_settings_core(&state, settings)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_column_speech(state: State<'_, AppState>, column_id: String, speech: ColumnSpeech) -> Result<ColumnSpeech> {
+pub async fn set_column_speech(
+    state: State<'_, AppState>,
+    column_id: String,
+    speech: ColumnSpeech,
+) -> Result<ColumnSpeech> {
     set_column_speech_core(&state, &column_id, speech)
 }
 
@@ -155,7 +185,12 @@ pub async fn list_speech_voices(external_url: String) -> Result<Vec<Voice>> {
 /// フロントが整形した読み上げ文を依頼する。失敗しても、フロントは握りつぶす(通知音と同じ fire-and-forget)。
 #[tauri::command]
 #[specta::specta]
-pub async fn speak_note(state: State<'_, AppState>, column_id: String, note_id: String, text: String) -> Result<()> {
+pub async fn speak_note(
+    state: State<'_, AppState>,
+    column_id: String,
+    note_id: String,
+    text: String,
+) -> Result<()> {
     enqueue_note_core(&state, &column_id, &note_id, &text)
 }
 
@@ -213,10 +248,18 @@ mod tests {
     }
 
     fn on() -> SpeechSettings {
-        SpeechSettings { enabled: true, external_url: "http://h:1".into(), default_voice_id: "3".into(), ..Default::default() }
+        SpeechSettings {
+            enabled: true,
+            external_url: "http://h:1".into(),
+            default_voice_id: "3".into(),
+            ..Default::default()
+        }
     }
     fn col_on() -> ColumnSpeech {
-        ColumnSpeech { enabled: true, ..Default::default() }
+        ColumnSpeech {
+            enabled: true,
+            ..Default::default()
+        }
     }
     fn pending(s: &AppState) -> Vec<crate::tts::queue::SpeechItem> {
         std::iter::from_fn(|| s.speech.pop_for_command_test()).collect()
@@ -225,11 +268,24 @@ mod tests {
     #[test]
     fn set_settings_validates_normalizes_and_saves() {
         let s = state_with(SpeechSettings::default(), vec![]);
-        let bad = SpeechSettings { external_url: "ftp://x".into(), ..Default::default() };
+        let bad = SpeechSettings {
+            external_url: "ftp://x".into(),
+            ..Default::default()
+        };
         assert!(set_settings_core(&s, bad).is_err());
 
-        let got = set_settings_core(&s, SpeechSettings { external_url: "  http://h:1/  ".into(), ..on() }).unwrap();
-        assert_eq!(got.external_url, "http://h:1", "前後の空白と末尾のスラッシュを落として保存する");
+        let got = set_settings_core(
+            &s,
+            SpeechSettings {
+                external_url: "  http://h:1/  ".into(),
+                ..on()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            got.external_url, "http://h:1",
+            "前後の空白と末尾のスラッシュを落として保存する"
+        );
         assert_eq!(s.settings.load_speech().external_url, "http://h:1");
     }
 
@@ -237,7 +293,14 @@ mod tests {
     fn turning_the_master_switch_off_clears_the_queue() {
         let s = state_with(on(), vec![column("c1", col_on())]);
         enqueue_note_core(&s, "c1", "n1", "こんにちは").unwrap();
-        set_settings_core(&s, SpeechSettings { enabled: false, ..on() }).unwrap();
+        set_settings_core(
+            &s,
+            SpeechSettings {
+                enabled: false,
+                ..on()
+            },
+        )
+        .unwrap();
         assert!(pending(&s).is_empty());
     }
 
@@ -247,24 +310,55 @@ mod tests {
         enqueue_note_core(&s, "c1", "n1", "a").unwrap();
         enqueue_note_core(&s, "c2", "n2", "b").unwrap();
 
-        let saved = set_column_speech_core(&s, "c1", ColumnSpeech { enabled: false, queue_limit: 99, ..Default::default() }).unwrap();
+        let saved = set_column_speech_core(
+            &s,
+            "c1",
+            ColumnSpeech {
+                enabled: false,
+                queue_limit: 99,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
-        assert_eq!(saved.queue_limit, crate::domain::speech::QUEUE_LIMIT_MAX, "丸めた値を返す(UI が保存された値を表示できるように)");
+        assert_eq!(
+            saved.queue_limit,
+            crate::domain::speech::QUEUE_LIMIT_MAX,
+            "丸めた値を返す(UI が保存された値を表示できるように)"
+        );
         assert_eq!(s.settings.load_column("c1").unwrap().speech, saved);
         let left = pending(&s);
         assert_eq!(left.len(), 1);
-        assert_eq!(left[0].note_id, "n2", "オフにしたカラムの待ち項目だけが消える");
+        assert_eq!(
+            left[0].note_id, "n2",
+            "オフにしたカラムの待ち項目だけが消える"
+        );
     }
 
     #[test]
     fn set_column_speech_on_a_missing_column_is_not_found() {
         let s = state_with(on(), vec![]);
-        assert!(matches!(set_column_speech_core(&s, "nope", ColumnSpeech::default()), Err(crate::error::Error::NotFound(_))));
+        assert!(matches!(
+            set_column_speech_core(&s, "nope", ColumnSpeech::default()),
+            Err(crate::error::Error::NotFound(_))
+        ));
     }
 
     #[test]
     fn enqueue_resolves_the_column_voice_then_falls_back_to_the_default_voice() {
-        let s = state_with(on(), vec![column("c1", col_on()), column("c2", ColumnSpeech { voice_id: "9".into(), ..col_on() })]);
+        let s = state_with(
+            on(),
+            vec![
+                column("c1", col_on()),
+                column(
+                    "c2",
+                    ColumnSpeech {
+                        voice_id: "9".into(),
+                        ..col_on()
+                    },
+                ),
+            ],
+        );
         enqueue_note_core(&s, "c1", "n1", "a").unwrap();
         enqueue_note_core(&s, "c2", "n2", "b").unwrap();
         let q = pending(&s);
@@ -275,7 +369,13 @@ mod tests {
 
     #[test]
     fn enqueue_is_a_silent_noop_when_speech_is_off_globally_or_for_the_column() {
-        let s = state_with(SpeechSettings { enabled: false, ..on() }, vec![column("c1", col_on())]);
+        let s = state_with(
+            SpeechSettings {
+                enabled: false,
+                ..on()
+            },
+            vec![column("c1", col_on())],
+        );
         enqueue_note_core(&s, "c1", "n1", "a").unwrap();
         let s2 = state_with(on(), vec![column("c1", ColumnSpeech::default())]);
         enqueue_note_core(&s2, "c1", "n1", "a").unwrap();
@@ -299,13 +399,28 @@ mod tests {
     #[test]
     fn enqueue_reports_a_missing_column_url_or_voice() {
         let s = state_with(on(), vec![]);
-        assert!(matches!(enqueue_note_core(&s, "nope", "n", "a"), Err(crate::error::Error::NotFound(_))));
+        assert!(matches!(
+            enqueue_note_core(&s, "nope", "n", "a"),
+            Err(crate::error::Error::NotFound(_))
+        ));
 
-        let s = state_with(SpeechSettings { external_url: String::new(), ..on() }, vec![column("c1", col_on())]);
+        let s = state_with(
+            SpeechSettings {
+                external_url: String::new(),
+                ..on()
+            },
+            vec![column("c1", col_on())],
+        );
         let e = enqueue_note_core(&s, "c1", "n", "a").unwrap_err();
         assert!(e.to_string().contains(ERR_NOT_CONFIGURED), "{e}");
 
-        let s = state_with(SpeechSettings { default_voice_id: String::new(), ..on() }, vec![column("c1", col_on())]);
+        let s = state_with(
+            SpeechSettings {
+                default_voice_id: String::new(),
+                ..on()
+            },
+            vec![column("c1", col_on())],
+        );
         let e = enqueue_note_core(&s, "c1", "n", "a").unwrap_err();
         assert!(e.to_string().contains(ERR_NO_VOICE), "{e}");
     }
@@ -313,16 +428,26 @@ mod tests {
     #[test]
     fn the_built_in_engine_needs_no_url_to_queue_notes_or_the_test_phrase() {
         // 実アプリの確認(Task 12)で、内蔵エンジンなのに ERR_NOT_CONFIGURED になった不具合の再現。
-        let core = SpeechSettings { engine: crate::domain::SpeechEngineKind::VoicevoxCore, external_url: String::new(), ..on() };
+        let core = SpeechSettings {
+            engine: crate::domain::SpeechEngineKind::VoicevoxCore,
+            external_url: String::new(),
+            ..on()
+        };
         let s = state_with(core, vec![column("c1", col_on())]);
         enqueue_note_core(&s, "c1", "n1", "こんにちは").unwrap();
         test_speech_core(&s, "テストです").unwrap();
         assert_eq!(pending(&s).len(), 2, "内蔵エンジンは URL が空でも積める");
 
         // 外部エンジンで URL が空なら、従来どおり未設定。
-        let ext = SpeechSettings { external_url: String::new(), ..on() };
+        let ext = SpeechSettings {
+            external_url: String::new(),
+            ..on()
+        };
         let s = state_with(ext, vec![column("c1", col_on())]);
-        assert!(test_speech_core(&s, "テストです").unwrap_err().to_string().contains(ERR_NOT_CONFIGURED));
+        assert!(test_speech_core(&s, "テストです")
+            .unwrap_err()
+            .to_string()
+            .contains(ERR_NOT_CONFIGURED));
     }
 
     #[test]
@@ -335,7 +460,16 @@ mod tests {
 
     #[test]
     fn the_column_limit_is_applied_per_column() {
-        let s = state_with(on(), vec![column("c1", ColumnSpeech { queue_limit: 2, ..col_on() })]);
+        let s = state_with(
+            on(),
+            vec![column(
+                "c1",
+                ColumnSpeech {
+                    queue_limit: 2,
+                    ..col_on()
+                },
+            )],
+        );
         for i in 0..4 {
             enqueue_note_core(&s, "c1", &format!("n{i}"), "a").unwrap();
         }
@@ -345,7 +479,13 @@ mod tests {
 
     #[test]
     fn test_speech_queues_under_the_test_column_even_when_the_master_switch_is_off() {
-        let s = state_with(SpeechSettings { enabled: false, ..on() }, vec![]);
+        let s = state_with(
+            SpeechSettings {
+                enabled: false,
+                ..on()
+            },
+            vec![],
+        );
         test_speech_core(&s, "テストです").unwrap();
         let q = pending(&s);
         assert_eq!(q.len(), 1);

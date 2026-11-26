@@ -58,7 +58,9 @@ pub struct ScheduledPostStore {
 impl ScheduledPostEntry {
     /// 次に処理してよい時刻(epoch 秒)。
     pub fn ready_at(&self) -> i64 {
-        self.next_attempt_at.unwrap_or(self.scheduled_at).max(self.scheduled_at)
+        self.next_attempt_at
+            .unwrap_or(self.scheduled_at)
+            .max(self.scheduled_at)
     }
 
     /// 一覧(`ScheduledModal`)用の形。中身は A の `ScheduledNote` と同じ項目。
@@ -92,13 +94,21 @@ impl ScheduledPostStore {
         } else {
             Data::default()
         };
-        Ok(Self { backing: Backing::File(path), data: Mutex::new(data), dirty: AtomicBool::new(false) })
+        Ok(Self {
+            backing: Backing::File(path),
+            data: Mutex::new(data),
+            dirty: AtomicBool::new(false),
+        })
     }
 
     /// メモリだけの版。`AppState::new*` の既定(起動時に `with_scheduled_posts` で永続版へ差し替える)と、
     /// テストで使う。
     pub(crate) fn new_in_memory() -> Self {
-        Self { backing: Backing::Memory, data: Mutex::new(Data::default()), dirty: AtomicBool::new(false) }
+        Self {
+            backing: Backing::Memory,
+            data: Mutex::new(Data::default()),
+            dirty: AtomicBool::new(false),
+        }
     }
 
     fn save(&self, data: &Data) -> Result<()> {
@@ -115,7 +125,11 @@ impl ScheduledPostStore {
 
     /// 利用者の操作による変更を保存する。失敗したらメモリを `change` の前に戻して Err を返し、
     /// 「失敗した」という応答と状態を一致させる(Issue #682)。
-    fn save_or_restore(&self, data: &mut Data, change: impl FnOnce(&mut Vec<ScheduledPostEntry>)) -> Result<()> {
+    fn save_or_restore(
+        &self,
+        data: &mut Data,
+        change: impl FnOnce(&mut Vec<ScheduledPostEntry>),
+    ) -> Result<()> {
         let before = data.posts.clone();
         change(&mut data.posts);
         self.save(data).inspect_err(|_| data.posts = before)
@@ -124,7 +138,8 @@ impl ScheduledPostStore {
     /// 送信結果をメモリに反映済みのまま保存する。失敗しても、メモリは巻き戻さない(送信は終わっていて、
     /// 巻き戻すと再送・二重投稿の元になる)。代わりに `dirty` を立て、`flush` で追いつかせる(Issue #620)。
     fn save_recorded(&self, data: &Data) -> Result<()> {
-        self.save(data).inspect_err(|_| self.dirty.store(true, Ordering::SeqCst))
+        self.save(data)
+            .inspect_err(|_| self.dirty.store(true, Ordering::SeqCst))
     }
 
     /// 保存できていない送信結果があるか。
@@ -144,7 +159,11 @@ impl ScheduledPostStore {
 
     /// `id` の予約に `f` を適用して保存する。無ければ None。送信結果の記録に使うので、保存に失敗しても
     /// メモリは戻さない(`save_recorded`)。
-    fn with_entry<R>(&self, id: &str, f: impl FnOnce(&mut ScheduledPostEntry) -> R) -> Result<Option<R>> {
+    fn with_entry<R>(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut ScheduledPostEntry) -> R,
+    ) -> Result<Option<R>> {
         let mut g = self.data.lock().unwrap();
         let Some(entry) = g.posts.iter_mut().find(|e| e.id == id) else {
             return Ok(None);
@@ -154,7 +173,13 @@ impl ScheduledPostStore {
         Ok(Some(out))
     }
 
-    pub fn add(&self, account_id: &str, scheduled_at: i64, input: DraftInput, now: i64) -> Result<ScheduledPostEntry> {
+    pub fn add(
+        &self,
+        account_id: &str,
+        scheduled_at: i64,
+        input: DraftInput,
+        now: i64,
+    ) -> Result<ScheduledPostEntry> {
         let mut g = self.data.lock().unwrap();
         let entry = ScheduledPostEntry {
             id: uuid::Uuid::new_v4().to_string(),
@@ -172,7 +197,13 @@ impl ScheduledPostStore {
     }
 
     pub fn get(&self, id: &str) -> Option<ScheduledPostEntry> {
-        self.data.lock().unwrap().posts.iter().find(|e| e.id == id).cloned()
+        self.data
+            .lock()
+            .unwrap()
+            .posts
+            .iter()
+            .find(|e| e.id == id)
+            .cloned()
     }
 
     /// そのアカウントの予約を、予約日時の昇順(同時刻は作成順)で返す。
@@ -283,7 +314,11 @@ impl ScheduledPostStore {
     /// 取り消し(削除)。他アカウントの予約・存在しない予約は NotFound、`Posting` は Invalid。
     pub fn cancel(&self, account_id: &str, id: &str) -> Result<()> {
         let mut g = self.data.lock().unwrap();
-        let Some(pos) = g.posts.iter().position(|e| e.id == id && e.account_id == account_id) else {
+        let Some(pos) = g
+            .posts
+            .iter()
+            .position(|e| e.id == id && e.account_id == account_id)
+        else {
             return Err(Error::NotFound(format!("scheduled post: {id}")));
         };
         if g.posts[pos].status == LocalScheduleStatus::Posting {
@@ -303,7 +338,11 @@ impl ScheduledPostStore {
     pub fn recover_posting(&self) -> Result<usize> {
         let mut g = self.data.lock().unwrap();
         let mut n = 0;
-        for e in g.posts.iter_mut().filter(|e| e.status == LocalScheduleStatus::Posting) {
+        for e in g
+            .posts
+            .iter_mut()
+            .filter(|e| e.status == LocalScheduleStatus::Posting)
+        {
             e.status = LocalScheduleStatus::Failed;
             e.error = Some(UNKNOWN_RESULT_MESSAGE.to_string());
             n += 1;
@@ -348,8 +387,15 @@ mod tests {
         s.add("acc2", 500, test_input("other"), 102).unwrap();
 
         assert_eq!(late.status, LocalScheduleStatus::Pending);
-        assert_eq!((late.attempts, late.next_attempt_at, late.error.clone()), (0, None, None));
-        let ids: Vec<_> = s.list_for_account("acc1").into_iter().map(|e| e.id).collect();
+        assert_eq!(
+            (late.attempts, late.next_attempt_at, late.error.clone()),
+            (0, None, None)
+        );
+        let ids: Vec<_> = s
+            .list_for_account("acc1")
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
         assert_eq!(ids, vec![early.id, late.id]);
         assert_eq!(s.list_for_account("acc2").len(), 1);
         assert!(s.list_for_account("nobody").is_empty());
@@ -389,7 +435,11 @@ mod tests {
         assert_eq!(s.next_wakeup(), Some(1_500));
         s.begin_post(&a.id).unwrap();
         s.finish_failed(&a.id, "x").unwrap();
-        assert_eq!(s.next_wakeup(), Some(1_500), "failed entries do not wake the scheduler");
+        assert_eq!(
+            s.next_wakeup(),
+            Some(1_500),
+            "failed entries do not wake the scheduler"
+        );
     }
 
     /// Review Focus 2: 同じ予約を 2 回送らない。
@@ -445,11 +495,20 @@ mod tests {
     fn cancel_removes_but_not_posting_nor_other_accounts() {
         let s = store();
         let e = s.add("acc1", 1_000, test_input("a"), 0).unwrap();
-        assert!(matches!(s.cancel("acc2", &e.id), Err(Error::NotFound(_))), "other account's entry");
-        assert!(matches!(s.cancel("acc1", "missing"), Err(Error::NotFound(_))));
+        assert!(
+            matches!(s.cancel("acc2", &e.id), Err(Error::NotFound(_))),
+            "other account's entry"
+        );
+        assert!(matches!(
+            s.cancel("acc1", "missing"),
+            Err(Error::NotFound(_))
+        ));
 
         s.begin_post(&e.id).unwrap();
-        assert!(matches!(s.cancel("acc1", &e.id), Err(Error::Invalid(_))), "posting can't be cancelled");
+        assert!(
+            matches!(s.cancel("acc1", &e.id), Err(Error::Invalid(_))),
+            "posting can't be cancelled"
+        );
         s.finish_failed(&e.id, "x").unwrap();
         s.cancel("acc1", &e.id).unwrap();
         assert!(s.get(&e.id).is_none());
@@ -534,7 +593,8 @@ mod tests {
 
     impl BrokenDisk {
         fn new() -> Self {
-            let dir = std::env::temp_dir().join(format!("tsumugi-scheduled-dir-{}", uuid::Uuid::new_v4()));
+            let dir = std::env::temp_dir()
+                .join(format!("tsumugi-scheduled-dir-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
             Self { dir }
         }
@@ -564,7 +624,11 @@ mod tests {
 
         disk.break_dir();
         assert!(s.begin_post(&e.id).is_err());
-        assert_eq!(s.get(&e.id).unwrap().status, LocalScheduleStatus::Pending, "memory not changed");
+        assert_eq!(
+            s.get(&e.id).unwrap().status,
+            LocalScheduleStatus::Pending,
+            "memory not changed"
+        );
         assert_eq!(s.due(1_000).len(), 1, "still due, so it is retried later");
 
         disk.repair_dir();
@@ -592,7 +656,10 @@ mod tests {
         assert!(!s.is_dirty());
         assert!(!s.flush().unwrap(), "nothing left to write");
         let reloaded = ScheduledPostStore::new(disk.path()).unwrap();
-        assert!(reloaded.get(&e.id).is_none(), "a restart no longer sees a posting entry");
+        assert!(
+            reloaded.get(&e.id).is_none(),
+            "a restart no longer sees a posting entry"
+        );
     }
 
     /// Issue #620: 失敗・再試行の記録も同じ(送信結果はメモリが正で、後から保存を追いつかせる)。
@@ -611,7 +678,10 @@ mod tests {
         disk.repair_dir();
         assert!(s.flush().unwrap());
         let reloaded = ScheduledPostStore::new(disk.path()).unwrap();
-        assert_eq!(reloaded.get(&e.id).unwrap().status, LocalScheduleStatus::Failed);
+        assert_eq!(
+            reloaded.get(&e.id).unwrap().status,
+            LocalScheduleStatus::Failed
+        );
     }
 
     /// 無関係な保存が成功すれば、ディスクは追いつく(`dirty` も下りる)。
@@ -642,7 +712,11 @@ mod tests {
 
         disk.break_dir();
         assert!(s.add("acc1", 500, test_input("lost"), 1).is_err());
-        let ids: Vec<_> = s.list_for_account("acc1").into_iter().map(|e| e.id).collect();
+        let ids: Vec<_> = s
+            .list_for_account("acc1")
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
         assert_eq!(ids, vec![kept.id]);
         assert_eq!(s.due(500).len(), 0, "the rejected entry is never sent");
     }
@@ -660,7 +734,10 @@ mod tests {
 
         disk.repair_dir();
         s.cancel("acc1", &e.id).unwrap();
-        assert!(ScheduledPostStore::new(disk.path()).unwrap().get(&e.id).is_none());
+        assert!(ScheduledPostStore::new(disk.path())
+            .unwrap()
+            .get(&e.id)
+            .is_none());
     }
 
     /// Issue #682: アカウントの予約の削除に失敗したら、全部残す。
@@ -689,7 +766,10 @@ mod tests {
         disk.break_dir();
         assert!(s.finish_posted(&sent.id).is_err());
         assert!(s.cancel("acc1", &other.id).is_err());
-        assert!(s.get(&sent.id).is_none(), "the posted entry does not come back");
+        assert!(
+            s.get(&sent.id).is_none(),
+            "the posted entry does not come back"
+        );
         assert!(s.get(&other.id).is_some());
         assert!(s.is_dirty(), "still waiting to be flushed");
     }
@@ -697,7 +777,10 @@ mod tests {
     #[test]
     fn a_missing_file_is_empty_and_a_corrupt_file_is_an_error() {
         let path = temp_path();
-        assert!(ScheduledPostStore::new(path.clone()).unwrap().list_for_account("acc1").is_empty());
+        assert!(ScheduledPostStore::new(path.clone())
+            .unwrap()
+            .list_for_account("acc1")
+            .is_empty());
         std::fs::write(&path, "{ not json").unwrap();
         assert!(ScheduledPostStore::new(path.clone()).is_err());
         std::fs::remove_file(&path).unwrap();

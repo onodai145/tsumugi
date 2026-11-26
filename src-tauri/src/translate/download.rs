@@ -4,10 +4,10 @@
 use super::model_store::{has_enough_space, MODEL_SHA256, MODEL_SIZE_BYTES, MODEL_URL};
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::future::Future;
 use std::time::{Duration, Instant};
 
 /// 応答ヘッダ・次のチャンクを待つ上限。接続が黙って止まったときに、いつまでも進捗が止まったままにしない。
@@ -24,7 +24,11 @@ pub struct ModelSpec {
 
 impl ModelSpec {
     pub fn official() -> Self {
-        Self { url: MODEL_URL.into(), size: MODEL_SIZE_BYTES, sha256: MODEL_SHA256.into() }
+        Self {
+            url: MODEL_URL.into(),
+            size: MODEL_SIZE_BYTES,
+            sha256: MODEL_SHA256.into(),
+        }
     }
 }
 
@@ -52,13 +56,25 @@ impl DownloadError {
     pub fn reason(&self) -> String {
         match self {
             Self::Cancelled => "キャンセルしました".into(),
-            Self::Http(s) => format!("サーバーがエラーを返しました（HTTP {s}）。時間をおいて再度お試しください"),
-            Self::Network(_) => "通信が途切れました。再度ダウンロードすると途中から再開します".into(),
-            Self::HashMismatch => "ダウンロードしたファイルの検証に失敗しました。もう一度お試しください".into(),
-            Self::SizeMismatch => "ダウンロードしたファイルのサイズが想定と違います。もう一度お試しください".into(),
+            Self::Http(s) => {
+                format!("サーバーがエラーを返しました（HTTP {s}）。時間をおいて再度お試しください")
+            }
+            Self::Network(_) => {
+                "通信が途切れました。再度ダウンロードすると途中から再開します".into()
+            }
+            Self::HashMismatch => {
+                "ダウンロードしたファイルの検証に失敗しました。もう一度お試しください".into()
+            }
+            Self::SizeMismatch => {
+                "ダウンロードしたファイルのサイズが想定と違います。もう一度お試しください".into()
+            }
             Self::NoSpace => "ディスクの空き容量が足りません".into(),
-            Self::BadResponse => "サーバーの応答が想定と違います。時間をおいて再度お試しください".into(),
-            Self::Io(_) => "ファイルの書き込みに失敗しました（ディスクの空き容量を確認してください）".into(),
+            Self::BadResponse => {
+                "サーバーの応答が想定と違います。時間をおいて再度お試しください".into()
+            }
+            Self::Io(_) => {
+                "ファイルの書き込みに失敗しました（ディスクの空き容量を確認してください）".into()
+            }
         }
     }
 }
@@ -102,7 +118,11 @@ fn content_range_start(v: &str) -> Option<u64> {
 
 /// `fut` を待つ。待っている間もキャンセルを見て、`limit` を超えたらネットワークエラー（タイムアウト）にする。
 /// 接続の確立やチャンクの到着を待っているときでも、キャンセルがすぐ効くようにするため。
-async fn wait<F: Future>(fut: F, cancel: &AtomicBool, limit: Duration) -> Result<F::Output, DownloadError> {
+async fn wait<F: Future>(
+    fut: F,
+    cancel: &AtomicBool,
+    limit: Duration,
+) -> Result<F::Output, DownloadError> {
     tokio::pin!(fut);
     let start = Instant::now();
     loop {
@@ -131,7 +151,17 @@ pub async fn download(
     free_space: &(dyn Fn(&Path) -> Option<u64> + Sync),
     on_phase: &mut (dyn FnMut(Phase) + Send),
 ) -> Result<(), DownloadError> {
-    download_with_stall(client, spec, part, dest, cancel, free_space, on_phase, CHUNK_TIMEOUT).await
+    download_with_stall(
+        client,
+        spec,
+        part,
+        dest,
+        cancel,
+        free_space,
+        on_phase,
+        CHUNK_TIMEOUT,
+    )
+    .await
 }
 
 /// `download` の本体。`stall` は、応答ヘッダと各チャンクを待つ上限（テストで短くするために引数にしてある）。
@@ -211,7 +241,10 @@ pub(crate) async fn download_with_stall(
                     .map_err(io_err)?,
             );
             let mut downloaded = if append { have } else { 0 };
-            on_phase(Phase::Downloading { downloaded, total: spec.size });
+            on_phase(Phase::Downloading {
+                downloaded,
+                total: spec.size,
+            });
             let mut stream = resp.bytes_stream();
             loop {
                 if cancel.load(Ordering::SeqCst) {
@@ -224,7 +257,10 @@ pub(crate) async fn download_with_stall(
                     Ok(Some(Ok(chunk))) => {
                         file.write_all(&chunk).map_err(io_err)?;
                         downloaded += chunk.len() as u64;
-                        on_phase(Phase::Downloading { downloaded, total: spec.size });
+                        on_phase(Phase::Downloading {
+                            downloaded,
+                            total: spec.size,
+                        });
                     }
                 }
             }
@@ -304,16 +340,31 @@ mod tests {
     impl Respond for Server {
         fn respond(&self, req: &Request) -> ResponseTemplate {
             self.hits.fetch_add(1, Ordering::SeqCst);
-            let range = req.headers.get("range").map(|v| v.to_str().unwrap().to_string());
+            let range = req
+                .headers
+                .get("range")
+                .map(|v| v.to_str().unwrap().to_string());
             self.ranges.lock().unwrap().push(range.clone());
             match (&range, self.honor_range) {
                 (Some(r), true) => {
-                    let start: usize = r.trim_start_matches("bytes=").trim_end_matches('-').parse().unwrap();
+                    let start: usize = r
+                        .trim_start_matches("bytes=")
+                        .trim_end_matches('-')
+                        .parse()
+                        .unwrap();
                     if start >= self.body.len() {
                         return ResponseTemplate::new(416);
                     }
                     ResponseTemplate::new(206)
-                        .insert_header("content-range", format!("bytes {}-{}/{}", start, self.body.len() - 1, self.body.len()))
+                        .insert_header(
+                            "content-range",
+                            format!(
+                                "bytes {}-{}/{}",
+                                start,
+                                self.body.len() - 1,
+                                self.body.len()
+                            ),
+                        )
                         .set_body_bytes(self.body[start..].to_vec())
                 }
                 _ => ResponseTemplate::new(200).set_body_bytes(self.body.clone()),
@@ -339,10 +390,21 @@ mod tests {
             sha256: expected_sha.unwrap_or_else(|| sha(&data)),
         };
         Mock::given(method("GET"))
-            .respond_with(Server { body: data, honor_range, ranges: ranges.clone(), hits: hits.clone() })
+            .respond_with(Server {
+                body: data,
+                honor_range,
+                ranges: ranges.clone(),
+                hits: hits.clone(),
+            })
             .mount(&server)
             .await;
-        Fixture { _server: server, dir: temp_dir(), ranges, hits, spec }
+        Fixture {
+            _server: server,
+            dir: temp_dir(),
+            ranges,
+            hits,
+            spec,
+        }
     }
 
     fn client() -> reqwest::Client {
@@ -353,7 +415,16 @@ mod tests {
         let mut phases = vec![];
         let part = f.dir.join("m.gguf.part");
         let dest = f.dir.join("m.gguf");
-        let r = download(&client(), &f.spec, &part, &dest, cancel, &|_| Some(u64::MAX), &mut |p| phases.push(p)).await;
+        let r = download(
+            &client(),
+            &f.spec,
+            &part,
+            &dest,
+            cancel,
+            &|_| Some(u64::MAX),
+            &mut |p| phases.push(p),
+        )
+        .await;
         (r, phases)
     }
 
@@ -374,7 +445,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(downloaded.windows(2).all(|w| w[0] <= w[1]), "{downloaded:?}");
+        assert!(
+            downloaded.windows(2).all(|w| w[0] <= w[1]),
+            "{downloaded:?}"
+        );
         assert_eq!(*downloaded.last().unwrap(), data.len() as u64);
     }
 
@@ -385,8 +459,15 @@ mod tests {
         std::fs::write(f.dir.join("m.gguf.part"), &data[..100_000]).unwrap();
         let (r, _) = run(&f, &AtomicBool::new(false)).await;
         r.unwrap();
-        assert_eq!(std::fs::read(f.dir.join("m.gguf")).unwrap(), data, "継ぎ足した結果がハッシュ検証を通る");
-        assert_eq!(f.ranges.lock().unwrap().as_slice(), &[Some("bytes=100000-".to_string())]);
+        assert_eq!(
+            std::fs::read(f.dir.join("m.gguf")).unwrap(),
+            data,
+            "継ぎ足した結果がハッシュ検証を通る"
+        );
+        assert_eq!(
+            f.ranges.lock().unwrap().as_slice(),
+            &[Some("bytes=100000-".to_string())]
+        );
     }
 
     #[tokio::test]
@@ -396,7 +477,11 @@ mod tests {
         std::fs::write(f.dir.join("m.gguf.part"), &data[..50_000]).unwrap();
         let (r, _) = run(&f, &AtomicBool::new(false)).await;
         r.unwrap();
-        assert_eq!(std::fs::read(f.dir.join("m.gguf")).unwrap(), data, "200 の全体を、.part に継ぎ足さず上書きする");
+        assert_eq!(
+            std::fs::read(f.dir.join("m.gguf")).unwrap(),
+            data,
+            "200 の全体を、.part に継ぎ足さず上書きする"
+        );
     }
 
     #[tokio::test]
@@ -408,7 +493,11 @@ mod tests {
         let (r, _) = run(&f, &AtomicBool::new(false)).await;
         r.unwrap();
         assert_eq!(std::fs::read(f.dir.join("m.gguf")).unwrap(), data);
-        assert_eq!(f.ranges.lock().unwrap().as_slice(), &[None], "Range なしで取り直す");
+        assert_eq!(
+            f.ranges.lock().unwrap().as_slice(),
+            &[None],
+            "Range なしで取り直す"
+        );
     }
 
     #[tokio::test]
@@ -432,16 +521,39 @@ mod tests {
             }
         }
         Mock::given(method("GET"))
-            .respond_with(Reject416 { inner: Server { body: data.clone(), honor_range: true, ranges: ranges.clone(), hits: hits.clone() } })
+            .respond_with(Reject416 {
+                inner: Server {
+                    body: data.clone(),
+                    honor_range: true,
+                    ranges: ranges.clone(),
+                    hits: hits.clone(),
+                },
+            })
             .mount(&server)
             .await;
         let dir = temp_dir();
         std::fs::write(dir.join("m.gguf.part"), &data[..10_000]).unwrap();
-        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: data.len() as u64, sha256: sha(&data) };
-        let r = download(&client(), &spec, &dir.join("m.gguf.part"), &dir.join("m.gguf"), &AtomicBool::new(false), &|_| None, &mut |_| {}).await;
+        let spec = ModelSpec {
+            url: format!("{}/m.gguf", server.uri()),
+            size: data.len() as u64,
+            sha256: sha(&data),
+        };
+        let r = download(
+            &client(),
+            &spec,
+            &dir.join("m.gguf.part"),
+            &dir.join("m.gguf"),
+            &AtomicBool::new(false),
+            &|_| None,
+            &mut |_| {},
+        )
+        .await;
         r.unwrap();
         assert_eq!(std::fs::read(dir.join("m.gguf")).unwrap(), data);
-        assert_eq!(ranges.lock().unwrap().as_slice(), &[Some("416".to_string()), None]);
+        assert_eq!(
+            ranges.lock().unwrap().as_slice(),
+            &[Some("416".to_string()), None]
+        );
     }
 
     #[tokio::test]
@@ -461,17 +573,39 @@ mod tests {
         let f = fixture(data, true, Some(sha(b"something else"))).await;
         let (r, _) = run(&f, &AtomicBool::new(false)).await;
         assert_eq!(r, Err(DownloadError::HashMismatch));
-        assert!(!f.dir.join("m.gguf.part").exists(), "壊れた .part を再開に使わせない");
-        assert!(!f.dir.join("m.gguf").exists(), "検証に通らないファイルをモデルとして置かない");
+        assert!(
+            !f.dir.join("m.gguf.part").exists(),
+            "壊れた .part を再開に使わせない"
+        );
+        assert!(
+            !f.dir.join("m.gguf").exists(),
+            "検証に通らないファイルをモデルとして置かない"
+        );
     }
 
     #[tokio::test]
     async fn an_http_error_fails_without_touching_the_destination() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(500)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
         let dir = temp_dir();
-        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: 10, sha256: sha(b"x") };
-        let r = download(&client(), &spec, &dir.join("p"), &dir.join("d"), &AtomicBool::new(false), &|_| None, &mut |_| {}).await;
+        let spec = ModelSpec {
+            url: format!("{}/m.gguf", server.uri()),
+            size: 10,
+            sha256: sha(b"x"),
+        };
+        let r = download(
+            &client(),
+            &spec,
+            &dir.join("p"),
+            &dir.join("d"),
+            &AtomicBool::new(false),
+            &|_| None,
+            &mut |_| {},
+        )
+        .await;
         assert_eq!(r, Err(DownloadError::Http(500)));
         assert!(!dir.join("d").exists());
     }
@@ -480,7 +614,16 @@ mod tests {
     async fn not_enough_space_fails_before_any_request() {
         let f = fixture(body(1000), true, None).await;
         let mut phases = vec![];
-        let r = download(&client(), &f.spec, &f.dir.join("p"), &f.dir.join("d"), &AtomicBool::new(false), &|_| Some(0), &mut |p| phases.push(p)).await;
+        let r = download(
+            &client(),
+            &f.spec,
+            &f.dir.join("p"),
+            &f.dir.join("d"),
+            &AtomicBool::new(false),
+            &|_| Some(0),
+            &mut |p| phases.push(p),
+        )
+        .await;
         assert_eq!(r, Err(DownloadError::NoSpace));
         assert_eq!(f.hits.load(Ordering::SeqCst), 0);
     }
@@ -504,20 +647,31 @@ mod tests {
         let f = fixture(data.clone(), true, None).await;
         let cancel = AtomicBool::new(false);
         let mut seen = 0u64;
-        let r = download(&client(), &f.spec, &f.dir.join("m.gguf.part"), &f.dir.join("m.gguf"), &cancel, &|_| None, &mut |p| {
-            if let Phase::Downloading { downloaded, .. } = p {
-                seen = downloaded;
-                // 最初の進捗（0 バイト）の次に届いた、データを書いた通知で止める。
-                if downloaded > 0 {
-                    cancel.store(true, Ordering::SeqCst);
+        let r = download(
+            &client(),
+            &f.spec,
+            &f.dir.join("m.gguf.part"),
+            &f.dir.join("m.gguf"),
+            &cancel,
+            &|_| None,
+            &mut |p| {
+                if let Phase::Downloading { downloaded, .. } = p {
+                    seen = downloaded;
+                    // 最初の進捗（0 バイト）の次に届いた、データを書いた通知で止める。
+                    if downloaded > 0 {
+                        cancel.store(true, Ordering::SeqCst);
+                    }
                 }
-            }
-        })
+            },
+        )
         .await;
         assert_eq!(r, Err(DownloadError::Cancelled));
         assert!(seen > 0);
         let kept = std::fs::metadata(f.dir.join("m.gguf.part")).unwrap().len();
-        assert!(kept > 0 && kept <= data.len() as u64, "受け取った分は .part に残る（バッファに溜めたまま失わない）: {kept}");
+        assert!(
+            kept > 0 && kept <= data.len() as u64,
+            "受け取った分は .part に残る（バッファに溜めたまま失わない）: {kept}"
+        );
         assert!(!f.dir.join("m.gguf").exists());
         // 残った .part から再開して完走する。
         cancel.store(false, Ordering::SeqCst);
@@ -525,7 +679,14 @@ mod tests {
         r.unwrap();
         assert_eq!(std::fs::read(f.dir.join("m.gguf")).unwrap(), data);
         if kept < data.len() as u64 {
-            assert!(f.ranges.lock().unwrap().iter().any(|r| r.as_deref().is_some_and(|v| v.starts_with("bytes="))), "再開は Range で行う");
+            assert!(
+                f.ranges
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r.as_deref().is_some_and(|v| v.starts_with("bytes="))),
+                "再開は Range で行う"
+            );
         }
     }
 
@@ -536,7 +697,10 @@ mod tests {
         f.spec.size = 2000; // サーバーは 1000 バイトしか返さない
         let (r, _) = run(&f, &AtomicBool::new(false)).await;
         assert!(matches!(r, Err(DownloadError::Network(_))), "{r:?}");
-        assert_eq!(std::fs::metadata(f.dir.join("m.gguf.part")).unwrap().len(), 1000);
+        assert_eq!(
+            std::fs::metadata(f.dir.join("m.gguf.part")).unwrap().len(),
+            1000
+        );
     }
 
     /// 応答ヘッダが届くのを待っている間（接続確立中）でも、キャンセルが効く。
@@ -544,11 +708,19 @@ mod tests {
     async fn cancelling_while_waiting_for_the_response_returns_quickly() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(10)).set_body_bytes(vec![0u8; 10]))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(10))
+                    .set_body_bytes(vec![0u8; 10]),
+            )
             .mount(&server)
             .await;
         let dir = temp_dir();
-        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: 10, sha256: sha(&[0u8; 10]) };
+        let spec = ModelSpec {
+            url: format!("{}/m.gguf", server.uri()),
+            size: 10,
+            sha256: sha(&[0u8; 10]),
+        };
         let cancel = Arc::new(AtomicBool::new(false));
         let c = cancel.clone();
         tokio::spawn(async move {
@@ -556,9 +728,22 @@ mod tests {
             c.store(true, Ordering::SeqCst);
         });
         let t = std::time::Instant::now();
-        let r = download(&client(), &spec, &dir.join("p"), &dir.join("d"), &cancel, &|_| None, &mut |_| {}).await;
+        let r = download(
+            &client(),
+            &spec,
+            &dir.join("p"),
+            &dir.join("d"),
+            &cancel,
+            &|_| None,
+            &mut |_| {},
+        )
+        .await;
         assert_eq!(r, Err(DownloadError::Cancelled));
-        assert!(t.elapsed() < std::time::Duration::from_secs(3), "キャンセルが応答待ちで止まった: {:?}", t.elapsed());
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(3),
+            "キャンセルが応答待ちで止まった: {:?}",
+            t.elapsed()
+        );
     }
 
     /// 応答ヘッダが来ない接続は、一定時間でネットワークエラーにする（SYN が黙って落ちる回線など）。
@@ -566,11 +751,19 @@ mod tests {
     async fn a_response_that_never_arrives_times_out_as_a_network_error() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(10)).set_body_bytes(vec![0u8; 10]))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(10))
+                    .set_body_bytes(vec![0u8; 10]),
+            )
             .mount(&server)
             .await;
         let dir = temp_dir();
-        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: 10, sha256: sha(&[0u8; 10]) };
+        let spec = ModelSpec {
+            url: format!("{}/m.gguf", server.uri()),
+            size: 10,
+            sha256: sha(&[0u8; 10]),
+        };
         let t = std::time::Instant::now();
         let r = download_with_stall(
             &client(),
@@ -584,33 +777,62 @@ mod tests {
         )
         .await;
         assert_eq!(r, Err(DownloadError::Network("timeout".into())));
-        assert!(t.elapsed() < std::time::Duration::from_secs(3), "{:?}", t.elapsed());
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(3),
+            "{:?}",
+            t.elapsed()
+        );
     }
 
     /// Range を付けても付けなくても、Content-Range の無い 206 を返すサーバー。
     #[tokio::test]
     async fn a_206_without_content_range_twice_is_reported_as_a_bad_response() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(206).set_body_bytes(vec![1u8; 10])).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(206).set_body_bytes(vec![1u8; 10]))
+            .mount(&server)
+            .await;
         let dir = temp_dir();
         std::fs::write(dir.join("p"), [1u8; 4]).unwrap();
-        let spec = ModelSpec { url: format!("{}/m.gguf", server.uri()), size: 10, sha256: sha(&[1u8; 10]) };
-        let r = download(&client(), &spec, &dir.join("p"), &dir.join("d"), &AtomicBool::new(false), &|_| None, &mut |_| {}).await;
+        let spec = ModelSpec {
+            url: format!("{}/m.gguf", server.uri()),
+            size: 10,
+            sha256: sha(&[1u8; 10]),
+        };
+        let r = download(
+            &client(),
+            &spec,
+            &dir.join("p"),
+            &dir.join("d"),
+            &AtomicBool::new(false),
+            &|_| None,
+            &mut |_| {},
+        )
+        .await;
         assert_eq!(r, Err(DownloadError::BadResponse));
-        assert!(DownloadError::BadResponse.reason().contains("応答"), "HTTP 206 のような番号を見せない");
+        assert!(
+            DownloadError::BadResponse.reason().contains("応答"),
+            "HTTP 206 のような番号を見せない"
+        );
     }
 
     #[test]
     fn log_tags_name_the_failure_without_urls_or_paths() {
         assert_eq!(DownloadError::Http(503).log_tag(), "http 503");
-        assert_eq!(DownloadError::Network("timeout".into()).log_tag(), "network timeout");
+        assert_eq!(
+            DownloadError::Network("timeout".into()).log_tag(),
+            "network timeout"
+        );
         assert_eq!(DownloadError::HashMismatch.log_tag(), "hash mismatch");
         assert_eq!(DownloadError::NoSpace.log_tag(), "no space");
         assert_eq!(DownloadError::BadResponse.log_tag(), "bad response");
         assert_eq!(DownloadError::Cancelled.log_tag(), "cancelled");
         assert_eq!(DownloadError::SizeMismatch.log_tag(), "size mismatch");
         // Io は種別だけ（`io::Error` の文字列は渡さない）。
-        assert_eq!(DownloadError::Io("No space left on device (os error 28)".into()).log_tag(), "io");
+        assert_eq!(
+            DownloadError::Io("No space left on device (os error 28)".into()).log_tag(),
+            "io"
+        );
     }
 
     #[test]
@@ -627,7 +849,10 @@ mod tests {
         ] {
             let r = e.reason();
             assert!(!r.is_empty());
-            assert!(!r.contains("secret.example") && !r.contains("/home/"), "{r}");
+            assert!(
+                !r.contains("secret.example") && !r.contains("/home/"),
+                "{r}"
+            );
         }
         assert!(DownloadError::Http(503).reason().contains("503"));
     }

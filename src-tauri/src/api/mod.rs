@@ -9,13 +9,13 @@ pub mod client;
 pub mod clips;
 pub mod drafts;
 pub mod drive;
+pub mod hashtags;
 pub mod meta;
 pub mod mutes;
+pub mod normalize;
 pub mod notes;
 pub mod notifications;
-pub mod hashtags;
-pub mod users;
 pub mod url_preview;
-pub mod normalize;
+pub mod users;
 
 pub use client::MisskeyClient;

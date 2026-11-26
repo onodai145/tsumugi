@@ -31,26 +31,52 @@ impl SpeechCore {
     pub fn new(root: PathBuf, http: reqwest::Client) -> Self {
         let assets = catalog::engine_assets();
         let store = Arc::new(Store::new(root));
-        let engine = CoreEngine::new(store.clone(), assets.clone(), native_factory(store.clone(), assets.clone()));
+        let engine = CoreEngine::new(
+            store.clone(),
+            assets.clone(),
+            native_factory(store.clone(), assets.clone()),
+        );
         let packs = Arc::new(Packs::new(store.clone(), assets, http, engine.clone()));
-        Self { store, engine, packs }
+        Self {
+            store,
+            engine,
+            packs,
+        }
     }
 
     /// 非対応(テスト・`AppState::new` の既定)。何もディスクに書かず、取得もできない。
     pub fn unconfigured() -> Self {
-        let store = Arc::new(Store::new(std::env::temp_dir().join("tsumugi-voicevox-unconfigured")));
+        let store = Arc::new(Store::new(
+            std::env::temp_dir().join("tsumugi-voicevox-unconfigured"),
+        ));
         let factory: BackendFactory = Arc::new(|| Err(CoreError::Load("unconfigured".into())));
         let engine = CoreEngine::new(store.clone(), None, factory);
-        let packs = Arc::new(Packs::new(store.clone(), None, reqwest::Client::new(), engine.clone()));
-        Self { store, engine, packs }
+        let packs = Arc::new(Packs::new(
+            store.clone(),
+            None,
+            reqwest::Client::new(),
+            engine.clone(),
+        ));
+        Self {
+            store,
+            engine,
+            packs,
+        }
     }
 }
 
 #[cfg(not(target_os = "ios"))]
 fn native_factory(store: Arc<Store>, assets: Option<EngineAssets>) -> BackendFactory {
     Arc::new(move || {
-        let a = assets.as_ref().ok_or_else(|| CoreError::Load("unsupported platform".into()))?;
-        let core = ffi::NativeCore::load(&store.core_lib(a), &store.ort_lib(a), &store.dict_dir(), ffi::default_cpu_threads())?;
+        let a = assets
+            .as_ref()
+            .ok_or_else(|| CoreError::Load("unsupported platform".into()))?;
+        let core = ffi::NativeCore::load(
+            &store.core_lib(a),
+            &store.ort_lib(a),
+            &store.dict_dir(),
+            ffi::default_cpu_threads(),
+        )?;
         Ok(Arc::new(core) as Arc<dyn CoreBackend>)
     })
 }
@@ -63,8 +89,8 @@ fn native_factory(_store: Arc<Store>, _assets: Option<EngineAssets>) -> BackendF
 #[cfg(all(test, desktop))]
 mod real_tests {
     use super::*;
-    use crate::tts::engine::{SpeechEngine, SynthParams};
     use crate::translate::model_store::LocalModelStatus;
+    use crate::tts::engine::{SpeechEngine, SynthParams};
     use packs::PackKey;
     use std::time::Duration;
 
@@ -74,7 +100,10 @@ mod real_tests {
     #[tokio::test]
     #[ignore]
     async fn real_end_to_end() {
-        let root = PathBuf::from(std::env::var("TSUMUGI_TEST_CORE_ROOT").expect("TSUMUGI_TEST_CORE_ROOT を設定してください"));
+        let root = PathBuf::from(
+            std::env::var("TSUMUGI_TEST_CORE_ROOT")
+                .expect("TSUMUGI_TEST_CORE_ROOT を設定してください"),
+        );
         let core = SpeechCore::new(root, reqwest::Client::new());
         let notify: packs::Notify = Arc::new(|| {});
         for key in [PackKey::Engine, PackKey::Voice("0".into())] {
@@ -91,22 +120,105 @@ mod real_tests {
             .expect("取得が終わらない");
         }
         let snap = core.packs.snapshot();
-        assert_eq!(snap.engine.status, LocalModelStatus::Ready, "{:?}", snap.engine.status);
-        assert_eq!(snap.voices[0].pack.status, LocalModelStatus::Ready, "{:?}", snap.voices[0].pack.status);
+        assert_eq!(
+            snap.engine.status,
+            LocalModelStatus::Ready,
+            "{:?}",
+            snap.engine.status
+        );
+        assert_eq!(
+            snap.voices[0].pack.status,
+            LocalModelStatus::Ready,
+            "{:?}",
+            snap.voices[0].pack.status
+        );
 
-        let wav = core.engine.synthesize("この音声は、ボイスボックスを使用して、出力されています。", "3", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap();
+        let wav = core
+            .engine
+            .synthesize(
+                "この音声は、ボイスボックスを使用して、出力されています。",
+                "3",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(&wav[..4], b"RIFF");
         assert!(wav.len() > 100_000, "{}", wav.len());
-        let fast = core.engine.synthesize("この音声は、ボイスボックスを使用して、出力されています。", "3", &SynthParams { speed_scale: 2.0, volume: 1.0 }).await.unwrap();
-        assert!(fast.len() < wav.len() * 3 / 4, "話速 2.0 は、1.0 より十分短い: {} vs {}", fast.len(), wav.len());
-        let quiet = core.engine.synthesize("あ", "3", &SynthParams { speed_scale: 1.0, volume: 0.1 }).await.unwrap();
-        let loud = core.engine.synthesize("あ", "3", &SynthParams { speed_scale: 1.0, volume: 2.0 }).await.unwrap();
-        let peak = |w: &[u8]| w[44..].chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]).unsigned_abs()).max().unwrap_or(0);
-        assert!(peak(&quiet) < peak(&loud), "音量が効く: {} vs {}", peak(&quiet), peak(&loud));
+        let fast = core
+            .engine
+            .synthesize(
+                "この音声は、ボイスボックスを使用して、出力されています。",
+                "3",
+                &SynthParams {
+                    speed_scale: 2.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            fast.len() < wav.len() * 3 / 4,
+            "話速 2.0 は、1.0 より十分短い: {} vs {}",
+            fast.len(),
+            wav.len()
+        );
+        let quiet = core
+            .engine
+            .synthesize(
+                "あ",
+                "3",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 0.1,
+                },
+            )
+            .await
+            .unwrap();
+        let loud = core
+            .engine
+            .synthesize(
+                "あ",
+                "3",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 2.0,
+                },
+            )
+            .await
+            .unwrap();
+        let peak = |w: &[u8]| {
+            w[44..]
+                .chunks_exact(2)
+                .map(|c| i16::from_le_bytes([c[0], c[1]]).unsigned_abs())
+                .max()
+                .unwrap_or(0)
+        };
+        assert!(
+            peak(&quiet) < peak(&loud),
+            "音量が効く: {} vs {}",
+            peak(&quiet),
+            peak(&loud)
+        );
         assert!(!core.engine.voices().await.unwrap().is_empty());
 
         // 取得していない声は、エンジンが動いていても、`ERR_NOT_READY`。
-        let r = core.engine.synthesize("a", "14", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await;
-        assert!(matches!(r, Err(crate::error::Error::Invalid(ref m)) if m == crate::tts::ERR_NOT_READY), "{r:?}");
+        let r = core
+            .engine
+            .synthesize(
+                "a",
+                "14",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await;
+        assert!(
+            matches!(r, Err(crate::error::Error::Invalid(ref m)) if m == crate::tts::ERR_NOT_READY),
+            "{r:?}"
+        );
     }
 }

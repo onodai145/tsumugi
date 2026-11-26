@@ -6,7 +6,9 @@ use super::ffi::{CoreBackend, CoreError};
 use super::store::Store;
 use crate::error::Result;
 use crate::tts::engine::{SpeechEngine, SynthParams, Voice};
-use crate::tts::{invalid, ERR_BAD_RESPONSE, ERR_ENGINE_LOAD, ERR_NOT_READY, ERR_NO_VOICE, ERR_UNSUPPORTED};
+use crate::tts::{
+    invalid, ERR_BAD_RESPONSE, ERR_ENGINE_LOAD, ERR_NOT_READY, ERR_NO_VOICE, ERR_UNSUPPORTED,
+};
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,7 +27,8 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-pub type BackendFactory = Arc<dyn Fn() -> std::result::Result<Arc<dyn CoreBackend>, CoreError> + Send + Sync>;
+pub type BackendFactory =
+    Arc<dyn Fn() -> std::result::Result<Arc<dyn CoreBackend>, CoreError> + Send + Sync>;
 
 struct Inner {
     store: Arc<Store>,
@@ -152,7 +155,8 @@ fn core_err(e: CoreError) -> crate::error::Error {
 
 /// AudioQuery に、話速と音量を設定する。
 fn apply_params(query_json: &str, p: &SynthParams) -> Result<String> {
-    let mut q: serde_json::Value = serde_json::from_str(query_json).map_err(|_| invalid(ERR_BAD_RESPONSE))?;
+    let mut q: serde_json::Value =
+        serde_json::from_str(query_json).map_err(|_| invalid(ERR_BAD_RESPONSE))?;
     let obj = q.as_object_mut().ok_or_else(|| invalid(ERR_BAD_RESPONSE))?;
     obj.insert("speedScale".into(), serde_json::json!(p.speed_scale));
     obj.insert("volumeScale".into(), serde_json::json!(p.volume));
@@ -170,7 +174,10 @@ impl SpeechEngine for CoreEngine {
             }
             for c in &v.characters {
                 for s in &c.styles {
-                    out.push(Voice { id: s.id.to_string(), label: format!("{}（{}）", c.name, s.name) });
+                    out.push(Voice {
+                        id: s.id.to_string(),
+                        label: format!("{}（{}）", c.name, s.name),
+                    });
                 }
             }
         }
@@ -180,9 +187,18 @@ impl SpeechEngine for CoreEngine {
     async fn synthesize(&self, text: &str, voice_id: &str, p: &SynthParams) -> Result<Vec<u8>> {
         // 声の ID は、スタイル ID の数値。空・数値でない・カタログにない ID は、ロードより前に弾く。
         let style: u32 = voice_id.trim().parse().map_err(|_| invalid(ERR_NO_VOICE))?;
-        let (vvm, _, _) = catalog().voice(style).ok_or_else(|| invalid(ERR_NO_VOICE))?;
-        let assets = self.inner.assets.as_ref().ok_or_else(|| invalid(ERR_UNSUPPORTED))?;
-        if self.inner.paused.load(Ordering::SeqCst) || !self.inner.store.engine_ready(assets) || !self.inner.store.vvm_ready(vvm) {
+        let (vvm, _, _) = catalog()
+            .voice(style)
+            .ok_or_else(|| invalid(ERR_NO_VOICE))?;
+        let assets = self
+            .inner
+            .assets
+            .as_ref()
+            .ok_or_else(|| invalid(ERR_UNSUPPORTED))?;
+        if self.inner.paused.load(Ordering::SeqCst)
+            || !self.inner.store.engine_ready(assets)
+            || !self.inner.store.vvm_ready(vvm)
+        {
             return Err(invalid(ERR_NOT_READY));
         }
         let vvm_path = self.inner.store.vvm_path(&vvm.id);
@@ -232,9 +248,15 @@ mod tests {
             Ok(())
         }
         fn audio_query(&self, text: &str, style_id: u32) -> std::result::Result<String, CoreError> {
-            Ok(format!(r#"{{"speedScale":1.0,"volumeScale":1.0,"text":"{text}","style":{style_id}}}"#))
+            Ok(format!(
+                r#"{{"speedScale":1.0,"volumeScale":1.0,"text":"{text}","style":{style_id}}}"#
+            ))
         }
-        fn synthesis(&self, query_json: &str, _style_id: u32) -> std::result::Result<Vec<u8>, CoreError> {
+        fn synthesis(
+            &self,
+            query_json: &str,
+            _style_id: u32,
+        ) -> std::result::Result<Vec<u8>, CoreError> {
             if self.panic_in_synthesis.load(Ordering::SeqCst) {
                 panic!("boom");
             }
@@ -268,11 +290,19 @@ mod tests {
             c.fetch_add(1, Ordering::SeqCst);
             Ok(f.clone() as Arc<dyn CoreBackend>)
         });
-        Setup { engine: CoreEngine::new(store.clone(), assets, factory), fake, factory_calls, store }
+        Setup {
+            engine: CoreEngine::new(store.clone(), assets, factory),
+            fake,
+            factory_calls,
+            store,
+        }
     }
 
     fn params() -> SynthParams {
-        SynthParams { speed_scale: 1.5, volume: 0.8 }
+        SynthParams {
+            speed_scale: 1.5,
+            volume: 0.8,
+        }
     }
 
     fn code(r: Result<Vec<u8>>) -> String {
@@ -285,10 +315,19 @@ mod tests {
     #[tokio::test]
     async fn it_synthesizes_with_the_speed_and_volume_applied() {
         let s = setup(true);
-        let wav = s.engine.synthesize("こんにちは", "3", &params()).await.unwrap();
+        let wav = s
+            .engine
+            .synthesize("こんにちは", "3", &params())
+            .await
+            .unwrap();
         assert_eq!(wav, b"RIFFfake");
-        assert_eq!(*s.fake.loaded.lock().unwrap(), vec![s.store.vvm_path("0")], "声が入っている VVM をロードする");
-        let q: serde_json::Value = serde_json::from_str(&s.fake.queries.lock().unwrap()[0]).unwrap();
+        assert_eq!(
+            *s.fake.loaded.lock().unwrap(),
+            vec![s.store.vvm_path("0")],
+            "声が入っている VVM をロードする"
+        );
+        let q: serde_json::Value =
+            serde_json::from_str(&s.fake.queries.lock().unwrap()[0]).unwrap();
         assert_eq!(q["speedScale"].as_f64().unwrap(), 1.5);
         assert!((q["volumeScale"].as_f64().unwrap() - 0.8).abs() < 1e-6);
         assert_eq!(q["style"], 3);
@@ -299,7 +338,11 @@ mod tests {
     async fn a_bad_voice_id_is_no_voice_and_never_touches_the_backend() {
         let s = setup(true);
         for id in ["", "  ", "abc", "-1", "3.5", "99999999999", "99999"] {
-            assert_eq!(code(s.engine.synthesize("a", id, &params()).await), crate::tts::ERR_NO_VOICE, "{id:?}");
+            assert_eq!(
+                code(s.engine.synthesize("a", id, &params()).await),
+                crate::tts::ERR_NO_VOICE,
+                "{id:?}"
+            );
         }
         assert_eq!(s.factory_calls.load(Ordering::SeqCst), 0, "ロードもしない");
     }
@@ -307,10 +350,16 @@ mod tests {
     #[tokio::test]
     async fn a_missing_engine_or_voice_model_is_not_ready() {
         let s = setup(false);
-        assert_eq!(code(s.engine.synthesize("a", "3", &params()).await), crate::tts::ERR_NOT_READY);
+        assert_eq!(
+            code(s.engine.synthesize("a", "3", &params()).await),
+            crate::tts::ERR_NOT_READY
+        );
         // エンジン一式だけ取得済みで、その声の VVM がない。
         install_fake_engine(&s.store, &engine_assets_for("linux", "x86_64").unwrap());
-        assert_eq!(code(s.engine.synthesize("a", "3", &params()).await), crate::tts::ERR_NOT_READY);
+        assert_eq!(
+            code(s.engine.synthesize("a", "3", &params()).await),
+            crate::tts::ERR_NOT_READY
+        );
         assert_eq!(s.factory_calls.load(Ordering::SeqCst), 0);
     }
 
@@ -319,7 +368,10 @@ mod tests {
         let store = Arc::new(Store::new(temp_root()));
         let factory: BackendFactory = Arc::new(|| Err(CoreError::Load("never".into())));
         let engine = CoreEngine::new(store, None, factory);
-        assert_eq!(code(engine.synthesize("a", "3", &params()).await), crate::tts::ERR_UNSUPPORTED);
+        assert_eq!(
+            code(engine.synthesize("a", "3", &params()).await),
+            crate::tts::ERR_UNSUPPORTED
+        );
         assert!(engine.voices().await.unwrap().is_empty());
     }
 
@@ -341,8 +393,14 @@ mod tests {
             }
         });
         let engine = CoreEngine::new(store, assets, factory);
-        assert_eq!(code(engine.synthesize("a", "3", &params()).await), crate::tts::ERR_ENGINE_LOAD);
-        assert!(engine.synthesize("a", "3", &params()).await.is_ok(), "次の合成で再試行する");
+        assert_eq!(
+            code(engine.synthesize("a", "3", &params()).await),
+            crate::tts::ERR_ENGINE_LOAD
+        );
+        assert!(
+            engine.synthesize("a", "3", &params()).await.is_ok(),
+            "次の合成で再試行する"
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
@@ -350,28 +408,52 @@ mod tests {
     async fn a_synthesis_failure_is_a_bad_response_and_a_panic_does_not_escape() {
         let s = setup(true);
         s.fake.fail_synthesis.store(true, Ordering::SeqCst);
-        assert_eq!(code(s.engine.synthesize("a", "3", &params()).await), crate::tts::ERR_BAD_RESPONSE);
+        assert_eq!(
+            code(s.engine.synthesize("a", "3", &params()).await),
+            crate::tts::ERR_BAD_RESPONSE
+        );
         s.fake.fail_synthesis.store(false, Ordering::SeqCst);
         s.fake.panic_in_synthesis.store(true, Ordering::SeqCst);
-        assert_eq!(code(s.engine.synthesize("a", "3", &params()).await), crate::tts::ERR_ENGINE_LOAD, "ネイティブ側の panic は Err にする");
+        assert_eq!(
+            code(s.engine.synthesize("a", "3", &params()).await),
+            crate::tts::ERR_ENGINE_LOAD,
+            "ネイティブ側の panic は Err にする"
+        );
         s.fake.panic_in_synthesis.store(false, Ordering::SeqCst);
-        assert!(s.engine.synthesize("a", "3", &params()).await.is_ok(), "panic のあとも使える");
+        assert!(
+            s.engine.synthesize("a", "3", &params()).await.is_ok(),
+            "panic のあとも使える"
+        );
     }
 
     #[tokio::test]
     async fn voices_lists_only_the_installed_voice_models() {
         let s = setup(true);
         let voices = s.engine.voices().await.unwrap();
-        assert!(voices.iter().any(|v| v.id == "3" && v.label == "ずんだもん（ノーマル）"));
+        assert!(voices
+            .iter()
+            .any(|v| v.id == "3" && v.label == "ずんだもん（ノーマル）"));
         assert!(!voices.iter().any(|v| v.id == "14"), "VVM 1 は未取得");
-        assert_eq!(voices.len(), catalog().vvm("0").unwrap().characters.iter().map(|c| c.styles.len()).sum::<usize>());
+        assert_eq!(
+            voices.len(),
+            catalog()
+                .vvm("0")
+                .unwrap()
+                .characters
+                .iter()
+                .map(|c| c.styles.len())
+                .sum::<usize>()
+        );
     }
 
     #[tokio::test]
     async fn a_paused_engine_reports_not_ready_and_never_loads_until_resumed() {
         let s = setup(true);
         s.engine.set_paused(true);
-        assert_eq!(code(s.engine.synthesize("a", "3", &params()).await), crate::tts::ERR_NOT_READY);
+        assert_eq!(
+            code(s.engine.synthesize("a", "3", &params()).await),
+            crate::tts::ERR_NOT_READY
+        );
         assert_eq!(s.factory_calls.load(Ordering::SeqCst), 0);
         s.engine.set_paused(false);
         assert!(s.engine.synthesize("a", "3", &params()).await.is_ok());
@@ -397,7 +479,10 @@ mod tests {
         s.engine.synthesize("a", "3", &params()).await.unwrap();
         let busy = InFlight::new(&s.engine.inner);
         let idle = Duration::from_secs(1);
-        assert!(!s.engine.unload_if_idle(Instant::now() + idle * 10, idle), "合成の最中は解放しない");
+        assert!(
+            !s.engine.unload_if_idle(Instant::now() + idle * 10, idle),
+            "合成の最中は解放しない"
+        );
         drop(busy);
         assert!(s.engine.unload_if_idle(Instant::now() + idle * 10, idle));
     }
@@ -406,14 +491,26 @@ mod tests {
     async fn the_backend_is_unloaded_when_idle_and_loaded_again_on_demand() {
         let s = setup(true);
         let idle = Duration::from_secs(600);
-        assert!(!s.engine.unload_if_idle(Instant::now() + idle * 2, idle), "まだ何もロードしていない");
+        assert!(
+            !s.engine.unload_if_idle(Instant::now() + idle * 2, idle),
+            "まだ何もロードしていない"
+        );
         s.engine.synthesize("a", "3", &params()).await.unwrap();
         assert!(s.engine.is_loaded());
-        assert!(!s.engine.unload_if_idle(Instant::now(), idle), "使った直後は解放しない");
-        assert!(s.engine.unload_if_idle(Instant::now() + idle + Duration::from_secs(1), idle));
+        assert!(
+            !s.engine.unload_if_idle(Instant::now(), idle),
+            "使った直後は解放しない"
+        );
+        assert!(s
+            .engine
+            .unload_if_idle(Instant::now() + idle + Duration::from_secs(1), idle));
         assert!(!s.engine.is_loaded());
         s.engine.synthesize("a", "3", &params()).await.unwrap();
-        assert_eq!(s.factory_calls.load(Ordering::SeqCst), 2, "必要になったら、また作る");
+        assert_eq!(
+            s.factory_calls.load(Ordering::SeqCst),
+            2,
+            "必要になったら、また作る"
+        );
         s.engine.unload();
         assert!(!s.engine.is_loaded());
     }

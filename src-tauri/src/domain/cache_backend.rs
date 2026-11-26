@@ -7,8 +7,18 @@ use specta::Type;
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CacheBackendConfig {
     Sqlite,
-    Postgres { host: String, port: u16, database: String, user: String },
-    MySql { host: String, port: u16, database: String, user: String },
+    Postgres {
+        host: String,
+        port: u16,
+        database: String,
+        user: String,
+    },
+    MySql {
+        host: String,
+        port: u16,
+        database: String,
+        user: String,
+    },
 }
 
 impl Default for CacheBackendConfig {

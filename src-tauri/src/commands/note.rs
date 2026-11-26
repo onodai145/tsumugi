@@ -101,7 +101,11 @@ pub async fn unreact(
 
 /// `unreact` の中核ロジック。`tauri::State`(テストから構築不可)を経由せず単体テスト可能にする
 /// (`commands/mute.rs::sync_server_mutes_core` と同じ狙い)。
-async fn unreact_core(state: &AppState, note_id: &str, client: &crate::api::MisskeyClient) -> Result<()> {
+async fn unreact_core(
+    state: &AppState,
+    note_id: &str,
+    client: &crate::api::MisskeyClient,
+) -> Result<()> {
     match delete_reaction(client, note_id).await {
         Ok(()) => {}
         Err(Error::Api(detail)) if detail.contains("NOT_REACTED") => {}
@@ -210,7 +214,10 @@ pub(crate) fn effective_translate_engine(prefs: &UiPrefs) -> TranslateEngine {
 /// NoteMenu の「翻訳」項目を出すか（Issue #440、#603）。サーバー翻訳のときは、接続先サーバーで翻訳が使えるとき
 /// だけ true。ローカル翻訳のときは、このビルド・プラットフォームが対応しているとき true（モデル未取得でも true:
 /// 押したときに「モデルを取得してください」と案内するほうが、項目が消えるより分かりやすい）。
-pub(crate) async fn get_translator_available_core(state: &AppState, account_id: &str) -> Result<bool> {
+pub(crate) async fn get_translator_available_core(
+    state: &AppState,
+    account_id: &str,
+) -> Result<bool> {
     match effective_translate_engine(&state.settings.load_ui()?) {
         TranslateEngine::Server => translator_available_for(state, account_id).await,
         TranslateEngine::Local => Ok(crate::translate::is_supported()),
@@ -254,7 +261,10 @@ pub(crate) async fn translate_note_core(
             let plamo_lang = crate::translate::lang::to_plamo_lang(&lang)
                 .ok_or_else(|| crate::translate::invalid(crate::translate::ERR_LANG_UNSUPPORTED))?;
             let out = state.local_translate.translate(text, plamo_lang).await?;
-            Ok(Some(Translation { source_lang: None, text: out }))
+            Ok(Some(Translation {
+                source_lang: None,
+                text: out,
+            }))
         }
     }
 }
@@ -306,7 +316,10 @@ pub async fn upload_file(
 ) -> Result<DriveFile> {
     let (host, token) = state.host_token(&account_id)?;
     let bytes = crate::commands::mute::read_file_bytes(&app, &path).await?;
-    let filename = app.path().file_name(&path).unwrap_or_else(|| "file".to_string());
+    let filename = app
+        .path()
+        .file_name(&path)
+        .unwrap_or_else(|| "file".to_string());
     let filename = ensure_extension(filename, &bytes);
     api_upload_bytes(&state.http, &host, &token, bytes, filename).await
 }
@@ -414,7 +427,10 @@ pub async fn read_clipboard_image(app: AppHandle) -> Result<ClipboardImage> {
         .unwrap_or(0);
     let filename = clipboard_filename(millis);
 
-    Ok(ClipboardImage { filename, bytes: png_bytes })
+    Ok(ClipboardImage {
+        filename,
+        bytes: png_bytes,
+    })
 }
 
 /// ファイルマネージャでコピーしたファイルのパス一覧を返す(アップロードはしない。Issue #117)。
@@ -427,12 +443,13 @@ pub async fn read_clipboard_image(app: AppHandle) -> Result<ClipboardImage> {
 pub async fn read_clipboard_files() -> Result<Vec<String>> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        let read = tauri::async_runtime::spawn_blocking(|| -> std::result::Result<Vec<String>, String> {
-            use clipboard_rs::Clipboard;
-            let ctx = clipboard_rs::ClipboardContext::new().map_err(|e| e.to_string())?;
-            ctx.get_files().map_err(|e| e.to_string())
-        })
-        .await;
+        let read =
+            tauri::async_runtime::spawn_blocking(|| -> std::result::Result<Vec<String>, String> {
+                use clipboard_rs::Clipboard;
+                let ctx = clipboard_rs::ClipboardContext::new().map_err(|e| e.to_string())?;
+                ctx.get_files().map_err(|e| e.to_string())
+            })
+            .await;
         match read {
             Ok(Ok(uris)) => Ok(file_uris_to_paths(&uris)),
             // 「クリップボードにファイル参照が無い」だけでも Err になりうる(画像貼り付けのたびに
@@ -459,9 +476,11 @@ pub async fn read_clipboard_files() -> Result<Vec<String>> {
 #[tauri::command]
 #[specta::specta]
 pub async fn read_clipboard_text(app: AppHandle) -> Result<String> {
-    let text = tauri::async_runtime::spawn_blocking(move || app.clipboard().read_text().unwrap_or_default())
-        .await
-        .unwrap_or_default();
+    let text = tauri::async_runtime::spawn_blocking(move || {
+        app.clipboard().read_text().unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
     Ok(text)
 }
 
@@ -479,7 +498,9 @@ async fn fetch_guarded_bytes(
     url: &str,
 ) -> Result<Vec<u8>> {
     let blocked = || {
-        Error::Invalid("取得先が許可されていません(ローカル/社内ネットワークのアドレス)".to_string())
+        Error::Invalid(
+            "取得先が許可されていません(ローカル/社内ネットワークのアドレス)".to_string(),
+        )
     };
     let parsed = url::Url::parse(url).map_err(|e| Error::Invalid(format!("invalid url: {e}")))?;
     if let Err(b) = crate::net_guard::validate_url(&parsed, allow) {
@@ -494,7 +515,10 @@ async fn fetch_guarded_bytes(
         }
     })?;
     if !resp.status().is_success() {
-        return Err(Error::Api(format!("failed to fetch file: {}", resp.status())));
+        return Err(Error::Api(format!(
+            "failed to fetch file: {}",
+            resp.status()
+        )));
     }
     read_body_limited(resp, MAX_SAVE_FILE_BYTES).await
 }
@@ -502,7 +526,12 @@ async fn fetch_guarded_bytes(
 /// 応答の本文を `max` バイトまで読む。`Content-Length` があれば読む前に拒否し、無い(chunked 等の)応答や
 /// 嘘のヘッダでも、累計が `max` を超えた時点で読むのをやめる(全量をバッファしてから比べない。Issue #607)。
 async fn read_body_limited(resp: reqwest::Response, max: u64) -> Result<Vec<u8>> {
-    let too_large = || Error::Invalid(format!("ファイルが大きすぎます（{}MB超）", max / 1024 / 1024));
+    let too_large = || {
+        Error::Invalid(format!(
+            "ファイルが大きすぎます（{}MB超）",
+            max / 1024 / 1024
+        ))
+    };
     if resp.content_length().is_some_and(|len| len > max) {
         return Err(too_large());
     }
@@ -538,7 +567,10 @@ pub async fn save_url_to_file(
 /// fetch()で直接バイト列を読めない（<audio>再生自体はCORS制約を受けないため
 /// 別問題）。Rust側でCORSに縛られずダウンロードし、ArrayBufferとしてそのまま渡す。
 #[tauri::command]
-pub async fn fetch_url_bytes(state: State<'_, AppState>, url: String) -> Result<tauri::ipc::Response> {
+pub async fn fetch_url_bytes(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<tauri::ipc::Response> {
     let bytes = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &url).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
@@ -596,8 +628,9 @@ fn encode_png_rgba(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
 
 /// ミリ秒Unix時刻から `clipboard-YYYYMMDD-HHMMSS-mmm.png` 形式のファイル名を生成する(UTC基準)。
 fn clipboard_filename(millis: i64) -> String {
-    let dt = chrono::DateTime::from_timestamp_millis(millis)
-        .unwrap_or_else(|| chrono::DateTime::from_timestamp_millis(0).expect("timestamp 0 is valid"));
+    let dt = chrono::DateTime::from_timestamp_millis(millis).unwrap_or_else(|| {
+        chrono::DateTime::from_timestamp_millis(0).expect("timestamp 0 is valid")
+    });
     format!("clipboard-{}.png", dt.format("%Y%m%d-%H%M%S-%3f"))
 }
 
@@ -613,7 +646,10 @@ fn file_uris_to_paths(entries: &[String]) -> Vec<String> {
         .iter()
         .filter_map(|entry| {
             let entry = entry.trim();
-            let path = if entry.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("file:")) {
+            let path = if entry
+                .get(..5)
+                .is_some_and(|s| s.eq_ignore_ascii_case("file:"))
+            {
                 let url = url::Url::parse(entry).ok()?;
                 // 空ホストと localhost は許可。それ以外(file://host/... や Windows の UNC)は除外する。
                 if !matches!(url.host_str(), None | Some("") | Some("localhost")) {
@@ -714,10 +750,19 @@ pub(crate) async fn fetch_url_preview_core(
     } else {
         configured.to_string()
     };
-    let result = fetch_url_preview_api(&state.preview_http, &state.preview_allowlist, &proxy_base, url).await;
+    let result = fetch_url_preview_api(
+        &state.preview_http,
+        &state.preview_allowlist,
+        &proxy_base,
+        url,
+    )
+    .await;
     match result {
         // インポート由来の取得先だけ、保存し直すと使えることを案内する(手入力の取得先は直らない)。
-        Err(Error::Invalid(m)) if m == crate::api::url_preview::BLOCKED_MESSAGE && state.settings.summaly_proxy_imported() => {
+        Err(Error::Invalid(m))
+            if m == crate::api::url_preview::BLOCKED_MESSAGE
+                && state.settings.summaly_proxy_imported() =>
+        {
             Err(Error::Invalid(format!(
                 "{m}。インポートした設定の取得先は、設定の外部連携で保存し直すと使えます"
             )))
@@ -746,32 +791,54 @@ mod tests {
     #[tokio::test]
     async fn fetch_guarded_bytes_returns_body_for_allowed_host() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/f")).respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8, 2, 3])).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/f"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8, 2, 3]))
+            .mount(&server)
+            .await;
         let allow = allow_localhost(&server);
         let url = format!("http://localhost:{}/f", server.address().port());
-        let bytes = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap();
+        let bytes = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url)
+            .await
+            .unwrap();
         assert_eq!(bytes, vec![1u8, 2, 3]);
     }
 
     #[tokio::test]
     async fn fetch_guarded_bytes_rejects_ip_literal_without_connecting() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
         let allow = crate::net_guard::FetchAllowlist::default();
         let url = format!("http://127.0.0.1:{}/f", server.address().port());
-        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")),
+            "unexpected: {err:?}"
+        );
         assert!(server.received_requests().await.unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn fetch_guarded_bytes_rejects_hostname_resolving_to_loopback() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
         let allow = crate::net_guard::FetchAllowlist::default();
         let url = format!("http://localhost:{}/f", server.address().port());
-        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")),
+            "unexpected: {err:?}"
+        );
         assert!(server.received_requests().await.unwrap().is_empty());
     }
 
@@ -779,28 +846,43 @@ mod tests {
     async fn fetch_guarded_bytes_rejects_other_port_of_allowlisted_host() {
         let allowed = MockServer::start().await;
         let other = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&other).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&other)
+            .await;
         let allow = allow_localhost(&allowed);
         let url = format!("http://localhost:{}/f", other.address().port());
-        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")),
+            "unexpected: {err:?}"
+        );
         assert!(other.received_requests().await.unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn fetch_guarded_bytes_rejects_unparsable_url() {
         let allow = crate::net_guard::FetchAllowlist::default();
-        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, "not a url").await.unwrap_err();
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, "not a url")
+            .await
+            .unwrap_err();
         assert!(matches!(err, Error::Invalid(_)), "unexpected: {err:?}");
     }
 
     #[tokio::test]
     async fn fetch_guarded_bytes_maps_http_error_status() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(404)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
         let allow = allow_localhost(&server);
         let url = format!("http://localhost:{}/missing", server.address().port());
-        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url)
+            .await
+            .unwrap_err();
         assert!(matches!(err, Error::Api(_)), "unexpected: {err:?}");
     }
 
@@ -808,11 +890,19 @@ mod tests {
     async fn fetch_guarded_bytes_rejects_oversize_content_length() {
         let server = MockServer::start().await;
         let big = vec![0u8; (MAX_SAVE_FILE_BYTES as usize) + 1];
-        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200).set_body_bytes(big)).mount(&server).await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(big))
+            .mount(&server)
+            .await;
         let allow = allow_localhost(&server);
         let url = format!("http://localhost:{}/big", server.address().port());
-        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url).await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")), "unexpected: {err:?}");
+        let err = fetch_guarded_bytes(&fetch_client(&allow), &allow, &url)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")),
+            "unexpected: {err:?}"
+        );
     }
 
     /// `Content-Length` 無しの chunked 応答を返す生 TCP サーバー(wiremock は常に `Content-Length` を付けるため)。
@@ -825,7 +915,11 @@ mod tests {
             let (mut sock, _) = listener.accept().await.unwrap();
             let mut req = [0u8; 1024];
             let _ = sock.read(&mut req).await;
-            if sock.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n").await.is_err() {
+            if sock
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await
+                .is_err()
+            {
                 return;
             }
             let chunk = format!("400\r\n{}\r\n", "a".repeat(1024));
@@ -844,17 +938,28 @@ mod tests {
     #[tokio::test]
     async fn read_body_limited_aborts_chunked_body_without_content_length_over_limit() {
         let port = chunked_server(None).await;
-        let resp = reqwest::get(format!("http://127.0.0.1:{port}/")).await.unwrap();
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}/"))
+            .await
+            .unwrap();
         assert!(resp.content_length().is_none());
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), read_body_limited(resp, 64 * 1024)).await;
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            read_body_limited(resp, 64 * 1024),
+        )
+        .await;
         let err = result.expect("上限を超えても読み続けている").unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")), "unexpected: {err:?}");
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("大きすぎます")),
+            "unexpected: {err:?}"
+        );
     }
 
     #[tokio::test]
     async fn read_body_limited_accepts_chunked_body_within_limit() {
         let port = chunked_server(Some(8 * 1024)).await;
-        let resp = reqwest::get(format!("http://127.0.0.1:{port}/")).await.unwrap();
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}/"))
+            .await
+            .unwrap();
         let bytes = read_body_limited(resp, 64 * 1024).await.unwrap();
         assert_eq!(bytes.len(), 8 * 1024);
     }
@@ -862,7 +967,9 @@ mod tests {
     #[tokio::test]
     async fn read_body_limited_accepts_chunked_body_exactly_at_limit() {
         let port = chunked_server(Some(4 * 1024)).await;
-        let resp = reqwest::get(format!("http://127.0.0.1:{port}/")).await.unwrap();
+        let resp = reqwest::get(format!("http://127.0.0.1:{port}/"))
+            .await
+            .unwrap();
         let bytes = read_body_limited(resp, 4 * 1024).await.unwrap();
         assert_eq!(bytes.len(), 4 * 1024);
     }
@@ -880,7 +987,9 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/url"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "title": "T" })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "title": "T" })),
+            )
             .mount(&server)
             .await;
         server
@@ -889,8 +998,13 @@ mod tests {
     #[tokio::test]
     async fn fetch_url_preview_reaches_a_user_saved_loopback_proxy() {
         let server = preview_server().await;
-        let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", server.address().port()), false);
-        let preview = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap();
+        let state = state_with_summaly(
+            &format!("http://127.0.0.1:{}/url", server.address().port()),
+            false,
+        );
+        let preview = fetch_url_preview_core(&state, "acc", "https://example.com/")
+            .await
+            .unwrap();
         assert_eq!(preview.title.as_deref(), Some("T"));
     }
 
@@ -901,21 +1015,42 @@ mod tests {
         let state = state_with_summaly(&proxy, false);
 
         // URLプレビューでは届く
-        assert!(fetch_url_preview_core(&state, "acc", "https://example.com/").await.is_ok());
+        assert!(
+            fetch_url_preview_core(&state, "acc", "https://example.com/")
+                .await
+                .is_ok()
+        );
 
         // メディア取得(`save_url_to_file` / `fetch_url_bytes` が使うクライアントと許可リスト)では、同じホストでも拒否される
         let before = server.received_requests().await.unwrap().len();
-        let err = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &proxy).await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
-        assert_eq!(server.received_requests().await.unwrap().len(), before, "メディア取得ではリクエストが出ない");
+        let err = fetch_guarded_bytes(&state.fetch_http, &state.fetch_allowlist, &proxy)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")),
+            "unexpected: {err:?}"
+        );
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            before,
+            "メディア取得ではリクエストが出ない"
+        );
     }
 
     #[tokio::test]
     async fn fetch_url_preview_rejects_an_imported_ip_literal_without_connecting() {
         let server = preview_server().await;
-        let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", server.address().port()), true);
-        let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        let state = state_with_summaly(
+            &format!("http://127.0.0.1:{}/url", server.address().port()),
+            true,
+        );
+        let err = fetch_url_preview_core(&state, "acc", "https://example.com/")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")),
+            "unexpected: {err:?}"
+        );
         assert!(
             matches!(err, Error::Invalid(ref m) if m.contains("保存し直")),
             "インポート由来の取得先には、保存し直す案内を付ける: {err:?}"
@@ -926,9 +1061,17 @@ mod tests {
     #[tokio::test]
     async fn fetch_url_preview_rejects_an_imported_hostname_resolving_to_loopback() {
         let server = preview_server().await;
-        let state = state_with_summaly(&format!("http://localhost:{}/url", server.address().port()), true);
-        let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        let state = state_with_summaly(
+            &format!("http://localhost:{}/url", server.address().port()),
+            true,
+        );
+        let err = fetch_url_preview_core(&state, "acc", "https://example.com/")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")),
+            "unexpected: {err:?}"
+        );
         assert!(server.received_requests().await.unwrap().is_empty());
     }
 
@@ -938,15 +1081,23 @@ mod tests {
         let proxy = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/url"))
-            .respond_with(
-                ResponseTemplate::new(302)
-                    .insert_header("location", format!("http://127.0.0.1:{}/url", target.address().port())),
-            )
+            .respond_with(ResponseTemplate::new(302).insert_header(
+                "location",
+                format!("http://127.0.0.1:{}/url", target.address().port()),
+            ))
             .mount(&proxy)
             .await;
-        let state = state_with_summaly(&format!("http://127.0.0.1:{}/url", proxy.address().port()), false);
-        let err = fetch_url_preview_core(&state, "acc", "https://example.com/").await.unwrap_err();
-        assert!(matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")), "unexpected: {err:?}");
+        let state = state_with_summaly(
+            &format!("http://127.0.0.1:{}/url", proxy.address().port()),
+            false,
+        );
+        let err = fetch_url_preview_core(&state, "acc", "https://example.com/")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Invalid(ref m) if m.contains("許可されていません")),
+            "unexpected: {err:?}"
+        );
         assert!(
             matches!(err, Error::Invalid(ref m) if !m.contains("保存し直")),
             "手入力の取得先では、保存し直しても直らないので案内しない: {err:?}"
@@ -994,11 +1145,15 @@ mod tests {
     }
 
     fn state_with_translate_engine(engine: &str, target_lang: &str) -> AppState {
-        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory()).with_local_translate(
-            std::sync::Arc::new(crate::translate::LocalTranslate::new(std::sync::Arc::new(|| {
-                Ok(std::sync::Arc::new(Echo) as std::sync::Arc<dyn crate::translate::engine::LocalTranslator>)
-            }))),
-        );
+        let state = AppState::new_for_test(crate::store::SettingsStore::new_in_memory())
+            .with_local_translate(std::sync::Arc::new(crate::translate::LocalTranslate::new(
+                std::sync::Arc::new(|| {
+                    Ok(std::sync::Arc::new(Echo)
+                        as std::sync::Arc<
+                            dyn crate::translate::engine::LocalTranslator,
+                        >)
+                }),
+            )));
         let mut prefs = crate::domain::UiPrefs::default();
         prefs.translate_engine = engine.into();
         prefs.translate_target_lang = target_lang.into();
@@ -1009,17 +1164,31 @@ mod tests {
     #[tokio::test]
     async fn local_engine_translates_the_given_text_without_an_account() {
         let state = state_with_translate_engine("local", "ja");
-        let t = translate_note_core(&state, "no-such-account", "n1", "hello").await.unwrap();
-        assert_eq!(t, Some(Translation { source_lang: None, text: "[ja] hello".into() }));
+        let t = translate_note_core(&state, "no-such-account", "n1", "hello")
+            .await
+            .unwrap();
+        assert_eq!(
+            t,
+            Some(Translation {
+                source_lang: None,
+                text: "[ja] hello".into()
+            })
+        );
     }
 
     #[tokio::test]
     async fn local_engine_maps_the_target_language_to_plamo() {
         let state = state_with_translate_engine("local", "zh");
-        let t = translate_note_core(&state, "a", "n1", "hello").await.unwrap().unwrap();
+        let t = translate_note_core(&state, "a", "n1", "hello")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(t.text, "[zh-hans] hello");
         let state = state_with_translate_engine("local", "en-US");
-        let t = translate_note_core(&state, "a", "n1", "こんにちは").await.unwrap().unwrap();
+        let t = translate_note_core(&state, "a", "n1", "こんにちは")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(t.text, "[en] こんにちは");
     }
 
@@ -1036,7 +1205,11 @@ mod tests {
     async fn local_engine_returns_none_for_blank_text() {
         let state = state_with_translate_engine("local", "ja");
         for blank in ["", "   ", "\n\t"] {
-            assert_eq!(translate_note_core(&state, "a", "n1", blank).await.unwrap(), None, "{blank:?}");
+            assert_eq!(
+                translate_note_core(&state, "a", "n1", blank).await.unwrap(),
+                None,
+                "{blank:?}"
+            );
         }
     }
 
@@ -1048,7 +1221,9 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/notes/translate"))
-            .and(body_partial_json(serde_json::json!({ "noteId": "n1", "targetLang": "ja" })))
+            .and(body_partial_json(
+                serde_json::json!({ "noteId": "n1", "targetLang": "ja" }),
+            ))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!({ "sourceLang": "EN", "text": "こんにちは" })),
@@ -1060,8 +1235,16 @@ mod tests {
         state.register_test_account("acc1");
         state.set_test_api_base(mock.uri());
 
-        let t = translate_note_core(&state, "acc1", "n1", "hello").await.unwrap();
-        assert_eq!(t, Some(Translation { source_lang: Some("EN".into()), text: "こんにちは".into() }));
+        let t = translate_note_core(&state, "acc1", "n1", "hello")
+            .await
+            .unwrap();
+        assert_eq!(
+            t,
+            Some(Translation {
+                source_lang: Some("EN".into()),
+                text: "こんにちは".into()
+            })
+        );
     }
 
     #[tokio::test]
@@ -1207,9 +1390,18 @@ mod tests {
 
     #[test]
     fn guess_attachment_image_mime_falls_back_for_unknown_or_video_extensions() {
-        assert_eq!(guess_attachment_image_mime("clip.mp4"), "application/octet-stream");
-        assert_eq!(guess_attachment_image_mime("clip.webm"), "application/octet-stream");
-        assert_eq!(guess_attachment_image_mime("noext"), "application/octet-stream");
+        assert_eq!(
+            guess_attachment_image_mime("clip.mp4"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            guess_attachment_image_mime("clip.webm"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            guess_attachment_image_mime("noext"),
+            "application/octet-stream"
+        );
     }
 
     #[test]
@@ -1218,37 +1410,55 @@ mod tests {
         let rgba = [255u8, 0, 0, 255, 0, 0, 255, 255];
         let png_bytes = encode_png_rgba(&rgba, 2, 1).expect("encode should succeed");
         // PNG シグネチャ: 89 50 4E 47 0D 0A 1A 0A
-        assert_eq!(&png_bytes[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert_eq!(
+            &png_bytes[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
     }
 
     #[test]
     fn clipboard_filename_formats_utc_datetime_with_millis() {
         // 2026-07-25T15:30:45.123Z の Unix ミリ秒
         let millis = 1784993445123;
-        assert_eq!(clipboard_filename(millis), "clipboard-20260725-153045-123.png");
+        assert_eq!(
+            clipboard_filename(millis),
+            "clipboard-20260725-153045-123.png"
+        );
     }
 
     #[test]
     fn ensure_extension_appends_sniffed_extension_when_filename_has_none() {
         // content:// URI 由来のファイル名は "100006972" のように拡張子を持たない
         let png_bytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
-        assert_eq!(ensure_extension("100006972".to_string(), &png_bytes), "100006972.png");
+        assert_eq!(
+            ensure_extension("100006972".to_string(), &png_bytes),
+            "100006972.png"
+        );
     }
 
     #[test]
     fn ensure_extension_leaves_filename_with_existing_extension_untouched() {
         let png_bytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
-        assert_eq!(ensure_extension("photo.jpg".to_string(), &png_bytes), "photo.jpg");
+        assert_eq!(
+            ensure_extension("photo.jpg".to_string(), &png_bytes),
+            "photo.jpg"
+        );
     }
 
     #[test]
     fn ensure_extension_leaves_filename_unchanged_when_type_undetectable() {
-        assert_eq!(ensure_extension("100006972".to_string(), &[0, 1, 2, 3]), "100006972");
+        assert_eq!(
+            ensure_extension("100006972".to_string(), &[0, 1, 2, 3]),
+            "100006972"
+        );
     }
 
     /// `file_uris_to_paths` 用に、テストごとに一意な一時ディレクトリを作る。
     fn clipboard_files_tmp_dir() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("tsumugi-clipboard-files-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "tsumugi-clipboard-files-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1291,7 +1501,10 @@ mod tests {
         #[cfg(unix)]
         {
             let uri = file_uri(&p).replacen("file://", "file://localhost", 1);
-            assert_eq!(file_uris_to_paths(&[uri]), vec![p.to_str().unwrap().to_string()]);
+            assert_eq!(
+                file_uris_to_paths(&[uri]),
+                vec![p.to_str().unwrap().to_string()]
+            );
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1316,7 +1529,10 @@ mod tests {
             "not a uri".to_string(),
             file_uri(&ok),
         ];
-        assert_eq!(file_uris_to_paths(&uris), vec![ok.to_str().unwrap().to_string()]);
+        assert_eq!(
+            file_uris_to_paths(&uris),
+            vec![ok.to_str().unwrap().to_string()]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1339,7 +1555,10 @@ mod tests {
             "relative/path/a.png".to_string(),
             "a.png".to_string(),
         ];
-        assert_eq!(file_uris_to_paths(&uris), vec![ok.to_str().unwrap().to_string()]);
+        assert_eq!(
+            file_uris_to_paths(&uris),
+            vec![ok.to_str().unwrap().to_string()]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -194,8 +194,8 @@ impl Field {
             Reactions => &[Numeric, Set],
             // Boolean
             Renote | Quote | Reply | HasFiles | HasPoll | Cw | Sensitive | Local | Remote | Bot
-            | Cat | Direct | ToMe | ReplyToMe | HasMention | HasLink | Pinned | Reacted | Renoted
-            | Favorited | Mine | Following => &[Boolean],
+            | Cat | Direct | ToMe | ReplyToMe | HasMention | HasLink | Pinned | Reacted
+            | Renoted | Favorited | Mine | Following => &[Boolean],
             // Numeric
             Renotes | Replies | Files | Length | CreatedAt | UserFollowers | UserFollowing
             | UserNotes => &[Numeric],
@@ -250,7 +250,10 @@ mod tests {
         assert_eq!(Field::from_name("hashtags"), Some(Field::Tags));
         assert_eq!(Field::from_name("to"), Some(Field::Mentions));
         assert_eq!(Field::from_name("mentions_me"), Some(Field::ToMe));
-        assert_eq!(Field::from_name("user.followers"), Some(Field::UserFollowers));
+        assert_eq!(
+            Field::from_name("user.followers"),
+            Some(Field::UserFollowers)
+        );
         assert_eq!(Field::from_name("nope"), None);
     }
 

@@ -163,8 +163,7 @@ fn numeric(v: &Value) -> bool {
 }
 
 fn set_capable(v: &Value) -> bool {
-    matches!(v, Value::Set(_))
-        || matches!(v, Value::Field(f) if f.supports(FilterType::Set))
+    matches!(v, Value::Set(_)) || matches!(v, Value::Field(f) if f.supports(FilterType::Set))
 }
 
 /// Account を含む Eq/Ne の特別扱い（`user.id == @me` 等）。該当しなければ None。
@@ -198,7 +197,10 @@ fn eval_bool(v: &Value, n: &Note, ctx: &EvalContext) -> bool {
         Cat => n.user.is_cat,
         Direct => n.visibility == Visibility::Specified,
         ToMe => n.mentions.iter().any(|m| ctx.my_user_ids.contains(m)),
-        ReplyToMe => n.reply_user_id.as_ref().map_or(false, |u| ctx.my_user_ids.contains(u)),
+        ReplyToMe => n
+            .reply_user_id
+            .as_ref()
+            .map_or(false, |u| ctx.my_user_ids.contains(u)),
         HasMention => !n.mentions.is_empty(),
         HasLink => n.text.as_deref().map(has_url).unwrap_or(false),
         Pinned => n.is_pinned,
@@ -413,7 +415,10 @@ mod tests {
     fn boolean_predicates() {
         let n = base_note();
         assert!(matches("from home where has_files && !cw && !bot", &n));
-        assert!(matches("from home where local && has_link && has_mention", &n));
+        assert!(matches(
+            "from home where local && has_link && has_mention",
+            &n
+        ));
         assert!(!matches("from home where renote", &n));
         assert!(matches("from home where !renote", &n));
     }
@@ -498,15 +503,28 @@ mod tests {
             chain("cw", "||", MAX_AST_DEPTH - 1),
             format!("{} > 0", chain("reactions", "+", MAX_AST_DEPTH - 1)),
             format!("{}cw", "!".repeat(MAX_NEST_DEPTH)),
-            format!("{}cw{}", "(".repeat(MAX_NEST_DEPTH), ")".repeat(MAX_NEST_DEPTH)),
+            format!(
+                "{}cw{}",
+                "(".repeat(MAX_NEST_DEPTH),
+                ")".repeat(MAX_NEST_DEPTH)
+            ),
         ];
         for q in queries {
             let h = std::thread::Builder::new()
                 .stack_size(1 << 20)
                 .spawn(move || {
-                    let expr = parse(&format!("from home where {q}")).unwrap().predicate.unwrap();
+                    let expr = parse(&format!("from home where {q}"))
+                        .unwrap()
+                        .predicate
+                        .unwrap();
                     let _ = evaluate(&expr, &base_note(), &ctx());
-                    let _ = build_where(&expr, &SqlCtx { my_ids: vec![], following_ids: None });
+                    let _ = build_where(
+                        &expr,
+                        &SqlCtx {
+                            my_ids: vec![],
+                            following_ids: None,
+                        },
+                    );
                 })
                 .unwrap();
             h.join().unwrap();

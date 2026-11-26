@@ -65,7 +65,12 @@ async fn guard_middleware(State(g): State<Arc<GuardState>>, req: Request, next: 
     match guard::check(req.headers(), req.uri(), g.port, g.token.get().as_deref()) {
         Verdict::Allow => next.run(req).await,
         Verdict::Forbidden => (StatusCode::FORBIDDEN, "Forbidden").into_response(),
-        Verdict::Unauthorized => (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, "Bearer")], "Unauthorized").into_response(),
+        Verdict::Unauthorized => (
+            StatusCode::UNAUTHORIZED,
+            [(header::WWW_AUTHENTICATE, "Bearer")],
+            "Unauthorized",
+        )
+            .into_response(),
     }
 }
 
@@ -113,14 +118,19 @@ impl McpRuntime {
             Arc::new(NeverSessionManager::default()),
             config,
         );
-        let guard_state = Arc::new(GuardState { port: bound, token: self.token.clone() });
-        let router: Router = Router::new()
-            .nest_service("/mcp", service)
-            .layer(axum::middleware::from_fn_with_state(guard_state, guard_middleware));
+        let guard_state = Arc::new(GuardState {
+            port: bound,
+            token: self.token.clone(),
+        });
+        let router: Router = Router::new().nest_service("/mcp", service).layer(
+            axum::middleware::from_fn_with_state(guard_state, guard_middleware),
+        );
 
         let ct = shutdown.clone();
         let task = tokio::spawn(async move {
-            let _ = axum::serve(listener, router).with_graceful_shutdown(async move { ct.cancelled().await }).await;
+            let _ = axum::serve(listener, router)
+                .with_graceful_shutdown(async move { ct.cancelled().await })
+                .await;
         });
         *self.running.lock().await = Some(Running { shutdown, task });
         self.set_state(RunState::Running { port: bound });
@@ -151,7 +161,9 @@ impl McpRuntime {
 /// 状態に残し、`Ok` を返す(設定はオンのままで、ポートを直して再試行できる)。
 pub async fn reconcile<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     use tauri::Manager;
-    let state = app.try_state::<crate::state::AppState>().ok_or("app state is not available")?;
+    let state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or("app state is not available")?;
     // 他の起動・停止と直列にする。設定は、ロックを取ったあとに読む(待っている間の変更を反映するため)。
     let _lifecycle = state.mcp.lifecycle.lock().await;
     let settings = state.settings.load_mcp();
@@ -197,21 +209,51 @@ mod tests {
         async fn start() -> Self {
             let app = tauri::test::mock_app();
             let state = AppState::new_for_test(SettingsStore::new_in_memory());
-            state.accounts.lock().unwrap().upsert(account("a1", "one.example"));
-            state.settings.update_mcp(|m| {
-                m.enabled = true;
-                m.exposed_account_ids = vec!["a1".into()];
-            }).unwrap();
+            state
+                .accounts
+                .lock()
+                .unwrap()
+                .upsert(account("a1", "one.example"));
+            state
+                .settings
+                .update_mcp(|m| {
+                    m.enabled = true;
+                    m.exposed_account_ids = vec!["a1".into()];
+                })
+                .unwrap();
             let alice = user("u1", "alice", None);
             let notes = vec![
-                note("p", 500, Visibility::Public, false, "public rust", alice.clone()),
-                note("f", 300, Visibility::Followers, false, "followers rust", alice),
+                note(
+                    "p",
+                    500,
+                    Visibility::Public,
+                    false,
+                    "public rust",
+                    alice.clone(),
+                ),
+                note(
+                    "f",
+                    300,
+                    Visibility::Followers,
+                    false,
+                    "followers rust",
+                    alice,
+                ),
             ];
             state.cache.cache_notes("col1", &notes).await.unwrap();
-            state.cache.record_note_accounts("a1", &["p".to_string(), "f".to_string()]).await.unwrap();
+            state
+                .cache
+                .record_note_accounts("a1", &["p".to_string(), "f".to_string()])
+                .await
+                .unwrap();
             state.mcp.token.set(TOKEN.into());
             app.manage(state);
-            let port = app.state::<AppState>().mcp.start(app.handle().clone(), 0).await.unwrap();
+            let port = app
+                .state::<AppState>()
+                .mcp
+                .start(app.handle().clone(), 0)
+                .await
+                .unwrap();
             // システムのプロキシ設定が 127.0.0.1 宛を横取りしないよう no_proxy にする。
             let client = reqwest::Client::builder().no_proxy().build().unwrap();
             Harness { app, port, client }
@@ -221,7 +263,12 @@ mod tests {
             self.app.state::<AppState>()
         }
 
-        async fn post(&self, token: Option<&str>, extra: &[(&str, &str)], body: Value) -> (u16, Value) {
+        async fn post(
+            &self,
+            token: Option<&str>,
+            extra: &[(&str, &str)],
+            body: Value,
+        ) -> (u16, Value) {
             let mut req = self
                 .client
                 .post(format!("http://127.0.0.1:{}/mcp", self.port))
@@ -263,8 +310,18 @@ mod tests {
     #[tokio::test]
     async fn rejects_bad_host_and_any_origin_with_403_even_with_a_valid_token() {
         let h = Harness::start().await;
-        assert_eq!(h.post(Some(TOKEN), &[("Host", "evil.example")], init_body()).await.0, 403);
-        assert_eq!(h.post(Some(TOKEN), &[("Origin", "http://localhost")], init_body()).await.0, 403);
+        assert_eq!(
+            h.post(Some(TOKEN), &[("Host", "evil.example")], init_body())
+                .await
+                .0,
+            403
+        );
+        assert_eq!(
+            h.post(Some(TOKEN), &[("Origin", "http://localhost")], init_body())
+                .await
+                .0,
+            403
+        );
     }
 
     #[tokio::test]
@@ -278,35 +335,65 @@ mod tests {
     async fn initialize_list_and_call_round_trip() {
         let h = Harness::start().await;
         let (_, init) = h.post(Some(TOKEN), &[], init_body()).await;
-        assert!(init["result"]["capabilities"]["tools"].is_object(), "{init}");
+        assert!(
+            init["result"]["capabilities"]["tools"].is_object(),
+            "{init}"
+        );
 
-        let (_, list) = h.post(Some(TOKEN), &[], json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await;
-        let mut names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        let (_, list) = h
+            .post(
+                Some(TOKEN),
+                &[],
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+            )
+            .await;
+        let mut names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
         names.sort();
         assert_eq!(names, vec!["get_note", "list_accounts", "search_notes"]);
         for t in list["result"]["tools"].as_array().unwrap() {
-            assert_eq!(t["annotations"]["readOnlyHint"], true, "読み取り専用の注釈: {t}");
+            assert_eq!(
+                t["annotations"]["readOnlyHint"], true,
+                "読み取り専用の注釈: {t}"
+            );
             let d = t["description"].as_str().unwrap();
-            assert!(d.contains("cached"), "キャッシュ済みのみが対象であることを説明に含める: {d}");
+            assert!(
+                d.contains("cached"),
+                "キャッシュ済みのみが対象であることを説明に含める: {d}"
+            );
         }
 
         let v = h.call_tool("list_accounts", json!({})).await;
         assert_eq!(v["result"]["structuredContent"]["accounts"][0]["id"], "a1");
 
-        let v = h.call_tool("search_notes", json!({"account":"a1","text":"rust"})).await;
-        let notes = v["result"]["structuredContent"]["notes"].as_array().unwrap();
+        let v = h
+            .call_tool("search_notes", json!({"account":"a1","text":"rust"}))
+            .await;
+        let notes = v["result"]["structuredContent"]["notes"]
+            .as_array()
+            .unwrap();
         assert_eq!(notes.len(), 1, "followers のノートは返らない: {v}");
         assert_eq!(notes[0]["id"], "p");
 
-        let v = h.call_tool("get_note", json!({"account":"a1","id":"p"})).await;
+        let v = h
+            .call_tool("get_note", json!({"account":"a1","id":"p"}))
+            .await;
         assert_eq!(v["result"]["structuredContent"]["id"], "p");
     }
 
     #[tokio::test]
     async fn out_of_scope_and_unexposed_return_the_same_tool_error() {
         let h = Harness::start().await;
-        let a = h.call_tool("get_note", json!({"account":"a1","id":"f"})).await;
-        let b = h.call_tool("get_note", json!({"account":"zzz","id":"p"})).await;
+        let a = h
+            .call_tool("get_note", json!({"account":"a1","id":"f"}))
+            .await;
+        let b = h
+            .call_tool("get_note", json!({"account":"zzz","id":"p"}))
+            .await;
         assert_eq!(a["result"]["isError"], true);
         assert_eq!(a["result"], b["result"], "存在の有無を区別できてはいけない");
     }
@@ -316,7 +403,10 @@ mod tests {
         let h = Harness::start().await;
         let ok = h.call_tool("search_notes", json!({"account":"a1"})).await;
         assert_ne!(ok["result"]["isError"], true, "{ok}");
-        h.state().settings.update_mcp(|m| m.exposed_account_ids.clear()).unwrap();
+        h.state()
+            .settings
+            .update_mcp(|m| m.exposed_account_ids.clear())
+            .unwrap();
         let denied = h.call_tool("search_notes", json!({"account":"a1"})).await;
         assert_eq!(denied["result"]["isError"], true);
     }
@@ -349,7 +439,11 @@ mod tests {
         assert_eq!(h.state().mcp.status(), RunState::Running { port: h.port });
         h.state().mcp.stop().await;
         assert_eq!(h.state().mcp.status(), RunState::Stopped);
-        let r = h.client.post(format!("http://127.0.0.1:{}/mcp", h.port)).send().await;
+        let r = h
+            .client
+            .post(format!("http://127.0.0.1:{}/mcp", h.port))
+            .send()
+            .await;
         assert!(r.is_err(), "停止後はポートが閉じている");
     }
 
@@ -357,16 +451,22 @@ mod tests {
     async fn reconcile_starts_when_enabled_and_stops_when_disabled() {
         let app = tauri::test::mock_app();
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        state.settings.update_mcp(|m| {
-            m.enabled = true;
-            m.port = 0; // 空きポート(テスト用。コマンド経由では 1024 未満を拒否する)
-        }).unwrap();
+        state
+            .settings
+            .update_mcp(|m| {
+                m.enabled = true;
+                m.port = 0; // 空きポート(テスト用。コマンド経由では 1024 未満を拒否する)
+            })
+            .unwrap();
         app.manage(state);
 
         reconcile(app.handle()).await.unwrap();
         let st = app.state::<AppState>();
         assert!(matches!(st.mcp.status(), RunState::Running { .. }));
-        assert!(st.mcp.token.get().is_some(), "トークンが作られて共有されている");
+        assert!(
+            st.mcp.token.get().is_some(),
+            "トークンが作られて共有されている"
+        );
 
         st.settings.update_mcp(|m| m.enabled = false).unwrap();
         reconcile(app.handle()).await.unwrap();
@@ -377,14 +477,26 @@ mod tests {
     async fn reconcile_fails_without_starting_when_the_keyring_is_unavailable() {
         struct Failing;
         impl crate::session::SecretStore for Failing {
-            fn set(&self, _: &str, _: &str) -> crate::error::Result<()> { Err(crate::error::Error::Secret("no keyring".into())) }
-            fn get(&self, _: &str) -> crate::error::Result<Option<String>> { Err(crate::error::Error::Secret("no keyring".into())) }
-            fn delete(&self, _: &str) -> crate::error::Result<()> { Err(crate::error::Error::Secret("no keyring".into())) }
+            fn set(&self, _: &str, _: &str) -> crate::error::Result<()> {
+                Err(crate::error::Error::Secret("no keyring".into()))
+            }
+            fn get(&self, _: &str) -> crate::error::Result<Option<String>> {
+                Err(crate::error::Error::Secret("no keyring".into()))
+            }
+            fn delete(&self, _: &str) -> crate::error::Result<()> {
+                Err(crate::error::Error::Secret("no keyring".into()))
+            }
         }
         let app = tauri::test::mock_app();
         let mut state = AppState::new_for_test(SettingsStore::new_in_memory());
         state.secrets = Box::new(Failing);
-        state.settings.update_mcp(|m| { m.enabled = true; m.port = 0; }).unwrap();
+        state
+            .settings
+            .update_mcp(|m| {
+                m.enabled = true;
+                m.port = 0;
+            })
+            .unwrap();
         app.manage(state);
 
         assert!(reconcile(app.handle()).await.is_err());
@@ -401,7 +513,13 @@ mod tests {
         // 設定がオフなのに待ち受けが残る(Issue #557 の最終レビュー)。
         let app = tauri::test::mock_app();
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        state.settings.update_mcp(|m| { m.enabled = true; m.port = 0; }).unwrap();
+        state
+            .settings
+            .update_mcp(|m| {
+                m.enabled = true;
+                m.port = 0;
+            })
+            .unwrap();
         app.manage(state);
         let st = app.state::<AppState>();
 
@@ -409,7 +527,11 @@ mod tests {
         let handle = app.handle().clone();
         let task = tokio::spawn(async move { reconcile(&handle).await });
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        assert_eq!(st.mcp.status(), RunState::Stopped, "ロックを持っている間は進まない");
+        assert_eq!(
+            st.mcp.status(),
+            RunState::Stopped,
+            "ロックを持っている間は進まない"
+        );
 
         drop(guard);
         task.await.unwrap().unwrap();
@@ -421,7 +543,13 @@ mod tests {
         // 設定は、ロックを取ったあとに読む。待っている間にオフへ変わったら、起動せずに止まる。
         let app = tauri::test::mock_app();
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        state.settings.update_mcp(|m| { m.enabled = true; m.port = 0; }).unwrap();
+        state
+            .settings
+            .update_mcp(|m| {
+                m.enabled = true;
+                m.port = 0;
+            })
+            .unwrap();
         app.manage(state);
         let st = app.state::<AppState>();
 
@@ -432,7 +560,11 @@ mod tests {
         st.settings.update_mcp(|m| m.enabled = false).unwrap(); // 待っている間にオフへ
         drop(guard);
         task.await.unwrap().unwrap();
-        assert_eq!(st.mcp.status(), RunState::Stopped, "オフの設定のまま、待ち受けは残らない");
+        assert_eq!(
+            st.mcp.status(),
+            RunState::Stopped,
+            "オフの設定のまま、待ち受けは残らない"
+        );
     }
 
     #[tokio::test]
@@ -441,12 +573,21 @@ mod tests {
         let port = blocker.local_addr().unwrap().port();
         let app = tauri::test::mock_app();
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        state.settings.update_mcp(|m| { m.enabled = true; m.port = port; }).unwrap();
+        state
+            .settings
+            .update_mcp(|m| {
+                m.enabled = true;
+                m.port = port;
+            })
+            .unwrap();
         app.manage(state);
 
         reconcile(app.handle()).await.unwrap(); // バインド失敗はコマンドのエラーにしない(状態で伝える)
         let st = app.state::<AppState>();
         assert!(matches!(st.mcp.status(), RunState::Error(_)));
-        assert!(st.settings.load_mcp().enabled, "設定はオンのまま。ポートを直して再試行できる");
+        assert!(
+            st.settings.load_mcp().enabled,
+            "設定はオンのまま。ポートを直して再試行できる"
+        );
     }
 }

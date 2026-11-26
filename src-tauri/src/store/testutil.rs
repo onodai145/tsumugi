@@ -9,7 +9,8 @@ pub(crate) struct BrokenDisk {
 
 impl BrokenDisk {
     pub(crate) fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!("tsumugi-broken-disk-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("tsumugi-broken-disk-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         Self { dir }
     }

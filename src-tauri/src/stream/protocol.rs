@@ -96,8 +96,16 @@ pub fn parse_incoming(text: &str) -> Incoming {
         }
         Some("noteUpdated") => {
             let body = v.get("body").cloned().unwrap_or(Value::Null);
-            let note_id = body.get("id").and_then(Value::as_str).unwrap_or("").to_string();
-            let kind = body.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+            let note_id = body
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let kind = body
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             let inner = body.get("body").cloned().unwrap_or(Value::Null);
             if note_id.is_empty() {
                 Incoming::Other
@@ -157,7 +165,11 @@ mod tests {
         let msg = r#"{"type":"noteUpdated","body":{"id":"n1","type":"reacted",
             "body":{"reaction":"👍","userId":"u2"}}}"#;
         match parse_incoming(msg) {
-            Incoming::NoteUpdated { note_id, kind, body } => {
+            Incoming::NoteUpdated {
+                note_id,
+                kind,
+                body,
+            } => {
                 assert_eq!(note_id, "n1");
                 assert_eq!(kind, "reacted");
                 assert_eq!(body["reaction"], "👍");
@@ -168,8 +180,14 @@ mod tests {
 
     #[test]
     fn unknown_and_garbage_are_other() {
-        assert!(matches!(parse_incoming(r#"{"type":"emitCaptureData"}"#), Incoming::Other));
+        assert!(matches!(
+            parse_incoming(r#"{"type":"emitCaptureData"}"#),
+            Incoming::Other
+        ));
         assert!(matches!(parse_incoming("not json"), Incoming::Other));
-        assert!(matches!(parse_incoming(r#"{"no":"type"}"#), Incoming::Other));
+        assert!(matches!(
+            parse_incoming(r#"{"no":"type"}"#),
+            Incoming::Other
+        ));
     }
 }

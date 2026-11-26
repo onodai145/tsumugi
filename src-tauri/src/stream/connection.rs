@@ -25,8 +25,8 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Runtime};
 use tauri::Manager as _;
+use tauri::{AppHandle, Runtime};
 use tauri_specta::Event as _;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
@@ -235,7 +235,10 @@ impl ConnectionManager {
         let mut accounts = self.accounts.lock().unwrap();
         // 認証失敗などで止まったタスクは捨てて、渡されたトークン(呼び出し側が取り直した最新のもの)で
         // 作り直す。止まったタスクへ送ると購読が黙って失われる(Issue #622)。
-        if accounts.get(&account_id).is_some_and(|ctl| ctl.cmd.is_closed()) {
+        if accounts
+            .get(&account_id)
+            .is_some_and(|ctl| ctl.cmd.is_closed())
+        {
             accounts.remove(&account_id);
         }
         let cmd = AccountCommand::AddChannel {
@@ -286,11 +289,7 @@ impl ConnectionManager {
         });
     }
 
-    fn send_to_account(
-        &self,
-        column_id: &str,
-        make: impl FnOnce(String) -> AccountCommand,
-    ) {
+    fn send_to_account(&self, column_id: &str, make: impl FnOnce(String) -> AccountCommand) {
         let account_id = match self.columns.lock().unwrap().get(column_id) {
             Some(a) => a.clone(),
             None => return,
@@ -303,12 +302,19 @@ impl ConnectionManager {
     /// 認証失敗で止まった通知カラムの最終通知idを取り出す(取り出すと消える, Issue #684)。
     /// 一度も通知を知らないまま止まっていれば `None`。
     pub fn take_stalled_notification_mark(&self, column_id: &str) -> Option<String> {
-        self.stalled_notification_marks.lock().unwrap().remove(column_id)
+        self.stalled_notification_marks
+            .lock()
+            .unwrap()
+            .remove(column_id)
     }
 
     /// `take_stalled_notification_mark` の、消さない版。
     pub fn peek_stalled_notification_mark(&self, column_id: &str) -> Option<String> {
-        self.stalled_notification_marks.lock().unwrap().get(column_id).cloned()
+        self.stalled_notification_marks
+            .lock()
+            .unwrap()
+            .get(column_id)
+            .cloned()
     }
 
     /// テスト用: 認証失敗で止まったあとの状態(退避済みのウォーターマーク)を作る。
@@ -322,7 +328,10 @@ impl ConnectionManager {
 
     /// カラムを閉じる（購読解除）。そのアカウントの最後のカラムなら WebSocket ごと畳む。
     pub fn close(&self, column_id: &str) {
-        self.stalled_notification_marks.lock().unwrap().remove(column_id);
+        self.stalled_notification_marks
+            .lock()
+            .unwrap()
+            .remove(column_id);
         let account_id = match self.columns.lock().unwrap().remove(column_id) {
             Some(a) => a,
             None => return,
@@ -395,7 +404,17 @@ fn spawn_account<R: Runtime>(
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     let handle = tauri::async_runtime::spawn(async move {
-        run_account(app, account_id, host, token, config, stalled_marks, cancel_rx, cmd_rx).await;
+        run_account(
+            app,
+            account_id,
+            host,
+            token,
+            config,
+            stalled_marks,
+            cancel_rx,
+            cmd_rx,
+        )
+        .await;
     });
     AccountCtl {
         cmd: cmd_tx,
@@ -421,8 +440,8 @@ struct ChannelSub {
 /// subNote 購読集合（接続単位・上限付き FIFO）。noteUpdated ルーティングのため
 /// note_id -> それを表示中のカラム集合を保持する。
 struct CaptureSet {
-    order: VecDeque<String>,                    // note_id を登録順に（FIFO 追い出し用）
-    refs: HashMap<String, HashSet<String>>,     // note_id -> 関心のある column_id 集合
+    order: VecDeque<String>, // note_id を登録順に（FIFO 追い出し用）
+    refs: HashMap<String, HashSet<String>>, // note_id -> 関心のある column_id 集合
     cap: usize,
 }
 
@@ -603,9 +622,7 @@ async fn run_account<R: Runtime>(
 
         match outcome {
             RunOutcome::Cancelled => return,
-            RunOutcome::Disconnected => {
-                emit_state_all(&app, &subs, ConnectionState::Reconnecting)
-            }
+            RunOutcome::Disconnected => emit_state_all(&app, &subs, ConnectionState::Reconnecting),
             RunOutcome::Fatal => {
                 emit_state_all(&app, &subs, ConnectionState::Error);
                 // タスクと一緒に `subs` が失われるので、通知カラムのウォーターマークを退避する。
@@ -614,7 +631,11 @@ async fn run_account<R: Runtime>(
                     let mut marks = stalled_marks.lock().unwrap();
                     for sub in subs.values() {
                         if matches!(sub.mode, StreamMode::Notifications { .. }) {
-                            set_stalled_mark(&mut marks, &sub.column_id, sub.last_seen_notification_id.clone());
+                            set_stalled_mark(
+                                &mut marks,
+                                &sub.column_id,
+                                sub.last_seen_notification_id.clone(),
+                            );
                         }
                     }
                 }
@@ -623,9 +644,19 @@ async fn run_account<R: Runtime>(
                 // タスクの停止を検出して作り直せる)。
                 cmd_rx.close();
                 while let Ok(cmd) = cmd_rx.try_recv() {
-                    if let AccountCommand::AddChannel { column_id, mode, initial_last_seen_id, .. } = cmd {
+                    if let AccountCommand::AddChannel {
+                        column_id,
+                        mode,
+                        initial_last_seen_id,
+                        ..
+                    } = cmd
+                    {
                         if matches!(mode, StreamMode::Notifications { .. }) {
-                            set_stalled_mark(&mut stalled_marks.lock().unwrap(), &column_id, initial_last_seen_id);
+                            set_stalled_mark(
+                                &mut stalled_marks.lock().unwrap(),
+                                &column_id,
+                                initial_last_seen_id,
+                            );
                         }
                         emit_state(&app, &column_id, ConnectionState::Error);
                     }
@@ -665,8 +696,10 @@ async fn connect_and_run<R: Runtime>(
         use tokio_tungstenite::tungstenite::http::header::{HeaderValue, USER_AGENT};
         match url.as_str().into_client_request() {
             Ok(mut req) => {
-                req.headers_mut()
-                    .insert(USER_AGENT, HeaderValue::from_static(crate::state::USER_AGENT));
+                req.headers_mut().insert(
+                    USER_AGENT,
+                    HeaderValue::from_static(crate::state::USER_AGENT),
+                );
                 req
             }
             Err(e) => {
@@ -705,7 +738,9 @@ async fn connect_and_run<R: Runtime>(
     }
     // キャプチャ中ノートを再購読
     for id in captures.note_ids() {
-        let _ = write.send(Message::Text(protocol::sub_note(id).into())).await;
+        let _ = write
+            .send(Message::Text(protocol::sub_note(id).into()))
+            .await;
     }
     emit_state_all(app, subs, ConnectionState::Connected);
     *connected = true;
@@ -877,17 +912,24 @@ async fn apply_capture_add(
 ) {
     let outcome = captures.add(note_id, column_id);
     if outcome.subscribe {
-        let _ = write.send(Message::Text(protocol::sub_note(note_id).into())).await;
+        let _ = write
+            .send(Message::Text(protocol::sub_note(note_id).into()))
+            .await;
     }
     if let Some(old) = outcome.evicted {
-        let _ = write.send(Message::Text(protocol::unsub_note(&old).into())).await;
+        let _ = write
+            .send(Message::Text(protocol::unsub_note(&old).into()))
+            .await;
     }
 }
 
 enum HandleResult {
     None,
     /// 新規ノートが column_id に届いた（自動キャプチャ対象）
-    CaptureNote { column_id: String, note_id: String },
+    CaptureNote {
+        column_id: String,
+        note_id: String,
+    },
 }
 
 /// ストリーミングで受信したノートをキャッシュへ書き、そのアカウントの取得経路として記録する。
@@ -922,7 +964,12 @@ async fn handle_text<R: Runtime>(
                 return HandleResult::None;
             };
             let column_id = sub.column_id.clone();
-            let StreamMode::Notes { account_id, filter, ctx } = &sub.mode else {
+            let StreamMode::Notes {
+                account_id,
+                filter,
+                ctx,
+            } = &sub.mode
+            else {
                 return HandleResult::None;
             };
             if !sub.dedup.accept(&note.id) {
@@ -962,7 +1009,10 @@ async fn handle_text<R: Runtime>(
                 note_id: id,
             }
         }
-        Incoming::ChannelNotification { channel_id, notification } => {
+        Incoming::ChannelNotification {
+            channel_id,
+            notification,
+        } => {
             let Some(sub_key) = sub_index.get(&channel_id) else {
                 return HandleResult::None;
             };
@@ -986,16 +1036,16 @@ async fn handle_text<R: Runtime>(
             // (Issue #101)。noteUpdated 経路と両方届いた場合の二重加算は、両経路で共通の
             // (note_id, actor_id, reaction) キーによる重複排除で防ぐ。
             if n.kind == "reaction" {
-                if let (Some(note), Some(reaction), Some(actor)) =
-                    (&n.note, &n.reaction, &n.user)
-                {
+                if let (Some(note), Some(reaction), Some(actor)) = (&n.note, &n.reaction, &n.user) {
                     let note_id = note.id.clone();
                     // reaction 通知の reaction はサーバ側で decodeReaction() を経由しない
                     // 生の正規化値のため、ローカル絵文字だと ":name:" のようにホスト部が無い。
                     // noteUpdated(reacted) 経路は decodeReaction() 済みで ":name@.:" になっており、
                     // 表記が食い違うと reaction_event_key の重複排除が効かず二重加算される。
                     let reaction = decode_reaction(reaction);
-                    let update = NoteUpdate::Reacted { reaction: reaction.clone() };
+                    let update = NoteUpdate::Reacted {
+                        reaction: reaction.clone(),
+                    };
                     let actor_id = Some(actor.id.clone());
                     let key = reaction_event_key(&note_id, actor_id.as_deref(), &update)
                         .expect("Reacted always yields a dedup key");
@@ -1027,7 +1077,11 @@ async fn handle_text<R: Runtime>(
             .emit(app);
             HandleResult::None
         }
-        Incoming::NoteUpdated { note_id, kind, body } => {
+        Incoming::NoteUpdated {
+            note_id,
+            kind,
+            body,
+        } => {
             if let Some((update, actor_id)) = map_note_update(&kind, &body) {
                 // reaction 通知フォールバック経路(Issue #101)と共通のキーで重複排除する。
                 // Reacted/Unreacted 以外(PollVoted/Deleted)は対象外なのでそのまま処理する。
@@ -1084,11 +1138,17 @@ fn decode_reaction(raw: &str) -> String {
     format!(":{inner}@.:")
 }
 
-fn reaction_event_key(note_id: &str, actor_id: Option<&str>, update: &NoteUpdate) -> Option<String> {
+fn reaction_event_key(
+    note_id: &str,
+    actor_id: Option<&str>,
+    update: &NoteUpdate,
+) -> Option<String> {
     let actor_id = actor_id?;
     match update {
         NoteUpdate::Reacted { reaction } => Some(format!("react:{note_id}:{actor_id}:{reaction}")),
-        NoteUpdate::Unreacted { reaction } => Some(format!("unreact:{note_id}:{actor_id}:{reaction}")),
+        NoteUpdate::Unreacted { reaction } => {
+            Some(format!("unreact:{note_id}:{actor_id}:{reaction}"))
+        }
         NoteUpdate::PollVoted { .. } | NoteUpdate::Deleted => None,
     }
 }
@@ -1110,7 +1170,12 @@ fn is_own_actor(state: &AppState, account_id: &str, actor_id: Option<&str>) -> b
 
 /// 他ユーザーの reacted/unreacted をキャッシュへ反映する（無ければ何もしない）。
 /// pollVoted/deleted はキャッシュ整合性への影響が小さいため対象外(Issue #89はリアクションのみ報告)。
-async fn apply_note_update_to_cache(state: &AppState, note_id: &str, update: &NoteUpdate, is_own: bool) {
+async fn apply_note_update_to_cache(
+    state: &AppState,
+    note_id: &str,
+    update: &NoteUpdate,
+    is_own: bool,
+) {
     let (NoteUpdate::Reacted { reaction } | NoteUpdate::Unreacted { reaction }) = update else {
         return;
     };
@@ -1148,7 +1213,10 @@ fn notification_muted(state: &AppState, account_id: &str, n: &Notification) -> b
 
 /// noteUpdated の kind/body を型付き NoteUpdate に落とす。
 fn map_note_update(kind: &str, body: &Value) -> Option<(NoteUpdate, Option<String>)> {
-    let actor = body.get("userId").and_then(Value::as_str).map(str::to_string);
+    let actor = body
+        .get("userId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     match kind {
         "reacted" => {
             let reaction = body.get("reaction").and_then(Value::as_str)?.to_string();
@@ -1168,7 +1236,11 @@ fn map_note_update(kind: &str, body: &Value) -> Option<(NoteUpdate, Option<Strin
 }
 
 /// 指定アカウントの全カラムへ接続状態を通知する。
-fn emit_state_all<R: Runtime>(app: &AppHandle<R>, subs: &HashMap<String, ChannelSub>, state: ConnectionState) {
+fn emit_state_all<R: Runtime>(
+    app: &AppHandle<R>,
+    subs: &HashMap<String, ChannelSub>,
+    state: ConnectionState,
+) {
     // TQL複数ソースでは複数の ChannelSub が同じ column_id を持つため重複排除する
     let mut seen = HashSet::new();
     for sub in subs.values() {
@@ -1239,7 +1311,8 @@ mod tests {
 
     #[test]
     fn map_reacted_and_actor() {
-        let (u, actor) = map_note_update("reacted", &json!({"reaction":"👍","userId":"u2"})).unwrap();
+        let (u, actor) =
+            map_note_update("reacted", &json!({"reaction":"👍","userId":"u2"})).unwrap();
         assert!(matches!(u, NoteUpdate::Reacted { reaction } if reaction == "👍"));
         assert_eq!(actor.as_deref(), Some("u2"));
     }
@@ -1267,7 +1340,10 @@ mod tests {
     #[test]
     fn decode_reaction_is_idempotent_and_leaves_other_forms_untouched() {
         assert_eq!(decode_reaction(":blobcat@.:"), ":blobcat@.:");
-        assert_eq!(decode_reaction(":blobcat@misskey.io:"), ":blobcat@misskey.io:");
+        assert_eq!(
+            decode_reaction(":blobcat@misskey.io:"),
+            ":blobcat@misskey.io:"
+        );
         assert_eq!(decode_reaction("👍"), "👍");
     }
 
@@ -1277,7 +1353,10 @@ mod tests {
         // が同じキーになっていないと reaction_event_key の重複排除が効かず二重加算される。
         let (update, _) =
             map_note_update("reacted", &json!({"reaction":":blobcat@.:","userId":"u2"})).unwrap();
-        let NoteUpdate::Reacted { reaction: from_note_updated } = update else {
+        let NoteUpdate::Reacted {
+            reaction: from_note_updated,
+        } = update
+        else {
             panic!("expected Reacted");
         };
         let from_notification = decode_reaction(":blobcat:");
@@ -1286,7 +1365,9 @@ mod tests {
 
     #[test]
     fn reaction_event_key_matches_across_reacted_and_unreacted_but_differs_by_actor_or_reaction() {
-        let reacted = NoteUpdate::Reacted { reaction: "👍".into() };
+        let reacted = NoteUpdate::Reacted {
+            reaction: "👍".into(),
+        };
         let a = reaction_event_key("n1", Some("u1"), &reacted).unwrap();
         let b = reaction_event_key("n1", Some("u1"), &reacted).unwrap();
         assert_eq!(a, b); // 同一(note, actor, update)は同じキー = noteUpdated/通知どちらが先でも重複扱いできる
@@ -1294,20 +1375,32 @@ mod tests {
         let diff_actor = reaction_event_key("n1", Some("u2"), &reacted).unwrap();
         assert_ne!(a, diff_actor);
 
-        let diff_reaction =
-            reaction_event_key("n1", Some("u1"), &NoteUpdate::Reacted { reaction: "🎉".into() }).unwrap();
+        let diff_reaction = reaction_event_key(
+            "n1",
+            Some("u1"),
+            &NoteUpdate::Reacted {
+                reaction: "🎉".into(),
+            },
+        )
+        .unwrap();
         assert_ne!(a, diff_reaction);
 
-        let unreacted = NoteUpdate::Unreacted { reaction: "👍".into() };
+        let unreacted = NoteUpdate::Unreacted {
+            reaction: "👍".into(),
+        };
         let c = reaction_event_key("n1", Some("u1"), &unreacted).unwrap();
         assert_ne!(a, c); // react/unreact は別イベント扱い
     }
 
     #[test]
     fn reaction_event_key_none_without_actor_or_for_untracked_kinds() {
-        let reacted = NoteUpdate::Reacted { reaction: "👍".into() };
+        let reacted = NoteUpdate::Reacted {
+            reaction: "👍".into(),
+        };
         assert!(reaction_event_key("n1", None, &reacted).is_none());
-        assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::PollVoted { choice: 0 }).is_none());
+        assert!(
+            reaction_event_key("n1", Some("u1"), &NoteUpdate::PollVoted { choice: 0 }).is_none()
+        );
         assert!(reaction_event_key("n1", Some("u1"), &NoteUpdate::Deleted).is_none());
     }
 
@@ -1405,14 +1498,34 @@ mod tests {
     #[tokio::test]
     async fn apply_note_update_to_cache_increments_and_decrements_others_reaction() {
         let state = state_with_account("acc1", "u-self");
-        state.cache.cache_note("col1", &minimal_note("n1")).await.unwrap();
+        state
+            .cache
+            .cache_note("col1", &minimal_note("n1"))
+            .await
+            .unwrap();
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, false).await;
+        apply_note_update_to_cache(
+            &state,
+            "n1",
+            &NoteUpdate::Reacted {
+                reaction: "👍".into(),
+            },
+            false,
+        )
+        .await;
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.reactions.get("👍"), Some(&1));
         assert_eq!(n.reaction_count, 1);
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() }, false).await;
+        apply_note_update_to_cache(
+            &state,
+            "n1",
+            &NoteUpdate::Unreacted {
+                reaction: "👍".into(),
+            },
+            false,
+        )
+        .await;
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.reactions.get("👍"), None);
         assert_eq!(n.reaction_count, 0);
@@ -1433,21 +1546,49 @@ mod tests {
     async fn apply_note_update_to_cache_is_noop_when_note_not_cached() {
         let state = state_with_account("acc1", "u-self");
         // n1 は未キャッシュ。panicせず何もしないこと。
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, false).await;
+        apply_note_update_to_cache(
+            &state,
+            "n1",
+            &NoteUpdate::Reacted {
+                reaction: "👍".into(),
+            },
+            false,
+        )
+        .await;
         assert!(state.cache.get_note("n1").await.unwrap().is_none());
     }
     #[tokio::test]
     async fn apply_note_update_to_cache_reflects_own_reaction_from_other_client() {
         let state = state_with_account("acc1", "u-self");
-        state.cache.cache_note("col1", &minimal_note("n1")).await.unwrap();
+        state
+            .cache
+            .cache_note("col1", &minimal_note("n1"))
+            .await
+            .unwrap();
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, true).await;
+        apply_note_update_to_cache(
+            &state,
+            "n1",
+            &NoteUpdate::Reacted {
+                reaction: "👍".into(),
+            },
+            true,
+        )
+        .await;
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.my_reaction.as_deref(), Some("👍"));
         assert_eq!(n.reactions.get("👍"), Some(&1));
         assert_eq!(n.reaction_count, 1);
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Unreacted { reaction: "👍".into() }, true).await;
+        apply_note_update_to_cache(
+            &state,
+            "n1",
+            &NoteUpdate::Unreacted {
+                reaction: "👍".into(),
+            },
+            true,
+        )
+        .await;
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.my_reaction, None);
         assert_eq!(n.reactions.get("👍"), None);
@@ -1455,13 +1596,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_note_update_to_cache_does_not_double_count_own_reaction_already_applied_by_command() {
+    async fn apply_note_update_to_cache_does_not_double_count_own_reaction_already_applied_by_command(
+    ) {
         let state = state_with_account("acc1", "u-self");
         let mut note = minimal_note("n1");
         note.apply_my_reaction("👍"); // react コマンド側の反映済み状態
         state.cache.cache_note("col1", &note).await.unwrap();
 
-        apply_note_update_to_cache(&state, "n1", &NoteUpdate::Reacted { reaction: "👍".into() }, true).await;
+        apply_note_update_to_cache(
+            &state,
+            "n1",
+            &NoteUpdate::Reacted {
+                reaction: "👍".into(),
+            },
+            true,
+        )
+        .await;
         let n = state.cache.get_note("n1").await.unwrap().unwrap();
         assert_eq!(n.my_reaction.as_deref(), Some("👍"));
         assert_eq!(n.reactions.get("👍"), Some(&1));

@@ -27,7 +27,9 @@ pub trait CoreBackend: Send + Sync + 'static {
 
 /// 推論のスレッド数。コア数の半分(最低 1)。CORE の既定(全コア)だと、合成中に UI が重くなるため。
 pub fn default_cpu_threads() -> u16 {
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
     (cores / 2).clamp(1, u16::MAX as usize) as u16
 }
 
@@ -72,20 +74,36 @@ mod native {
     /// ロードしたライブラリの関数。`Library` はプロセスの終わりまで外さない(下の `api`)ので、`'static` に持てる。
     struct Api {
         error_result_to_message: unsafe extern "C" fn(Code) -> *const c_char,
-        onnxruntime_load_once: unsafe extern "C" fn(LoadOnnxruntimeOptions, *mut *const c_void) -> Code,
+        onnxruntime_load_once:
+            unsafe extern "C" fn(LoadOnnxruntimeOptions, *mut *const c_void) -> Code,
         open_jtalk_rc_new: unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> Code,
         open_jtalk_rc_delete: unsafe extern "C" fn(*mut c_void),
-        synthesizer_new: unsafe extern "C" fn(*const c_void, *const c_void, InitializeOptions, *mut *mut c_void) -> Code,
+        synthesizer_new: unsafe extern "C" fn(
+            *const c_void,
+            *const c_void,
+            InitializeOptions,
+            *mut *mut c_void,
+        ) -> Code,
         synthesizer_delete: unsafe extern "C" fn(*mut c_void),
         voice_model_file_open: unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> Code,
         voice_model_file_id: unsafe extern "C" fn(*const c_void, *mut [u8; 16]),
         voice_model_file_delete: unsafe extern "C" fn(*mut c_void),
         make_default_load_voice_model_options: unsafe extern "C" fn() -> LoadVoiceModelOptions,
-        synthesizer_load_voice_model: unsafe extern "C" fn(*const c_void, *const c_void, LoadVoiceModelOptions) -> Code,
-        synthesizer_unload_voice_model: unsafe extern "C" fn(*const c_void, *const [u8; 16]) -> Code,
-        synthesizer_create_audio_query: unsafe extern "C" fn(*const c_void, *const c_char, u32, *mut *mut c_char) -> Code,
+        synthesizer_load_voice_model:
+            unsafe extern "C" fn(*const c_void, *const c_void, LoadVoiceModelOptions) -> Code,
+        synthesizer_unload_voice_model:
+            unsafe extern "C" fn(*const c_void, *const [u8; 16]) -> Code,
+        synthesizer_create_audio_query:
+            unsafe extern "C" fn(*const c_void, *const c_char, u32, *mut *mut c_char) -> Code,
         make_default_synthesis_options: unsafe extern "C" fn() -> SynthesisOptions,
-        synthesizer_synthesis: unsafe extern "C" fn(*const c_void, *const c_char, u32, SynthesisOptions, *mut usize, *mut *mut u8) -> Code,
+        synthesizer_synthesis: unsafe extern "C" fn(
+            *const c_void,
+            *const c_char,
+            u32,
+            SynthesisOptions,
+            *mut usize,
+            *mut *mut u8,
+        ) -> Code,
         string_free: unsafe extern "C" fn(*mut c_char),
         bytes_free: unsafe extern "C" fn(*mut u8),
     }
@@ -99,7 +117,8 @@ mod native {
             return Ok(a);
         }
         // SAFETY: 取得時に SHA-256 で検証した公式のライブラリを、アプリのデータディレクトリの固定の場所から読む。
-        let lib = unsafe { Library::new(core_lib) }.map_err(|e| CoreError::Load(format!("library: {e}")))?;
+        let lib = unsafe { Library::new(core_lib) }
+            .map_err(|e| CoreError::Load(format!("library: {e}")))?;
         // プロセスの終わりまで外さない。CORE は ONNX Runtime を内部の static で持つので、外すと再ロードが壊れうる。
         let lib: &'static Library = Box::leak(Box::new(lib));
         macro_rules! sym {
@@ -119,7 +138,9 @@ mod native {
             voice_model_file_open: sym!("voicevox_voice_model_file_open"),
             voice_model_file_id: sym!("voicevox_voice_model_file_id"),
             voice_model_file_delete: sym!("voicevox_voice_model_file_delete"),
-            make_default_load_voice_model_options: sym!("voicevox_make_default_load_voice_model_options"),
+            make_default_load_voice_model_options: sym!(
+                "voicevox_make_default_load_voice_model_options"
+            ),
             synthesizer_load_voice_model: sym!("voicevox_synthesizer_load_voice_model"),
             synthesizer_unload_voice_model: sym!("voicevox_synthesizer_unload_voice_model"),
             synthesizer_create_audio_query: sym!("voicevox_synthesizer_create_audio_query"),
@@ -142,7 +163,12 @@ mod native {
         unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
     }
 
-    fn check(api: &Api, code: Code, what: &str, kind: fn(String) -> CoreError) -> Result<(), CoreError> {
+    fn check(
+        api: &Api,
+        code: Code,
+        what: &str,
+        kind: fn(String) -> CoreError,
+    ) -> Result<(), CoreError> {
         if code == OK {
             Ok(())
         } else {
@@ -151,7 +177,9 @@ mod native {
     }
 
     fn c_path(p: &Path) -> Result<CString, CoreError> {
-        p.to_str().and_then(|s| CString::new(s).ok()).ok_or_else(|| CoreError::Load("path is not valid UTF-8 or contains NUL".into()))
+        p.to_str()
+            .and_then(|s| CString::new(s).ok())
+            .ok_or_else(|| CoreError::Load("path is not valid UTF-8 or contains NUL".into()))
     }
 
     /// ロード済みの `Synthesizer`。**全メソッドは `state` の Mutex で直列化する**(下の `Send` / `Sync` の根拠)。
@@ -174,20 +202,35 @@ mod native {
             self.state.lock().unwrap_or_else(|e| e.into_inner())
         }
 
-        pub fn load(core_lib: &Path, ort_lib: &Path, dict_dir: &Path, cpu_threads: u16) -> Result<Self, CoreError> {
+        pub fn load(
+            core_lib: &Path,
+            ort_lib: &Path,
+            dict_dir: &Path,
+            cpu_threads: u16,
+        ) -> Result<Self, CoreError> {
             let api = api(core_lib)?;
             let ort_path = c_path(ort_lib)?;
             let dict = c_path(dict_dir)?;
             let mut ort: *const c_void = std::ptr::null();
             // SAFETY: `ort_path` は、呼び出しの間生きている。`ort` は出力先。ONNX Runtime はプロセスで 1 度だけロードされ、以後は同じものが返る。
-            let code = unsafe { (api.onnxruntime_load_once)(LoadOnnxruntimeOptions { filename: ort_path.as_ptr() }, &mut ort) };
+            let code = unsafe {
+                (api.onnxruntime_load_once)(
+                    LoadOnnxruntimeOptions {
+                        filename: ort_path.as_ptr(),
+                    },
+                    &mut ort,
+                )
+            };
             check(api, code, "onnxruntime", CoreError::Load)?;
             let mut open_jtalk: *mut c_void = std::ptr::null_mut();
             // SAFETY: `dict` は呼び出しの間生きている。
             let code = unsafe { (api.open_jtalk_rc_new)(dict.as_ptr(), &mut open_jtalk) };
             check(api, code, "dictionary", CoreError::Load)?;
             let mut synthesizer: *mut c_void = std::ptr::null_mut();
-            let options = InitializeOptions { acceleration_mode: ACCELERATION_CPU, cpu_num_threads: cpu_threads };
+            let options = InitializeOptions {
+                acceleration_mode: ACCELERATION_CPU,
+                cpu_num_threads: cpu_threads,
+            };
             // SAFETY: `ort` と `open_jtalk` は、上の呼び出しで得た有効なポインタ。
             let code = unsafe { (api.synthesizer_new)(ort, open_jtalk, options, &mut synthesizer) };
             if let Err(e) = check(api, code, "synthesizer", CoreError::Load) {
@@ -195,7 +238,12 @@ mod native {
                 unsafe { (api.open_jtalk_rc_delete)(open_jtalk) };
                 return Err(e);
             }
-            Ok(Self { api, open_jtalk, synthesizer, state: Mutex::new(HashMap::new()) })
+            Ok(Self {
+                api,
+                open_jtalk,
+                synthesizer,
+                state: Mutex::new(HashMap::new()),
+            })
         }
     }
 
@@ -214,7 +262,13 @@ mod native {
             // SAFETY: `model` は、上で開いた有効なハンドル。`id` は 16 バイトの出力先。
             unsafe { (self.api.voice_model_file_id)(model, &mut id) };
             // SAFETY: `synthesizer` と `model` は有効。
-            let code = unsafe { (self.api.synthesizer_load_voice_model)(self.synthesizer, model, (self.api.make_default_load_voice_model_options)()) };
+            let code = unsafe {
+                (self.api.synthesizer_load_voice_model)(
+                    self.synthesizer,
+                    model,
+                    (self.api.make_default_load_voice_model_options)(),
+                )
+            };
             // ハンドルは、ロードのあとは要らない(実測: 閉じても合成できる)。成否にかかわらず閉じる。
             // SAFETY: `model` は有効で、ここで 1 度だけ閉じる。
             unsafe { (self.api.voice_model_file_delete)(model) };
@@ -225,25 +279,43 @@ mod native {
 
         fn audio_query(&self, text: &str, style_id: u32) -> Result<String, CoreError> {
             let _serial = self.lock_state();
-            let text = CString::new(text).map_err(|_| CoreError::Synthesis("text contains NUL".into()))?;
+            let text =
+                CString::new(text).map_err(|_| CoreError::Synthesis("text contains NUL".into()))?;
             let mut out: *mut c_char = std::ptr::null_mut();
             // SAFETY: `text` は呼び出しの間生きている。
-            let code = unsafe { (self.api.synthesizer_create_audio_query)(self.synthesizer, text.as_ptr(), style_id, &mut out) };
+            let code = unsafe {
+                (self.api.synthesizer_create_audio_query)(
+                    self.synthesizer,
+                    text.as_ptr(),
+                    style_id,
+                    &mut out,
+                )
+            };
             check(self.api, code, "audio query", CoreError::Synthesis)?;
             // SAFETY: 成功時の `out` は、CORE が確保した NUL 終端の UTF-8 文字列。コピーしてから `string_free` で解放する。
-            let s = unsafe { CStr::from_ptr(out) }.to_string_lossy().into_owned();
+            let s = unsafe { CStr::from_ptr(out) }
+                .to_string_lossy()
+                .into_owned();
             unsafe { (self.api.string_free)(out) };
             Ok(s)
         }
 
         fn synthesis(&self, query_json: &str, style_id: u32) -> Result<Vec<u8>, CoreError> {
             let _serial = self.lock_state();
-            let q = CString::new(query_json).map_err(|_| CoreError::Synthesis("query contains NUL".into()))?;
+            let q = CString::new(query_json)
+                .map_err(|_| CoreError::Synthesis("query contains NUL".into()))?;
             let mut len: usize = 0;
             let mut wav: *mut u8 = std::ptr::null_mut();
             // SAFETY: `q` は呼び出しの間生きている。
             let code = unsafe {
-                (self.api.synthesizer_synthesis)(self.synthesizer, q.as_ptr(), style_id, (self.api.make_default_synthesis_options)(), &mut len, &mut wav)
+                (self.api.synthesizer_synthesis)(
+                    self.synthesizer,
+                    q.as_ptr(),
+                    style_id,
+                    (self.api.make_default_synthesis_options)(),
+                    &mut len,
+                    &mut wav,
+                )
             };
             check(self.api, code, "synthesis", CoreError::Synthesis)?;
             // SAFETY: 成功時の `wav` は、CORE が確保した `len` バイト。コピーしてから `bytes_free` で解放する。
@@ -280,7 +352,9 @@ mod tests {
     #[test]
     fn the_default_thread_count_is_at_least_one_and_at_most_half_of_the_cores() {
         let n = default_cpu_threads() as usize;
-        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2);
         assert!(n >= 1);
         assert!(n <= cores.max(2) / 2 + 1, "{n} / {cores}");
     }
@@ -297,26 +371,44 @@ mod real_tests {
     #[test]
     #[ignore]
     fn native_core_loads_and_synthesizes_a_real_wav() {
-        let p = PathBuf::from(std::env::var("TSUMUGI_TEST_PROBE").expect("TSUMUGI_TEST_PROBE を設定してください"));
+        let p = PathBuf::from(
+            std::env::var("TSUMUGI_TEST_PROBE").expect("TSUMUGI_TEST_PROBE を設定してください"),
+        );
         let core = NativeCore::load(
             &p.join("core/voicevox_core-linux-x64-0.17.1/lib/libvoicevox_core.so"),
-            &p.join("ort/voicevox_onnxruntime-linux-x64-1.17.3/lib/libvoicevox_onnxruntime.so.1.17.3"),
+            &p.join(
+                "ort/voicevox_onnxruntime-linux-x64-1.17.3/lib/libvoicevox_onnxruntime.so.1.17.3",
+            ),
             &p.join("dict/open_jtalk_dic_utf_8-1.11"),
             default_cpu_threads(),
         )
         .expect("load");
         let vvm = p.join("0.vvm");
         core.load_voice_model(&vvm).expect("load vvm");
-        core.load_voice_model(&vvm).expect("2 回目のロードは何もしない");
+        core.load_voice_model(&vvm)
+            .expect("2 回目のロードは何もしない");
 
-        let q = core.audio_query("この音声は、ボイスボックスを使用して、出力されています。", 3).expect("audio_query");
-        assert!(q.contains("speedScale") && q.contains("volumeScale"), "{}", &q[..q.len().min(200)]);
+        let q = core
+            .audio_query(
+                "この音声は、ボイスボックスを使用して、出力されています。",
+                3,
+            )
+            .expect("audio_query");
+        assert!(
+            q.contains("speedScale") && q.contains("volumeScale"),
+            "{}",
+            &q[..q.len().min(200)]
+        );
         let wav = core.synthesis(&q, 3).expect("synthesis");
         assert_eq!(&wav[..4], b"RIFF");
         assert_eq!(&wav[8..12], b"WAVE");
         assert!(wav.len() > 100_000, "{}", wav.len());
         let pcm = &wav[44..];
-        assert!(pcm.chunks_exact(2).any(|c| i16::from_le_bytes([c[0], c[1]]).abs() > 1000), "無音ではない");
+        assert!(
+            pcm.chunks_exact(2)
+                .any(|c| i16::from_le_bytes([c[0], c[1]]).abs() > 1000),
+            "無音ではない"
+        );
 
         // 外したあとは、そのスタイルを合成できない。入れ直せば、また合成できる。
         core.unload_all();

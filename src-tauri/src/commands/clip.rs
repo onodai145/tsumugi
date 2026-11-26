@@ -1,6 +1,9 @@
 //! クリップ系 command（一覧取得・作成・ノート追加）。
 
-use crate::api::clips::{add_note_to_clip as api_add_note_to_clip, create_clip as api_create_clip, list_clips as api_list_clips};
+use crate::api::clips::{
+    add_note_to_clip as api_add_note_to_clip, create_clip as api_create_clip,
+    list_clips as api_list_clips,
+};
 use crate::domain::Clip;
 use crate::error::Result;
 use crate::state::AppState;
@@ -17,7 +20,11 @@ pub async fn list_clips(state: State<'_, AppState>, account_id: String) -> Resul
 /// クリップを新規作成する。
 #[tauri::command]
 #[specta::specta]
-pub async fn create_clip(state: State<'_, AppState>, account_id: String, name: String) -> Result<Clip> {
+pub async fn create_clip(
+    state: State<'_, AppState>,
+    account_id: String,
+    name: String,
+) -> Result<Clip> {
     let client = state.client_for(&account_id)?;
     api_create_clip(&client, &name).await
 }

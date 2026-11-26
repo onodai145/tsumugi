@@ -12,8 +12,8 @@ mod mcp;
 mod mml;
 mod mobile_intent;
 mod nav_guard;
-mod network_status;
 mod net_guard;
+mod network_status;
 mod scheduler;
 mod session;
 mod sound;
@@ -545,49 +545,109 @@ mod specta_export {
         assert!(ts.contains("whoami"));
         // MCPサーバー(Issue #557)のコマンドと型
         assert!(ts.contains("getMcpStatus"), "missing getMcpStatus command");
-        assert!(ts.contains("setMcpEnabled"), "missing setMcpEnabled command");
+        assert!(
+            ts.contains("setMcpEnabled"),
+            "missing setMcpEnabled command"
+        );
         assert!(ts.contains("setMcpPort"), "missing setMcpPort command");
-        assert!(ts.contains("setMcpAccountExposed"), "missing setMcpAccountExposed command");
+        assert!(
+            ts.contains("setMcpAccountExposed"),
+            "missing setMcpAccountExposed command"
+        );
         assert!(ts.contains("getMcpToken"), "missing getMcpToken command");
-        assert!(ts.contains("regenerateMcpToken"), "missing regenerateMcpToken command");
-        assert!(ts.contains("McpStatus") && ts.contains("exposedAccountIds"), "missing McpStatus type");
+        assert!(
+            ts.contains("regenerateMcpToken"),
+            "missing regenerateMcpToken command"
+        );
+        assert!(
+            ts.contains("McpStatus") && ts.contains("exposedAccountIds"),
+            "missing McpStatus type"
+        );
         // サーバーサイド検索(Issue #430)のコマンドと型
-        assert!(ts.contains("searchServerNotes"), "missing searchServerNotes command");
-        assert!(ts.contains("getSearchCapabilities"), "missing getSearchCapabilities command");
+        assert!(
+            ts.contains("searchServerNotes"),
+            "missing searchServerNotes command"
+        );
+        assert!(
+            ts.contains("getSearchCapabilities"),
+            "missing getSearchCapabilities command"
+        );
         // 予約投稿(Issue #60)のコマンドと型
         assert!(ts.contains("scheduleNote"), "missing scheduleNote command");
-        assert!(ts.contains("listScheduledNotes"), "missing listScheduledNotes command");
-        assert!(ts.contains("cancelScheduledNote"), "missing cancelScheduledNote command");
-        assert!(ts.contains("getScheduleCapabilities"), "missing getScheduleCapabilities command");
+        assert!(
+            ts.contains("listScheduledNotes"),
+            "missing listScheduledNotes command"
+        );
+        assert!(
+            ts.contains("cancelScheduledNote"),
+            "missing cancelScheduledNote command"
+        );
+        assert!(
+            ts.contains("getScheduleCapabilities"),
+            "missing getScheduleCapabilities command"
+        );
         assert!(
             ts.contains("scheduledAt: number") || ts.contains("scheduledAt:number"),
             "ScheduledNote.scheduled_at should export as number (camelCase)"
         );
         // クライアント側予約(Issue #60 B)のコマンド・型・イベント
-        assert!(ts.contains("scheduleNoteLocal"), "missing scheduleNoteLocal command");
-        assert!(ts.contains("listLocalScheduledNotes"), "missing listLocalScheduledNotes command");
-        assert!(ts.contains("cancelLocalScheduledNote"), "missing cancelLocalScheduledNote command");
-        assert!(ts.contains("postLocalScheduledNow"), "missing postLocalScheduledNow command");
-        assert!(ts.contains("LocalScheduledNote"), "missing LocalScheduledNote type");
-        assert!(ts.contains("ScheduledPostPosted"), "missing ScheduledPostPosted event");
-        assert!(ts.contains("ScheduledPostFailed"), "missing ScheduledPostFailed event");
+        assert!(
+            ts.contains("scheduleNoteLocal"),
+            "missing scheduleNoteLocal command"
+        );
+        assert!(
+            ts.contains("listLocalScheduledNotes"),
+            "missing listLocalScheduledNotes command"
+        );
+        assert!(
+            ts.contains("cancelLocalScheduledNote"),
+            "missing cancelLocalScheduledNote command"
+        );
+        assert!(
+            ts.contains("postLocalScheduledNow"),
+            "missing postLocalScheduledNow command"
+        );
+        assert!(
+            ts.contains("LocalScheduledNote"),
+            "missing LocalScheduledNote type"
+        );
+        assert!(
+            ts.contains("ScheduledPostPosted"),
+            "missing ScheduledPostPosted event"
+        );
+        assert!(
+            ts.contains("ScheduledPostFailed"),
+            "missing ScheduledPostFailed event"
+        );
         assert!(
             ts.contains("\"pending\"") && ts.contains("\"expired\""),
             "LocalScheduleStatus should export camelCase variants"
         );
-        assert!(ts.contains("dateRange"), "SearchCapabilities.date_range should be camelCase");
+        assert!(
+            ts.contains("dateRange"),
+            "SearchCapabilities.date_range should be camelCase"
+        );
         // serde(rename_all="camelCase") が specta 経由で TS に反映されていること
         assert!(
             ts.contains("displayName"),
             "Account.display_name should be camelCase (displayName). serde rename not applied:\n{ts}"
         );
-        assert!(ts.contains("followersCount"), "User.followers_count should be camelCase");
+        assert!(
+            ts.contains("followersCount"),
+            "User.followers_count should be camelCase"
+        );
         // token を戻り値に含めていないこと（型に token フィールドが無い）
-        assert!(!ts.contains("token:"), "bindings unexpectedly expose a token field:\n{ts}");
+        assert!(
+            !ts.contains("token:"),
+            "bindings unexpectedly expose a token field:\n{ts}"
+        );
         // Phase 2: command と event が生成されていること
         assert!(ts.contains("addColumn"), "missing addColumn command");
         assert!(ts.contains("ColumnNote"), "missing ColumnNote event type");
-        assert!(ts.contains("createdAt"), "Note.created_at should be camelCase");
+        assert!(
+            ts.contains("createdAt"),
+            "Note.created_at should be camelCase"
+        );
         // i64(created_at) が number として出ていること（BigInt ではない）
         assert!(
             ts.contains("createdAt: number") || ts.contains("createdAt:number"),
@@ -596,9 +656,18 @@ mod specta_export {
         // MML 着メロ(Issue #75)のコマンドと型
         assert!(ts.contains("parseMml"), "missing parseMml command");
         assert!(ts.contains("MmlParseResult"), "missing MmlParseResult type");
-        assert!(ts.contains("startSec"), "NoteEvent.start_sec should be camelCase");
-        assert!(ts.contains("\"parsed\"") && ts.contains("\"invalid\""), "MmlParseResult status tags");
+        assert!(
+            ts.contains("startSec"),
+            "NoteEvent.start_sec should be camelCase"
+        );
+        assert!(
+            ts.contains("\"parsed\"") && ts.contains("\"invalid\""),
+            "MmlParseResult status tags"
+        );
         assert!(ts.contains("export type Timbre"), "missing Timbre type");
-        assert!(ts.contains("\"epiano\""), "Timbre variants must be camelCase strings");
+        assert!(
+            ts.contains("\"epiano\""),
+            "Timbre variants must be camelCase strings"
+        );
     }
 }

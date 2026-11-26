@@ -56,7 +56,11 @@ struct Parser {
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, nest: 0 }
+        Parser {
+            tokens,
+            pos: 0,
+            nest: 0,
+        }
     }
 
     /// 再帰する構文(`(` `!` `[`)に入る。呼び出し側は、成功した経路では必ず `leave` を呼ぶ
@@ -141,7 +145,9 @@ impl Parser {
             loop {
                 match self.bump() {
                     Some(Token::Str(s)) => args.push(s),
-                    other => return Err(format!("source argument must be a string, got {other:?}")),
+                    other => {
+                        return Err(format!("source argument must be a string, got {other:?}"))
+                    }
                 }
                 if self.eat(&Token::Comma) {
                     continue;
@@ -276,11 +282,15 @@ impl Parser {
     fn parse_value(&mut self) -> Result<Value, String> {
         match self.peek() {
             Some(Token::Str(_)) => {
-                let Some(Token::Str(s)) = self.bump() else { unreachable!() };
+                let Some(Token::Str(s)) = self.bump() else {
+                    unreachable!()
+                };
                 Ok(Value::Str(s))
             }
             Some(Token::Num(_)) => {
-                let Some(Token::Num(n)) = self.bump() else { unreachable!() };
+                let Some(Token::Num(n)) = self.bump() else {
+                    unreachable!()
+                };
                 Ok(Value::Num(n))
             }
             Some(Token::At) => {
@@ -590,7 +600,11 @@ mod tests {
     fn the_depth_limit_covers_chains_inside_nesting() {
         // 入れ子は上限以内でも、各段に連鎖があれば AST は深くなる
         // 入れ子60段(上限以内)、各段で左に5項つなぐ: 5 * 60 = 300 段
-        let q = format!("{}cw{}", "(".repeat(60), " && cw && cw && cw && cw && cw)".repeat(60));
+        let q = format!(
+            "{}cw{}",
+            "(".repeat(60),
+            " && cw && cw && cw && cw && cw)".repeat(60)
+        );
         assert!(pred(&q).is_err());
     }
 

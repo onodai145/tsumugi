@@ -23,19 +23,31 @@ pub struct SpeechCoreTerms {
 
 pub(crate) fn info(s: &AppState) -> SpeechCoreInfo {
     let mut i = s.speech_core.packs.snapshot();
-    i.terms_accepted = s.settings.speech_core_terms_version().as_deref() == Some(i.terms_version.as_str());
+    i.terms_accepted =
+        s.settings.speech_core_terms_version().as_deref() == Some(i.terms_version.as_str());
     i
 }
 
 pub(crate) fn terms_core() -> SpeechCoreTerms {
     let t = terms();
-    SpeechCoreTerms { version: terms_version(), voice_models: t.voice_models.replace('\r', ""), onnxruntime: t.onnxruntime.replace('\r', "") }
+    SpeechCoreTerms {
+        version: terms_version(),
+        voice_models: t.voice_models.replace('\r', ""),
+        onnxruntime: t.onnxruntime.replace('\r', ""),
+    }
 }
 
 /// 規約への同意を Rust 側で強制してから、取得を始める。同意は、開始できたあとに記録する。
-pub(crate) fn start_core(s: &AppState, pack: &str, accepted_terms_version: &str, notify: Notify) -> Result<()> {
+pub(crate) fn start_core(
+    s: &AppState,
+    pack: &str,
+    accepted_terms_version: &str,
+    notify: Notify,
+) -> Result<()> {
     if accepted_terms_version != terms_version() {
-        return Err(Error::Invalid("規約への同意が必要です(版が一致しません)".into()));
+        return Err(Error::Invalid(
+            "規約への同意が必要です(版が一致しません)".into(),
+        ));
     }
     let key = PackKey::parse(pack)?;
     s.speech_core.packs.start(key, notify)?;
@@ -76,7 +88,12 @@ pub async fn get_speech_core_terms() -> Result<SpeechCoreTerms> {
 /// 進捗は Event `SpeechCoreStatusChanged`。設定画面を閉じても続く。
 #[tauri::command]
 #[specta::specta]
-pub async fn start_speech_core_download(app: AppHandle, state: State<'_, AppState>, pack: String, accepted_terms_version: String) -> Result<()> {
+pub async fn start_speech_core_download(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pack: String,
+    accepted_terms_version: String,
+) -> Result<()> {
     start_core(&state, &pack, &accepted_terms_version, notify_for(app))
 }
 
@@ -91,8 +108,16 @@ pub async fn cancel_speech_core_download(state: State<'_, AppState>) -> Result<(
 /// 取得済みのものと、途中までのファイルを削除する。取得中は拒否する。
 #[tauri::command]
 #[specta::specta]
-pub async fn delete_speech_core_pack(app: AppHandle, state: State<'_, AppState>, pack: String) -> Result<()> {
-    state.speech_core.packs.delete(PackKey::parse(&pack)?).await?;
+pub async fn delete_speech_core_pack(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pack: String,
+) -> Result<()> {
+    state
+        .speech_core
+        .packs
+        .delete(PackKey::parse(&pack)?)
+        .await?;
     let _ = SpeechCoreStatusChanged { info: info(&state) }.emit(&app);
     Ok(())
 }
@@ -130,10 +155,30 @@ mod tests {
     /// 声 `0` の取得先を、偽のサーバーに向けた状態。
     fn with_server(server: &MockServer, body: &[u8]) -> AppState {
         let store = Arc::new(Store::new(temp_root()));
-        let engine = CoreEngine::new(store.clone(), None, Arc::new(|| Err(CoreError::Load("n/a".into()))));
-        let mut packs = Packs::new(store.clone(), crate::tts::voicevox::catalog::engine_assets_for("linux", "x86_64"), reqwest::Client::new(), engine.clone());
-        packs.override_voice_spec("0", ModelSpec { url: format!("{}/0.vvm", server.uri()), size: body.len() as u64, sha256: sha256_hex(body) });
-        let core = SpeechCore { store, engine, packs: Arc::new(packs) };
+        let engine = CoreEngine::new(
+            store.clone(),
+            None,
+            Arc::new(|| Err(CoreError::Load("n/a".into()))),
+        );
+        let mut packs = Packs::new(
+            store.clone(),
+            crate::tts::voicevox::catalog::engine_assets_for("linux", "x86_64"),
+            reqwest::Client::new(),
+            engine.clone(),
+        );
+        packs.override_voice_spec(
+            "0",
+            ModelSpec {
+                url: format!("{}/0.vvm", server.uri()),
+                size: body.len() as u64,
+                sha256: sha256_hex(body),
+            },
+        );
+        let core = SpeechCore {
+            store,
+            engine,
+            packs: Arc::new(packs),
+        };
         unconfigured().with_speech_core(Arc::new(core))
     }
 
@@ -152,44 +197,67 @@ mod tests {
         let s = unconfigured();
         for v in ["", "1999-01-01", "  ", &terms_version().to_uppercase()] {
             let r = start_core(&s, "0", v, noop());
-            assert!(matches!(r, Err(Error::Invalid(ref m)) if m.contains("規約")), "{v:?}: {r:?}");
+            assert!(
+                matches!(r, Err(Error::Invalid(ref m)) if m.contains("規約")),
+                "{v:?}: {r:?}"
+            );
         }
         assert_eq!(s.settings.speech_core_terms_version(), None);
     }
 
     #[tokio::test]
-    async fn an_unknown_pack_and_an_unsupported_environment_are_rejected_without_recording_consent() {
+    async fn an_unknown_pack_and_an_unsupported_environment_are_rejected_without_recording_consent()
+    {
         let s = unconfigured();
         assert!(start_core(&s, "nope", &terms_version(), noop()).is_err());
-        assert!(start_core(&s, "s0", &terms_version(), noop()).is_err(), "歌声だけの VVM は取得できない");
+        assert!(
+            start_core(&s, "s0", &terms_version(), noop()).is_err(),
+            "歌声だけの VVM は取得できない"
+        );
         match start_core(&s, "engine", &terms_version(), noop()) {
             Err(Error::Invalid(m)) => assert_eq!(m, crate::tts::ERR_UNSUPPORTED),
             other => panic!("{other:?}"),
         }
-        assert_eq!(s.settings.speech_core_terms_version(), None, "開始できなかったら同意を記録しない");
+        assert_eq!(
+            s.settings.speech_core_terms_version(),
+            None,
+            "開始できなかったら同意を記録しない"
+        );
     }
 
     #[tokio::test]
     async fn consent_is_recorded_after_a_successful_start_and_shown_in_the_info() {
         let server = MockServer::start().await;
         let body = vec![7u8; 2048];
-        Mock::given(method("GET")).and(path("/0.vvm")).respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone())).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/0.vvm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+            .mount(&server)
+            .await;
         let s = with_server(&server, &body);
         assert!(!info(&s).terms_accepted);
 
         start_core(&s, "0", &terms_version(), noop()).unwrap();
         wait_idle(&s).await;
 
-        assert_eq!(s.settings.speech_core_terms_version().as_deref(), Some(terms_version().as_str()));
+        assert_eq!(
+            s.settings.speech_core_terms_version().as_deref(),
+            Some(terms_version().as_str())
+        );
         let i = info(&s);
         assert!(i.terms_accepted);
-        assert_eq!(i.voices[0].pack.status, crate::translate::model_store::LocalModelStatus::Ready);
+        assert_eq!(
+            i.voices[0].pack.status,
+            crate::translate::model_store::LocalModelStatus::Ready
+        );
     }
 
     #[test]
     fn an_older_consent_is_not_accepted_for_the_current_terms() {
         let s = unconfigured();
-        s.settings.set_speech_core_terms_version("older-version").unwrap();
+        s.settings
+            .set_speech_core_terms_version("older-version")
+            .unwrap();
         assert!(!info(&s).terms_accepted, "規約が変わったら、再同意が要る");
     }
 
@@ -205,8 +273,22 @@ mod tests {
         let s = unconfigured();
         assert!(!info(&s).supported);
         assert!(list_voices_core(&s).await.unwrap().is_empty());
-        let r = s.speech_core.engine.synthesize("a", "3", &crate::tts::engine::SynthParams { speed_scale: 1.0, volume: 1.0 }).await;
-        assert!(matches!(r, Err(Error::Invalid(ref m)) if m == crate::tts::ERR_UNSUPPORTED), "{r:?}");
+        let r = s
+            .speech_core
+            .engine
+            .synthesize(
+                "a",
+                "3",
+                &crate::tts::engine::SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await;
+        assert!(
+            matches!(r, Err(Error::Invalid(ref m)) if m == crate::tts::ERR_UNSUPPORTED),
+            "{r:?}"
+        );
     }
 
     #[test]
@@ -214,10 +296,17 @@ mod tests {
         let s = unconfigured();
         let saved = crate::commands::speech::set_settings_core(
             &s,
-            crate::domain::SpeechSettings { enabled: true, engine: crate::domain::SpeechEngineKind::VoicevoxCore, ..Default::default() },
+            crate::domain::SpeechSettings {
+                enabled: true,
+                engine: crate::domain::SpeechEngineKind::VoicevoxCore,
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(saved.engine, crate::domain::SpeechEngineKind::VoicevoxCore);
-        assert_eq!(s.settings.load_speech().engine, crate::domain::SpeechEngineKind::VoicevoxCore);
+        assert_eq!(
+            s.settings.load_speech().engine,
+            crate::domain::SpeechEngineKind::VoicevoxCore
+        );
     }
 }

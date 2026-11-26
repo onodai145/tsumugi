@@ -328,7 +328,9 @@ fn parse_http_url(raw: &str) -> Result<url::Url> {
     // `url::Url::parse` は前後の空白や途中のタブ・改行を黙って取り除くので、検証した形と実際に
     // 使う(保存・OSに渡す)文字列が食い違う。前後の空白と制御文字を含む値は拒否する。
     if raw != raw.trim() || raw.chars().any(char::is_control) {
-        return Err(invalid_url("URLの前後の空白や制御文字(改行・タブなど)は含められません"));
+        return Err(invalid_url(
+            "URLの前後の空白や制御文字(改行・タブなど)は含められません",
+        ));
     }
     let parsed = url::Url::parse(raw).map_err(|_| invalid_url("URLの形式が正しくありません"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -380,8 +382,10 @@ fn with_label(label: &str, e: Error) -> Error {
 impl UiPrefs {
     /// 外部サービスの2つのURLを検証する(保存・インポートの入口で使う)。
     pub fn validate_external_urls(&self) -> Result<()> {
-        validate_search_engine_url(&self.search_engine_url).map_err(|e| with_label("検索エンジンのURL", e))?;
-        validate_summaly_proxy_url(&self.summaly_proxy_url).map_err(|e| with_label("URLプレビューの取得先", e))?;
+        validate_search_engine_url(&self.search_engine_url)
+            .map_err(|e| with_label("検索エンジンのURL", e))?;
+        validate_summaly_proxy_url(&self.summaly_proxy_url)
+            .map_err(|e| with_label("URLプレビューの取得先", e))?;
         Ok(())
     }
 
@@ -722,7 +726,10 @@ mod tests {
         // 既定はGoogle検索(追加前の固定挙動を維持)。
         let v: UiPrefs =
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
-        assert_eq!(v.search_engine_url, "https://www.google.com/search?q={query}");
+        assert_eq!(
+            v.search_engine_url,
+            "https://www.google.com/search?q={query}"
+        );
     }
 
     #[test]
@@ -756,15 +763,18 @@ mod tests {
     #[test]
     fn translate_engine_defaults_to_server_for_legacy_json() {
         // translate_engine 追加前に保存された JSON も読めること（#[serde(default)]）。
-        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.translate_engine, "server");
         assert_eq!(UiPrefs::default().translate_engine, "server");
     }
 
     #[test]
     fn translate_engine_round_trips_camel_case() {
-        let v: UiPrefs =
-            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320,"translateEngine":"local"}"#).unwrap();
+        let v: UiPrefs = serde_json::from_str(
+            r#"{"theme":"dark","defaultColumnWidth":320,"translateEngine":"local"}"#,
+        )
+        .unwrap();
         assert_eq!(v.translate_engine, "local");
         let json = serde_json::to_value(&v).unwrap();
         assert_eq!(json["translateEngine"], "local");
@@ -782,14 +792,16 @@ mod tests {
     #[test]
     fn instance_ticker_defaults_to_remote_for_legacy_json() {
         // instance_ticker 追加前に保存された JSON も読めること（#[serde(default)]）。
-        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.instance_ticker, "remote");
     }
 
     #[test]
     fn cat_mode_defaults_to_respect_for_legacy_json() {
         // cat_mode 追加前に保存された JSON も読めること（#[serde(default)]）。
-        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.cat_mode, "respect");
     }
 
@@ -797,7 +809,8 @@ mod tests {
     fn avatar_radius_defaults_to_20_for_legacy_json() {
         // avatar_radius 追加前に保存された JSON も読めること（#[serde(default)]）。
         // 既定は20%(追加前の rounded-md に近い見た目、Issue #94)。
-        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.avatar_radius, 20);
     }
 
@@ -805,7 +818,8 @@ mod tests {
     fn ui_scale_defaults_to_100_for_legacy_json() {
         // ui_scale 追加前に保存された JSON も読めること（#[serde(default)]）。
         // 0 ではなく 100（等倍）にフォールバックすること（Issue #40）。
-        let v: UiPrefs = serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
+        let v: UiPrefs =
+            serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
         assert_eq!(v.ui_scale, 100);
         assert_eq!(UiPrefs::default().ui_scale, 100);
     }
@@ -858,7 +872,10 @@ mod tests {
         ] {
             assert!(validate_search_engine_url(bad).is_err(), "{bad:?}");
         }
-        let too_long = format!("https://example.com/?q={{query}}{}", "a".repeat(MAX_EXTERNAL_URL_LEN));
+        let too_long = format!(
+            "https://example.com/?q={{query}}{}",
+            "a".repeat(MAX_EXTERNAL_URL_LEN)
+        );
         assert!(validate_search_engine_url(&too_long).is_err());
     }
 
@@ -917,11 +934,19 @@ mod tests {
     fn validate_external_urls_names_the_offending_field() {
         let mut p = UiPrefs::default();
         p.search_engine_url = "javascript:alert({query})".into();
-        assert!(p.validate_external_urls().unwrap_err().to_string().contains("検索エンジンのURL"));
+        assert!(p
+            .validate_external_urls()
+            .unwrap_err()
+            .to_string()
+            .contains("検索エンジンのURL"));
 
         let mut p = UiPrefs::default();
         p.summaly_proxy_url = "ftp://example.com".into();
-        assert!(p.validate_external_urls().unwrap_err().to_string().contains("URLプレビューの取得先"));
+        assert!(p
+            .validate_external_urls()
+            .unwrap_err()
+            .to_string()
+            .contains("URLプレビューの取得先"));
     }
 
     #[test]

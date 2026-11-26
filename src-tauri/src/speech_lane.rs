@@ -76,7 +76,11 @@ mod tests {
     use tokio::sync::oneshot;
 
     fn buf(len: usize) -> SamplesBuffer {
-        SamplesBuffer::new(NonZeroU16::new(1).unwrap(), NonZeroU32::new(8000).unwrap(), vec![0.1f32; len])
+        SamplesBuffer::new(
+            NonZeroU16::new(1).unwrap(),
+            NonZeroU32::new(8000).unwrap(),
+            vec![0.1f32; len],
+        )
     }
 
     /// キューの出力から `n` サンプルを読み進める(オーディオスレッドが再生するのと同じ動き)。
@@ -142,7 +146,10 @@ mod tests {
         let (tx, mut rx) = oneshot::channel();
         lane.start(player, buf(200), tx);
         lane.fail("device reopened");
-        assert_eq!(rx.try_recv().unwrap(), SpeakOutcome::Failed("device reopened".into()));
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            SpeakOutcome::Failed("device reopened".into())
+        );
     }
 
     #[test]

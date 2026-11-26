@@ -3,7 +3,9 @@
 use crate::api::drafts::{create_scheduled, delete_draft, list_scheduled};
 use crate::api::notes::NoteDraft;
 use crate::commands::column::cached_server_version;
-use crate::domain::{schedule_capabilities, LocalScheduledNote, ScheduleCapabilities, ScheduledNote};
+use crate::domain::{
+    schedule_capabilities, LocalScheduledNote, ScheduleCapabilities, ScheduledNote,
+};
 use crate::error::Result;
 use crate::scheduler;
 use crate::state::AppState;
@@ -69,7 +71,13 @@ pub async fn schedule_note_local(
     input: DraftInput,
     scheduled_at: u32,
 ) -> Result<LocalScheduledNote> {
-    scheduler::schedule_local(&state, &account_id, input, i64::from(scheduled_at), scheduler::now_sec())
+    scheduler::schedule_local(
+        &state,
+        &account_id,
+        input,
+        i64::from(scheduled_at),
+        scheduler::now_sec(),
+    )
 }
 
 /// そのアカウントのローカル予約(予約日時の昇順)。

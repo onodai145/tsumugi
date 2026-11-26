@@ -61,7 +61,11 @@ impl CacheMetrics {
     }
 
     pub fn record_resume(&self, hit: bool) {
-        let counter = if hit { &self.resume_hit } else { &self.resume_fallback };
+        let counter = if hit {
+            &self.resume_hit
+        } else {
+            &self.resume_fallback
+        };
         counter.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -207,7 +211,14 @@ impl AppState {
         cache: NoteCacheStore,
         cache_dir: std::path::PathBuf,
     ) -> Self {
-        Self::new_with_sound(secrets, settings, drafts, cache, cache_dir, SoundPlayer::spawn())
+        Self::new_with_sound(
+            secrets,
+            settings,
+            drafts,
+            cache,
+            cache_dir,
+            SoundPlayer::spawn(),
+        )
     }
 
     /// 予約投稿のストアを差し替える(起動時に永続版へ)。
@@ -217,18 +228,27 @@ impl AppState {
     }
 
     /// ローカル翻訳のマネージャーを差し替える(起動時にモデルの置き場つきのものへ)。
-    pub fn with_local_translate(mut self, local_translate: std::sync::Arc<crate::translate::LocalTranslate>) -> Self {
+    pub fn with_local_translate(
+        mut self,
+        local_translate: std::sync::Arc<crate::translate::LocalTranslate>,
+    ) -> Self {
         self.local_translate = local_translate;
         self
     }
 
     /// ローカル翻訳のモデル管理を差し替える(起動時にモデルの置き場つきのものへ)。
-    pub fn with_local_models(mut self, local_models: std::sync::Arc<crate::translate::LocalModels>) -> Self {
+    pub fn with_local_models(
+        mut self,
+        local_models: std::sync::Arc<crate::translate::LocalModels>,
+    ) -> Self {
         self.local_models = local_models;
         self
     }
 
-    pub fn with_speech_core(mut self, speech_core: std::sync::Arc<crate::tts::voicevox::SpeechCore>) -> Self {
+    pub fn with_speech_core(
+        mut self,
+        speech_core: std::sync::Arc<crate::tts::voicevox::SpeechCore>,
+    ) -> Self {
         self.speech_core = speech_core;
         self
     }
@@ -252,14 +272,22 @@ impl AppState {
         let fetch_allowlist = crate::net_guard::FetchAllowlist::default();
         fetch_allowlist.replace(hosts_with_token(&accounts, secrets.as_ref()));
         let preview_allowlist = crate::net_guard::FetchAllowlist::default();
-        preview_allowlist.replace(preview_allowlist_hosts(&accounts, secrets.as_ref(), &settings));
+        preview_allowlist.replace(preview_allowlist_hosts(
+            &accounts,
+            secrets.as_ref(),
+            &settings,
+        ));
         Self {
-            http: crate::api::client::build_http_client(USER_AGENT).expect("failed to build reqwest client"),
+            http: crate::api::client::build_http_client(USER_AGENT)
+                .expect("failed to build reqwest client"),
             fetch_http: crate::net_guard::build_fetch_client(USER_AGENT, fetch_allowlist.clone())
                 .expect("failed to build fetch client"),
             fetch_allowlist,
-            preview_http: crate::net_guard::build_fetch_client(USER_AGENT, preview_allowlist.clone())
-                .expect("failed to build preview client"),
+            preview_http: crate::net_guard::build_fetch_client(
+                USER_AGENT,
+                preview_allowlist.clone(),
+            )
+            .expect("failed to build preview client"),
             preview_allowlist,
             accounts: Mutex::new(AccountManager::with_accounts(accounts)),
             secrets,
@@ -359,12 +387,25 @@ impl AppState {
         }
     }
 
-    pub(crate) fn strip_muted_reply_with(&self, account_id: &str, mute: &MuteConfig, note: &mut Note) {
-        if note.reply.as_deref().is_some_and(|r| self.is_reply_muted(account_id, mute, r)) {
+    pub(crate) fn strip_muted_reply_with(
+        &self,
+        account_id: &str,
+        mute: &MuteConfig,
+        note: &mut Note,
+    ) {
+        if note
+            .reply
+            .as_deref()
+            .is_some_and(|r| self.is_reply_muted(account_id, mute, r))
+        {
             note.reply = None;
         }
         if let Some(inner) = note.renote.as_deref_mut() {
-            if inner.reply.as_deref().is_some_and(|r| self.is_reply_muted(account_id, mute, r)) {
+            if inner
+                .reply
+                .as_deref()
+                .is_some_and(|r| self.is_reply_muted(account_id, mute, r))
+            {
                 inner.reply = None;
             }
         }
@@ -384,12 +425,19 @@ impl AppState {
     /// account の同期ロックのエントリを破棄する(アカウント削除時)。実行中の同期は `Arc` を持つので、
     /// そのまま完了する。
     pub fn forget_server_mute_sync_lock(&self, account_id: &str) {
-        self.server_mute_sync_locks.lock().unwrap().remove(account_id);
+        self.server_mute_sync_locks
+            .lock()
+            .unwrap()
+            .remove(account_id);
     }
 
     /// account の接続先サーバーのバージョン（取得済みの場合のみ）。
     pub fn server_version(&self, account_id: &str) -> Option<String> {
-        self.server_versions.lock().unwrap().get(account_id).cloned()
+        self.server_versions
+            .lock()
+            .unwrap()
+            .get(account_id)
+            .cloned()
     }
 
     /// account の接続先サーバーのバージョンを保存する。
@@ -407,7 +455,11 @@ impl AppState {
 
     /// account の接続先サーバーでノート翻訳が使えるか（取得済みの場合のみ）。
     pub fn translator_available(&self, account_id: &str) -> Option<bool> {
-        self.translator_available.lock().unwrap().get(account_id).copied()
+        self.translator_available
+            .lock()
+            .unwrap()
+            .get(account_id)
+            .copied()
     }
 
     /// account の翻訳可否を保存する。
@@ -446,9 +498,13 @@ impl AppState {
     /// アカウントの追加・削除・再認証の直後と、取得先を変えた・信頼した・インポートした直後に呼ぶ。
     pub fn refresh_fetch_allowlist(&self) {
         let accounts = self.accounts.lock().unwrap().list();
-        self.fetch_allowlist.replace(hosts_with_token(&accounts, self.secrets.as_ref()));
-        self.preview_allowlist
-            .replace(preview_allowlist_hosts(&accounts, self.secrets.as_ref(), &self.settings));
+        self.fetch_allowlist
+            .replace(hosts_with_token(&accounts, self.secrets.as_ref()));
+        self.preview_allowlist.replace(preview_allowlist_hosts(
+            &accounts,
+            self.secrets.as_ref(),
+            &self.settings,
+        ));
     }
 
     /// そのアカウントのトークンがキーリングにあるか。読み取りの失敗は、「トークンなし」とは区別してエラーにする。
@@ -497,7 +553,11 @@ impl AppState {
         let (host, token) = self.host_token(account_id)?;
         #[cfg(test)]
         if let Some(base) = self.test_api_base.lock().unwrap().clone() {
-            return Ok(crate::api::MisskeyClient::new_with_api_base(self.http.clone(), base, Some(token)));
+            return Ok(crate::api::MisskeyClient::new_with_api_base(
+                self.http.clone(),
+                base,
+                Some(token),
+            ));
         }
         Ok(crate::api::MisskeyClient::new(
             self.http.clone(),
@@ -518,17 +578,20 @@ impl AppState {
     /// (呼ばないと、`client_for` は `https://misskey.test/api` へ向かう)。
     #[cfg(test)]
     pub(crate) fn register_test_account(&self, account_id: &str) {
-        self.accounts.lock().unwrap().upsert(crate::domain::Account {
-            id: account_id.into(),
-            host: "misskey.test".into(),
-            username: "me".into(),
-            user_id: "u1".into(),
-            display_name: "Me".into(),
-            avatar_url: None,
-            instance: None,
-            is_cat: false,
-            avatar_blurhash: None,
-        });
+        self.accounts
+            .lock()
+            .unwrap()
+            .upsert(crate::domain::Account {
+                id: account_id.into(),
+                host: "misskey.test".into(),
+                username: "me".into(),
+                user_id: "u1".into(),
+                display_name: "Me".into(),
+                avatar_url: None,
+                instance: None,
+                is_cat: false,
+                avatar_blurhash: None,
+            });
         self.secrets.set(account_id, "token").unwrap();
         self.refresh_fetch_allowlist();
     }
@@ -536,7 +599,11 @@ impl AppState {
 
 /// URLプレビュー専用の許可リストに入れるホストの全体: トークンを持つアカウントのホストと、利用者が設定した
 /// 取得先(Issue #549。インポート由来の取得先は入れない)。
-fn preview_allowlist_hosts(accounts: &[Account], secrets: &dyn SecretStore, settings: &SettingsStore) -> Vec<String> {
+fn preview_allowlist_hosts(
+    accounts: &[Account],
+    secrets: &dyn SecretStore,
+    settings: &SettingsStore,
+) -> Vec<String> {
     let mut hosts = hosts_with_token(accounts, secrets);
     hosts.extend(settings.trusted_summaly_allowlist_entry());
     hosts
@@ -603,8 +670,14 @@ mod tests {
         ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
         settings.save_ui(&ui).unwrap();
         let state = AppState::new_for_test(settings);
-        assert!(state.preview_allowlist.allows("192.168.1.10", 3030), "起動時の初期値に入る");
-        assert!(!state.preview_allowlist.allows("192.168.1.10", 80), "ポートは明示されたものだけ");
+        assert!(
+            state.preview_allowlist.allows("192.168.1.10", 3030),
+            "起動時の初期値に入る"
+        );
+        assert!(
+            !state.preview_allowlist.allows("192.168.1.10", 80),
+            "ポートは明示されたものだけ"
+        );
 
         // インポート直後相当: 許可リストから外れる
         let mut data = state.settings.snapshot();
@@ -614,7 +687,10 @@ mod tests {
         assert!(!state.preview_allowlist.contains_host("192.168.1.10"));
 
         // 設定画面で保存し直す(信頼する)と入る
-        state.settings.trust_summaly_proxy("http://192.168.1.10:3030/url").unwrap();
+        state
+            .settings
+            .trust_summaly_proxy("http://192.168.1.10:3030/url")
+            .unwrap();
         state.refresh_fetch_allowlist();
         assert!(state.preview_allowlist.allows("192.168.1.10", 3030));
     }
@@ -627,21 +703,37 @@ mod tests {
         settings.save_ui(&ui).unwrap();
         let state = AppState::new_for_test(settings);
         assert!(state.preview_allowlist.contains_host("proxy.example.com"));
-        assert!(!state.fetch_allowlist.contains_host("proxy.example.com"), "起動時");
+        assert!(
+            !state.fetch_allowlist.contains_host("proxy.example.com"),
+            "起動時"
+        );
 
         state.refresh_fetch_allowlist();
-        assert!(!state.fetch_allowlist.contains_host("proxy.example.com"), "更新後");
+        assert!(
+            !state.fetch_allowlist.contains_host("proxy.example.com"),
+            "更新後"
+        );
 
-        state.settings.trust_summaly_proxy("http://proxy.example.com:3030/url").unwrap();
+        state
+            .settings
+            .trust_summaly_proxy("http://proxy.example.com:3030/url")
+            .unwrap();
         state.refresh_fetch_allowlist();
-        assert!(!state.fetch_allowlist.contains_host("proxy.example.com"), "信頼後");
+        assert!(
+            !state.fetch_allowlist.contains_host("proxy.example.com"),
+            "信頼後"
+        );
     }
 
     #[test]
     fn preview_allowlist_keeps_account_hosts_with_token_and_skips_those_without() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
         state.register_test_account("acc1"); // host=misskey.test、トークンあり
-        state.accounts.lock().unwrap().upsert(test_account("acc2", "internal.example")); // トークンなし
+        state
+            .accounts
+            .lock()
+            .unwrap()
+            .upsert(test_account("acc2", "internal.example")); // トークンなし
         state.refresh_fetch_allowlist();
 
         // 取得先が空のときの既定経路(`https://{host}/url`)に必要
@@ -650,7 +742,10 @@ mod tests {
 
         state.accounts.lock().unwrap().remove("acc1").unwrap();
         state.refresh_fetch_allowlist();
-        assert!(!state.preview_allowlist.contains_host("misskey.test"), "削除したら、2つとも外れる");
+        assert!(
+            !state.preview_allowlist.contains_host("misskey.test"),
+            "削除したら、2つとも外れる"
+        );
         assert!(!state.fetch_allowlist.contains_host("misskey.test"));
     }
 
@@ -717,7 +812,11 @@ mod tests {
     fn refresh_fetch_allowlist_skips_accounts_without_token() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
         state.register_test_account("acc1"); // host=misskey.test、トークンあり
-        state.accounts.lock().unwrap().upsert(test_account("acc2", "internal.example")); // トークンなし
+        state
+            .accounts
+            .lock()
+            .unwrap()
+            .upsert(test_account("acc2", "internal.example")); // トークンなし
         state.refresh_fetch_allowlist();
 
         assert!(state.fetch_allowlist.contains_host("misskey.test"));
@@ -727,8 +826,12 @@ mod tests {
     #[test]
     fn startup_allowlist_excludes_accounts_without_token() {
         let settings = SettingsStore::new_in_memory();
-        settings.upsert_account(&test_account("with", "misskey.test")).unwrap();
-        settings.upsert_account(&test_account("without", "internal.example")).unwrap();
+        settings
+            .upsert_account(&test_account("with", "misskey.test"))
+            .unwrap();
+        settings
+            .upsert_account(&test_account("without", "internal.example"))
+            .unwrap();
         let secrets = crate::session::MemoryStore::default();
         secrets.set("with", "tok").unwrap();
         let cache = NoteCacheStore::new(crate::store::SqliteBackend::new(
@@ -777,7 +880,10 @@ mod tests {
         state.register_test_account("acc1");
         state.secrets = Box::new(FailingStore);
 
-        assert!(matches!(state.has_token("acc1"), Err(crate::error::Error::Secret(_))));
+        assert!(matches!(
+            state.has_token("acc1"),
+            Err(crate::error::Error::Secret(_))
+        ));
     }
 
     #[test]
@@ -909,7 +1015,10 @@ mod tests {
 
         state.forget_server_mute_sync_lock("a1");
 
-        assert!(!std::sync::Arc::ptr_eq(&before, &state.server_mute_sync_lock("a1")));
+        assert!(!std::sync::Arc::ptr_eq(
+            &before,
+            &state.server_mute_sync_lock("a1")
+        ));
     }
 
     fn reply_test_note(id: &str, user_id: &str, username: &str, text: &str) -> crate::domain::Note {
@@ -963,11 +1072,20 @@ mod tests {
     }
 
     /// 返信先 r1 つきの返信ノート n1 を作る。
-    fn reply_with_target(target_user_id: &str, target_username: &str, target_text: &str) -> crate::domain::Note {
+    fn reply_with_target(
+        target_user_id: &str,
+        target_username: &str,
+        target_text: &str,
+    ) -> crate::domain::Note {
         let mut n = reply_test_note("n1", "u1", "alice", "my reply");
         n.reply_id = Some("r1".into());
         n.reply_user_id = Some(target_user_id.into());
-        n.reply = Some(Box::new(reply_test_note("r1", target_user_id, target_username, target_text)));
+        n.reply = Some(Box::new(reply_test_note(
+            "r1",
+            target_user_id,
+            target_username,
+            target_text,
+        )));
         n
     }
 
@@ -984,7 +1102,11 @@ mod tests {
 
         assert!(n.reply.is_none());
         assert_eq!(n.reply_id.as_deref(), Some("r1"), "reply_id は残す");
-        assert_eq!(n.reply_user_id.as_deref(), Some("u2"), "reply_user_id は残す");
+        assert_eq!(
+            n.reply_user_id.as_deref(),
+            Some("u2"),
+            "reply_user_id は残す"
+        );
         assert_eq!(n.text.as_deref(), Some("my reply"), "本体は変えない");
     }
 
@@ -1045,7 +1167,10 @@ mod tests {
 
         state.strip_muted_reply("acc1", &mut n);
 
-        assert!(n.reply.is_some(), "別アカウントのサーバーミュートは効かない");
+        assert!(
+            n.reply.is_some(),
+            "別アカウントのサーバーミュートは効かない"
+        );
     }
 
     #[test]
