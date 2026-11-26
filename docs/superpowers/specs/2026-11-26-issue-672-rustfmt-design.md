@@ -25,6 +25,12 @@
 
 Rust Style Guide は、開発者とツールが既定のスタイルに従うことを推奨している。差分は `max_width = 120` と `use_small_heuristics = "Max"` を併用した場合(+2682 / -3375)より大きく、+13343 / -3235 になる。差分の大きさは一度きりで、blame への影響は `.git-blame-ignore-revs` で減らせる(新しく増えた行には残ることがある)ので、標準に揃えるほうを取る。
 
+### `llama_target.rs` を `cargo fmt` の対象にする
+
+`build.rs` の `include!("llama_target.rs")` を `mod llama_target;` に変える。`cargo fmt` は `mod` 宣言をたどるので、このファイルだけの `rustfmt` 呼び出し(CI・pre-commit・`CLAUDE.md`)と、`--edition` の直書きが不要になる。`src/translate/mod.rs` のテストの `include!` は変えない。判定の中身は変えない。
+
+以下の節にある `rustfmt ... llama_target.rs` の実行は、この変更の後は行わない(整形コミットを作った時点の手順として残す)。
+
 ### コミット構成
 
 ブランチ `chore/issue-672-rustfmt`、PR は 1 本。
@@ -34,6 +40,7 @@ Rust Style Guide は、開発者とツールが既定のスタイルに従うこ
 3. `.git-blame-ignore-revs` に 2 の hash を登録する。
 4. CI のチェックと `CLAUDE.md` の追記。
 5. pre-commit のフック。
+6. `llama_target.rs` を `mod` で読み込み、個別の `rustfmt` 呼び出しを消す。
 
 ### CI
 
@@ -61,6 +68,8 @@ stable は版を固定していないので、将来の rustfmt の更新で、�
 - `.rs` がステージされたコミットだけで動く。
 
 ## 検証
+
+- `llama_target.rs` だけを崩すと、`cargo fmt --all --check` が失敗する。`cargo test` が通り、テストの件数が変わらない(cfg `llama_target` が立ったまま)。
 
 - 整形コミットの親に同じコマンドをかけた結果が、整形コミットのツリーと一致する。
 - `cargo test` が通り、実行後の作業ツリーに差分が無い(`tauri.gen.ts` が変わらない)。

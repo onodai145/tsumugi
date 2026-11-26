@@ -280,6 +280,18 @@ git commit -m "chore: pre-commit に rustfmt のチェックを追加する(Issu
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
 
+### Task 5: `llama_target.rs` を `cargo fmt` の対象にする
+
+**Files:**
+- Modify: `src-tauri/build.rs`, `src-tauri/llama_target.rs`(先頭のコメント)
+- Modify: `.github/workflows/test.yml`, `.pre-commit-config.yaml`, `CLAUDE.md`
+
+- [ ] **Step 1:** scratch のコピーで `llama_target.rs` を崩し、`cargo +stable fmt --all --check` が通ってしまうことを確かめる。
+- [ ] **Step 2:** `build.rs` の `include!("llama_target.rs");` を `mod llama_target;` に、呼び出しを `llama_target::llama_target(...)` に変える。
+- [ ] **Step 3:** Step 1 と同じ確認で失敗することを確かめる。
+- [ ] **Step 4:** CI・フック・`CLAUDE.md` から `rustfmt ... llama_target.rs` を消す。`CLAUDE.md` のフックの行に、rustup と stable の rustfmt コンポーネントが要ることを書く。
+- [ ] **Step 5:** `cargo test`(1437 passed、100 ignored のまま)と `pre-commit run rustfmt --all-files` を通してコミットする。
+
 ## 完了後
 
 push と PR の作成は、ユーザーの確認を取ってから行う。PR の本文は `.github/pull_request_template.md` の構成に従い、次を含める。
