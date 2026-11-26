@@ -221,6 +221,7 @@ impl Packs {
         self.vvm_specs.insert(id.to_string(), spec);
     }
 
+    #[cfg(test)]
     pub(crate) fn is_running(&self) -> bool {
         self.inner.lock().unwrap().running.is_some()
     }

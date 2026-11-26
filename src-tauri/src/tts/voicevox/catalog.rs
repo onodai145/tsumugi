@@ -11,6 +11,7 @@ pub const ORT_VERSION: &str = "1.17.3";
 /// Android は 1.23.2(prerelease)。1.17.3 の Android 版は ELF が 4KB 整列で、16KB ページの端末で読めない恐れがある(段階3の spec)。
 /// 1.23.2 は 16KB 整列で、Pixel 8 Pro の実機で CORE 0.17.1 と合成できた。
 pub const ORT_VERSION_ANDROID: &str = "1.23.2";
+#[cfg(test)]
 pub const DICT_VERSION: &str = "1.11";
 /// エンジン一式(CORE + ONNX Runtime + 辞書)の識別子。置き場のディレクトリ名に使う。版を変えるときは一緒に変える。
 /// ONNX Runtime の版が Android だけ違うので、ビルド対象で値が変わる(`EngineAssets.ort_version` と一致することはテストで見ている)。

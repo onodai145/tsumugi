@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  # docs/**やMarkdownのみの変更ではrust-test/frontend-check/android-buildの
+  # docs/**やMarkdownのみの変更ではrust-test/clippy/frontend-check/android-buildの
   # 実処理をスキップするためのdiff判定。これらは必須ステータスチェックに
   # 指定されている(main のブランチ保護)ため、paths-ignoreでジョブ自体の
   # 起動を止めるとチェックがpendingのままマージがブロックされてしまう。
@@ -110,6 +110,96 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         working-directory: src-tauri
         run: cargo test
+
+  # clippy は版を固定して -D warnings にする(Issue #707)。浮動の stable だと、Rust の新版で lint が増えたときに
+  # 無関係な PR の CI が落ちる。版は src-tauri/clippy-toolchain(pre-push のフックも読む)。
+  clippy:
+    needs: changes
+    runs-on: ubuntu-24.04 # rust-test と同じ理由で固定(Issue #594)
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - name: Install system dependencies (Tauri v2 Linux)
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libasound2-dev \
+            patchelf \
+            cmake
+
+      - name: clippy の版を読む
+        if: needs.changes.outputs.code == 'true'
+        id: toolchain
+        run: echo "version=$(cat src-tauri/clippy-toolchain)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        if: needs.changes.outputs.code == 'true'
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          components: clippy
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        if: needs.changes.outputs.code == 'true'
+        with:
+          workspaces: src-tauri
+          # Actions のキャッシュは上限(10GB)に達しているので、このジョブは main でだけ保存する。
+          # PR は main のキャッシュを復元する。
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # tauri::generate_context!() は frontendDist の実在を要求する。clippy にビルド済みのフロントは要らない。
+      - name: Create empty frontendDist
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          mkdir -p frontend/dist
+          echo '<!doctype html>' > frontend/dist/index.html
+
+      - name: cargo clippy (Linux)
+        if: needs.changes.outputs.code == 'true'
+        working-directory: src-tauri
+        run: cargo "+$(cat clippy-toolchain)" clippy --all-targets -- -D warnings
+
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
+        if: needs.changes.outputs.code == 'true'
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          local-cache: true
+
+      # android-build の同名ステップと同じ(setup-ndk が展開するシンボリックリンクがリンク切れになる)。
+      - name: Restore Android NDK symlinks
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          directory="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          find "$directory" -type l | while read -r link; do
+              current_target=$(readlink "$link")
+              new_target="$directory/$(basename "$current_target")"
+              ln -sf "$new_target" "$link"
+          done
+
+      # Android 専用のコード(cfg)は Linux の clippy では見えない。テストはデスクトップ専用のものがあるので --lib。
+      - name: cargo clippy (Android aarch64)
+        if: needs.changes.outputs.code == 'true'
+        working-directory: src-tauri
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_PLATFORM: android-26
+        run: |
+          bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export PATH="$bin:$PATH"
+          export CC_aarch64_linux_android="$bin/aarch64-linux-android26-clang"
+          export CXX_aarch64_linux_android="$bin/aarch64-linux-android26-clang++"
+          export AR_aarch64_linux_android="$bin/llvm-ar"
+          cargo "+$(cat clippy-toolchain)" clippy --lib --target aarch64-linux-android -- -D warnings
 
   rust-coverage:
     needs: changes

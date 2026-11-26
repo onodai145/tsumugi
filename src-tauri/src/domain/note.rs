@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(back.reply.as_ref().map(|r| r.id.as_str()), Some("r1"));
 
         // 旧キャッシュ行(reply キーを持たない payload)は None として読める
-        let mut legacy = serde_json::to_value(&minimal_note()).unwrap();
+        let mut legacy = serde_json::to_value(minimal_note()).unwrap();
         legacy.as_object_mut().unwrap().remove("reply");
         let back: Note = serde_json::from_value(legacy).unwrap();
         assert!(back.reply.is_none());

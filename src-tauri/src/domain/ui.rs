@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(v.note_cache_limit, 10000);
         assert_eq!(v.note_cache_max_age_days, 0);
         assert_eq!(v.note_cache_max_size_mb, 0);
-        assert_eq!(v.enable_file_logging, false);
+        assert!(!v.enable_file_logging);
         assert_eq!(v.code_highlight_theme, "auto");
         assert!(v.custom_syntax_themes.is_empty());
         assert!(v.url_preview_enabled);
@@ -562,7 +562,7 @@ mod tests {
         assert!(v.haptics_enabled);
         // developer_options_enabled も同様に既定値(false, 追加前は開発者オプションタブ自体が
         // 存在しなかった)へフォールバックすること。
-        assert_eq!(v.developer_options_enabled, false);
+        assert!(!v.developer_options_enabled);
     }
 
     #[test]
@@ -786,7 +786,7 @@ mod tests {
         // 既定はOFF(追加前は開発者オプションタブが存在しなかった挙動を維持)。
         let v: UiPrefs =
             serde_json::from_str(r#"{"theme":"dark","defaultColumnWidth":320}"#).unwrap();
-        assert_eq!(v.developer_options_enabled, false);
+        assert!(!v.developer_options_enabled);
     }
 
     #[test]

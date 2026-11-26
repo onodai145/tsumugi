@@ -54,6 +54,7 @@ impl ExternalEngine {
     }
 
     /// 応答サイズの上限を指定する(テスト用に公開。本番は `new` の既定値)。
+    #[cfg(test)]
     pub fn with_limits(mut self, max_json: usize, max_wav: usize) -> Self {
         self.max_json = max_json;
         self.max_wav = max_wav;
@@ -193,10 +194,13 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    /// フェイクのエンジンが受け取ったリクエストの記録。
+    type Recorded<T> = Arc<Mutex<Vec<T>>>;
+
     #[derive(Clone, Default)]
     struct Seen {
-        audio_query: Arc<Mutex<Vec<HashMap<String, String>>>>,
-        synthesis: Arc<Mutex<Vec<(HashMap<String, String>, Value)>>>,
+        audio_query: Recorded<HashMap<String, String>>,
+        synthesis: Recorded<(HashMap<String, String>, Value)>,
     }
 
     fn wav() -> Vec<u8> {

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 /// 既定のポート。衝突しにくい動的ポート範囲(49152〜)の固定値。
 pub const DEFAULT_PORT: u16 = 49731;
 /// 設定できる最小のポート(特権ポートを避ける)。
+#[cfg(any(desktop, test))]
 pub const MIN_PORT: u16 = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +36,7 @@ impl Default for McpSettings {
 }
 
 /// ポートが設定できる範囲か。上限は `u16` の型が保証する。
+#[cfg(any(desktop, test))]
 pub fn validate_port(port: u16) -> Result<(), String> {
     if port < MIN_PORT {
         return Err(format!("ポートは{MIN_PORT}以上を指定してください"));

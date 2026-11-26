@@ -1177,10 +1177,13 @@ fn definition_head(chars: &[Sym], i: usize) -> Option<(String, usize)> {
     Some((name, open))
 }
 
+/// 名前 → 本体。
+type Macros = HashMap<String, Vec<Sym>>;
+
 /// 定義(`$名前 = { 本体 }`)を取り除き、表に入れる。戻り値は (定義を除いた列, 名前 → 本体)。
-fn collect_macros(chars: &[Sym]) -> Result<(Vec<Sym>, HashMap<String, Vec<Sym>>), MmlError> {
+fn collect_macros(chars: &[Sym]) -> Result<(Vec<Sym>, Macros), MmlError> {
     let mut rest = Vec::with_capacity(chars.len());
-    let mut macros: HashMap<String, Vec<Sym>> = HashMap::new();
+    let mut macros = Macros::new();
     let mut i = 0;
     while i < chars.len() {
         if chars[i].0 == '$' {

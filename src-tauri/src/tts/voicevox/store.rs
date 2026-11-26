@@ -21,6 +21,7 @@ impl Store {
         Self { root }
     }
 
+    #[cfg(test)]
     pub fn root(&self) -> &Path {
         &self.root
     }

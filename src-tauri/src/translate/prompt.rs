@@ -29,6 +29,7 @@ pub fn build_parts(plamo_lang: &str) -> PromptParts {
 }
 
 /// 3つを連結した文字列（テストと、一括トークン化との比較用）。
+#[cfg(test)]
 pub fn join(parts: &PromptParts, text: &str) -> String {
     format!("{}{}{}", parts.prefix, text, parts.suffix)
 }

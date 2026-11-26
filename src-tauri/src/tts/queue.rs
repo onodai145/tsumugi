@@ -40,6 +40,7 @@ impl SpeechQueue {
         Self::default()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()
     }

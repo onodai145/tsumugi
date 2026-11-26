@@ -153,6 +153,7 @@ pub(crate) fn gc_unused_background_files(
 /// 手段が無いため`read_file_bytes`でファイル全体を読む(直後の`copy_media_file`でもう一度全体を
 /// 読むため二重読み込みにはなるが、拡張子が無い=Androidのフォトピッカー経由の場合にのみ発生する
 /// 稀なパスなので許容する。Issue #400)。
+#[cfg(any(not(target_os = "android"), test))]
 const PEEK_HEADER_BYTES: usize = 1024;
 
 async fn peek_file_header(

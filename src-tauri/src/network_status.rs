@@ -18,6 +18,7 @@ pub enum Transport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::enum_variant_names)] // 名前は TS に出るので変えない
 pub enum Metered {
     Metered,
     Unmetered,
@@ -38,6 +39,7 @@ impl NetworkStatus {
     };
 
     /// Kotlin から渡る整数を変換する。範囲外は `Unknown`（将来 Kotlin 側に値を足しても Rust が落ちない）。
+    #[cfg(any(target_os = "android", test))]
     pub fn from_raw(transport: i32, metered: i32) -> Self {
         NetworkStatus {
             transport: match transport {
