@@ -1,6 +1,6 @@
-/// <reference types="vitest/config" />
 import path from "node:path";
 import { defineConfig } from "vite";
+// この import は、下の `test` 設定の型(vite の UserConfig の拡張)も兼ねる。消すと `pnpm check` が型エラーになる。
 import { coverageConfigDefaults } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";

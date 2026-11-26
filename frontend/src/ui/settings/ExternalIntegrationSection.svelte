@@ -31,7 +31,7 @@
   $effect(() => {
     const lang = translateTargetLang;
     let stale = false;
-    (async () => {
+    void (async () => {
       try {
         const v = await unwrap(commands.isTranslateLangSupported(lang));
         if (!stale) langSupported = v;

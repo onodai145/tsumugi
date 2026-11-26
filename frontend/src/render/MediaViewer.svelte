@@ -224,6 +224,7 @@
   const SWIPE_CLOSE_FADE_PX = 400;
   let swipe: { id: number; x: number; y: number; lock: "v" | "h" | null; page: HTMLElement } | null = null;
   // 画面に触れているタッチの数。2本以上(ピンチズーム)の間は縦スワイプを一切扱わない。
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 画面の更新に使わないので、素の Set にする
   const activeTouchIds = new Set<number>();
 
   function isCurrentPageZoomed(page: HTMLElement) {
@@ -317,6 +318,7 @@
   // の判断により「実際に変形操作をした画像に対する妥当な代償」として許容する)。
   // 後始末が済んだ(imageTransformが初期値の状態でresetTransform()を適用し終えた)時点で
   // dirtiedItemIdsから除去し、以降は「単に画像を切り替えただけ」の経路に戻る。
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 画面の更新に使わないので、素の Set にする
   const dirtiedCropperItemIds = new Set<string>();
   function applyImageTransform() {
     const el = currentCropperImageEl;

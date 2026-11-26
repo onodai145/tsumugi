@@ -894,7 +894,7 @@
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       if (busy) return;
-      submit();
+      void submit();
       return;
     }
     if (showEmojiPicker && e.key === "Escape") {
@@ -921,7 +921,7 @@
           return; // 矢印キーで明示的に選ぶまでEnterでは確定しない(改行のつもりでEnterを押した場合の誤確定を防ぐ)
         }
         e.preventDefault();
-        confirmCompletion(selectedIndex);
+        void confirmCompletion(selectedIndex);
         return;
       }
       if (e.key === "Escape") {
@@ -1226,12 +1226,10 @@
 
 {#if err}
   <Modal title="エラー" compact onclose={() => (err = null)}>
-    {#snippet children()}
-      <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{err}</p>
-      <div class="flex justify-end">
-        <Button onclick={() => (err = null)}>わかった</Button>
-      </div>
-    {/snippet}
+    <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{err}</p>
+    <div class="flex justify-end">
+      <Button onclick={() => (err = null)}>わかった</Button>
+    </div>
   </Modal>
 {/if}
 

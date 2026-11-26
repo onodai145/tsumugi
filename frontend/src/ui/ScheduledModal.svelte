@@ -139,79 +139,77 @@
 </script>
 
 <Modal title="予約済みの投稿" {onclose} width="520px" maxHeight="80vh">
-  {#snippet children()}
-    {#if err}
-      <p class="mb-2 mt-0 whitespace-pre-wrap break-words text-sm text-destructive">{err}</p>
-    {/if}
-    {#if (serverLoading || localLoading) && rows.length === 0}
-      <div class="py-3 text-sm text-muted-foreground">読み込み中…</div>
-    {:else if loadFailed && rows.length === 0}
-      <!-- 取得失敗を「予約なし」と誤解して二重に予約しないよう、空表示は出さず再読み込みだけ出す -->
-      <div class="flex justify-center py-2">
-        <Button type="button" variant="outline" size="sm" data-testid="scheduled-retry" onclick={reloadAll}>再読み込み</Button>
-      </div>
-    {:else if rows.length === 0}
-      <div class="py-3 text-sm text-muted-foreground" data-testid="scheduled-empty">予約済みの投稿はありません</div>
-    {:else}
-      <div class="min-h-0 flex-1 overflow-y-auto">
-        {#each rows as item (item.origin + ":" + item.note.id)}
-          {@const n = item.note}
-          {@const statusLabel = item.origin === "local" ? localStatusLabel(item.status) : null}
-          <div class="border-b border-border py-2 last:border-b-0" data-testid={`scheduled-item-${n.id}`}>
-            <div class="mb-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-              <span>{formatAt(n)}</span>
-              <span>{VISIBILITY_LABEL[n.visibility] ?? n.visibility}</span>
-              {#if item.origin === "server" && isServerFailed(n)}
-                <span class="font-semibold text-destructive" data-testid={`scheduled-failed-${n.id}`}>投稿に失敗</span>
+  {#if err}
+    <p class="mb-2 mt-0 whitespace-pre-wrap break-words text-sm text-destructive">{err}</p>
+  {/if}
+  {#if (serverLoading || localLoading) && rows.length === 0}
+    <div class="py-3 text-sm text-muted-foreground">読み込み中…</div>
+  {:else if loadFailed && rows.length === 0}
+    <!-- 取得失敗を「予約なし」と誤解して二重に予約しないよう、空表示は出さず再読み込みだけ出す -->
+    <div class="flex justify-center py-2">
+      <Button type="button" variant="outline" size="sm" data-testid="scheduled-retry" onclick={reloadAll}>再読み込み</Button>
+    </div>
+  {:else if rows.length === 0}
+    <div class="py-3 text-sm text-muted-foreground" data-testid="scheduled-empty">予約済みの投稿はありません</div>
+  {:else}
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      {#each rows as item (item.origin + ":" + item.note.id)}
+        {@const n = item.note}
+        {@const statusLabel = item.origin === "local" ? localStatusLabel(item.status) : null}
+        <div class="border-b border-border py-2 last:border-b-0" data-testid={`scheduled-item-${n.id}`}>
+          <div class="mb-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            <span>{formatAt(n)}</span>
+            <span>{VISIBILITY_LABEL[n.visibility] ?? n.visibility}</span>
+            {#if item.origin === "server" && isServerFailed(n)}
+              <span class="font-semibold text-destructive" data-testid={`scheduled-failed-${n.id}`}>投稿に失敗</span>
+            {/if}
+            {#if statusLabel}
+              <span class="font-semibold text-destructive" data-testid={`scheduled-local-status-${n.id}`}>{statusLabel}</span>
+            {/if}
+          </div>
+          <div class="mb-1.5 line-clamp-3 whitespace-pre-wrap break-words text-sm text-foreground">{n.text.trim() || "(本文なし)"}</div>
+          {#if item.origin === "local" && item.status === "pending"}
+            <div class="mb-1.5 text-xs text-muted-foreground" data-testid={`scheduled-local-notice-${n.id}`}>{LOCAL_SCHEDULE_NOTICE}</div>
+          {/if}
+          {#if item.origin === "local" && item.error}
+            <div class="mb-1.5 whitespace-pre-wrap break-words text-xs text-destructive">{item.error}</div>
+          {/if}
+          {#if !(item.origin === "local" && item.status === "posting")}
+            <div class="flex justify-end gap-1.5">
+              {#if item.origin === "local" && (item.status === "expired" || item.status === "failed")}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid={`scheduled-run-now-${n.id}`}
+                  onclick={() => runNow(item)}
+                >今すぐ投稿</Button>
               {/if}
-              {#if statusLabel}
-                <span class="font-semibold text-destructive" data-testid={`scheduled-local-status-${n.id}`}>{statusLabel}</span>
-              {/if}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid={`scheduled-restore-${n.id}`}
+                onclick={() => onrestore(item)}
+              >作成欄に戻す</Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid={`scheduled-cancel-${n.id}`}
+                onclick={() => cancel(item)}
+              >取り消し</Button>
             </div>
-            <div class="mb-1.5 line-clamp-3 whitespace-pre-wrap break-words text-sm text-foreground">{n.text.trim() || "(本文なし)"}</div>
-            {#if item.origin === "local" && item.status === "pending"}
-              <div class="mb-1.5 text-xs text-muted-foreground" data-testid={`scheduled-local-notice-${n.id}`}>{LOCAL_SCHEDULE_NOTICE}</div>
-            {/if}
-            {#if item.origin === "local" && item.error}
-              <div class="mb-1.5 whitespace-pre-wrap break-words text-xs text-destructive">{item.error}</div>
-            {/if}
-            {#if !(item.origin === "local" && item.status === "posting")}
-              <div class="flex justify-end gap-1.5">
-                {#if item.origin === "local" && (item.status === "expired" || item.status === "failed")}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    data-testid={`scheduled-run-now-${n.id}`}
-                    onclick={() => runNow(item)}
-                  >今すぐ投稿</Button>
-                {/if}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid={`scheduled-restore-${n.id}`}
-                  onclick={() => onrestore(item)}
-                >作成欄に戻す</Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid={`scheduled-cancel-${n.id}`}
-                  onclick={() => cancel(item)}
-                >取り消し</Button>
-              </div>
-            {/if}
-          </div>
-        {/each}
-        {#if hasMore}
-          <div class="flex justify-center py-2">
-            <Button type="button" variant="ghost" size="sm" disabled={serverLoading} data-testid="scheduled-more" onclick={loadServer}
-              >さらに読み込む</Button
-            >
-          </div>
-        {/if}
-      </div>
-    {/if}
-  {/snippet}
+          {/if}
+        </div>
+      {/each}
+      {#if hasMore}
+        <div class="flex justify-center py-2">
+          <Button type="button" variant="ghost" size="sm" disabled={serverLoading} data-testid="scheduled-more" onclick={loadServer}
+            >さらに読み込む</Button
+          >
+        </div>
+      {/if}
+    </div>
+  {/if}
 </Modal>

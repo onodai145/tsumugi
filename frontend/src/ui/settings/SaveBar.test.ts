@@ -35,7 +35,7 @@ describe("SaveBar", () => {
   it("saved のとき「保存しました」を表示し、そうでなければ出さない", () => {
     const { rerender } = render(SaveBar, { props: { busy: false, saved: false, err: "", onsave: vi.fn() } });
     expect(screen.queryByText("保存しました")).toBeNull();
-    rerender({ busy: false, saved: true, err: "", onsave: vi.fn() });
+    void rerender({ busy: false, saved: true, err: "", onsave: vi.fn() });
     expect(screen.getByText("保存しました")).toBeTruthy();
   });
 

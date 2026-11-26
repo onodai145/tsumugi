@@ -37,7 +37,7 @@
   onMount(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    (async () => {
+    void (async () => {
       // 状態の取得より先にイベントを購読する。取得してから購読すると、その間に届いた終了イベント
       // （検証中→取得済み、ダウンロード中→失敗）を取りこぼし、以後イベントは来ないので表示が固まる。
       try {

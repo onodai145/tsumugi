@@ -19,7 +19,7 @@
   $effect(() => {
     if (deferred || preview !== undefined) return;
     let cancelled = false;
-    fetchUrlPreview(url).then((p) => {
+    void fetchUrlPreview(url).then((p) => {
       if (!cancelled) preview = p;
     });
     return () => {

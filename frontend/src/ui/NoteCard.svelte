@@ -173,7 +173,7 @@
     app.reactPicker = null;
     if (accountId) {
       const wasMine = inner.myReaction === reaction;
-      app.toggleReaction(accountId, inner.id, reaction, inner);
+      void app.toggleReaction(accountId, inner.id, reaction, inner);
       if (!wasMine) {
         const host = app.accounts.find((a) => a.id === accountId)?.host;
         const stored =
@@ -217,7 +217,7 @@
   }
   function confirmVote() {
     if (confirmChoice === null || !accountId) return;
-    app.votePoll(accountId, inner.id, confirmChoice);
+    void app.votePoll(accountId, inner.id, confirmChoice);
     confirmChoice = null;
   }
   // 連打対策: リクエスト完了を待つだけだとIPCが速く人間の連打間隔より早く終わってしまうため、
@@ -706,7 +706,7 @@
     <div
       use:portal
       class="z-[1010]"
-      style={`position:fixed; left:0; top:0;`}
+      style="position: fixed; left: 0; top: 0;"
       onmouseenter={keepHover}
       onmouseleave={leaveHover}
     >

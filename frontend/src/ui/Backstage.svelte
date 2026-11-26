@@ -27,7 +27,7 @@
         // 補助情報なので失敗してもログには出さず静かに諦める
       }
     }
-    poll();
+    void poll();
     const id = setInterval(poll, 3000);
     return () => {
       cancelled = true;

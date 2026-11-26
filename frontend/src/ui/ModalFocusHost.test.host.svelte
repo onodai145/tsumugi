@@ -6,7 +6,5 @@
 </script>
 
 <Modal title="t" onclose={() => {}} {compact}>
-  {#snippet children()}
-    <ModalFocusChild />
-  {/snippet}
+  <ModalFocusChild />
 </Modal>

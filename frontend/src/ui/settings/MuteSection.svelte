@@ -44,11 +44,11 @@
 </label>
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">NGユーザ(@user@host。@は省略可)</span>
-  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder={"@spammer@example.com"} bind:value={users} data-testid="mute-ng-users-textarea"></textarea>
+  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder="@spammer@example.com" bind:value={users} data-testid="mute-ng-users-textarea"></textarea>
 </label>
 <label class="mb-2.5 flex flex-col gap-1 text-sm">
   <span class="text-muted-foreground">NGインスタンス(host)</span>
-  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder={"spam.example"} bind:value={instances}></textarea>
+  <textarea class="resize-y rounded-md border border-border bg-muted px-[9px] py-[7px] font-[inherit] text-foreground" rows="2" placeholder="spam.example" bind:value={instances}></textarea>
 </label>
 
 <SaveBar {busy} testid="mute-save" {saved} {err} onsave={save} />

@@ -136,6 +136,8 @@ PR のマージ後に、ruleset `main-1` の必須ステータスチェックに
 
 TypeScript を 6.1 以上に上げる更新は、typescript-eslint が対応するまで取り込めない。
 
+Svelte の要素のイベントハンドラが返す Promise は、どちらのルールでも検出されない(`onclick={save}`、`onclick={() => save()}`、`onclick={async () => …}` を試して確認した。`onclick={() => { save(); }}` のようなブロック内の呼びっぱなしは検出される)。失敗しうる非同期の処理は、呼び先で `catch` する。
+
 ## 手元のフック(pre-push)
 
 `.pre-commit-config.yaml` に pre-push のフックを足す。

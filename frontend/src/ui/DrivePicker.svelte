@@ -83,6 +83,7 @@
   }
 
   function toggleSelect(f: DriveFile) {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- 作り直して代入するので、素の Map でよい
     const next = new Map(selected);
     if (next.has(f.id)) next.delete(f.id);
     else next.set(f.id, f);

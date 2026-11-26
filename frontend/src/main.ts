@@ -28,7 +28,7 @@ window.addEventListener('keydown', (e) => {
 // Rust側 open_devtools コマンドもデバッグビルド限定(リリースビルドでは無害なno-op)。
 if (import.meta.env.DEV) {
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'F12') commands.openDevtools()
+    if (e.key === 'F12') void commands.openDevtools()
   })
 }
 

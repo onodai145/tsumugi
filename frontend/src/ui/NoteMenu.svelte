@@ -73,7 +73,7 @@
   }
 
   function toggleFavorite() {
-    app.toggleFavorite(accountId, note.id, note);
+    void app.toggleFavorite(accountId, note.id, note);
     onclose();
   }
 
@@ -122,7 +122,7 @@
   }
 
   function pickClip(clip: Clip) {
-    app.addNoteToClip(accountId, clip.id, note.id);
+    void app.addNoteToClip(accountId, clip.id, note.id);
     onclose();
   }
 

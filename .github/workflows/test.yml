@@ -310,6 +310,11 @@ jobs:
         working-directory: frontend
         run: pnpm check
 
+      - name: eslint
+        if: needs.changes.outputs.code == 'true'
+        working-directory: frontend
+        run: pnpm lint
+
       - name: vitest
         if: needs.changes.outputs.code == 'true'
         working-directory: frontend
