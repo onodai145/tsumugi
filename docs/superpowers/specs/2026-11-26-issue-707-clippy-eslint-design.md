@@ -27,7 +27,7 @@
 
 ### ESLint(10.15.0、typescript-eslint 8.74.0、eslint-plugin-svelte 3.24.1)
 
-下記「ESLint のルール」の設定で、65 件 / 32 ファイル(テストは 9 件)。所要時間は 45 秒。多いものは `no-floating-promises`(29 件)と `no-explicit-any`(10 件)。
+下記「ESLint のルール」の設定で、62 件 / 31 ファイル(テストは 8 件)。所要時間は 45 秒。多いものは `no-floating-promises`(29 件)と `no-explicit-any`(10 件)。
 
 typescript-eslint が対応する TypeScript は `<6.1.0`。今の `~6.0.2` は範囲内。
 
@@ -108,7 +108,7 @@ PR のマージ後に、ruleset `main-1` の必須ステータスチェックに
 - 型情報を使うルールは `no-floating-promises` と `no-misused-promises` の 2 つだけ
 - 対象外: `dist/`、`coverage/`、`public/`、`src/bindings/`、リポジトリの `e2e/`
 
-無効にするもの:
+無効にするもの・条件を緩めるもの:
 
 | ルール | 理由 |
 |---|---|
@@ -116,6 +116,8 @@ PR のマージ後に、ruleset `main-1` の必須ステータスチェックに
 | `svelte/no-unused-svelte-ignore` | 誤検知。指摘されたコメントを消すと `svelte-check` の警告が 43 件増える |
 | `no-unused-expressions`(`.svelte` / `.svelte.ts` のみ) | `trigger;` や `app.now;` は、依存を追跡させるための式 |
 | `no-irregular-whitespace` の正規表現内(`skipRegExps`) | 全角空白を意図して書いている |
+| `svelte/no-useless-mustaches` の文字列エスケープを含むもの(`ignoreStringEscape`) | `{"ネタバレ\nspoiler"}` を属性に直すと、改行が文字の `\n` に変わる |
+| `no-unused-vars` の `_` で始まる引数と変数(`argsIgnorePattern` / `varsIgnorePattern`) | 使わないことを名前で示している |
 
 ### 掃除の方針
 
