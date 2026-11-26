@@ -107,4 +107,14 @@ describe("ConfirmDialog のフォーカスが外れた後の Escape(Issue #700)"
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onclose).not.toHaveBeenCalled();
   });
+
+  it("単体でも、bodyでのEscapeでキャンセルする", async () => {
+    const onCancel = vi.fn();
+    render(ConfirmDialog, { props: { message: "削除しますか?", onConfirm: vi.fn(), onCancel } });
+    await tick();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    await fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 });

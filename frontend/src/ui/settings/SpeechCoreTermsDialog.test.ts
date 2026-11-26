@@ -64,4 +64,14 @@ describe("SpeechCoreTermsDialog のフォーカスが外れた後の Escape(Issu
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onclose).not.toHaveBeenCalled();
   });
+
+  it("単体でも、bodyでのEscapeでキャンセルする", async () => {
+    const onCancel = vi.fn();
+    render(SpeechCoreTermsDialog, { terms, sizeBytes: 1, onAccept: vi.fn(), onCancel });
+    await tick();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    await fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 });

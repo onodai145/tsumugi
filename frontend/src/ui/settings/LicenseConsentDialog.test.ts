@@ -54,4 +54,14 @@ describe("LicenseConsentDialog のフォーカスが外れた後の Escape(Issue
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onclose).not.toHaveBeenCalled();
   });
+
+  it("単体でも、bodyでのEscapeでキャンセルする", async () => {
+    const onCancel = vi.fn();
+    render(LicenseConsentDialog, { props: { ...base, onCancel } });
+    await tick();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    await fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 });

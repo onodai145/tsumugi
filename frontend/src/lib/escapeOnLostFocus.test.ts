@@ -9,6 +9,9 @@ function layer(close = vi.fn()) {
   document.body.appendChild(node);
   const action = escapeOnLostFocus(node, close);
   const remove = () => {
+    const i = cleanups.indexOf(remove);
+    if (i < 0) return;
+    cleanups.splice(i, 1);
     action.destroy();
     node.remove();
   };
@@ -23,7 +26,7 @@ function press(key = "Escape", target: EventTarget = document.body) {
 }
 
 afterEach(() => {
-  for (const remove of cleanups.splice(0)) remove();
+  for (const remove of [...cleanups]) remove();
   document.body.innerHTML = "";
 });
 

@@ -206,4 +206,11 @@ describe("ReportUserDialog のフォーカスが外れた後の Escape(Issue #70
     expect(oncancel).not.toHaveBeenCalled();
     expect(onclose).not.toHaveBeenCalled();
   });
+
+  it("単体でも、bodyでのEscapeで閉じる", async () => {
+    const { oncancel } = mount();
+    await tick();
+    await escapeFromBody();
+    expect(oncancel).toHaveBeenCalledTimes(1);
+  });
 });
