@@ -380,7 +380,7 @@
     const edge = edgeFromPointer(e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height);
     app.dragOverPaneEdge(group.id, edge);
   }}
-  ondragleave={(e) => {
+  ondragleave={() => {
     if (app.dragOverEdgeTarget?.groupId === group.id) app.dragOverPaneEdge(group.id, null);
   }}
   role="group"

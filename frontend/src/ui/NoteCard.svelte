@@ -706,7 +706,7 @@
     <div
       use:portal
       class="z-[1010]"
-      style={`position:fixed; left:0; top:0;`}
+      style="position: fixed; left: 0; top: 0;"
       onmouseenter={keepHover}
       onmouseleave={leaveHover}
     >

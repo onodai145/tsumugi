@@ -893,7 +893,7 @@ describe("キーボード選択移動時のみスクロールする(Issue #363)"
 
   beforeEach(() => {
     scrollIntoViewMock = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoViewMock as any;
+    Element.prototype.scrollIntoView = scrollIntoViewMock as typeof Element.prototype.scrollIntoView;
   });
 
   afterEach(() => {

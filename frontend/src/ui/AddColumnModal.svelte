@@ -467,7 +467,7 @@
         mode="query"
         bind:value={tqlText}
         rows={4}
-        placeholder={'from home, list("...") where has_files && !cw'}
+        placeholder='from home, list("...") where has_files && !cw'
         invalid={!!tqlErr}
         oninput={onTqlInput}
         testid="add-column-tql-textarea"
@@ -584,7 +584,7 @@
       <TqlCompletionField
         mode="predicate"
         bind:value={filterText}
-        placeholder={"例: has_files && !cw && reactions >= 5"}
+        placeholder="例: has_files && !cw && reactions >= 5"
         invalid={!!filterErr}
         oninput={onFilterInput}
       />

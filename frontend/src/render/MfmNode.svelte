@@ -22,8 +22,9 @@
   }: { node: MfmNode; emojis?: Record<string, string>; nyaize?: boolean } = $props();
 
   // props はノード種別ごとに異なるため any 経由でアクセス
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props はノード種別ごとに形が違う
   const p = $derived((node as any).props ?? {});
-  const children = $derived<MfmNode[]>((node as any).children ?? []);
+  const children = $derived<MfmNode[]>((node as { children?: MfmNode[] }).children ?? []);
   // fn ノード（$[name.args ...]）の装飾。本家は全 fn に一律 display:inline-block を付与する。
   const fn = $derived(
     node.type === "fn"
@@ -36,12 +37,12 @@
   // それ以外は末尾テキストを rt、残りを base として描画する。
   function rubyParts(cs: MfmNode[]): { base: MfmNode[]; baseText?: string; rt: string } {
     if (cs.length === 1 && cs[0].type === "text") {
-      const t = String((cs[0] as any).props?.text ?? "");
+      const t = String((cs[0] as { props?: { text?: unknown } }).props?.text ?? "");
       const sp = t.split(" ");
       return { base: [], baseText: sp[0], rt: sp[1] ?? "" };
     }
     const last = cs[cs.length - 1];
-    const rt = last && last.type === "text" ? String((last as any).props?.text ?? "").trim() : "";
+    const rt = last && last.type === "text" ? String((last as { props?: { text?: unknown } }).props?.text ?? "").trim() : "";
     return { base: cs.slice(0, -1), rt };
   }
   const ruby = $derived(
@@ -57,7 +58,7 @@
   // $[unixtime <epoch秒>]。子テキストの数値をローカル日時で表示する。
   const unixMs = $derived.by(() => {
     if (node.type !== "fn" || p.name !== "unixtime") return NaN;
-    const t = parseInt(String((children[0] as any)?.props?.text ?? ""), 10);
+    const t = parseInt(String((children[0] as { props?: { text?: unknown } } | undefined)?.props?.text ?? ""), 10);
     return Number.isFinite(t) ? t * 1000 : NaN;
   });
   const unixLabel = $derived(Number.isFinite(unixMs) ? new Date(unixMs).toLocaleString() : "");

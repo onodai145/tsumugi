@@ -9,6 +9,7 @@ function parseHttpUrl(raw: string): URL | string {
   if (raw.length > MAX_EXTERNAL_URL_LEN) return `URLが長すぎます(${MAX_EXTERNAL_URL_LEN}文字まで)`;
   // `URL` は前後の空白や途中のタブ・改行を黙って取り除くので、検証した形と実際に使う文字列が食い違う。
   // 前後の空白と制御文字を含む値は拒否する。
+  // eslint-disable-next-line no-control-regex -- 制御文字を含む URL を拒否するため、意図して書いている
   if (raw !== raw.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(raw)) {
     return "URLの前後の空白や制御文字(改行・タブなど)は含められません";
   }

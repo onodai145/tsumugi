@@ -1,7 +1,6 @@
 // shiki によるコードブロックのシンタックスハイライト（Issue #118）。
 // ハイライタはモジュールスカラーのシングルトンとして遅延生成する
 // （マルチカラムで多数のノートが同時描画されるため、1インスタンスを使い回す）。
-import type { HighlighterGeneric } from "shiki/core";
 import { createHighlighter, createCssVariablesTheme } from "shiki";
 import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
 import type { CustomSyntaxTheme } from "../bindings/tauri.gen";
@@ -39,7 +38,7 @@ const AUTO_DARK_THEME = "github-dark";
 // 実際の色は lib/theme.ts が <html> に設定する --shiki-token-* 側で決まるため使い回せる）。
 const CSS_VARIABLES_THEME = createCssVariablesTheme({ name: "css-variables", variablePrefix: "--shiki-" });
 
-let highlighterPromise: Promise<HighlighterGeneric<any, any>> | null = null;
+let highlighterPromise: ReturnType<typeof createHighlighter> | null = null;
 
 function getHighlighter() {
   if (!highlighterPromise) {
@@ -71,7 +70,7 @@ export async function highlightCode(
   code: string,
   lang: string | null,
   themeSelection: string,
-  customSyntaxThemes: CustomSyntaxTheme[],
+  _customSyntaxThemes: CustomSyntaxTheme[],
 ): Promise<string> {
   const normalizedLang = (lang ?? "").toLowerCase();
   const isBundled = BUNDLED_LANGS.includes(normalizedLang as (typeof BUNDLED_LANGS)[number]);
@@ -84,7 +83,7 @@ export async function highlightCode(
     if (isBundled) {
       const loadedLangs = highlighter.getLoadedLanguages();
       if (!loadedLangs.includes(normalizedLang)) {
-        await highlighter.loadLanguage(normalizedLang as any);
+        await highlighter.loadLanguage(normalizedLang as Parameters<typeof highlighter.loadLanguage>[number]);
       }
     }
 
@@ -102,7 +101,7 @@ export async function highlightCode(
       const themeId = themeSelection.slice("shiki:".length);
       const loadedThemes = highlighter.getLoadedThemes();
       if (!loadedThemes.includes(themeId)) {
-        await highlighter.loadTheme(themeId as any);
+        await highlighter.loadTheme(themeId as Parameters<typeof highlighter.loadTheme>[number]);
       }
       return highlighter.codeToHtml(code, { lang: effectiveLang, theme: themeId });
     }

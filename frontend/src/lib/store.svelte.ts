@@ -2198,9 +2198,8 @@ class AppStore {
   /// #applyBackgroundは同期関数なので、この非同期処理はfire-and-forgetで呼ばれる。
   async #loadBackgroundImageBlob(path: string) {
     this.#bgImageSourcePath = path;
-    let blobUrl: string | null = null;
     try {
-      blobUrl = await loadAssetBlobUrl(path);
+      const blobUrl = await loadAssetBlobUrl(path);
       // 取得中に別の背景へ切り替えられていたら、古いレスポンスの反映は捨てる。
       if (this.#bgImageSourcePath !== path) {
         URL.revokeObjectURL(blobUrl);

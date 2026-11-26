@@ -32,6 +32,7 @@
 
 <div class="mfm-codeblock" bind:this={el}>
   {#if html}
+    <!-- eslint-disable-next-line svelte/no-at-html-tags -- highlightCode が作る HTML(コードはエスケープ済み) -->
     {@html html}
   {:else}
     <pre class="shiki-plain"><code>{code}</code></pre>

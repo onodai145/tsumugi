@@ -370,7 +370,7 @@
           <TqlCompletionField
             mode="predicate"
             bind:value={tqlText}
-            placeholder={'例: has_files && user.acct == "@alice@misskey.example"'}
+            placeholder='例: has_files && user.acct == "@alice@misskey.example"'
             invalid={!!tqlErr}
             oninput={onTqlInput}
           />

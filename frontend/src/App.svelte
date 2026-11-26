@@ -278,9 +278,7 @@
 
   {#if app.showComposeModal}
     <Modal title="投稿" onclose={() => (app.showComposeModal = false)} maxHeight="100%">
-      {#snippet children()}
-        <ComposeBar onPosted={() => (app.showComposeModal = false)} expanded />
-      {/snippet}
+      <ComposeBar onPosted={() => (app.showComposeModal = false)} expanded />
     </Modal>
   {/if}
 
@@ -320,12 +318,10 @@
   {/if}
   {#if app.errorModal}
     <Modal title="エラー" compact onclose={() => (app.errorModal = null)}>
-      {#snippet children()}
-        <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{app.errorModal}</p>
-        <div class="flex justify-end">
-          <Button onclick={() => (app.errorModal = null)}>わかった</Button>
-        </div>
-      {/snippet}
+      <p class="mb-3.5 mt-0 whitespace-pre-wrap break-words text-sm text-foreground">{app.errorModal}</p>
+      <div class="flex justify-end">
+        <Button onclick={() => (app.errorModal = null)}>わかった</Button>
+      </div>
     </Modal>
   {/if}
 </div>
