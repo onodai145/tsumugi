@@ -159,7 +159,7 @@
         return; // 矢印キーで明示的に選ぶまでEnterでは確定しない(改行のつもりでEnterを押した場合の誤確定を防ぐ)
       }
       e.preventDefault();
-      confirmCompletion(selectedIndex);
+      void confirmCompletion(selectedIndex);
       return;
     }
     if (e.key === "Escape") {

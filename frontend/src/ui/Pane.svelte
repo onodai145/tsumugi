@@ -83,7 +83,7 @@
   function onRowSplitResizeUp(child: PaneChild) {
     if (!rowResizing || rowResizing.nodeId !== child.node.id) return;
     rowResizing = null;
-    app.resizePane(child.node.id, child.size ?? 300);
+    void app.resizePane(child.node.id, child.size ?? 300);
   }
 
   // Column分割の境界(children[i]とchildren[i+1]の間)のペアドラッグリサイズ。

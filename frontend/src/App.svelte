@@ -154,7 +154,7 @@
   }
 
   onMount(() => {
-    app.boot();
+    void app.boot();
     window.addEventListener("keydown", onGlobalKey);
     const stopPendingShareListener = setupPendingShareListener();
     return () => {

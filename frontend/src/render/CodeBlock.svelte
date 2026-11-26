@@ -21,7 +21,7 @@
     const themeSelection = app.ui.codeHighlightTheme ?? "auto";
     const customSyntaxThemes = app.ui.customSyntaxThemes ?? [];
     let cancelled = false;
-    highlightCode(currentCode, currentLang, themeSelection, customSyntaxThemes).then((result) => {
+    void highlightCode(currentCode, currentLang, themeSelection, customSyntaxThemes).then((result) => {
       if (!cancelled) html = result;
     });
     return () => {

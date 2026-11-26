@@ -108,7 +108,7 @@ describe("handleNyaizeCopy", () => {
     const event = new Event("copy", { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(event, "clipboardData", { value: clipboardData });
     Object.defineProperty(event, "currentTarget", { value: container });
-    fireEvent(container, event);
+    void fireEvent(container, event);
     return clipboardData.captured ?? "";
   }
 
@@ -157,7 +157,7 @@ describe("handleNyaizeCopy", () => {
     const event = new Event("copy", { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(event, "clipboardData", { value: clipboardData });
     Object.defineProperty(event, "currentTarget", { value: container });
-    fireEvent(container, event);
+    void fireEvent(container, event);
 
     expect(clipboardData.setDataCalled).toBe(false);
     expect(event.defaultPrevented).toBe(false);
@@ -215,7 +215,7 @@ describe("handleNyaizeCopy", () => {
     const event = new Event("copy", { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(event, "clipboardData", { value: undefined });
     Object.defineProperty(event, "currentTarget", { value: container });
-    fireEvent(container, event);
+    void fireEvent(container, event);
 
     expect(event.defaultPrevented).toBe(false);
   });
@@ -234,7 +234,7 @@ describe("handleNyaizeCopy", () => {
     const event = new Event("copy", { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(event, "clipboardData", { value: clipboardData });
     Object.defineProperty(event, "currentTarget", { value: container });
-    fireEvent(container, event);
+    void fireEvent(container, event);
 
     expect(clipboardData.setDataCalled).toBe(true);
     expect(clipboardData.captured).toBe("こんな感じ");

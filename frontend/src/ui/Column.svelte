@@ -42,7 +42,7 @@
   function onScroll(e: Event) {
     const el = e.currentTarget as HTMLElement;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300 && activeTab) {
-      app.loadMore(activeTab.id);
+      void app.loadMore(activeTab.id);
     }
   }
 
@@ -120,7 +120,7 @@
   function onResizeUp() {
     if (!resizing) return;
     resizing = false;
-    app.persistGroupWidth(group.id, group.width);
+    void app.persistGroupWidth(group.id, group.width);
   }
 
   // カラムヘッダーメニュー（タブ追加／下に分割／カラム設定を1つの「⋯」に集約）
@@ -540,7 +540,7 @@
             type="button"
             role="menuitem"
             class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
-            onclick={() => pickMenuItem(() => app.moveColumnAdjacent(group.id, "prev"))}
+            onclick={() => pickMenuItem(() => void app.moveColumnAdjacent(group.id, "prev"))}
           >
             <ChevronLeft size={16} /> 左に移動
           </button>
@@ -550,7 +550,7 @@
             type="button"
             role="menuitem"
             class="box-border flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted"
-            onclick={() => pickMenuItem(() => app.moveColumnAdjacent(group.id, "next"))}
+            onclick={() => pickMenuItem(() => void app.moveColumnAdjacent(group.id, "next"))}
           >
             <ChevronRight size={16} /> 右に移動
           </button>

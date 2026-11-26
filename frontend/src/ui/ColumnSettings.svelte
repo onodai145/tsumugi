@@ -8,14 +8,14 @@
   const group = $derived(app.groups.find((g) => g.id === groupId));
 
   function setAuto(auto: boolean) {
-    if (groupId) app.setGroupAuto(groupId, auto);
+    if (groupId) void app.setGroupAuto(groupId, auto);
   }
 
   function setWidth(w: number) {
     if (!groupId || !Number.isFinite(w)) return;
     const clamped = Math.min(720, Math.max(220, Math.round(w)));
     app.setGroupWidthLocal(groupId, clamped);
-    app.persistGroupWidth(groupId, clamped);
+    void app.persistGroupWidth(groupId, clamped);
   }
 
   const paneCtx = $derived(groupId ? app.paneColumnContext(groupId) : null);
@@ -23,12 +23,12 @@
   function setHeightPercent(p: number) {
     if (!paneCtx || !Number.isFinite(p)) return;
     const clamped = Math.min(95, Math.max(5, Math.round(p)));
-    app.resizePane(paneCtx.nodeId, clamped);
+    void app.resizePane(paneCtx.nodeId, clamped);
   }
 
   function setHeightAuto(auto: boolean) {
     if (!paneCtx) return;
-    app.setPaneAuto(paneCtx.nodeId, auto);
+    void app.setPaneAuto(paneCtx.nodeId, auto);
   }
 
   // 縦分割されたブロック全体の幅(Row内でこのグループを含むSplit自身の幅)。
@@ -39,12 +39,12 @@
   function setBlockWidth(w: number) {
     if (!rowSlot || rowSlot.isLeaf || !Number.isFinite(w)) return;
     const clamped = Math.min(720, Math.max(220, Math.round(w)));
-    app.resizePane(rowSlot.nodeId, clamped);
+    void app.resizePane(rowSlot.nodeId, clamped);
   }
 
   function setBlockAuto(auto: boolean) {
     if (!rowSlot || rowSlot.isLeaf) return;
-    app.setPaneAuto(rowSlot.nodeId, auto);
+    void app.setPaneAuto(rowSlot.nodeId, auto);
   }
 </script>
 

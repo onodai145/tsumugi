@@ -37,7 +37,7 @@
   onMount(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    (async () => {
+    void (async () => {
       // 状態の取得より先に購読する(取得の間に届いた終了イベントを取りこぼして、表示が固まるのを避ける)。
       try {
         const u = await events.speechCoreStatusChanged.listen((e) => {
