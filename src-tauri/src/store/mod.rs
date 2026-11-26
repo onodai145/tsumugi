@@ -6,23 +6,23 @@
 
 pub mod db;
 pub mod draft;
-pub mod scheduled_post;
+pub(crate) mod mysql_backend;
+pub(crate) mod mysql_user_ref;
 pub mod note_cache;
+pub(crate) mod postgres_backend;
+pub(crate) mod postgres_user_ref;
+pub mod scheduled_post;
+#[cfg(test)]
+pub(crate) mod search_contract;
 pub mod settings;
 pub mod settings_transfer;
 mod sqlite_backend;
 #[cfg(test)]
-pub(crate) mod search_contract;
-#[cfg(test)]
 pub(crate) mod testutil;
-pub(crate) mod postgres_backend;
-pub(crate) mod postgres_user_ref;
-pub(crate) mod mysql_backend;
-pub(crate) mod mysql_user_ref;
 pub mod user_ref;
 
 pub use draft::DraftStore;
-pub use scheduled_post::ScheduledPostStore;
 pub use note_cache::NoteCacheStore;
+pub use scheduled_post::ScheduledPostStore;
 pub use settings::SettingsStore;
 pub(crate) use sqlite_backend::SqliteBackend;

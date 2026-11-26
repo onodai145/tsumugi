@@ -8,12 +8,12 @@ pub enum Token {
     OrOr,   // ||
     Not,    // !
     // 比較
-    EqEq, // ==
-    Ne,   // !=
-    Lt,   // <
-    Gt,   // >
-    Le,   // <=
-    Ge,   // >=
+    EqEq,   // ==
+    Ne,     // !=
+    Lt,     // <
+    Gt,     // >
+    Le,     // <=
+    Ge,     // >=
     Arrow,  // ->  (contains)
     RArrow, // <-  (in)
     // 算術
@@ -42,7 +42,9 @@ pub(crate) const MAX_INPUT_CHARS: usize = 16 * 1024;
 /// 入力を字句列へ。失敗時はメッセージを返す。
 pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     if input.chars().count() > MAX_INPUT_CHARS {
-        return Err(format!("TQL is too long (max {MAX_INPUT_CHARS} characters)"));
+        return Err(format!(
+            "TQL is too long (max {MAX_INPUT_CHARS} characters)"
+        ));
     }
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
@@ -294,8 +296,14 @@ mod tests {
 
     #[test]
     fn ne_vs_not_and_decimal() {
-        assert_eq!(tokenize("a != 1.5").unwrap(), vec![Ident("a".into()), Ne, Num(1.5)]);
-        assert_eq!(tokenize("!renote").unwrap(), vec![Not, Ident("renote".into())]);
+        assert_eq!(
+            tokenize("a != 1.5").unwrap(),
+            vec![Ident("a".into()), Ne, Num(1.5)]
+        );
+        assert_eq!(
+            tokenize("!renote").unwrap(),
+            vec![Not, Ident("renote".into())]
+        );
     }
 
     #[test]

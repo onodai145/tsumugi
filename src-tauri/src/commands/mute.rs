@@ -224,7 +224,11 @@ pub(crate) async fn apply_mute_config(state: &AppState, config: MuteConfig) -> R
 /// 直後に書き込んで復活させないため(`ColumnFence::invalidate_boundaries`)。
 ///
 /// `clear_boundaries` の失敗は無視する(現状の挙動)。
-async fn apply_mute_config_with<F, Fut>(state: &AppState, config: MuteConfig, clear_boundaries: F) -> Result<()>
+async fn apply_mute_config_with<F, Fut>(
+    state: &AppState,
+    config: MuteConfig,
+    clear_boundaries: F,
+) -> Result<()>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<()>>,
@@ -614,7 +618,11 @@ async fn sync_server_mutes_core(
 /// - 前回の保存値が無い(アップグレード直後、新しいアカウント)場合は、捨てずに保存だけする。
 /// - 境界の破棄が失敗したら、保存値を更新しない(次回の同期で、もう一度解除を検出して再試行する)。
 /// - 保存値の書き込みの失敗は、同期を失敗にしない(次回、もう一度検出するだけで、捨てるのは安全側)。
-async fn reflect_server_mute_change(state: &AppState, account_id: &str, snapshot: ServerMuteSnapshot) {
+async fn reflect_server_mute_change(
+    state: &AppState,
+    account_id: &str,
+    snapshot: ServerMuteSnapshot,
+) {
     let previous = match state.settings.load_server_mute_snapshot(account_id) {
         Ok(previous) => previous,
         Err(e) => {
@@ -631,7 +639,10 @@ async fn reflect_server_mute_change(state: &AppState, account_id: &str, snapshot
         }
     }
     if previous.as_ref() != Some(&snapshot) {
-        if let Err(e) = state.settings.save_server_mute_snapshot(account_id, &snapshot) {
+        if let Err(e) = state
+            .settings
+            .save_server_mute_snapshot(account_id, &snapshot)
+        {
             log::warn!("failed to save the server mute snapshot for {account_id}: {e}");
         }
     }
@@ -751,7 +762,9 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
 
-        let result = sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        let result = sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         assert_eq!(result.blocked_users, 0);
         assert_eq!(result.word_rules, 2);
@@ -768,20 +781,41 @@ mod tests {
     #[tokio::test]
     async fn apply_mute_config_clears_boundaries_and_stales_earlier_boundary_epochs() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        state.cache.replace_fetch_boundaries("c1", &[(0, "n500".to_string())]).await.unwrap();
+        state
+            .cache
+            .replace_fetch_boundaries("c1", &[(0, "n500".to_string())])
+            .await
+            .unwrap();
         let epoch = state.column_fence.begin("c1"); // 旧ミュートで取得を始めた
 
-        apply_mute_config(&state, MuteConfig::default()).await.unwrap();
+        apply_mute_config(&state, MuteConfig::default())
+            .await
+            .unwrap();
 
-        assert!(state.cache.get_fetch_boundaries("c1").await.unwrap().is_empty());
-        let boundaries_ok = state.column_fence.write_if_current("c1", &epoch, |ok| async move { ok }).await;
-        assert_eq!(boundaries_ok, Some(false), "旧ミュートで控えた境界の世代は古くなる");
+        assert!(state
+            .cache
+            .get_fetch_boundaries("c1")
+            .await
+            .unwrap()
+            .is_empty());
+        let boundaries_ok = state
+            .column_fence
+            .write_if_current("c1", &epoch, |ok| async move { ok })
+            .await;
+        assert_eq!(
+            boundaries_ok,
+            Some(false),
+            "旧ミュートで控えた境界の世代は古くなる"
+        );
     }
 
     #[tokio::test]
     async fn apply_mute_config_replaces_the_mute_config() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        let config = MuteConfig { ng_words: vec!["secret".to_string()], ..MuteConfig::default() };
+        let config = MuteConfig {
+            ng_words: vec!["secret".to_string()],
+            ..MuteConfig::default()
+        };
 
         apply_mute_config(&state, config.clone()).await.unwrap();
 
@@ -810,7 +844,10 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/i"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": words })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "mutedWords": words })),
+            )
             .mount(mock)
             .await;
     }
@@ -835,7 +872,11 @@ mod tests {
                     title: None,
                 })
                 .unwrap();
-            state.cache.replace_fetch_boundaries(column_id, &[(0, "n500".to_string())]).await.unwrap();
+            state
+                .cache
+                .replace_fetch_boundaries(column_id, &[(0, "n500".to_string())])
+                .await
+                .unwrap();
         }
         state
     }
@@ -863,13 +904,18 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
 
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         // 保存値が無い(アップグレード直後)ので、捨てずに保存だけする
         for column_id in ["c1", "c2", "c3"] {
             assert_eq!(boundaries_of(&state, column_id).await, kept());
         }
-        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&["u1"], &[]))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -878,16 +924,37 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_server_mutes(&mock, &["u1"], serde_json::json!(["spoiler"])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
-        mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!(["spoiler", "alpha"])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        mount_server_mutes(
+            &mock,
+            &["u1", "u2"],
+            serde_json::json!(["spoiler", "alpha"]),
+        )
+        .await;
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         for column_id in ["c1", "c2", "c3"] {
-            assert_eq!(boundaries_of(&state, column_id).await, kept(), "追加だけでは捨てない");
+            assert_eq!(
+                boundaries_of(&state, column_id).await,
+                kept(),
+                "追加だけでは捨てない"
+            );
         }
-        let saved = state.settings.load_server_mute_snapshot("acc1").unwrap().unwrap();
-        assert_eq!(saved.users, vec!["u1".to_string(), "u2".to_string()], "保存値は更新される");
+        let saved = state
+            .settings
+            .load_server_mute_snapshot("acc1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.users,
+            vec!["u1".to_string(), "u2".to_string()],
+            "保存値は更新される"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -896,15 +963,26 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await; // u2 のミュートを解除
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         assert!(boundaries_of(&state, "c1").await.is_empty());
         assert!(boundaries_of(&state, "c2").await.is_empty());
-        assert_eq!(boundaries_of(&state, "c3").await, kept(), "他のアカウントのカラムは、そのまま");
-        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
+        assert_eq!(
+            boundaries_of(&state, "c3").await,
+            kept(),
+            "他のアカウントのカラムは、そのまま"
+        );
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&["u1"], &[]))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -913,10 +991,14 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_server_mutes(&mock, &[], serde_json::json!(["spoiler", "alpha"])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         mount_server_mutes(&mock, &[], serde_json::json!(["spoiler"])).await; // "alpha" を解除
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         assert!(boundaries_of(&state, "c1").await.is_empty());
         assert!(boundaries_of(&state, "c2").await.is_empty());
@@ -929,7 +1011,9 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         mock.reset().await;
         Mock::given(method("POST"))
@@ -943,8 +1027,14 @@ mod tests {
         for column_id in ["c1", "c2", "c3"] {
             assert_eq!(boundaries_of(&state, column_id).await, kept());
         }
-        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1", "u2"], &[])));
-        assert!(state.is_server_muted("acc1", "u2"), "メモリ上のミュート集合も、そのまま");
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&["u1", "u2"], &[]))
+        );
+        assert!(
+            state.is_server_muted("acc1", "u2"),
+            "メモリ上のミュート集合も、そのまま"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -953,14 +1043,25 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
         let epoch = state.column_fence.begin("c1"); // 旧い集合で取得を始めた(再認証のときのように)
 
         mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
-        let boundaries_ok = state.column_fence.write_if_current("c1", &epoch, |ok| async move { ok }).await;
-        assert_eq!(boundaries_ok, Some(false), "旧い集合で控えた境界の世代は、古くなる");
+        let boundaries_ok = state
+            .column_fence
+            .write_if_current("c1", &epoch, |ok| async move { ok })
+            .await;
+        assert_eq!(
+            boundaries_ok,
+            Some(false),
+            "旧い集合で控えた境界の世代は、古くなる"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -969,12 +1070,19 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
         mount_server_mutes(&mock, &["u1", "u2"], serde_json::json!([])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
-        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), Some(snap(&["u1"], &[])));
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            Some(snap(&["u1"], &[]))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -983,14 +1091,22 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/i"])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/"])).await; // i を外した(一致が減る=解除)
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         assert!(boundaries_of(&state, "c1").await.is_empty());
         assert!(boundaries_of(&state, "c2").await.is_empty());
-        assert_eq!(boundaries_of(&state, "c3").await, kept(), "他のアカウントのカラムは、そのまま");
+        assert_eq!(
+            boundaries_of(&state, "c3").await,
+            kept(),
+            "他のアカウントのカラムは、そのまま"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -999,13 +1115,27 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         // 以前のビルドでは妥当だったルールが、いまは不正で落ちる状況。保存値には、そのキーが残っている
-        state.settings.save_server_mute_snapshot("acc1", &snap(&[], &["r:/(unclosed/i"])).unwrap();
-        mount_server_mutes(&mock, &[], serde_json::json!(["/(unclosed/i", "/(unclosed/i"])).await; // 重複もある
+        state
+            .settings
+            .save_server_mute_snapshot("acc1", &snap(&[], &["r:/(unclosed/i"]))
+            .unwrap();
+        mount_server_mutes(
+            &mock,
+            &[],
+            serde_json::json!(["/(unclosed/i", "/(unclosed/i"]),
+        )
+        .await; // 重複もある
 
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         for column_id in ["c1", "c2", "c3"] {
-            assert_eq!(boundaries_of(&state, column_id).await, kept(), "不正でも、サーバーに残っていれば解除ではない");
+            assert_eq!(
+                boundaries_of(&state, column_id).await,
+                kept(),
+                "不正でも、サーバーに残っていれば解除ではない"
+            );
         }
         assert_eq!(
             state.settings.load_server_mute_snapshot("acc1").unwrap(),
@@ -1020,15 +1150,26 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_server_mutes(&mock, &[], serde_json::json!(["/spoiler/i"])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
         let first = state.settings.load_server_mute_snapshot("acc1").unwrap();
 
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap(); // サーバーは変わっていない
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap(); // サーバーは変わっていない
 
         for column_id in ["c1", "c2", "c3"] {
-            assert_eq!(boundaries_of(&state, column_id).await, kept(), "同じ集合の再同期では捨てない");
+            assert_eq!(
+                boundaries_of(&state, column_id).await,
+                kept(),
+                "同じ集合の再同期では捨てない"
+            );
         }
-        assert_eq!(state.settings.load_server_mute_snapshot("acc1").unwrap(), first);
+        assert_eq!(
+            state.settings.load_server_mute_snapshot("acc1").unwrap(),
+            first
+        );
         assert_eq!(first, Some(snap(&[], &["r:/spoiler/i"])));
     }
 
@@ -1048,10 +1189,18 @@ mod tests {
         .await;
 
         assert!(blocked.is_err(), "ロックを持たれている間は完了しない");
-        assert!(mock.received_requests().await.unwrap().is_empty(), "取得より前にロックを待つ");
+        assert!(
+            mock.received_requests().await.unwrap().is_empty(),
+            "取得より前にロックを待つ"
+        );
         drop(guard);
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
-        assert!(!mock.received_requests().await.unwrap().is_empty(), "ロックを放すと取得が走る");
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
+        assert!(
+            !mock.received_requests().await.unwrap().is_empty(),
+            "ロックを放すと取得が走る"
+        );
         assert!(state.is_server_muted("acc1", "u1"));
     }
 
@@ -1077,7 +1226,10 @@ mod tests {
     #[tokio::test]
     async fn apply_mute_config_replaces_state_mute_before_clearing_boundaries() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        let config = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+        let config = MuteConfig {
+            ng_words: vec!["spoiler".into()],
+            ..Default::default()
+        };
         let seen_when_clearing = std::sync::Mutex::new(None);
 
         apply_mute_config_with(&state, config.clone(), || async {
@@ -1095,11 +1247,20 @@ mod tests {
     #[tokio::test]
     async fn apply_mute_config_still_applies_and_saves_when_clearing_boundaries_fails() {
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
-        let config = MuteConfig { ng_words: vec!["spoiler".into()], ..Default::default() };
+        let config = MuteConfig {
+            ng_words: vec!["spoiler".into()],
+            ..Default::default()
+        };
 
-        let result = apply_mute_config_with(&state, config.clone(), || async { Err(Error::Invalid("db down".into())) }).await;
+        let result = apply_mute_config_with(&state, config.clone(), || async {
+            Err(Error::Invalid("db down".into()))
+        })
+        .await;
 
-        assert!(result.is_ok(), "境界を捨てる処理の失敗は無視する(現状の挙動)");
+        assert!(
+            result.is_ok(),
+            "境界を捨てる処理の失敗は無視する(現状の挙動)"
+        );
         assert_eq!(*state.mute.lock().unwrap(), config);
         assert_eq!(state.settings.load_mute().unwrap(), config);
     }
@@ -1111,9 +1272,13 @@ mod tests {
         let mut state = state_with_three_columns_and_boundaries().await;
         // 境界のテーブルを失った DB に差し替える。`replace_fetch_boundaries` が実際の SQL エラーになる
         let conn = crate::store::db::open_cache_in_memory().unwrap();
-        conn.execute("DROP TABLE column_source_boundary", []).unwrap();
+        conn.execute("DROP TABLE column_source_boundary", [])
+            .unwrap();
         state.cache = crate::store::NoteCacheStore::new(crate::store::SqliteBackend::new(conn));
-        state.settings.save_server_mute_snapshot("acc1", &snap(&["u1", "u2"], &[])).unwrap();
+        state
+            .settings
+            .save_server_mute_snapshot("acc1", &snap(&["u1", "u2"], &[]))
+            .unwrap();
         mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await; // u2 のミュートを解除
 
         let result = sync_server_mutes_core(&state, "acc1", &client).await;
@@ -1125,7 +1290,10 @@ mod tests {
             "境界を捨てられなかったので、保存値は前回のまま(次回の同期で、解除を再検出する)"
         );
         assert!(state.is_server_muted("acc1", "u1"));
-        assert!(!state.is_server_muted("acc1", "u2"), "メモリ上の集合は、新しい集合に差し替わっている");
+        assert!(
+            !state.is_server_muted("acc1", "u2"),
+            "メモリ上の集合は、新しい集合に差し替わっている"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1148,7 +1316,9 @@ mod tests {
         state.set_test_api_base(mock.uri());
         app.manage(state);
 
-        let result = sync_server_mutes(app.state::<AppState>(), "acc1".into()).await.unwrap();
+        let result = sync_server_mutes(app.state::<AppState>(), "acc1".into())
+            .await
+            .unwrap();
 
         assert_eq!(result.blocked_users, 1);
         assert_eq!(result.word_rules, 1);
@@ -1177,7 +1347,9 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/i"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })),
+            )
             .mount(mock)
             .await;
     }
@@ -1189,14 +1361,18 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
 
-        let result = sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        let result = sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         assert_eq!(result.next_expiry_at, Some(FAR_FUTURE_MS));
         assert!(state.is_server_muted("acc1", "u1"));
 
         // 期限が過ぎたミュートは、サーバーの mute/list に残っていても、集合から外れる
         mount_mute_list_with_expiry(&mock, "u1", "2000-01-01T00:00:00.000Z").await;
-        let result = sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        let result = sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         assert_eq!(result.next_expiry_at, None);
         assert!(!state.is_server_muted("acc1", "u1"));
@@ -1208,13 +1384,21 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = state_with_three_columns_and_boundaries().await;
         mount_mute_list_with_expiry(&mock, "u1", "2099-01-01T00:00:00.000Z").await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         mount_mute_list_with_expiry(&mock, "u1", "2000-01-01T00:00:00.000Z").await; // 期限が過ぎた=解除
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
 
         assert!(boundaries_of(&state, "c1").await.is_empty());
-        assert_eq!(boundaries_of(&state, "c3").await, kept(), "他のアカウントのカラムは、そのまま");
+        assert_eq!(
+            boundaries_of(&state, "c3").await,
+            kept(),
+            "他のアカウントのカラムは、そのまま"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1233,9 +1417,16 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
 
-        let result = mute_user_core(&state, "acc1", &client, "u1", MutePeriod::OneHour, 1_700_000_000_000)
-            .await
-            .unwrap();
+        let result = mute_user_core(
+            &state,
+            "acc1",
+            &client,
+            "u1",
+            MutePeriod::OneHour,
+            1_700_000_000_000,
+        )
+        .await
+        .unwrap();
 
         assert!(result.is_some(), "同期が成功したので、結果を返す");
         // 再同期で mute/list を読んだ(モックは mount_server_mutes のもの。期限なしの空)
@@ -1254,7 +1445,9 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
 
-        mute_user_core(&state, "acc1", &client, "u1", MutePeriod::Indefinitely, 0).await.unwrap();
+        mute_user_core(&state, "acc1", &client, "u1", MutePeriod::Indefinitely, 0)
+            .await
+            .unwrap();
 
         assert!(state.is_server_muted("acc1", "u1"));
     }
@@ -1301,7 +1494,10 @@ mod tests {
 
         let result = mute_user_core(&state, "acc1", &client, "u1", MutePeriod::OneDay, 0).await;
 
-        assert!(matches!(result, Ok(None)), "作成は成功。同期の失敗は None で伝える: {result:?}");
+        assert!(
+            matches!(result, Ok(None)),
+            "作成は成功。同期の失敗は None で伝える: {result:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1310,19 +1506,25 @@ mod tests {
         let client = MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
         let state = AppState::new_for_test(SettingsStore::new_in_memory());
         mount_server_mutes(&mock, &["u1"], serde_json::json!([])).await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
         assert!(state.is_server_muted("acc1", "u1"));
 
         mount_server_mutes(&mock, &[], serde_json::json!([])).await; // 解除後は空
         Mock::given(method("POST"))
             .and(path("/mute/delete"))
-            .and(wiremock::matchers::body_partial_json(serde_json::json!({ "userId": "u1" })))
+            .and(wiremock::matchers::body_partial_json(
+                serde_json::json!({ "userId": "u1" }),
+            ))
             .respond_with(ResponseTemplate::new(204))
             .expect(1)
             .mount(&mock)
             .await;
 
-        let result = unmute_user_core(&state, "acc1", &client, "u1").await.unwrap();
+        let result = unmute_user_core(&state, "acc1", &client, "u1")
+            .await
+            .unwrap();
 
         assert!(result.is_some());
         assert!(!state.is_server_muted("acc1", "u1"));
@@ -1349,21 +1551,30 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/i"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })),
+            )
             .mount(&mock)
             .await;
         Mock::given(method("POST"))
             .and(path("/blocking/create"))
-            .and(wiremock::matchers::body_partial_json(serde_json::json!({ "userId": "u1" })))
+            .and(wiremock::matchers::body_partial_json(
+                serde_json::json!({ "userId": "u1" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
             .expect(1)
             .mount(&mock)
             .await;
 
-        let result = block_user_core(&state, "acc1", &client, "u1").await.unwrap();
+        let result = block_user_core(&state, "acc1", &client, "u1")
+            .await
+            .unwrap();
 
         assert!(result.is_some(), "同期が成功したので、結果を返す");
-        assert!(state.is_server_muted("acc1", "u1"), "ブロックしたユーザーは表示を抑制する集合に入る");
+        assert!(
+            state.is_server_muted("acc1", "u1"),
+            "ブロックしたユーザーは表示を抑制する集合に入る"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1408,7 +1619,10 @@ mod tests {
 
         let result = block_user_core(&state, "acc1", &client, "u1").await;
 
-        assert!(matches!(result, Ok(None)), "ブロックは成功。同期の失敗は None で伝える: {result:?}");
+        assert!(
+            matches!(result, Ok(None)),
+            "ブロックは成功。同期の失敗は None で伝える: {result:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1425,7 +1639,9 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/i"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mutedWords": [] })),
+            )
             .mount(&mock)
             .await;
         let before = Mock::given(method("POST"))
@@ -1436,7 +1652,9 @@ mod tests {
             )
             .mount_as_scoped(&mock)
             .await;
-        sync_server_mutes_core(&state, "acc1", &client).await.unwrap();
+        sync_server_mutes_core(&state, "acc1", &client)
+            .await
+            .unwrap();
         assert!(state.is_server_muted("acc1", "u1"));
         drop(before);
 
@@ -1448,13 +1666,17 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/blocking/delete"))
-            .and(wiremock::matchers::body_partial_json(serde_json::json!({ "userId": "u1" })))
+            .and(wiremock::matchers::body_partial_json(
+                serde_json::json!({ "userId": "u1" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
             .expect(1)
             .mount(&mock)
             .await;
 
-        let result = unblock_user_core(&state, "acc1", &client, "u1").await.unwrap();
+        let result = unblock_user_core(&state, "acc1", &client, "u1")
+            .await
+            .unwrap();
 
         assert!(result.is_some());
         assert!(!state.is_server_muted("acc1", "u1"));
@@ -1492,7 +1714,9 @@ mod background_media_tests {
     fn classify_by_extension_returns_none_for_extensionless_path() {
         // content://media/picker/0/... のような拡張子の無いパスは拡張子判定できない。
         assert_eq!(
-            classify_by_extension("content://media/picker/0/com.android.providers.media.photopicker/media/1000000123"),
+            classify_by_extension(
+                "content://media/picker/0/com.android.providers.media.photopicker/media/1000000123"
+            ),
             None
         );
     }
@@ -1500,20 +1724,13 @@ mod background_media_tests {
     // `infer`クレートの一部の判定(特にwebm)は先頭256バイト超のバイト列を要求するため、
     // 手書きの短いマジックバイト列では正しく再現できない。ffmpeg/Pillowで生成した
     // 実ファイルを`tests/fixtures/background_media/`に配置し、それをそのまま使う。
-    const TINY_PNG: &[u8] =
-        include_bytes!("../../tests/fixtures/background_media/tiny.png");
-    const TINY_JPG: &[u8] =
-        include_bytes!("../../tests/fixtures/background_media/tiny.jpg");
-    const TINY_WEBP: &[u8] =
-        include_bytes!("../../tests/fixtures/background_media/tiny.webp");
-    const TINY_AVIF: &[u8] =
-        include_bytes!("../../tests/fixtures/background_media/tiny.avif");
-    const TINY_MP4: &[u8] =
-        include_bytes!("../../tests/fixtures/background_media/tiny.mp4");
-    const TINY_WEBM: &[u8] =
-        include_bytes!("../../tests/fixtures/background_media/tiny.webm");
-    const TINY_AVI: &[u8] =
-        include_bytes!("../../tests/fixtures/background_media/tiny.avi");
+    const TINY_PNG: &[u8] = include_bytes!("../../tests/fixtures/background_media/tiny.png");
+    const TINY_JPG: &[u8] = include_bytes!("../../tests/fixtures/background_media/tiny.jpg");
+    const TINY_WEBP: &[u8] = include_bytes!("../../tests/fixtures/background_media/tiny.webp");
+    const TINY_AVIF: &[u8] = include_bytes!("../../tests/fixtures/background_media/tiny.avif");
+    const TINY_MP4: &[u8] = include_bytes!("../../tests/fixtures/background_media/tiny.mp4");
+    const TINY_WEBM: &[u8] = include_bytes!("../../tests/fixtures/background_media/tiny.webm");
+    const TINY_AVI: &[u8] = include_bytes!("../../tests/fixtures/background_media/tiny.avi");
 
     #[test]
     fn classify_by_magic_bytes_recognizes_png() {

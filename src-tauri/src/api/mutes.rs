@@ -35,7 +35,10 @@ pub async fn fetch_muted_and_blocked(client: &MisskeyClient, now_ms: i64) -> Res
 /// (取りこぼして、ミュートが外れるよりは安全側)。
 fn read_row(rec: &Value, id_field: &str, now_ms: i64) -> Option<(String, Option<i64>)> {
     let user_id = rec.get(id_field)?.as_str()?.to_string();
-    let expires_at = rec.get("expiresAt").and_then(Value::as_str).and_then(rfc3339_millis);
+    let expires_at = rec
+        .get("expiresAt")
+        .and_then(Value::as_str)
+        .and_then(rfc3339_millis);
     match expires_at {
         Some(t) if t <= now_ms => None,
         other => Some((user_id, other)),
@@ -43,7 +46,9 @@ fn read_row(rec: &Value, id_field: &str, now_ms: i64) -> Option<(String, Option<
 }
 
 fn rfc3339_millis(s: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp_millis())
 }
 
 /// ページングしながら各レコードの `id_field`（対象 userId）を集める。
@@ -87,41 +92,58 @@ async fn collect(
 
 /// ユーザーをミュートする。`mute/create`。`expires_at_ms` は**ミリ秒**のエポック時刻(`None` は無期限)。
 /// すでにミュート中なら `ALREADY_MUTING` で失敗する(期限の変更は、解除してから作り直す)。
-pub async fn mute_user(client: &MisskeyClient, user_id: &str, expires_at_ms: Option<i64>) -> Result<()> {
+pub async fn mute_user(
+    client: &MisskeyClient,
+    user_id: &str,
+    expires_at_ms: Option<i64>,
+) -> Result<()> {
     let _: Value = client
-        .post("mute/create", &json!({ "userId": user_id, "expiresAt": expires_at_ms }))
+        .post(
+            "mute/create",
+            &json!({ "userId": user_id, "expiresAt": expires_at_ms }),
+        )
         .await?;
     Ok(())
 }
 
 /// ユーザーのミュートを解除する。`mute/delete`。
 pub async fn unmute_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
-    let _: Value = client.post("mute/delete", &json!({ "userId": user_id })).await?;
+    let _: Value = client
+        .post("mute/delete", &json!({ "userId": user_id }))
+        .await?;
     Ok(())
 }
 
 /// ユーザーをブロックする。`blocking/create`。サーバーは双方向のフォローも解除する。
 /// すでにブロック中なら `ALREADY_BLOCKING` で失敗する。
 pub async fn block_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
-    let _: Value = client.post("blocking/create", &json!({ "userId": user_id })).await?;
+    let _: Value = client
+        .post("blocking/create", &json!({ "userId": user_id }))
+        .await?;
     Ok(())
 }
 
 /// ユーザーのブロックを解除する。`blocking/delete`。ブロック中でなければ `NOT_BLOCKING` で失敗する。
 pub async fn unblock_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
-    let _: Value = client.post("blocking/delete", &json!({ "userId": user_id })).await?;
+    let _: Value = client
+        .post("blocking/delete", &json!({ "userId": user_id }))
+        .await?;
     Ok(())
 }
 
 /// ユーザーのリノートをミュートする。`renote-mute/create`。すでに対象なら `ALREADY_MUTING` で失敗する。
 pub async fn renote_mute_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
-    let _: Value = client.post("renote-mute/create", &json!({ "userId": user_id })).await?;
+    let _: Value = client
+        .post("renote-mute/create", &json!({ "userId": user_id }))
+        .await?;
     Ok(())
 }
 
 /// ユーザーのリノートミュートを解除する。`renote-mute/delete`。対象でなければ `NOT_MUTING` で失敗する。
 pub async fn unrenote_mute_user(client: &MisskeyClient, user_id: &str) -> Result<()> {
-    let _: Value = client.post("renote-mute/delete", &json!({ "userId": user_id })).await?;
+    let _: Value = client
+        .post("renote-mute/delete", &json!({ "userId": user_id }))
+        .await?;
     Ok(())
 }
 
@@ -157,7 +179,10 @@ pub async fn fetch_muted_words(client: &MisskeyClient) -> Result<MutedWords> {
 /// エントリを直接使うので、テスト専用(ルールの変換だけを見るテストが使う)。
 #[cfg(test)]
 pub(crate) fn parse_muted_words(raw: &serde_json::Value) -> Vec<WordMuteRule> {
-    parse_muted_word_entries(raw).into_iter().filter_map(|e| e.rule).collect()
+    parse_muted_word_entries(raw)
+        .into_iter()
+        .filter_map(|e| e.rule)
+        .collect()
 }
 
 /// `/i` の生JSONから `mutedWords` を取り出し、要素ごとにルールとキーを作る純粋関数。
@@ -203,7 +228,10 @@ fn words_entry(words: Vec<String>) -> Option<MutedWordEntry> {
     if words.is_empty() {
         None
     } else {
-        Some(MutedWordEntry { key: words_key(&words), rule: Some(WordMuteRule::Words(words)) })
+        Some(MutedWordEntry {
+            key: words_key(&words),
+            rule: Some(WordMuteRule::Words(words)),
+        })
     }
 }
 
@@ -213,7 +241,9 @@ fn parse_word_element(s: &str) -> Option<MutedWordEntry> {
     if let Some((pattern, flags)) = try_parse_regex_syntax(s) {
         let key = format!("r:{s}");
         if !is_valid_regex_flags(flags) {
-            log::warn!("invalid muted word regex flags /{pattern}/{flags}: unrecognized flag character");
+            log::warn!(
+                "invalid muted word regex flags /{pattern}/{flags}: unrecognized flag character"
+            );
             return Some(MutedWordEntry { rule: None, key });
         }
         let rule = match regex::RegexBuilder::new(pattern)
@@ -324,7 +354,9 @@ mod tests {
         // "/r/anime" must NOT become a live regex (flags "anime" contains invalid chars n,e,a);
         // it must be skipped entirely, not fall back to a literal word either.
         assert_eq!(rules.len(), 1);
-        assert!(matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == ["spoiler".to_string()].as_slice()));
+        assert!(
+            matches!(&rules[0], WordMuteRule::Words(w) if w.as_slice() == ["spoiler".to_string()].as_slice())
+        );
     }
 
     #[test]
@@ -332,17 +364,25 @@ mod tests {
         let raw = json!({ "mutedWords": ["/spoiler/gi"] });
         let rules = parse_muted_words(&raw);
         assert_eq!(rules.len(), 1);
-        let WordMuteRule::Regex(re) = &rules[0] else { panic!("expected Regex rule") };
+        let WordMuteRule::Regex(re) = &rules[0] else {
+            panic!("expected Regex rule")
+        };
         assert!(re.is_match("BIG SPOILER"));
     }
 
     fn keys_of(raw: serde_json::Value) -> Vec<String> {
-        parse_muted_word_entries(&raw).into_iter().map(|e| e.key).collect()
+        parse_muted_word_entries(&raw)
+            .into_iter()
+            .map(|e| e.key)
+            .collect()
     }
 
     #[test]
     fn word_key_format_is_unchanged_so_saved_snapshots_stay_comparable() {
-        assert_eq!(keys_of(json!({ "mutedWords": [["Foo", "bar"]] })), vec!["w:bar\u{1f}foo".to_string()]);
+        assert_eq!(
+            keys_of(json!({ "mutedWords": [["Foo", "bar"]] })),
+            vec!["w:bar\u{1f}foo".to_string()]
+        );
     }
 
     #[test]
@@ -396,7 +436,8 @@ mod tests {
 
     #[test]
     fn invalid_regex_keeps_its_key_but_has_no_rule() {
-        let entries = parse_muted_word_entries(&json!({ "mutedWords": ["/(unclosed/i", "/r/anime"] }));
+        let entries =
+            parse_muted_word_entries(&json!({ "mutedWords": ["/(unclosed/i", "/r/anime"] }));
 
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().all(|e| e.rule.is_none()));
@@ -417,12 +458,17 @@ mod tests {
 
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().all(|e| e.key.starts_with("w:")));
-        assert!(entries.iter().all(|e| matches!(&e.rule, Some(WordMuteRule::Words(_)))));
+        assert!(entries
+            .iter()
+            .all(|e| matches!(&e.rule, Some(WordMuteRule::Words(_)))));
     }
 
     #[test]
     fn non_string_non_array_elements_and_a_non_array_field_are_ignored() {
-        assert!(parse_muted_word_entries(&json!({ "mutedWords": [1, null, { "a": 1 }, true] })).is_empty());
+        assert!(
+            parse_muted_word_entries(&json!({ "mutedWords": [1, null, { "a": 1 }, true] }))
+                .is_empty()
+        );
         assert!(parse_muted_word_entries(&json!({ "mutedWords": "spoiler" })).is_empty());
         assert!(parse_muted_word_entries(&json!({ "mutedWords": { "a": 1 } })).is_empty());
     }
@@ -435,13 +481,19 @@ mod tests {
     #[test]
     fn read_row_without_expires_at_is_active_and_has_no_expiry() {
         let row = json!({ "id": "r1", "muteeId": "u1" });
-        assert_eq!(read_row(&row, "muteeId", NOW_MS), Some(("u1".to_string(), None)));
+        assert_eq!(
+            read_row(&row, "muteeId", NOW_MS),
+            Some(("u1".to_string(), None))
+        );
     }
 
     #[test]
     fn read_row_with_null_expires_at_is_active_and_has_no_expiry() {
         let row = json!({ "id": "r1", "muteeId": "u1", "expiresAt": null });
-        assert_eq!(read_row(&row, "muteeId", NOW_MS), Some(("u1".to_string(), None)));
+        assert_eq!(
+            read_row(&row, "muteeId", NOW_MS),
+            Some(("u1".to_string(), None))
+        );
     }
 
     #[test]
@@ -468,7 +520,10 @@ mod tests {
     #[test]
     fn read_row_with_unparsable_expires_at_stays_muted_without_an_expiry() {
         let row = json!({ "muteeId": "u1", "expiresAt": "not a date" });
-        assert_eq!(read_row(&row, "muteeId", NOW_MS), Some(("u1".to_string(), None)));
+        assert_eq!(
+            read_row(&row, "muteeId", NOW_MS),
+            Some(("u1".to_string(), None))
+        );
     }
 
     #[test]
@@ -489,13 +544,17 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/mute/create"))
-            .and(body_partial_json(json!({ "userId": "u1", "expiresAt": 1_700_000_000_000_i64 })))
+            .and(body_partial_json(
+                json!({ "userId": "u1", "expiresAt": 1_700_000_000_000_i64 }),
+            ))
             .respond_with(ResponseTemplate::new(204))
             .expect(1)
             .mount(&mock)
             .await;
 
-        mute_user(&test_client(&mock), "u1", Some(1_700_000_000_000)).await.unwrap();
+        mute_user(&test_client(&mock), "u1", Some(1_700_000_000_000))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -503,7 +562,9 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/mute/create"))
-            .and(body_partial_json(json!({ "userId": "u1", "expiresAt": null })))
+            .and(body_partial_json(
+                json!({ "userId": "u1", "expiresAt": null }),
+            ))
             .respond_with(ResponseTemplate::new(204))
             .expect(1)
             .mount(&mock)
@@ -603,7 +664,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let got = fetch_muted_and_blocked(&test_client(&mock), NOW_MS).await.unwrap();
+        let got = fetch_muted_and_blocked(&test_client(&mock), NOW_MS)
+            .await
+            .unwrap();
 
         let mut ids: Vec<&str> = got.ids.iter().map(String::as_str).collect();
         ids.sort_unstable();
@@ -617,7 +680,9 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/mute/list"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{ "id": "r1", "muteeId": "u1" }])))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!([{ "id": "r1", "muteeId": "u1" }])),
+            )
             .mount(&mock)
             .await;
         Mock::given(method("POST"))
@@ -626,7 +691,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let got = fetch_muted_and_blocked(&test_client(&mock), NOW_MS).await.unwrap();
+        let got = fetch_muted_and_blocked(&test_client(&mock), NOW_MS)
+            .await
+            .unwrap();
 
         assert_eq!(got.next_expiry_at_ms, None);
     }

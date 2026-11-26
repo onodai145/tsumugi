@@ -23,7 +23,14 @@ pub fn user(id: &str, username: &str, host: Option<&str>) -> User {
     }
 }
 
-pub fn note(id: &str, created_at: i64, visibility: Visibility, local_only: bool, text: &str, user: User) -> Note {
+pub fn note(
+    id: &str,
+    created_at: i64,
+    visibility: Visibility,
+    local_only: bool,
+    text: &str,
+    user: User,
+) -> Note {
     Note {
         id: id.into(),
         created_at,
@@ -57,7 +64,14 @@ pub fn note(id: &str, created_at: i64, visibility: Visibility, local_only: bool,
 }
 
 pub fn public_note(id: &str, created_at: i64, text: &str) -> Note {
-    note(id, created_at, Visibility::Public, false, text, user("u1", "alice", None))
+    note(
+        id,
+        created_at,
+        Visibility::Public,
+        false,
+        text,
+        user("u1", "alice", None),
+    )
 }
 
 pub fn account(id: &str, host: &str) -> Account {

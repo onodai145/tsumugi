@@ -43,7 +43,12 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
     async fn cache_notes(&self, column_id: &str, notes: &[Note]) -> Result<()>;
     async fn cache_note(&self, column_id: &str, note: &Note) -> Result<()>;
     async fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>>;
-    async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>>;
+    async fn load_cached_before(
+        &self,
+        column_id: &str,
+        until_id: &str,
+        limit: u32,
+    ) -> Result<Vec<Note>>;
     async fn get_note(&self, note_id: &str) -> Result<Option<Note>>;
     async fn update_note(&self, note: &Note) -> Result<()>;
     async fn clear_column_notes(&self, column_id: &str) -> Result<()>;
@@ -51,8 +56,16 @@ pub(crate) trait NoteCacheBackend: Send + Sync {
     /// `entries` に同じ `source_idx` を重複して渡すと主キー違反で `Err` になる。
     /// トランザクション内で DELETE+INSERT するため、失敗時は全体がロールバックされ既存の境界は残る。
     /// 重複を作らないのは呼び出し側の責務。
-    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()>;
-    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()>;
+    async fn replace_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()>;
+    async fn extend_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()>;
     async fn clear_all_fetch_boundaries(&self) -> Result<()>;
     async fn note_count(&self) -> Result<i32>;
     async fn notes_since(&self, since_epoch_secs: i32) -> Result<i32>;
@@ -93,13 +106,17 @@ impl NoteCacheStore {
     /// `Arc<dyn NoteCacheBackend>`を渡す)経由でのみ構築する。
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(backend: impl NoteCacheBackend + 'static) -> Self {
-        Self { backend: std::sync::Mutex::new(std::sync::Arc::new(backend)) }
+        Self {
+            backend: std::sync::Mutex::new(std::sync::Arc::new(backend)),
+        }
     }
 
     /// 既に`Arc`化済みのバックエンドから構築する(起動時、設定に応じてSqlite/Postgresの
     /// いずれかを事前に選んで`Arc<dyn NoteCacheBackend>`にした後、それをそのまま渡す用途)。
     pub fn new_from_arc(backend: std::sync::Arc<dyn NoteCacheBackend>) -> Self {
-        Self { backend: std::sync::Mutex::new(backend) }
+        Self {
+            backend: std::sync::Mutex::new(backend),
+        }
     }
 
     /// バックエンドを即時差し替える。ロックは一瞬だけ保持し(`.await`をまたがない)、
@@ -130,8 +147,15 @@ impl NoteCacheStore {
 
     /// カラムのキャッシュから until_id より古いノートを取得（新しい順、最大 limit 件）。
     /// backfill のキャッシュ優先パス用（load_cached の until_id 版）。
-    pub async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
-        self.backend().load_cached_before(column_id, until_id, limit).await
+    pub async fn load_cached_before(
+        &self,
+        column_id: &str,
+        until_id: &str,
+        limit: u32,
+    ) -> Result<Vec<Note>> {
+        self.backend()
+            .load_cached_before(column_id, until_id, limit)
+            .await
     }
 
     /// note_id 単体をキャッシュから取得する（column_note を経由しない）。
@@ -163,14 +187,26 @@ impl NoteCacheStore {
     /// entries に含まれないソースは未確定になる。
     /// entries に同じ source_idx を重複して渡すと主キー違反で `Err` になる。トランザクションは
     /// ロールバックされ既存の境界は残る(重複を作らないのは呼び出し側の責務)。
-    pub async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
-        self.backend().replace_fetch_boundaries(column_id, entries).await
+    pub async fn replace_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
+        self.backend()
+            .replace_fetch_boundaries(column_id, entries)
+            .await
     }
 
     /// 各 (source_idx, id) について境界を古い方向へのみ延長する(単調性を保証)。
     /// 行が無ければ挿入し、既存値の方が古ければ何もしない。
-    pub async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
-        self.backend().extend_fetch_boundaries(column_id, entries).await
+    pub async fn extend_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
+        self.backend()
+            .extend_fetch_boundaries(column_id, entries)
+            .await
     }
 
     /// 全カラムのbackfill境界を削除する(未確定状態に戻す)。ミュート設定変更時など、
@@ -214,17 +250,23 @@ impl NoteCacheStore {
         until_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<Note>> {
-        self.backend().search_cache(where_sql, until_id, limit).await
+        self.backend()
+            .search_cache(where_sql, until_id, limit)
+            .await
     }
 
     /// アカウントがこれらのノートを自分の取得経路で得たことを記録する(Issue #557)。
     pub async fn record_note_accounts(&self, account_id: &str, note_ids: &[String]) -> Result<()> {
-        self.backend().record_note_accounts(account_id, note_ids).await
+        self.backend()
+            .record_note_accounts(account_id, note_ids)
+            .await
     }
 
     /// `column_note` のあるカラムのノートをアカウントの帰属として複写する(埋め直し用)。
     pub async fn backfill_note_accounts(&self, account_id: &str, column_id: &str) -> Result<()> {
-        self.backend().backfill_note_accounts(account_id, column_id).await
+        self.backend()
+            .backfill_note_accounts(account_id, column_id)
+            .await
     }
 
     /// アカウント削除時に、そのアカウントの帰属を全て消す。
@@ -250,7 +292,10 @@ impl NoteCacheStore {
 ///   payload をスタブ形式へ書き戻してから復元する(自己修復)。
 /// - user参照(本体+renote分)が user テーブルに見つからない行は、ログ警告してスキップする
 ///   (呼び出し元をエラーにしない。deserialize_note_or_warn と同じポリシー)。
-pub(crate) fn resolve_payload_rows(conn: &Connection, rows: Vec<(String, String)>) -> Result<Vec<Note>> {
+pub(crate) fn resolve_payload_rows(
+    conn: &Connection,
+    rows: Vec<(String, String)>,
+) -> Result<Vec<Note>> {
     let mut values: Vec<(String, serde_json::Value)> = Vec::with_capacity(rows.len());
     for (id, payload) in rows {
         match serde_json::from_str::<serde_json::Value>(&payload) {
@@ -291,11 +336,18 @@ pub(crate) fn resolve_payload_rows(conn: &Connection, rows: Vec<(String, String)
 /// 旧形式(userフルオブジェクト埋め込み)の行を検知した際、抽出できた user を
 /// user テーブルへ upsert し、抽出できた箇所だけ payload をスタブ形式へ書き戻す
 /// (抽出に失敗した箇所は元のまま残す。中途半端な書き換えで既存データを失わないため)。
-fn self_heal_legacy_row(conn: &Connection, note_id: &str, value: &mut serde_json::Value) -> Result<()> {
+fn self_heal_legacy_row(
+    conn: &Connection,
+    note_id: &str,
+    value: &mut serde_json::Value,
+) -> Result<()> {
     let changed = self_heal_node(conn, value)?;
     if changed {
         let new_payload = serde_json::to_string(value)?;
-        conn.execute("UPDATE note SET payload = ?1 WHERE id = ?2", params![new_payload, note_id])?;
+        conn.execute(
+            "UPDATE note SET payload = ?1 WHERE id = ?2",
+            params![new_payload, note_id],
+        )?;
     }
     Ok(())
 }
@@ -332,11 +384,21 @@ fn self_heal_node(conn: &Connection, node: &mut serde_json::Value) -> Result<boo
 /// を主張したままだと、prune後にキャッシュに無いノートを「完全」と誤認して欠落表示になる
 /// ため(Issue #228)。
 /// 戻り値は削除したノート件数。
-fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<i64> {
+fn delete_matching(
+    conn: &Connection,
+    select_sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<i64> {
     // 接続は長命なので、万一 prune_ids が残っていても詰まらないよう先に消す(Issue #619)。
     conn.execute("DROP TABLE IF EXISTS prune_ids", [])?;
-    conn.execute(&format!("CREATE TEMP TABLE prune_ids AS {select_sql}"), params)?;
-    let deleted = conn.execute("DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)", [])? as i64;
+    conn.execute(
+        &format!("CREATE TEMP TABLE prune_ids AS {select_sql}"),
+        params,
+    )?;
+    let deleted = conn.execute(
+        "DELETE FROM note WHERE id IN (SELECT id FROM prune_ids)",
+        [],
+    )? as i64;
 
     // column_note をカスケード削除する前に、影響を受けるカラムと、各カラムで削除された
     // ノートの中の最大ID(=境界を少なくともこの値までは引き上げる必要がある)を確定しておく。
@@ -356,7 +418,15 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
         rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?
     };
 
-    for table in ["column_note", "note_account", "note_reaction", "note_tag", "note_mention", "note_emoji", "note_file"] {
+    for table in [
+        "column_note",
+        "note_account",
+        "note_reaction",
+        "note_tag",
+        "note_mention",
+        "note_emoji",
+        "note_file",
+    ] {
         conn.execute(
             &format!("DELETE FROM {table} WHERE note_id IN (SELECT id FROM prune_ids)"),
             [],
@@ -365,12 +435,11 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
     conn.execute("DROP TABLE prune_ids", [])?;
 
     for column_id in &affected_columns {
-        let survivor: Option<String> = match conn
-            .query_row(
-                "SELECT MIN(note_id) FROM column_note WHERE column_id = ?1",
-                params![column_id],
-                |r| r.get::<_, Option<String>>(0),
-            ) {
+        let survivor: Option<String> = match conn.query_row(
+            "SELECT MIN(note_id) FROM column_note WHERE column_id = ?1",
+            params![column_id],
+            |r| r.get::<_, Option<String>>(0),
+        ) {
             Ok(v) => v,
             Err(e) => return Err(e.into()),
         };
@@ -380,7 +449,9 @@ fn delete_matching(conn: &Connection, select_sql: &str, params: &[&dyn rusqlite:
                 // 消えていることがある(連合ノート)。その場合は削除された最大IDまで
                 // 引き上げないと、消えた範囲を「完全」と主張し続けてしまう(Issue #228)。
                 let candidate = match max_deleted_by_column.get(column_id) {
-                    Some(max_deleted) if max_deleted.as_str() > oldest.as_str() => max_deleted.clone(),
+                    Some(max_deleted) if max_deleted.as_str() > oldest.as_str() => {
+                        max_deleted.clone()
+                    }
                     _ => oldest,
                 };
                 conn.execute(
@@ -559,11 +630,22 @@ pub(crate) fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
     let current_file_keys: Vec<String> = n
         .files
         .iter()
-        .map(|f| format!("{}\u{0}{}\u{0}{}", f.mime_type, mime_category(&f.mime_type), f.is_sensitive as i64))
+        .map(|f| {
+            format!(
+                "{}\u{0}{}\u{0}{}",
+                f.mime_type,
+                mime_category(&f.mime_type),
+                f.is_sensitive as i64
+            )
+        })
         .collect();
-    let mut stmt = conn.prepare("SELECT rowid, mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = ?1")?;
+    let mut stmt = conn.prepare(
+        "SELECT rowid, mime_type, mime_category, is_sensitive FROM note_file WHERE note_id = ?1",
+    )?;
     let existing_files: Vec<(i64, String, String, i64)> = stmt
-        .query_map(params![n.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .query_map(params![n.id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?
         .collect::<rusqlite::Result<_>>()?;
     drop(stmt);
     for (rowid, mime_type, mime_category_val, is_sensitive) in existing_files {
@@ -576,7 +658,12 @@ pub(crate) fn upsert_note(conn: &Connection, n: &Note) -> Result<()> {
 }
 
 /// `NoteCacheStore::prune` の同期本体。`SqliteBackend::prune` から `spawn_blocking` 内で呼ばれる。
-pub(crate) fn prune_sync(conn: &Connection, keep: i32, max_age_days: i32, max_size_mb: i32) -> Result<usize> {
+pub(crate) fn prune_sync(
+    conn: &Connection,
+    keep: i32,
+    max_age_days: i32,
+    max_size_mb: i32,
+) -> Result<usize> {
     let mut deleted: i64 = 0;
     {
         let tx_conn = conn;
@@ -588,7 +675,11 @@ pub(crate) fn prune_sync(conn: &Connection, keep: i32, max_age_days: i32, max_si
         let tx = tx_conn.unchecked_transaction()?;
         if max_age_days > 0 {
             let cutoff = now_epoch() - max_age_days as i64 * 86_400;
-            deleted += delete_matching(&tx, "SELECT id FROM note WHERE created_at < ?1", params![cutoff])?;
+            deleted += delete_matching(
+                &tx,
+                "SELECT id FROM note WHERE created_at < ?1",
+                params![cutoff],
+            )?;
         }
         if keep > 0 {
             let total: i64 = tx.query_row("SELECT COUNT(*) FROM note", [], |r| r.get(0))?;
@@ -620,7 +711,8 @@ pub(crate) fn search_cache_sync(
     use crate::filter::sql::{Dialect, SqlParam};
 
     let w = where_sql.render(Dialect::Sqlite);
-    let mut sql = String::from("SELECT n.id, n.payload FROM note n JOIN user u ON u.id = n.user_id WHERE (");
+    let mut sql =
+        String::from("SELECT n.id, n.payload FROM note n JOIN user u ON u.id = n.user_id WHERE (");
     sql.push_str(&w.sql);
     sql.push(')');
     if until_id.is_some() {
@@ -716,8 +808,9 @@ mod tests {
         let conn = crate::store::db::open_cache_in_memory().unwrap();
         upsert_note(&conn, &note("n1", 100)).unwrap();
 
-        let raw_payload: String =
-            conn.query_row("SELECT payload FROM note WHERE id = 'n1'", [], |r| r.get(0)).unwrap();
+        let raw_payload: String = conn
+            .query_row("SELECT payload FROM note WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw_payload).unwrap();
         assert_eq!(v["user"], serde_json::json!({ "id": "u1" }));
     }
@@ -731,7 +824,9 @@ mod tests {
         upsert_note(&conn, &n).unwrap();
 
         let stored: Option<String> = conn
-            .query_row("SELECT reply_user_id FROM note WHERE id = 'n1'", [], |r| r.get(0))
+            .query_row("SELECT reply_user_id FROM note WHERE id = 'n1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(stored.as_deref(), Some("bob-id"));
     }
@@ -782,7 +877,11 @@ mod tests {
         upsert_note(&conn, &n).unwrap();
 
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM user WHERE id IN ('u1','u2')", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM user WHERE id IN ('u1','u2')",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 2);
     }
@@ -807,7 +906,8 @@ mod tests {
     }
 
     fn count(conn: &Connection, table: &str) -> i64 {
-        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
     }
 
     /// Issue #619: サイズ上限の縮小(`shrink_to_size`)が途中で失敗しても、部分削除にならず、
@@ -831,10 +931,17 @@ mod tests {
         // 予算 1 バイトなので必ず削除に入る
         assert!(shrink_to_size(&conn, 1).is_err());
 
-        assert_eq!(count(&conn, "note"), 1, "note が消えて関連だけ残る部分削除になってはいけない");
+        assert_eq!(
+            count(&conn, "note"),
+            1,
+            "note が消えて関連だけ残る部分削除になってはいけない"
+        );
         assert_eq!(count(&conn, "column_note"), 1);
         assert_eq!(count(&conn, "column_source_boundary"), 1);
-        assert!(!prune_ids_exists(&conn), "失敗後に prune_ids が残ってはいけない");
+        assert!(
+            !prune_ids_exists(&conn),
+            "失敗後に prune_ids が残ってはいけない"
+        );
 
         // 原因が取り除かれれば、再実行でそのまま成功する(`already exists` で詰まらない)。
         conn.execute_batch("DROP TRIGGER fail_cascade").unwrap();
@@ -848,7 +955,8 @@ mod tests {
     fn delete_matching_tolerates_a_leftover_prune_ids_table() {
         let conn = crate::store::db::open_cache_in_memory().unwrap();
         upsert_note(&conn, &note("n1", 100)).unwrap();
-        conn.execute_batch("CREATE TEMP TABLE prune_ids (id TEXT)").unwrap();
+        conn.execute_batch("CREATE TEMP TABLE prune_ids (id TEXT)")
+            .unwrap();
 
         let deleted = prune_sync(&conn, 0, 1, 0).unwrap();
 

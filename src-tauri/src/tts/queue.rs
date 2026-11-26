@@ -57,7 +57,13 @@ impl SpeechQueue {
         self.items.push_back(item);
 
         let mut dropped = 0;
-        while self.items.iter().filter(|i| i.column_id == column_id).count() > limit {
+        while self
+            .items
+            .iter()
+            .filter(|i| i.column_id == column_id)
+            .count()
+            > limit
+        {
             // そのカラムの最古の項目を捨てる(必ず見つかる: 上のループ条件が真)。
             if let Some(pos) = self.items.iter().position(|i| i.column_id == column_id) {
                 self.items.remove(pos);
@@ -94,7 +100,10 @@ mod tests {
             column_id: col.into(),
             text: format!("text-{note}"),
             voice_id: "1".into(),
-            params: SynthParams { speed_scale: 1.0, volume: 1.0 },
+            params: SynthParams {
+                speed_scale: 1.0,
+                volume: 1.0,
+            },
         }
     }
 
@@ -119,7 +128,11 @@ mod tests {
         q.push(item("a2", "a"), 2);
         let out = q.push(item("a3", "a"), 2);
         assert_eq!(out, PushOutcome::Accepted { dropped: 1 });
-        assert_eq!(ids(&mut q), ["b1", "a2", "a3"], "a の最古(a1)だけが消え、b は無傷");
+        assert_eq!(
+            ids(&mut q),
+            ["b1", "a2", "a3"],
+            "a の最古(a1)だけが消え、b は無傷"
+        );
     }
 
     #[test]
@@ -134,14 +147,20 @@ mod tests {
     #[test]
     fn a_limit_of_zero_is_treated_as_one() {
         let mut q = SpeechQueue::new();
-        assert_eq!(q.push(item("a1", "a"), 0), PushOutcome::Accepted { dropped: 0 });
+        assert_eq!(
+            q.push(item("a1", "a"), 0),
+            PushOutcome::Accepted { dropped: 0 }
+        );
         assert_eq!(q.len(), 1);
     }
 
     #[test]
     fn the_same_note_is_not_queued_twice_even_from_another_column() {
         let mut q = SpeechQueue::new();
-        assert_eq!(q.push(item("n1", "a"), 5), PushOutcome::Accepted { dropped: 0 });
+        assert_eq!(
+            q.push(item("n1", "a"), 5),
+            PushOutcome::Accepted { dropped: 0 }
+        );
         assert_eq!(q.push(item("n1", "b"), 5), PushOutcome::Duplicate);
         assert_eq!(q.len(), 1);
     }
@@ -151,7 +170,11 @@ mod tests {
         let mut q = SpeechQueue::new();
         q.push(item("n1", "a"), 5);
         assert!(q.pop().is_some());
-        assert_eq!(q.push(item("n1", "a"), 5), PushOutcome::Duplicate, "読み上げ済みのノートは再度積まない");
+        assert_eq!(
+            q.push(item("n1", "a"), 5),
+            PushOutcome::Duplicate,
+            "読み上げ済みのノートは再度積まない"
+        );
     }
 
     #[test]
@@ -162,7 +185,10 @@ mod tests {
             q.pop();
         }
         // 十分古い ID は忘れる(メモリが増え続けない)。
-        assert_eq!(q.push(item("n0", "a"), 5), PushOutcome::Accepted { dropped: 0 });
+        assert_eq!(
+            q.push(item("n0", "a"), 5),
+            PushOutcome::Accepted { dropped: 0 }
+        );
     }
 
     #[test]

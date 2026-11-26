@@ -16,7 +16,9 @@ pub(crate) struct SqliteBackend {
 
 impl SqliteBackend {
     pub(crate) fn new(conn: Connection) -> Self {
-        Self { conn: Arc::new(Mutex::new(conn)) }
+        Self {
+            conn: Arc::new(Mutex::new(conn)),
+        }
     }
 
     #[cfg(test)]
@@ -59,7 +61,8 @@ impl NoteCacheBackend for SqliteBackend {
     }
 
     async fn cache_note(&self, column_id: &str, note: &Note) -> Result<()> {
-        self.cache_notes(column_id, std::slice::from_ref(note)).await
+        self.cache_notes(column_id, std::slice::from_ref(note))
+            .await
     }
 
     async fn load_cached(&self, column_id: &str, limit: u32) -> Result<Vec<Note>> {
@@ -75,7 +78,9 @@ impl NoteCacheBackend for SqliteBackend {
                  LIMIT ?2",
             )?;
             let rows: Vec<(String, String)> = stmt
-                .query_map(rusqlite::params![column_id, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .query_map(rusqlite::params![column_id, limit], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
                 .collect::<rusqlite::Result<_>>()?;
             drop(stmt);
             crate::store::note_cache::resolve_payload_rows(&guard, rows)
@@ -84,7 +89,12 @@ impl NoteCacheBackend for SqliteBackend {
         .map_err(map_join_error)?
     }
 
-    async fn load_cached_before(&self, column_id: &str, until_id: &str, limit: u32) -> Result<Vec<Note>> {
+    async fn load_cached_before(
+        &self,
+        column_id: &str,
+        until_id: &str,
+        limit: u32,
+    ) -> Result<Vec<Note>> {
         let conn = Arc::clone(&self.conn);
         let column_id = column_id.to_string();
         let until_id = until_id.to_string();
@@ -98,14 +108,20 @@ impl NoteCacheBackend for SqliteBackend {
                  LIMIT ?3",
             )?;
             let rows: Vec<(String, String)> = stmt
-                .query_map(rusqlite::params![column_id, until_id, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .query_map(rusqlite::params![column_id, until_id, limit], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
                 .collect::<rusqlite::Result<_>>()?;
             drop(stmt);
             let mut out = crate::store::note_cache::resolve_payload_rows(&guard, rows)?;
             // 絞り込み・LIMITの選抜は境界比較と同じ id 基準で行い、表示順への並べ替えだけを
             // ここで行う。created_at で選抜すると、連合ノート(idとcreated_atの順序が食い違う)が
             // 範囲内にあるのに LIMIT の外へ弾かれて静かに欠落する(Issue #228)。
-            out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.id.cmp(&a.id)));
+            out.sort_by(|a, b| {
+                b.created_at
+                    .cmp(&a.created_at)
+                    .then_with(|| b.id.cmp(&a.id))
+            });
             Ok(out)
         })
         .await
@@ -118,13 +134,17 @@ impl NoteCacheBackend for SqliteBackend {
         tauri::async_runtime::spawn_blocking(move || -> Result<Option<Note>> {
             let guard = conn.lock().unwrap();
             let row: Option<(String, String)> = guard
-                .query_row("SELECT id, payload FROM note WHERE id = ?1", rusqlite::params![note_id], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
-                })
+                .query_row(
+                    "SELECT id, payload FROM note WHERE id = ?1",
+                    rusqlite::params![note_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
                 .optional()?;
             Ok(match row {
                 Some((id, payload)) => {
-                    crate::store::note_cache::resolve_payload_rows(&guard, vec![(id, payload)])?.into_iter().next()
+                    crate::store::note_cache::resolve_payload_rows(&guard, vec![(id, payload)])?
+                        .into_iter()
+                        .next()
                 }
                 None => None,
             })
@@ -149,7 +169,10 @@ impl NoteCacheBackend for SqliteBackend {
         let column_id = column_id.to_string();
         tauri::async_runtime::spawn_blocking(move || -> Result<()> {
             let guard = conn.lock().unwrap();
-            guard.execute("DELETE FROM column_note WHERE column_id = ?1", rusqlite::params![column_id])?;
+            guard.execute(
+                "DELETE FROM column_note WHERE column_id = ?1",
+                rusqlite::params![column_id],
+            )?;
             guard.execute(
                 "DELETE FROM column_source_boundary WHERE column_id = ?1",
                 rusqlite::params![column_id],
@@ -206,7 +229,10 @@ impl NoteCacheBackend for SqliteBackend {
         let account_id = account_id.to_string();
         tauri::async_runtime::spawn_blocking(move || -> Result<()> {
             let guard = conn.lock().unwrap();
-            guard.execute("DELETE FROM note_account WHERE account_id = ?1", rusqlite::params![account_id])?;
+            guard.execute(
+                "DELETE FROM note_account WHERE account_id = ?1",
+                rusqlite::params![account_id],
+            )?;
             Ok(())
         })
         .await
@@ -233,7 +259,10 @@ impl NoteCacheBackend for SqliteBackend {
         let conn = Arc::clone(&self.conn);
         tauri::async_runtime::spawn_blocking(move || -> Result<bool> {
             let guard = conn.lock().unwrap();
-            let any: bool = guard.query_row("SELECT EXISTS(SELECT 1 FROM note_account)", [], |r| r.get(0))?;
+            let any: bool =
+                guard.query_row("SELECT EXISTS(SELECT 1 FROM note_account)", [], |r| {
+                    r.get(0)
+                })?;
             Ok(!any)
         })
         .await
@@ -250,7 +279,9 @@ impl NoteCacheBackend for SqliteBackend {
                  WHERE column_id = ?1 ORDER BY source_idx",
             )?;
             let rows = stmt
-                .query_map(rusqlite::params![column_id], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?
+                .query_map(rusqlite::params![column_id], |r| {
+                    Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?))
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
@@ -258,7 +289,11 @@ impl NoteCacheBackend for SqliteBackend {
         .map_err(map_join_error)?
     }
 
-    async fn replace_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+    async fn replace_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
         let conn = Arc::clone(&self.conn);
         let column_id = column_id.to_string();
         let entries = entries.to_vec();
@@ -279,7 +314,11 @@ impl NoteCacheBackend for SqliteBackend {
         .map_err(map_join_error)?
     }
 
-    async fn extend_fetch_boundaries(&self, column_id: &str, entries: &[(u32, String)]) -> Result<()> {
+    async fn extend_fetch_boundaries(
+        &self,
+        column_id: &str,
+        entries: &[(u32, String)],
+    ) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -362,7 +401,12 @@ impl NoteCacheBackend for SqliteBackend {
         let until_id = until_id.map(|s| s.to_string());
         tauri::async_runtime::spawn_blocking(move || -> Result<Vec<Note>> {
             let guard = conn.lock().unwrap();
-            crate::store::note_cache::search_cache_sync(&guard, &where_sql, until_id.as_deref(), limit)
+            crate::store::note_cache::search_cache_sync(
+                &guard,
+                &where_sql,
+                until_id.as_deref(),
+                limit,
+            )
         })
         .await
         .map_err(map_join_error)?
@@ -386,15 +430,24 @@ mod tests {
 
     /// source_idx=0 だけの境界を置き換える(単一ソース時代のテストを新APIへ移すためのヘルパー)。
     async fn set0(s: &SqliteBackend, column_id: &str, id: &str) {
-        s.replace_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+        s.replace_fetch_boundaries(column_id, &[b(0, id)])
+            .await
+            .unwrap();
     }
 
     async fn extend0(s: &SqliteBackend, column_id: &str, id: &str) {
-        s.extend_fetch_boundaries(column_id, &[b(0, id)]).await.unwrap();
+        s.extend_fetch_boundaries(column_id, &[b(0, id)])
+            .await
+            .unwrap();
     }
 
     async fn b0(s: &SqliteBackend, column_id: &str) -> Option<String> {
-        s.get_fetch_boundaries(column_id).await.unwrap().into_iter().find(|(i, _)| *i == 0).map(|(_, v)| v)
+        s.get_fetch_boundaries(column_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|(i, _)| *i == 0)
+            .map(|(_, v)| v)
     }
 
     fn note(id: &str, created_at: i64) -> Note {
@@ -464,10 +517,15 @@ mod tests {
     #[tokio::test]
     async fn cache_roundtrip_preserves_note_and_order() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 150)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 150)])
+            .await
+            .unwrap();
         let got = s.load_cached("col1", 10).await.unwrap();
         // created_at 降順
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n3", "n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2", "n3", "n1"]
+        );
         // payload 復元が完全（reactions/files/tags）
         assert_eq!(got[0].reactions.get("👍"), Some(&3));
         assert_eq!(got[0].files[0].mime_type, "image/png");
@@ -481,15 +539,24 @@ mod tests {
     #[tokio::test]
     async fn load_cached_skips_row_with_legacy_array_emojis_payload() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         {
             let conn = s.conn().lock().unwrap();
             let legacy_payload = payload_with_array_emojis(&note("n1", 100));
-            conn.execute("UPDATE note SET payload = ?1 WHERE id = 'n1'", params![legacy_payload]).unwrap();
+            conn.execute(
+                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
+                params![legacy_payload],
+            )
+            .unwrap();
         }
 
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2"]
+        );
     }
 
     /// load_cached と同様、search_cache も壊れた行1件で全体を空にしない。
@@ -497,18 +564,30 @@ mod tests {
     async fn search_cache_skips_row_with_legacy_array_emojis_payload() {
         use crate::filter::{parser, sql};
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         {
             let conn = s.conn().lock().unwrap();
             let legacy_payload = payload_with_array_emojis(&note("n1", 100));
-            conn.execute("UPDATE note SET payload = ?1 WHERE id = 'n1'", params![legacy_payload]).unwrap();
+            conn.execute(
+                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
+                params![legacy_payload],
+            )
+            .unwrap();
         }
 
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        let ctx = sql::SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
         let expr = parser::parse_predicate("has_files").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, None, 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2"]
+        );
     }
 
     #[tokio::test]
@@ -526,7 +605,11 @@ mod tests {
         {
             let conn = s.conn().lock().unwrap();
             let legacy_payload = payload_with_array_emojis(&note("n1", 100));
-            conn.execute("UPDATE note SET payload = ?1 WHERE id = 'n1'", params![legacy_payload]).unwrap();
+            conn.execute(
+                "UPDATE note SET payload = ?1 WHERE id = 'n1'",
+                params![legacy_payload],
+            )
+            .unwrap();
         }
 
         assert!(s.get_note("n1").await.unwrap().is_none());
@@ -559,16 +642,24 @@ mod tests {
     async fn search_cache_applies_predicate_and_until_id_boundary() {
         use crate::filter::{parser, sql};
         let s = store();
-        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)]).await.unwrap();
+        s.cache_notes("col1", &[note("a1", 300), note("a2", 200), note("a3", 100)])
+            .await
+            .unwrap();
 
-        let ctx = sql::SqlCtx { my_ids: vec![], following_ids: None };
+        let ctx = sql::SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
 
         // 述語(has_files)は全件trueなので until_id 境界のみで絞られる
         let expr = parser::parse_predicate("has_files").unwrap();
         let w = sql::build_where(&expr, &ctx).unwrap();
         let got = s.search_cache(&w, Some("a3"), 10).await.unwrap();
         // 結果は ID 降順(a2 > a1)。このデータは created_at の順と ID の順が逆なので、ID 基準で並ぶことの確認も兼ねる。
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["a2", "a1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["a2", "a1"]
+        );
 
         // 述語が全件falseなら空
         let expr2 = parser::parse_predicate("cw").unwrap();
@@ -624,10 +715,15 @@ mod tests {
         s.cache_note("col1", &note("n1", 100)).await.unwrap(); // 再受信
         let got = s.load_cached("col1", 10).await.unwrap();
         assert_eq!(got.len(), 1); // 重複しない
-        // 関連テーブルも重複していない
+                                  // 関連テーブルも重複していない
         let conn = s.conn().lock().unwrap();
-        let rc: i64 =
-            conn.query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0)).unwrap();
+        let rc: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(rc, 1);
     }
 
@@ -696,20 +792,30 @@ mod tests {
     #[tokio::test]
     async fn load_cached_before_returns_notes_older_than_until_id_desc() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
 
         let got = s.load_cached_before("col1", "n3", 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2", "n1"]
+        );
     }
 
     #[tokio::test]
     async fn load_cached_before_respects_limit_and_column_scope() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
         s.cache_notes("col2", &[note("m1", 250)]).await.unwrap();
 
         let got = s.load_cached_before("col1", "n3", 1).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n2"]
+        );
 
         // col2 のノートは混ざらない
         let got_all = s.load_cached_before("col1", "n3", 10).await.unwrap();
@@ -723,38 +829,61 @@ mod tests {
     async fn load_cached_before_selects_by_id_not_created_at() {
         let s = store();
         // id順: n1 < n2 < n3、created_at順: n2(100) < n3(800) < n1(900)
-        s.cache_notes("col1", &[note("n1", 900), note("n2", 100), note("n3", 800)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 900), note("n2", 100), note("n3", 800)])
+            .await
+            .unwrap();
 
         let got = s.load_cached_before("col1", "n9", 2).await.unwrap();
         // id の大きい方から2件(n3, n2)が選抜される。created_at で選ぶと n1, n3 になり n2 が欠落する。
         let ids: Vec<&str> = got.iter().map(|n| n.id.as_str()).collect();
-        assert_eq!(ids, ["n3", "n2"], "id基準で選抜し created_at DESC で並べること");
+        assert_eq!(
+            ids,
+            ["n3", "n2"],
+            "id基準で選抜し created_at DESC で並べること"
+        );
     }
 
     #[tokio::test]
     async fn prune_removes_oldest_beyond_keep_and_related_rows() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
         let deleted = s.prune(2, 0, 0).await.unwrap();
         assert_eq!(deleted, 1);
         assert_eq!(s.note_count().await.unwrap(), 2);
         // 最古(n1)が消え、残りは新しい2件
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n3", "n2"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n3", "n2"]
+        );
         // 関連テーブル・column_note も一緒に消えていること
         let conn = s.conn().lock().unwrap();
-        let rc: i64 =
-            conn.query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0)).unwrap();
+        let rc: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(rc, 0);
-        let cn: i64 =
-            conn.query_row("SELECT COUNT(*) FROM column_note WHERE note_id='n1'", [], |r| r.get(0)).unwrap();
+        let cn: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM column_note WHERE note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(cn, 0);
     }
 
     #[tokio::test]
     async fn prune_is_noop_when_under_or_unlimited() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         assert_eq!(s.prune(10, 0, 0).await.unwrap(), 0); // 上限未満
         assert_eq!(s.prune(0, 0, 0).await.unwrap(), 0); // 全て無制限
         assert_eq!(s.note_count().await.unwrap(), 2);
@@ -765,11 +894,22 @@ mod tests {
         let s = store();
         let now = crate::store::note_cache::now_epoch();
         let one_day = 86_400;
-        s.cache_notes("col1", &[note("old", now - 40 * one_day), note("recent", now - one_day)]).await.unwrap();
+        s.cache_notes(
+            "col1",
+            &[
+                note("old", now - 40 * one_day),
+                note("recent", now - one_day),
+            ],
+        )
+        .await
+        .unwrap();
         let deleted = s.prune(0, 30, 0).await.unwrap();
         assert_eq!(deleted, 1);
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["recent"]);
+        assert_eq!(
+            got.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["recent"]
+        );
     }
 
     #[tokio::test]
@@ -790,7 +930,10 @@ mod tests {
             let conn = s.conn().lock().unwrap();
             db_size_bytes_for_test(&conn)
         };
-        assert!(before_size > 1024 * 1024, "test setup should exceed 1MB, got {before_size}");
+        assert!(
+            before_size > 1024 * 1024,
+            "test setup should exceed 1MB, got {before_size}"
+        );
 
         let deleted = s.prune(0, 0, 1).await.unwrap();
         assert!(deleted > 0);
@@ -803,15 +946,21 @@ mod tests {
     }
 
     fn db_size_bytes_for_test(conn: &Connection) -> i64 {
-        let page_count: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0)).unwrap();
-        let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0)).unwrap();
+        let page_count: i64 = conn
+            .query_row("PRAGMA page_count", [], |r| r.get(0))
+            .unwrap();
+        let page_size: i64 = conn
+            .query_row("PRAGMA page_size", [], |r| r.get(0))
+            .unwrap();
         page_count * page_size
     }
 
     #[tokio::test]
     async fn prune_raises_boundary_to_surviving_oldest_note_after_keep_exceeded() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
         set0(&s, "col1", "n1").await; // n1まで(=全件)取得済みと主張
 
         let deleted = s.prune(2, 0, 0).await.unwrap(); // 最古のn1が削除される
@@ -827,7 +976,9 @@ mod tests {
     async fn prune_raises_boundary_past_deleted_note_with_newer_id() {
         let s = store();
         // id順: n1 < n2 < n5、created_at順: n5(100) < n1(200) < n2(300)
-        s.cache_notes("col1", &[note("n5", 100), note("n1", 200), note("n2", 300)]).await.unwrap();
+        s.cache_notes("col1", &[note("n5", 100), note("n1", 200), note("n2", 300)])
+            .await
+            .unwrap();
         set0(&s, "col1", "n1").await;
 
         let deleted = s.prune(2, 0, 0).await.unwrap(); // created_at 最古の n5 が削除される
@@ -854,7 +1005,9 @@ mod tests {
         let s = store();
         let now = crate::store::note_cache::now_epoch();
         let one_day = 86_400;
-        s.cache_notes("col1", &[note("old", now - 40 * one_day)]).await.unwrap();
+        s.cache_notes("col1", &[note("old", now - 40 * one_day)])
+            .await
+            .unwrap();
         set0(&s, "col1", "old").await;
 
         let deleted = s.prune(0, 30, 0).await.unwrap();
@@ -868,7 +1021,9 @@ mod tests {
     async fn prune_leaves_unaffected_columns_boundary_untouched() {
         let s = store();
         s.cache_notes("colA", &[note("a1", 50)]).await.unwrap();
-        s.cache_notes("colB", &[note("b1", 100), note("b2", 200), note("b3", 300)]).await.unwrap();
+        s.cache_notes("colB", &[note("b1", 100), note("b2", 200), note("b3", 300)])
+            .await
+            .unwrap();
         set0(&s, "colA", "a1").await;
         set0(&s, "colB", "b1").await;
 
@@ -884,21 +1039,38 @@ mod tests {
         let s = store();
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
 
-        s.replace_fetch_boundaries("col1", &[b(1, "n200"), b(0, "n100")]).await.unwrap();
-        s.replace_fetch_boundaries("col2", &[b(0, "m1")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(1, "n200"), b(0, "n100")])
+            .await
+            .unwrap();
+        s.replace_fetch_boundaries("col2", &[b(0, "m1")])
+            .await
+            .unwrap();
 
         // source_idx 昇順で返り、別カラムには影響しない
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n100"), b(1, "n200")]);
-        assert_eq!(s.get_fetch_boundaries("col2").await.unwrap(), vec![b(0, "m1")]);
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n100"), b(1, "n200")]
+        );
+        assert_eq!(
+            s.get_fetch_boundaries("col2").await.unwrap(),
+            vec![b(0, "m1")]
+        );
     }
 
     #[tokio::test]
     async fn replace_fetch_boundaries_drops_sources_missing_from_entries() {
         let s = store();
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")])
+            .await
+            .unwrap();
 
-        s.replace_fetch_boundaries("col1", &[b(0, "n5")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n5")]);
+        s.replace_fetch_boundaries("col1", &[b(0, "n5")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n5")]
+        );
 
         s.replace_fetch_boundaries("col1", &[]).await.unwrap();
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
@@ -909,20 +1081,31 @@ mod tests {
     #[tokio::test]
     async fn replace_fetch_boundaries_rejects_duplicate_source_idx_and_rolls_back() {
         let s = store();
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")])
+            .await
+            .unwrap();
 
-        let result = s.replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")]).await;
+        let result = s
+            .replace_fetch_boundaries("col1", &[b(0, "n5"), b(0, "n6")])
+            .await;
 
         assert!(result.is_err());
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "n1"), b(1, "n2")]);
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "n1"), b(1, "n2")]
+        );
     }
 
     #[tokio::test]
     async fn extend_fetch_boundaries_moves_each_source_older_only_and_inserts_absent() {
         let s = store();
-        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n500")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n500"), b(1, "n500")])
+            .await
+            .unwrap();
 
-        s.extend_fetch_boundaries("col1", &[b(0, "n300"), b(1, "n800"), b(2, "n100")]).await.unwrap();
+        s.extend_fetch_boundaries("col1", &[b(0, "n300"), b(1, "n800"), b(2, "n100")])
+            .await
+            .unwrap();
 
         // 0: 古い方へ延長 / 1: 新しい値は無視 / 2: 行が無ければ挿入
         assert_eq!(
@@ -934,33 +1117,56 @@ mod tests {
     #[tokio::test]
     async fn extend_fetch_boundaries_accepts_empty_string_as_exhausted() {
         let s = store();
-        s.replace_fetch_boundaries("col1", &[b(0, "n500")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n500")])
+            .await
+            .unwrap();
 
-        s.extend_fetch_boundaries("col1", &[b(0, "")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "")]);
+        s.extend_fetch_boundaries("col1", &[b(0, "")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "")]
+        );
 
         // 枯渇済み("")は、後から通常のIDで延長しても戻らない
-        s.extend_fetch_boundaries("col1", &[b(0, "n1")]).await.unwrap();
-        assert_eq!(s.get_fetch_boundaries("col1").await.unwrap(), vec![b(0, "")]);
+        s.extend_fetch_boundaries("col1", &[b(0, "n1")])
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get_fetch_boundaries("col1").await.unwrap(),
+            vec![b(0, "")]
+        );
     }
 
     #[tokio::test]
     async fn clear_column_notes_removes_every_source_row_of_the_column_only() {
         let s = store();
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
-        s.replace_fetch_boundaries("col2", &[b(0, "m1")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")])
+            .await
+            .unwrap();
+        s.replace_fetch_boundaries("col2", &[b(0, "m1")])
+            .await
+            .unwrap();
 
         s.clear_column_notes("col1").await.unwrap();
 
         assert!(s.get_fetch_boundaries("col1").await.unwrap().is_empty());
-        assert_eq!(s.get_fetch_boundaries("col2").await.unwrap(), vec![b(0, "m1")]);
+        assert_eq!(
+            s.get_fetch_boundaries("col2").await.unwrap(),
+            vec![b(0, "m1")]
+        );
     }
 
     #[tokio::test]
     async fn clear_all_fetch_boundaries_removes_rows_of_every_source_and_column() {
         let s = store();
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")]).await.unwrap();
-        s.replace_fetch_boundaries("col2", &[b(0, "m1")]).await.unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, "n2")])
+            .await
+            .unwrap();
+        s.replace_fetch_boundaries("col2", &[b(0, "m1")])
+            .await
+            .unwrap();
 
         s.clear_all_fetch_boundaries().await.unwrap();
 
@@ -973,8 +1179,12 @@ mod tests {
     #[tokio::test]
     async fn prune_raises_every_source_boundary_of_the_column() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
-        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, ""), b(2, "n2")]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "n1"), b(1, ""), b(2, "n2")])
+            .await
+            .unwrap();
 
         let deleted = s.prune(2, 0, 0).await.unwrap(); // 最古の n1 が削除される
         assert_eq!(deleted, 1);
@@ -990,8 +1200,12 @@ mod tests {
         let s = store();
         let now = crate::store::note_cache::now_epoch();
         let one_day = 86_400;
-        s.cache_notes("col1", &[note("old", now - 40 * one_day)]).await.unwrap();
-        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, "")]).await.unwrap();
+        s.cache_notes("col1", &[note("old", now - 40 * one_day)])
+            .await
+            .unwrap();
+        s.replace_fetch_boundaries("col1", &[b(0, "old"), b(1, "")])
+            .await
+            .unwrap();
 
         let deleted = s.prune(0, 30, 0).await.unwrap();
         assert_eq!(deleted, 1);
@@ -1001,7 +1215,12 @@ mod tests {
 
     /// 旧形式(userフルオブジェクト埋め込み)の行を素のSQLで作る(upsert_noteを経由しない=
     /// Issue #263 以前に保存された実データの形を再現する)。
-    fn insert_legacy_row(conn: &Connection, note_id: &str, created_at: i64, user_json: serde_json::Value) {
+    fn insert_legacy_row(
+        conn: &Connection,
+        note_id: &str,
+        created_at: i64,
+        user_json: serde_json::Value,
+    ) {
         let mut n = note(note_id, created_at);
         let mut v = serde_json::to_value(&n).unwrap();
         v["user"] = user_json;
@@ -1048,17 +1267,29 @@ mod tests {
         let got = s.load_cached("col1", 10).await.unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].user.id, "u_legacy");
-        let instance = got[0].user.instance.as_ref().expect("instance should be hydrated");
+        let instance = got[0]
+            .user
+            .instance
+            .as_ref()
+            .expect("instance should be hydrated");
         assert_eq!(instance.name.as_deref(), Some("Remote"));
 
         // payload がスタブ形式へ書き戻されていること
         let conn = s.conn().lock().unwrap();
-        let raw: String = conn.query_row("SELECT payload FROM note WHERE id = 'n_legacy'", [], |r| r.get(0)).unwrap();
+        let raw: String = conn
+            .query_row("SELECT payload FROM note WHERE id = 'n_legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["user"], serde_json::json!({ "id": "u_legacy" }));
 
         // user テーブルへ抽出されていること
-        let name: String = conn.query_row("SELECT name FROM user WHERE id = 'u_legacy'", [], |r| r.get(0)).unwrap();
+        let name: String = conn
+            .query_row("SELECT name FROM user WHERE id = 'u_legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(name, "Carol");
     }
 
@@ -1116,22 +1347,38 @@ mod tests {
         let got = s.load_cached("col1", 10).await.unwrap();
         assert_eq!(got.len(), 1);
         let renote = got[0].renote.as_ref().expect("renote should be present");
-        let instance = renote.user.instance.as_ref().expect("renote author instance should be hydrated");
+        let instance = renote
+            .user
+            .instance
+            .as_ref()
+            .expect("renote author instance should be hydrated");
         assert_eq!(instance.name.as_deref(), Some("Remote"));
 
         // 両方(本体+renote分)がuserテーブルへ抽出されていること
         let conn = s.conn().lock().unwrap();
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM user WHERE id IN ('u_main','u_renote_author')", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM user WHERE id IN ('u_main','u_renote_author')",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 2);
 
         // payloadが本体+renote分ともスタブへ書き戻されていること
-        let raw: String =
-            conn.query_row("SELECT payload FROM note WHERE id = 'n_with_renote'", [], |r| r.get(0)).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT payload FROM note WHERE id = 'n_with_renote'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["user"], serde_json::json!({ "id": "u_main" }));
-        assert_eq!(v["renote"]["user"], serde_json::json!({ "id": "u_renote_author" }));
+        assert_eq!(
+            v["renote"]["user"],
+            serde_json::json!({ "id": "u_renote_author" })
+        );
     }
 
     fn note_replying_to_bob(id: &str, created_at: i64) -> Note {
@@ -1149,7 +1396,9 @@ mod tests {
     #[tokio::test]
     async fn cache_roundtrip_restores_reply_and_its_author() {
         let s = store();
-        s.cache_note("col1", &note_replying_to_bob("n_reply", 200)).await.unwrap();
+        s.cache_note("col1", &note_replying_to_bob("n_reply", 200))
+            .await
+            .unwrap();
 
         let got = s.load_cached("col1", 10).await.unwrap();
         assert_eq!(got.len(), 1);
@@ -1160,7 +1409,11 @@ mod tests {
 
         // payload 内では reply.user もスタブ化されていること
         let conn = s.conn().lock().unwrap();
-        let raw: String = conn.query_row("SELECT payload FROM note WHERE id = 'n_reply'", [], |r| r.get(0)).unwrap();
+        let raw: String = conn
+            .query_row("SELECT payload FROM note WHERE id = 'n_reply'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["reply"]["user"], serde_json::json!({ "id": "u_bob" }));
     }
@@ -1168,14 +1421,21 @@ mod tests {
     #[tokio::test]
     async fn load_cached_keeps_note_but_drops_reply_when_reply_author_row_missing() {
         let s = store();
-        s.cache_note("col1", &note_replying_to_bob("n_reply", 200)).await.unwrap();
+        s.cache_note("col1", &note_replying_to_bob("n_reply", 200))
+            .await
+            .unwrap();
         {
             let conn = s.conn().lock().unwrap();
-            conn.execute("DELETE FROM user WHERE id = 'u_bob'", []).unwrap();
+            conn.execute("DELETE FROM user WHERE id = 'u_bob'", [])
+                .unwrap();
         }
 
         let got = s.load_cached("col1", 10).await.unwrap();
-        assert_eq!(got.len(), 1, "返信先ユーザーの欠落でノート行ごと捨ててはいけない");
+        assert_eq!(
+            got.len(),
+            1,
+            "返信先ユーザーの欠落でノート行ごと捨ててはいけない"
+        );
         assert_eq!(got[0].id, "n_reply");
         assert!(got[0].reply.is_none());
     }
@@ -1263,11 +1523,25 @@ mod tests {
 
         let got = s.load_cached("col1", 10).await.unwrap();
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].reply.as_ref().expect("reply should be present").user.name.as_deref(), Some("Target"));
+        assert_eq!(
+            got[0]
+                .reply
+                .as_ref()
+                .expect("reply should be present")
+                .user
+                .name
+                .as_deref(),
+            Some("Target")
+        );
 
         let conn = s.conn().lock().unwrap();
-        let raw: String =
-            conn.query_row("SELECT payload FROM note WHERE id = 'n_with_reply'", [], |r| r.get(0)).unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT payload FROM note WHERE id = 'n_with_reply'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["reply"]["user"], serde_json::json!({ "id": "u_target" }));
     }
@@ -1277,7 +1551,12 @@ mod tests {
         let s = store();
         {
             let conn = s.conn().lock().unwrap();
-            insert_legacy_row(&conn, "n_orphan", 100, serde_json::json!({ "id": "u_orphan" }));
+            insert_legacy_row(
+                &conn,
+                "n_orphan",
+                100,
+                serde_json::json!({ "id": "u_orphan" }),
+            );
         }
 
         let got = s.load_cached("col1", 10).await.unwrap();
@@ -1291,12 +1570,21 @@ mod tests {
         let conn = s.conn().lock().unwrap();
         // has_link / text_length / files_count 等が正規化カラムに入る
         let (has_link, files_count): (i64, i64) = conn
-            .query_row("SELECT has_link, files_count FROM note WHERE id='n1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row(
+                "SELECT has_link, files_count FROM note WHERE id='n1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!(has_link, 1);
         assert_eq!(files_count, 1);
-        let cat: String =
-            conn.query_row("SELECT mime_category FROM note_file WHERE note_id='n1'", [], |r| r.get(0)).unwrap();
+        let cat: String = conn
+            .query_row(
+                "SELECT mime_category FROM note_file WHERE note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(cat, "image");
     }
 
@@ -1316,9 +1604,17 @@ mod tests {
         s.update_note(&n).await.unwrap();
 
         let conn = s.conn().lock().unwrap();
-        let rc: i64 =
-            conn.query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0)).unwrap();
-        assert_eq!(rc, 0, "取り消されたリアクションの行はUPSERT化後も削除されること");
+        let rc: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            rc, 0,
+            "取り消されたリアクションの行はUPSERT化後も削除されること"
+        );
     }
 
     /// Issue #115: 同じリアクションを再受信してもcountが正しく更新される(UPSERTのON CONFLICT DO UPDATEが効いていること)。
@@ -1334,7 +1630,11 @@ mod tests {
 
         let conn = s.conn().lock().unwrap();
         let count: i64 = conn
-            .query_row("SELECT count FROM note_reaction WHERE note_id='n1' AND emoji_key='👍'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count FROM note_reaction WHERE note_id='n1' AND emoji_key='👍'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 5);
     }
@@ -1344,8 +1644,12 @@ mod tests {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
 
-        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap(); // 再実行しても変わらない
+        s.record_note_accounts("acc1", &["n1".to_string(), "ghost".to_string()])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap(); // 再実行しても変わらない
 
         assert!(s.account_has_note("acc1", "n1").await.unwrap());
         // note に存在しない ID は孤児行にしない
@@ -1359,8 +1663,12 @@ mod tests {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
 
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
-        s.record_note_accounts("acc2", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc2", &["n1".to_string()])
+            .await
+            .unwrap();
 
         assert!(s.account_has_note("acc1", "n1").await.unwrap());
         assert!(s.account_has_note("acc2", "n1").await.unwrap());
@@ -1369,8 +1677,12 @@ mod tests {
     #[tokio::test]
     async fn note_account_is_removed_together_with_the_note_by_prune() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200), note("n3", 300)])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string(), "n3".to_string()])
+            .await
+            .unwrap();
 
         s.prune(2, 0, 0).await.unwrap(); // 最古の n1 が消える
 
@@ -1382,8 +1694,12 @@ mod tests {
     async fn note_account_forget_removes_only_the_given_account() {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
-        s.record_note_accounts("acc2", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
+        s.record_note_accounts("acc2", &["n1".to_string()])
+            .await
+            .unwrap();
 
         s.forget_account_notes("acc1").await.unwrap();
 
@@ -1394,7 +1710,9 @@ mod tests {
     #[tokio::test]
     async fn note_account_backfill_copies_the_column_notes_idempotently() {
         let s = store();
-        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)]).await.unwrap();
+        s.cache_notes("col1", &[note("n1", 100), note("n2", 200)])
+            .await
+            .unwrap();
         s.cache_notes("col2", &[note("n3", 300)]).await.unwrap();
 
         s.backfill_note_accounts("acc1", "col1").await.unwrap();
@@ -1411,7 +1729,9 @@ mod tests {
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
         assert!(s.note_account_is_empty().await.unwrap());
 
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
 
         assert!(!s.note_account_is_empty().await.unwrap());
     }
@@ -1440,7 +1760,9 @@ mod tests {
     async fn note_account_survives_clear_column_notes() {
         let s = store();
         s.cache_notes("col1", &[note("n1", 100)]).await.unwrap();
-        s.record_note_accounts("acc1", &["n1".to_string()]).await.unwrap();
+        s.record_note_accounts("acc1", &["n1".to_string()])
+            .await
+            .unwrap();
 
         s.clear_column_notes("col1").await.unwrap();
 

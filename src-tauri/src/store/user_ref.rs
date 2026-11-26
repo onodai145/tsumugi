@@ -161,10 +161,18 @@ pub(crate) fn stub_user_refs(note_value: &mut serde_json::Value) {
     if let Some(id) = note_value.get("user").and_then(|u| u.get("id")).cloned() {
         note_value["user"] = serde_json::json!({ "id": id });
     }
-    if note_value.get("renote").map(|r| r.is_object()).unwrap_or(false) {
+    if note_value
+        .get("renote")
+        .map(|r| r.is_object())
+        .unwrap_or(false)
+    {
         stub_user_refs(&mut note_value["renote"]);
     }
-    if note_value.get("reply").map(|r| r.is_object()).unwrap_or(false) {
+    if note_value
+        .get("reply")
+        .map(|r| r.is_object())
+        .unwrap_or(false)
+    {
         stub_user_refs(&mut note_value["reply"]);
     }
 }
@@ -177,18 +185,32 @@ pub(crate) fn is_legacy_full_user(user_value: &serde_json::Value) -> bool {
 
 /// note_value の `user`(本体+renote+reply分)のいずれかが旧形式かどうかを再帰的に判定する。
 pub(crate) fn has_legacy_full_user(note_value: &serde_json::Value) -> bool {
-    if note_value.get("user").map(is_legacy_full_user).unwrap_or(false) {
+    if note_value
+        .get("user")
+        .map(is_legacy_full_user)
+        .unwrap_or(false)
+    {
         return true;
     }
-    note_value.get("renote").map(has_legacy_full_user).unwrap_or(false)
-        || note_value.get("reply").map(has_legacy_full_user).unwrap_or(false)
+    note_value
+        .get("renote")
+        .map(has_legacy_full_user)
+        .unwrap_or(false)
+        || note_value
+            .get("reply")
+            .map(has_legacy_full_user)
+            .unwrap_or(false)
 }
 
 /// note_value の `user.id`(本体+renote+reply分)を出現順にすべて集める(重複可、呼び出し元で
 /// dedupする想定)。stub_user_refs 済み・旧形式どちらの形にも対応する(常に `["user"]["id"]`
 /// を見るだけなので形式を問わない)。
 pub(crate) fn collect_user_id_refs(note_value: &serde_json::Value, out: &mut Vec<String>) {
-    if let Some(id) = note_value.get("user").and_then(|u| u.get("id")).and_then(|v| v.as_str()) {
+    if let Some(id) = note_value
+        .get("user")
+        .and_then(|u| u.get("id"))
+        .and_then(|v| v.as_str())
+    {
         out.push(id.to_string());
     }
     if let Some(renote) = note_value.get("renote") {
@@ -206,7 +228,10 @@ pub(crate) fn collect_user_id_refs(note_value: &serde_json::Value, out: &mut Vec
 /// note_value の `user` スタブ(本体+renote+reply分)を users から引いてフルオブジェクトへ埋め戻す。
 /// 本体・renote の参照先のいずれかが users に無ければ false を返す(このノートは復元不可、呼び出し元でスキップする)。
 /// reply は補助表示なので、reply 側の欠落は reply を null にして true を返す(本体は捨てない)。
-pub(crate) fn hydrate_user_refs(note_value: &mut serde_json::Value, users: &HashMap<String, User>) -> bool {
+pub(crate) fn hydrate_user_refs(
+    note_value: &mut serde_json::Value,
+    users: &HashMap<String, User>,
+) -> bool {
     let Some(id) = note_value
         .get("user")
         .and_then(|u| u.get("id"))
@@ -220,13 +245,19 @@ pub(crate) fn hydrate_user_refs(note_value: &mut serde_json::Value, users: &Hash
     };
     note_value["user"] = serde_json::to_value(user).unwrap_or(serde_json::Value::Null);
 
-    if note_value.get("renote").map(|r| r.is_object()).unwrap_or(false)
+    if note_value
+        .get("renote")
+        .map(|r| r.is_object())
+        .unwrap_or(false)
         && !hydrate_user_refs(&mut note_value["renote"], users)
     {
         return false;
     }
     // reply は補助表示。参照先ユーザーが欠けていても本体は捨てず、reply だけ落とす
-    if note_value.get("reply").map(|r| r.is_object()).unwrap_or(false)
+    if note_value
+        .get("reply")
+        .map(|r| r.is_object())
+        .unwrap_or(false)
         && !hydrate_user_refs(&mut note_value["reply"], users)
     {
         note_value["reply"] = serde_json::Value::Null;
@@ -236,7 +267,10 @@ pub(crate) fn hydrate_user_refs(note_value: &mut serde_json::Value, users: &Hash
 
 /// `user` テーブルから id 一覧に対応する行をまとめて引く(1クエリ、N+1にしない)。
 /// 見つからない id は結果のマップに含まれない(呼び出し元は hydrate_user_refs の false で検知する)。
-pub(crate) fn fetch_users_by_ids(conn: &Connection, ids: &[String]) -> Result<HashMap<String, User>> {
+pub(crate) fn fetch_users_by_ids(
+    conn: &Connection,
+    ids: &[String],
+) -> Result<HashMap<String, User>> {
     let mut out = HashMap::new();
     if ids.is_empty() {
         return Ok(out);
@@ -251,13 +285,17 @@ pub(crate) fn fetch_users_by_ids(conn: &Connection, ids: &[String]) -> Result<Ha
          WHERE u.id IN ({placeholders})"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let bind_params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+    let bind_params: Vec<&dyn rusqlite::ToSql> =
+        ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
     let rows = stmt.query_map(bind_params.as_slice(), |r| {
         let emojis_json: String = r.get(10)?;
         let instance_name: Option<String> = r.get(13)?;
         let instance_icon_url: Option<String> = r.get(14)?;
         let instance_theme_color: Option<String> = r.get(15)?;
-        let instance = if instance_name.is_some() || instance_icon_url.is_some() || instance_theme_color.is_some() {
+        let instance = if instance_name.is_some()
+            || instance_icon_url.is_some()
+            || instance_theme_color.is_some()
+        {
             Some(InstanceInfo {
                 name: instance_name,
                 icon_url: instance_icon_url,
@@ -370,11 +408,15 @@ mod tests {
     }
 
     fn fetch_one(conn: &Connection, id: &str) -> User {
-        fetch_users_by_ids(conn, &[id.to_string()]).unwrap().remove(id).unwrap()
+        fetch_users_by_ids(conn, &[id.to_string()])
+            .unwrap()
+            .remove(id)
+            .unwrap()
     }
 
     fn instance_row_count(conn: &Connection) -> i64 {
-        conn.query_row("SELECT COUNT(*) FROM instance", [], |r| r.get(0)).unwrap()
+        conn.query_row("SELECT COUNT(*) FROM instance", [], |r| r.get(0))
+            .unwrap()
     }
 
     #[test]
@@ -424,7 +466,10 @@ mod tests {
         let conn = open_cache_in_memory().unwrap();
         // 直近のライブ書き込み(upsert_note経由を想定)で最新のemojis/nameが入っている
         let mut fresh = user_lite("u1", "Alice (new name)");
-        fresh.emojis = HashMap::from([("wave".to_string(), "https://example.com/wave.png".to_string())]);
+        fresh.emojis = HashMap::from([(
+            "wave".to_string(),
+            "https://example.com/wave.png".to_string(),
+        )]);
         upsert_user(&conn, &fresh).unwrap();
 
         // 数年前にキャッシュされた古いノートを自己修復で読む: 古いname、emojisキー無し(=空マップ)
@@ -433,17 +478,28 @@ mod tests {
         fill_user_from_snapshot(&conn, &stale_snapshot).unwrap();
 
         let (name, emojis_json): (String, String) = conn
-            .query_row("SELECT name, emojis FROM user WHERE id = 'u1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row("SELECT name, emojis FROM user WHERE id = 'u1'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .unwrap();
-        assert_eq!(name, "Alice (new name)", "古いスナップショットが直近のnameを上書きしてはいけない");
-        assert!(emojis_json.contains("wave"), "古いスナップショットが直近のemojisを消してはいけない");
+        assert_eq!(
+            name, "Alice (new name)",
+            "古いスナップショットが直近のnameを上書きしてはいけない"
+        );
+        assert!(
+            emojis_json.contains("wave"),
+            "古いスナップショットが直近のemojisを消してはいけない"
+        );
     }
 
     #[test]
     fn collect_users_returns_just_author_when_no_renote() {
         let n = bare_note("n1", user_lite("u1", "Alice"));
         let users = collect_users(&n);
-        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["u1"]);
+        assert_eq!(
+            users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
+            ["u1"]
+        );
     }
 
     #[test]
@@ -451,7 +507,10 @@ mod tests {
         let mut n = bare_note("n1", user_lite("u1", "Alice"));
         n.renote = Some(Box::new(bare_note("n0", user_lite("u2", "Bob"))));
         let users = collect_users(&n);
-        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["u1", "u2"]);
+        assert_eq!(
+            users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
+            ["u1", "u2"]
+        );
     }
 
     use serde_json::json;
@@ -484,7 +543,9 @@ mod tests {
 
     #[test]
     fn is_legacy_full_user_true_for_object_with_username_false_for_stub() {
-        assert!(is_legacy_full_user(&json!({ "id": "u1", "username": "alice" })));
+        assert!(is_legacy_full_user(
+            &json!({ "id": "u1", "username": "alice" })
+        ));
         assert!(!is_legacy_full_user(&json!({ "id": "u1" })));
     }
 
@@ -651,7 +712,10 @@ mod tests {
 
         let got = fetch_one(&conn, "u1").instance.unwrap();
         assert_eq!(got.name.as_deref(), Some("Renamed"));
-        assert_eq!(got.icon_url.as_deref(), Some("https://remote.example/favicon.ico"));
+        assert_eq!(
+            got.icon_url.as_deref(),
+            Some("https://remote.example/favicon.ico")
+        );
         assert_eq!(got.theme_color.as_deref(), Some("#ff8800"));
     }
 
@@ -660,7 +724,10 @@ mod tests {
         let mut n = bare_note("n1", user_lite("u1", "Alice"));
         n.reply = Some(Box::new(bare_note("n0", user_lite("u3", "Carol"))));
         let users = collect_users(&n);
-        assert_eq!(users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(), ["u1", "u3"]);
+        assert_eq!(
+            users.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
+            ["u1", "u3"]
+        );
     }
 
     #[test]
@@ -689,7 +756,10 @@ mod tests {
         });
         let mut ids = Vec::new();
         collect_user_id_refs(&v, &mut ids);
-        assert_eq!(ids, vec!["u1".to_string(), "u2".to_string(), "u3".to_string()]);
+        assert_eq!(
+            ids,
+            vec!["u1".to_string(), "u2".to_string(), "u3".to_string()]
+        );
     }
 
     #[test]
@@ -762,7 +832,11 @@ mod tests {
         local.instance = Some(remote_instance());
         upsert_user(&conn, &local).unwrap();
 
-        assert_eq!(instance_row_count(&conn), 0, "ローカルユーザーは instance 行を作らない");
+        assert_eq!(
+            instance_row_count(&conn),
+            0,
+            "ローカルユーザーは instance 行を作らない"
+        );
         assert!(fetch_one(&conn, "u1").instance.is_none());
     }
 
@@ -788,8 +862,11 @@ mod tests {
         );
 
         // 欠けている列だけは埋まる
-        conn.execute("UPDATE instance SET theme_color = NULL WHERE host = 'remote.example'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE instance SET theme_color = NULL WHERE host = 'remote.example'",
+            [],
+        )
+        .unwrap();
         fill_user_from_snapshot(&conn, &stale).unwrap();
         let got = fetch_one(&conn, "u2").instance.unwrap();
         assert_eq!(got.theme_color.as_deref(), Some("#000000"));

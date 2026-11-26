@@ -140,7 +140,9 @@ async fn remove_account_core(state: &AppState, account_id: &str) -> Result<()> {
         if let Err(e) = state.settings.delete_account(account_id) {
             if let Some(token) = &token {
                 if let Err(restore) = state.secrets.set(account_id, token) {
-                    log::warn!("failed to restore the token after the account removal failed: {restore}");
+                    log::warn!(
+                        "failed to restore the token after the account removal failed: {restore}"
+                    );
                 }
             }
             return Err(e);
@@ -192,10 +194,17 @@ pub async fn whoami(state: State<'_, AppState>, account_id: String) -> Result<Us
 /// （Instance Ticker用、Issue #103）。boot時にフロントから全アカウント分呼ばれる想定。
 #[tauri::command]
 #[specta::specta]
-pub async fn refresh_instance_meta(state: State<'_, AppState>, account_id: String) -> Result<Account> {
+pub async fn refresh_instance_meta(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Account> {
     let client = state.client_for(&account_id)?;
     let info = crate::api::meta::fetch_meta(&client).await?;
-    let account = state.accounts.lock().unwrap().update_instance(&account_id, Some(info))?;
+    let account = state
+        .accounts
+        .lock()
+        .unwrap()
+        .update_instance(&account_id, Some(info))?;
     state.settings.upsert_account(&account)?;
     Ok(account)
 }
@@ -203,11 +212,14 @@ pub async fn refresh_instance_meta(state: State<'_, AppState>, account_id: Strin
 /// "https://misskey.io/" や "@x@misskey.io" 混じりでもホスト名へ寄せる。
 fn normalize_host(input: &str) -> Result<String> {
     let s = input.trim();
-    let s = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
+    let s = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))
+        .unwrap_or(s);
     let s = s.split('/').next().unwrap_or(s);
     let s = s.rsplit('@').next().unwrap_or(s); // "@user@host" -> "host"
-    // 厳密な検証は設定インポートと共通(Issue #610)。ポート付きは通す。`.` を要求するのは、
-    // `localhost` などの単一ラベルと IPv6 リテラルを弾くため(net_guard はこれに依存する)。
+                                               // 厳密な検証は設定インポートと共通(Issue #610)。ポート付きは通す。`.` を要求するのは、
+                                               // `localhost` などの単一ラベルと IPv6 リテラルを弾くため(net_guard はこれに依存する)。
     let name = s.split(':').next().unwrap_or(s);
     if !name.contains('.') || !is_valid_account_host(s) {
         return Err(Error::Invalid(format!("invalid host: {input}")));
@@ -237,21 +249,39 @@ mod tests {
     fn normalize_host_variants() {
         assert_eq!(normalize_host("misskey.io").unwrap(), "misskey.io");
         assert_eq!(normalize_host("https://misskey.io/").unwrap(), "misskey.io");
-        assert_eq!(normalize_host("  http://example.tld/foo ").unwrap(), "example.tld");
-        assert_eq!(normalize_host("@alice@mi.example.com").unwrap(), "mi.example.com");
+        assert_eq!(
+            normalize_host("  http://example.tld/foo ").unwrap(),
+            "example.tld"
+        );
+        assert_eq!(
+            normalize_host("@alice@mi.example.com").unwrap(),
+            "mi.example.com"
+        );
         assert!(normalize_host("").is_err());
         assert!(normalize_host("localhost").is_err());
     }
 
     #[test]
     fn normalize_host_accepts_port() {
-        assert_eq!(normalize_host("https://mi.example.com:8443/").unwrap(), "mi.example.com:8443");
+        assert_eq!(
+            normalize_host("https://mi.example.com:8443/").unwrap(),
+            "mi.example.com:8443"
+        );
     }
 
     #[test]
     fn normalize_host_rejects_unparsable_hosts() {
         // Issue #610: `.` を含むだけの入力を通すと、後段の `Url::parse` が失敗する。
-        for bad in ["mis key.io", "misskey.io:abc", "misskey.io|x", "misskey.io:0", "misskey.io:99999", "a..b", ".misskey.io", "misskey.io."] {
+        for bad in [
+            "mis key.io",
+            "misskey.io:abc",
+            "misskey.io|x",
+            "misskey.io:0",
+            "misskey.io:99999",
+            "a..b",
+            ".misskey.io",
+            "misskey.io.",
+        ] {
             assert!(normalize_host(bad).is_err(), "{bad} が通ってしまった");
         }
     }
@@ -266,8 +296,7 @@ mod tests {
         assert_eq!(a.host, "misskey.io");
         assert!(!a.id.is_empty());
 
-        let raw2: RawUser =
-            serde_json::from_str(r#"{"id":"u2","username":"bob"}"#).unwrap();
+        let raw2: RawUser = serde_json::from_str(r#"{"id":"u2","username":"bob"}"#).unwrap();
         let a2 = build_account(None, "misskey.io", &raw2);
         assert_eq!(a2.display_name, "bob"); // name 無し → username
     }
@@ -288,7 +317,10 @@ mod tests {
         .unwrap();
         let a = build_account(None, "misskey.io", &raw);
         assert!(a.is_cat);
-        assert_eq!(a.avatar_blurhash.as_deref(), Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj"));
+        assert_eq!(
+            a.avatar_blurhash.as_deref(),
+            Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+        );
     }
 }
 
@@ -411,21 +443,34 @@ mod removal_tests {
         for (order, (id, host, column_id, group_id)) in ACCOUNTS.iter().enumerate() {
             settings.upsert_account(&account(id, host)).unwrap();
             settings
-                .upsert_group(&ColumnGroup { id: (*group_id).into(), order: order as i32, width: 320, auto: false })
+                .upsert_group(&ColumnGroup {
+                    id: (*group_id).into(),
+                    order: order as i32,
+                    width: 320,
+                    auto: false,
+                })
                 .unwrap();
-            settings.upsert_column(&column(column_id, id, group_id)).unwrap();
+            settings
+                .upsert_column(&column(column_id, id, group_id))
+                .unwrap();
         }
 
         let scheduled =
             ScheduledPostStore::new(scheduled_disk.path("scheduled_posts.json")).unwrap();
         let mut state = AppState::new_for_test(settings).with_scheduled_posts(scheduled);
         let faults = Arc::new(SecretFaults::default());
-        state.secrets = Box::new(FaultySecrets { inner: MemoryStore::default(), faults: faults.clone() });
+        state.secrets = Box::new(FaultySecrets {
+            inner: MemoryStore::default(),
+            faults: faults.clone(),
+        });
 
         let app = tauri::test::mock_app();
         for (id, host, column_id, _) in ACCOUNTS {
             state.secrets.set(id, "token").unwrap();
-            state.scheduled_posts.add(id, 4_000_000_000, test_input("later"), 0).unwrap();
+            state
+                .scheduled_posts
+                .add(id, 4_000_000_000, test_input("later"), 0)
+                .unwrap();
             state.connections.open_notifications(
                 app.handle().clone(),
                 column_id.into(),
@@ -437,19 +482,36 @@ mod removal_tests {
         }
         assert_eq!(state.connections.open_count(), 2);
 
-        Fixture { state, faults, settings_disk, scheduled_disk, _app: app }
+        Fixture {
+            state,
+            faults,
+            settings_disk,
+            scheduled_disk,
+            _app: app,
+        }
     }
 
     fn has_account(f: &Fixture, id: &str) -> (bool, bool) {
         (
             f.state.accounts.lock().unwrap().get(id).is_some(),
-            f.state.settings.load_accounts().unwrap().iter().any(|a| a.id == id),
+            f.state
+                .settings
+                .load_accounts()
+                .unwrap()
+                .iter()
+                .any(|a| a.id == id),
         )
     }
 
     fn column_ids(f: &Fixture) -> Vec<String> {
-        let mut ids: Vec<String> =
-            f.state.settings.load_columns().unwrap().into_iter().map(|c| c.id).collect();
+        let mut ids: Vec<String> = f
+            .state
+            .settings
+            .load_columns()
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
         ids.sort();
         ids
     }
@@ -474,8 +536,14 @@ mod removal_tests {
 
         assert_eq!(has_account(&f, "a1"), (false, false));
         assert_eq!(column_ids(&f), ["c2"]);
-        let groups: Vec<String> =
-            f.state.settings.load_groups().unwrap().into_iter().map(|g| g.id).collect();
+        let groups: Vec<String> = f
+            .state
+            .settings
+            .load_groups()
+            .unwrap()
+            .into_iter()
+            .map(|g| g.id)
+            .collect();
         assert_eq!(groups, ["g2"]);
         assert_eq!(token(&f, "a1"), None);
         assert!(f.state.scheduled_posts.list_for_account("a1").is_empty());
@@ -541,7 +609,11 @@ mod removal_tests {
 
         assert!(!matches!(err, Error::Secret(_)), "{err}");
         assert_untouched(&f);
-        assert_eq!(token(&f, "a1"), None, "書き戻せないので、要ログインの状態で残る");
+        assert_eq!(
+            token(&f, "a1"),
+            None,
+            "書き戻せないので、要ログインの状態で残る"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -581,7 +653,10 @@ mod removal_tests {
 
         remove_account_core(&f.state, "a1").await.unwrap();
 
-        assert!(!f.settings_disk.path("settings.json").exists(), "確定の後で保存先が壊れた");
+        assert!(
+            !f.settings_disk.path("settings.json").exists(),
+            "確定の後で保存先が壊れた"
+        );
         assert_eq!(has_account(&f, "a1"), (false, false));
         assert!(f.state.scheduled_posts.list_for_account("a1").is_empty());
         assert_eq!(f.state.connections.open_count(), 1);
@@ -591,7 +666,11 @@ mod removal_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_post_due_during_a_failing_removal_is_not_marked_failed() {
         let f = fixture();
-        let entry = f.state.scheduled_posts.add("a1", 1_000, test_input("due"), 0).unwrap();
+        let entry = f
+            .state
+            .scheduled_posts
+            .add("a1", 1_000, test_input("due"), 0)
+            .unwrap();
         f.settings_disk.break_dir();
         let (deleted_tx, deleted_rx) = mpsc::channel();
         let (scheduled_tx, scheduled_rx) = mpsc::channel::<()>();
@@ -617,7 +696,12 @@ mod removal_tests {
 
         // 戻ったトークンで送り、接続できないので再試行待ちになる。
         let after = f.state.scheduled_posts.get(&entry.id).unwrap();
-        assert_eq!((after.status, after.attempts), (LocalScheduleStatus::Pending, 1), "{:?}", after.error);
+        assert_eq!(
+            (after.status, after.attempts),
+            (LocalScheduleStatus::Pending, 1),
+            "{:?}",
+            after.error
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -639,7 +723,13 @@ mod removal_tests {
         persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token").unwrap();
 
         assert_eq!(token(&f, "a3").as_deref(), Some("new-token"));
-        assert!(f.state.settings.load_accounts().unwrap().iter().any(|a| a.id == "a3"));
+        assert!(f
+            .state
+            .settings
+            .load_accounts()
+            .unwrap()
+            .iter()
+            .any(|a| a.id == "a3"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -655,12 +745,19 @@ mod removal_tests {
 
     /// `a1` の再認証で返ってきた、表示名が変わったアカウント。
     fn renamed_a1() -> Account {
-        Account { display_name: "renamed".into(), ..account("a1", "127.0.0.1:1") }
+        Account {
+            display_name: "renamed".into(),
+            ..account("a1", "127.0.0.1:1")
+        }
     }
 
     fn saved_display_name(f: &Fixture, id: &str) -> String {
         let accounts = f.state.settings.load_accounts().unwrap();
-        accounts.into_iter().find(|a| a.id == id).unwrap().display_name
+        accounts
+            .into_iter()
+            .find(|a| a.id == id)
+            .unwrap()
+            .display_name
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -698,7 +795,10 @@ mod removal_tests {
         let result = persist_login(&f.state, &renamed_a1(), "new-token");
 
         f.faults.get.store(false, Ordering::SeqCst);
-        assert!(result.is_err() && !matches!(result, Err(Error::Secret(_))), "{result:?}");
+        assert!(
+            result.is_err() && !matches!(result, Err(Error::Secret(_))),
+            "{result:?}"
+        );
         assert_eq!(token(&f, "a1").as_deref(), Some("new-token"));
         assert_eq!(saved_display_name(&f, "a1"), "a1");
     }
@@ -715,7 +815,10 @@ mod removal_tests {
                 persist_login(&f.state, &renamed_a1(), "new-token").unwrap();
                 done_tx.send(()).unwrap();
             });
-            assert!(done_rx.recv_timeout(Duration::from_millis(300)).is_err(), "削除中に書き込んだ");
+            assert!(
+                done_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+                "削除中に書き込んだ"
+            );
             assert_eq!(token(&f, "a1").as_deref(), Some("token"));
             drop(removing);
             done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -731,6 +834,9 @@ mod removal_tests {
 
         let result = persist_login(&f.state, &account("a3", "127.0.0.1:3"), "new-token");
 
-        assert!(result.is_err() && !matches!(result, Err(Error::Secret(_))), "{result:?}");
+        assert!(
+            result.is_err() && !matches!(result, Err(Error::Secret(_))),
+            "{result:?}"
+        );
     }
 }

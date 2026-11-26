@@ -136,7 +136,10 @@ pub(crate) async fn fill_user_from_snapshot(pool: &sqlx::PgPool, user: &User) ->
     Ok(())
 }
 
-pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> Result<HashMap<String, User>> {
+pub(crate) async fn fetch_users_by_ids(
+    pool: &sqlx::PgPool,
+    ids: &[String],
+) -> Result<HashMap<String, User>> {
     let mut out = HashMap::new();
     if ids.is_empty() {
         return Ok(out);
@@ -175,9 +178,17 @@ pub(crate) async fn fetch_users_by_ids(pool: &sqlx::PgPool, ids: &[String]) -> R
         let instance_icon_url: Option<String> = row.try_get("instance_icon_url")?;
         let instance_theme_color: Option<String> = row.try_get("instance_theme_color")?;
         let avatar_blurhash: Option<String> = row.try_get("avatar_blurhash")?;
-        let emojis: HashMap<String, String> = serde_json::from_str(&emojis_json).unwrap_or_default();
-        let instance = if instance_name.is_some() || instance_icon_url.is_some() || instance_theme_color.is_some() {
-            Some(InstanceInfo { name: instance_name, icon_url: instance_icon_url, theme_color: instance_theme_color })
+        let emojis: HashMap<String, String> =
+            serde_json::from_str(&emojis_json).unwrap_or_default();
+        let instance = if instance_name.is_some()
+            || instance_icon_url.is_some()
+            || instance_theme_color.is_some()
+        {
+            Some(InstanceInfo {
+                name: instance_name,
+                icon_url: instance_icon_url,
+                theme_color: instance_theme_color,
+            })
         } else {
             None
         };
@@ -215,10 +226,14 @@ mod tests {
         let container = Postgres::default().start().await.unwrap();
         let port = container.get_host_port_ipv4(5432).await.unwrap();
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .connect(&format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres"))
+            .connect(&format!(
+                "postgres://postgres:postgres@127.0.0.1:{port}/postgres"
+            ))
             .await
             .unwrap();
-        crate::store::postgres_backend::ensure_schema(&pool).await.unwrap();
+        crate::store::postgres_backend::ensure_schema(&pool)
+            .await
+            .unwrap();
         // testcontainersのcontainerハンドルはpoolが生きている間ドロップされると
         // コンテナが止まるため、リークさせてテストプロセス終了まで保持する。
         std::mem::forget(container);
@@ -260,11 +275,18 @@ mod tests {
     }
 
     async fn fetch_one(pool: &sqlx::PgPool, id: &str) -> User {
-        fetch_users_by_ids(pool, &[id.to_string()]).await.unwrap().remove(id).unwrap()
+        fetch_users_by_ids(pool, &[id.to_string()])
+            .await
+            .unwrap()
+            .remove(id)
+            .unwrap()
     }
 
     async fn instance_row_count(pool: &sqlx::PgPool) -> i64 {
-        sqlx::query_scalar("SELECT COUNT(*) FROM instance").fetch_one(pool).await.unwrap()
+        sqlx::query_scalar("SELECT COUNT(*) FROM instance")
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -272,7 +294,9 @@ mod tests {
     async fn upsert_user_roundtrip() {
         let pool = pool().await;
         upsert_user(&pool, &user("u1")).await.unwrap();
-        let got = fetch_users_by_ids(&pool, &["u1".to_string()]).await.unwrap();
+        let got = fetch_users_by_ids(&pool, &["u1".to_string()])
+            .await
+            .unwrap();
         assert_eq!(got.get("u1").unwrap().name.as_deref(), Some("Alice"));
     }
 
@@ -284,7 +308,9 @@ mod tests {
         u.avatar_blurhash = Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into());
         upsert_user(&pool, &u).await.unwrap();
 
-        let got = fetch_users_by_ids(&pool, &["u1".to_string()]).await.unwrap();
+        let got = fetch_users_by_ids(&pool, &["u1".to_string()])
+            .await
+            .unwrap();
         assert_eq!(
             got.get("u1").unwrap().avatar_blurhash.as_deref(),
             Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj")
@@ -302,8 +328,14 @@ mod tests {
         u.bio = None; // ライブ書き込み(UserLiteのみ)を模す
         upsert_user(&pool, &u).await.unwrap();
 
-        let got = fetch_users_by_ids(&pool, &["u1".to_string()]).await.unwrap();
-        assert_eq!(got.get("u1").unwrap().bio.as_deref(), Some("hello"), "bioは既存値を保持すること");
+        let got = fetch_users_by_ids(&pool, &["u1".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(
+            got.get("u1").unwrap().bio.as_deref(),
+            Some("hello"),
+            "bioは既存値を保持すること"
+        );
     }
 
     #[tokio::test]
@@ -323,8 +355,15 @@ mod tests {
         upsert_user(&pool, &u1).await.unwrap();
         upsert_user(&pool, &remote_user("u2")).await.unwrap(); // instance無しでも同じhost
 
-        assert_eq!(fetch_one(&pool, "u2").await.instance, Some(remote_instance()));
-        assert_eq!(instance_row_count(&pool).await, 1, "同一ホストは1行に集約される");
+        assert_eq!(
+            fetch_one(&pool, "u2").await.instance,
+            Some(remote_instance())
+        );
+        assert_eq!(
+            instance_row_count(&pool).await,
+            1,
+            "同一ホストは1行に集約される"
+        );
     }
 
     #[tokio::test]
@@ -338,13 +377,21 @@ mod tests {
 
         // 別ユーザー(同一ホスト)の受信で name だけ更新(部分失敗)
         let mut u3 = remote_user("u3");
-        u3.instance = Some(InstanceInfo { name: Some("Renamed".into()), icon_url: None, theme_color: None });
+        u3.instance = Some(InstanceInfo {
+            name: Some("Renamed".into()),
+            icon_url: None,
+            theme_color: None,
+        });
         upsert_user(&pool, &u3).await.unwrap();
 
         for id in ["u1", "u2", "u3"] {
             let got = fetch_one(&pool, id).await.instance.unwrap();
             assert_eq!(got.name.as_deref(), Some("Renamed"), "{id}");
-            assert_eq!(got.icon_url.as_deref(), Some("https://remote.example/favicon.ico"), "{id}");
+            assert_eq!(
+                got.icon_url.as_deref(),
+                Some("https://remote.example/favicon.ico"),
+                "{id}"
+            );
             assert_eq!(got.theme_color.as_deref(), Some("#ff8800"), "{id}");
         }
     }
@@ -357,7 +404,11 @@ mod tests {
         local.instance = Some(remote_instance());
         upsert_user(&pool, &local).await.unwrap();
 
-        assert_eq!(instance_row_count(&pool).await, 0, "ローカルユーザーは instance 行を作らない");
+        assert_eq!(
+            instance_row_count(&pool).await,
+            0,
+            "ローカルユーザーは instance 行を作らない"
+        );
         assert!(fetch_one(&pool, "u1").await.instance.is_none());
     }
 
@@ -376,7 +427,10 @@ mod tests {
             theme_color: Some("#000000".into()),
         });
         fill_user_from_snapshot(&pool, &stale).await.unwrap();
-        assert_eq!(fetch_one(&pool, "u2").await.instance, Some(remote_instance()));
+        assert_eq!(
+            fetch_one(&pool, "u2").await.instance,
+            Some(remote_instance())
+        );
 
         sqlx::query("UPDATE instance SET theme_color = NULL WHERE host = 'remote.example'")
             .execute(&pool)

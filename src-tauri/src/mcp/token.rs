@@ -12,7 +12,8 @@ pub const SECRET_KEY: &str = "__mcp_token__";
 /// OSの乱数による256bitのトークン(base64url、パディングなし)。
 pub fn generate() -> Result<String> {
     let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| Error::Secret(format!("failed to generate the MCP token: {e}")))?;
+    getrandom::fill(&mut bytes)
+        .map_err(|e| Error::Secret(format!("failed to generate the MCP token: {e}")))?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
@@ -76,7 +77,9 @@ mod tests {
         let a = generate().unwrap();
         let b = generate().unwrap();
         assert_eq!(a.len(), 43, "32バイトのbase64url(パディングなし)");
-        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
         assert_ne!(a, b);
     }
 
@@ -86,7 +89,10 @@ mod tests {
         let first = load_or_create(&store).unwrap();
         let second = load_or_create(&store).unwrap();
         assert_eq!(first, second);
-        assert_eq!(store.get(SECRET_KEY).unwrap().as_deref(), Some(first.as_str()));
+        assert_eq!(
+            store.get(SECRET_KEY).unwrap().as_deref(),
+            Some(first.as_str())
+        );
     }
 
     #[test]
@@ -113,7 +119,11 @@ mod tests {
         assert_eq!(t.get().as_deref(), Some("abc"));
         let clone = t.clone();
         t.set("def".into());
-        assert_eq!(clone.get().as_deref(), Some("def"), "クローンは同じ値を共有する");
+        assert_eq!(
+            clone.get().as_deref(),
+            Some("def"),
+            "クローンは同じ値を共有する"
+        );
         t.clear();
         assert_eq!(clone.get(), None);
     }

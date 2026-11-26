@@ -48,7 +48,10 @@ impl ColumnFence {
     fn entry_or_create(&self, column_id: &str) -> Arc<Entry> {
         let mut columns = self.columns.lock().unwrap();
         Arc::clone(columns.entry(column_id.to_string()).or_insert_with(|| {
-            Arc::new(Entry { epoch: AtomicU64::new(self.issue()), lock: tokio::sync::Mutex::new(()) })
+            Arc::new(Entry {
+                epoch: AtomicU64::new(self.issue()),
+                lock: tokio::sync::Mutex::new(()),
+            })
         }))
     }
 
@@ -64,7 +67,12 @@ impl ColumnFence {
     /// `f` を実行する。不一致、またはエントリが無い(`remove` 済み)なら `f` を実行せず `None`
     /// (=古い)を返す。`f` には、控えた境界の世代がいまも現在か(`boundaries_ok`)が渡される。
     /// 偽のとき、`f` は「古い情報から作った境界」の書き込みを飛ばすこと。
-    pub async fn write_if_current<F, Fut, T>(&self, column_id: &str, epoch: &Epoch, f: F) -> Option<T>
+    pub async fn write_if_current<F, Fut, T>(
+        &self,
+        column_id: &str,
+        epoch: &Epoch,
+        f: F,
+    ) -> Option<T>
     where
         F: FnOnce(bool) -> Fut,
         Fut: Future<Output = T>,
@@ -100,7 +108,13 @@ impl ColumnFence {
         let result = f().await;
         let next = self.issue();
         entry.epoch.store(next, Ordering::SeqCst);
-        (Epoch { column: next, boundary: self.boundary_gen.load(Ordering::SeqCst) }, result)
+        (
+            Epoch {
+                column: next,
+                boundary: self.boundary_gen.load(Ordering::SeqCst),
+            },
+            result,
+        )
     }
 
     /// 境界の書きロックを取り、`f`(全カラムの境界を捨てる処理)を実行し、その後で境界の世代を進める。
@@ -173,8 +187,14 @@ mod tests {
         let (after, ran) = fence.invalidate("c1", || async { "cleared" }).await;
 
         assert_eq!(ran, "cleared");
-        assert_eq!(fence.write_if_current("c1", &before, |_| async { 1 }).await, None);
-        assert_eq!(fence.write_if_current("c1", &after, |_| async { 2 }).await, Some(2));
+        assert_eq!(
+            fence.write_if_current("c1", &before, |_| async { 1 }).await,
+            None
+        );
+        assert_eq!(
+            fence.write_if_current("c1", &after, |_| async { 2 }).await,
+            Some(2)
+        );
     }
 
     #[tokio::test]
@@ -184,8 +204,14 @@ mod tests {
         let (first, _) = fence.invalidate("c1", || async {}).await;
         let (second, _) = fence.invalidate("c1", || async {}).await;
 
-        assert_eq!(fence.write_if_current("c1", &first, |_| async { 1 }).await, None);
-        assert_eq!(fence.write_if_current("c1", &second, |_| async { 2 }).await, Some(2));
+        assert_eq!(
+            fence.write_if_current("c1", &first, |_| async { 1 }).await,
+            None
+        );
+        assert_eq!(
+            fence.write_if_current("c1", &second, |_| async { 2 }).await,
+            Some(2)
+        );
     }
 
     #[test]
@@ -207,7 +233,10 @@ mod tests {
 
         fence.remove("c1");
 
-        assert_eq!(fence.write_if_current("c1", &epoch, |_| async { 1 }).await, None);
+        assert_eq!(
+            fence.write_if_current("c1", &epoch, |_| async { 1 }).await,
+            None
+        );
     }
 
     #[tokio::test]
@@ -219,8 +248,14 @@ mod tests {
         let new = fence.begin("c1");
 
         assert_ne!(old, new);
-        assert_eq!(fence.write_if_current("c1", &old, |_| async { 1 }).await, None);
-        assert_eq!(fence.write_if_current("c1", &new, |_| async { 2 }).await, Some(2));
+        assert_eq!(
+            fence.write_if_current("c1", &old, |_| async { 1 }).await,
+            None
+        );
+        assert_eq!(
+            fence.write_if_current("c1", &new, |_| async { 2 }).await,
+            Some(2)
+        );
     }
 
     #[tokio::test]
@@ -230,7 +265,10 @@ mod tests {
 
         fence.invalidate("c1", || async {}).await;
 
-        assert_eq!(fence.write_if_current("c2", &other, |_| async { 1 }).await, Some(1));
+        assert_eq!(
+            fence.write_if_current("c2", &other, |_| async { 1 }).await,
+            Some(1)
+        );
     }
 
     #[tokio::test]
@@ -260,7 +298,10 @@ mod tests {
         for _ in 0..20 {
             tokio::task::yield_now().await;
         }
-        assert!(!writing.is_finished(), "invalidate の実行中は書き込みが待たされる");
+        assert!(
+            !writing.is_finished(),
+            "invalidate の実行中は書き込みが待たされる"
+        );
 
         gate.notify_one();
         invalidating.await.unwrap();
@@ -273,13 +314,16 @@ mod tests {
         let fence = ColumnFence::default();
         let epoch = fence.begin("c1");
 
-        let ok = fence.write_if_current("c1", &epoch, |ok| async move { ok }).await;
+        let ok = fence
+            .write_if_current("c1", &epoch, |ok| async move { ok })
+            .await;
 
         assert_eq!(ok, Some(true));
     }
 
     #[tokio::test]
-    async fn invalidate_boundaries_makes_earlier_epochs_boundary_stale_but_still_current_for_the_column() {
+    async fn invalidate_boundaries_makes_earlier_epochs_boundary_stale_but_still_current_for_the_column(
+    ) {
         let fence = ColumnFence::default();
         let before = fence.begin("c1");
 
@@ -287,10 +331,20 @@ mod tests {
 
         assert_eq!(ran, "cleared");
         // カラムの世代は変わっていないので書き込み自体は通る(`None` にならない)が、境界は古い
-        assert_eq!(fence.write_if_current("c1", &before, |ok| async move { ok }).await, Some(false));
+        assert_eq!(
+            fence
+                .write_if_current("c1", &before, |ok| async move { ok })
+                .await,
+            Some(false)
+        );
         // その後に控えた世代は、境界も現在
         let after = fence.begin("c1");
-        assert_eq!(fence.write_if_current("c1", &after, |ok| async move { ok }).await, Some(true));
+        assert_eq!(
+            fence
+                .write_if_current("c1", &after, |ok| async move { ok })
+                .await,
+            Some(true)
+        );
     }
 
     #[tokio::test]
@@ -300,8 +354,18 @@ mod tests {
 
         fence.invalidate_boundaries(|| async {}).await;
 
-        assert_eq!(fence.write_if_current("c1", &a, |ok| async move { ok }).await, Some(false));
-        assert_eq!(fence.write_if_current("c2", &b, |ok| async move { ok }).await, Some(false));
+        assert_eq!(
+            fence
+                .write_if_current("c1", &a, |ok| async move { ok })
+                .await,
+            Some(false)
+        );
+        assert_eq!(
+            fence
+                .write_if_current("c2", &b, |ok| async move { ok })
+                .await,
+            Some(false)
+        );
     }
 
     #[tokio::test]
@@ -311,7 +375,12 @@ mod tests {
 
         let (epoch, _) = fence.invalidate("c1", || async {}).await;
 
-        assert_eq!(fence.write_if_current("c1", &epoch, |ok| async move { ok }).await, Some(true));
+        assert_eq!(
+            fence
+                .write_if_current("c1", &epoch, |ok| async move { ok })
+                .await,
+            Some(true)
+        );
     }
 
     #[tokio::test]
@@ -342,7 +411,10 @@ mod tests {
         for _ in 0..20 {
             tokio::task::yield_now().await;
         }
-        assert!(!invalidating.is_finished(), "書き込みの実行中は invalidate_boundaries が待たされる");
+        assert!(
+            !invalidating.is_finished(),
+            "書き込みの実行中は invalidate_boundaries が待たされる"
+        );
 
         gate.notify_one();
         assert_eq!(writing.await.unwrap(), Some(1));
@@ -371,12 +443,19 @@ mod tests {
 
         let writing = tokio::spawn({
             let fence = fence.clone();
-            async move { fence.write_if_current("c1", &epoch, |ok| async move { ok }).await }
+            async move {
+                fence
+                    .write_if_current("c1", &epoch, |ok| async move { ok })
+                    .await
+            }
         });
         for _ in 0..20 {
             tokio::task::yield_now().await;
         }
-        assert!(!writing.is_finished(), "invalidate_boundaries の実行中は書き込みが待たされる");
+        assert!(
+            !writing.is_finished(),
+            "invalidate_boundaries の実行中は書き込みが待たされる"
+        );
 
         gate.notify_one();
         invalidating.await.unwrap();
@@ -392,7 +471,10 @@ mod tests {
 
         fence.invalidate("c1", || async {}).await;
 
-        assert!(!fence.is_current("c1", &epoch), "update_column / close_column の後は古い");
+        assert!(
+            !fence.is_current("c1", &epoch),
+            "update_column / close_column の後は古い"
+        );
     }
 
     #[tokio::test]
@@ -402,7 +484,10 @@ mod tests {
 
         fence.invalidate_boundaries(|| async {}).await;
 
-        assert!(fence.is_current("c1", &epoch), "境界の世代はカラムの世代と別。境界が捨てられても現行");
+        assert!(
+            fence.is_current("c1", &epoch),
+            "境界の世代はカラムの世代と別。境界が捨てられても現行"
+        );
     }
 
     #[test]

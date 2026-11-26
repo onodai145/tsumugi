@@ -3,10 +3,10 @@
 
 /// PLaMo 3 Translate が対応する言語コード。
 const SUPPORTED: &[&str] = &[
-    "ja", "en", "zh-hans", "zh-hant", "ko", "ar", "az", "be", "bg", "bn", "ca", "ceb", "de", "es", "et",
-    "eu", "fa", "fr", "gu", "he", "hi", "hr", "hu", "hy", "id", "it", "jv", "ka", "kk", "km", "lt", "lv",
-    "ml", "mr", "ms", "my", "ne", "nl", "pa", "pl", "ru", "si", "sk", "sl", "sr", "sw", "ta", "te", "th",
-    "tl", "ur", "uz", "vi",
+    "ja", "en", "zh-hans", "zh-hant", "ko", "ar", "az", "be", "bg", "bn", "ca", "ceb", "de", "es",
+    "et", "eu", "fa", "fr", "gu", "he", "hi", "hr", "hu", "hy", "id", "it", "jv", "ka", "kk", "km",
+    "lt", "lv", "ml", "mr", "ms", "my", "ne", "nl", "pa", "pl", "ru", "si", "sk", "sl", "sr", "sw",
+    "ta", "te", "th", "tl", "ur", "uz", "vi",
 ];
 
 /// 設定の言語コードを PLaMo のコードへ変換する。非対応は `None`。

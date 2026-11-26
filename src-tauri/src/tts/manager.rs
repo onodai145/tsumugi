@@ -27,7 +27,9 @@ pub(crate) fn wav_duration(wav: &[u8]) -> Option<std::time::Duration> {
     if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
         return None;
     }
-    let u32_at = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(wav.get(at..at + 4)?.try_into().ok()?)) };
+    let u32_at = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(wav.get(at..at + 4)?.try_into().ok()?))
+    };
     let mut byte_rate: Option<u32> = None;
     let mut pos = 12usize;
     while pos + 8 <= wav.len() {
@@ -116,7 +118,11 @@ impl Default for SpeechManager {
 impl SpeechManager {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(State { queue: SpeechQueue::new(), status: SpeechStatus::Unknown, failures: 0 }),
+            state: Mutex::new(State {
+                queue: SpeechQueue::new(),
+                status: SpeechStatus::Unknown,
+                failures: 0,
+            }),
             wake: Notify::new(),
             epoch: AtomicU64::new(0),
             playback_margin: PLAYBACK_MARGIN,
@@ -246,7 +252,10 @@ pub(crate) async fn handle_item(mgr: &SpeechManager, ctx: &dyn WorkerContext, it
             return;
         }
     };
-    let wav = match engine.synthesize(&item.text, &item.voice_id, &item.params).await {
+    let wav = match engine
+        .synthesize(&item.text, &item.voice_id, &item.params)
+        .await
+    {
         Ok(w) => w,
         Err(e) => {
             log::warn!("読み上げ: 合成に失敗しました: {e}");
@@ -290,7 +299,11 @@ pub const WORKER_RESTART_DELAY: std::time::Duration = std::time::Duration::from_
 
 /// ワーカーを監視つきで動かす。ワーカーの task が panic で落ちても、ログを残して再起動し、読み上げを続ける
 /// (処理中だった1件は失われる)。呼び出し側が spawn する。
-pub async fn run_supervised(mgr: Arc<SpeechManager>, ctx: Arc<dyn WorkerContext>, restart_delay: std::time::Duration) {
+pub async fn run_supervised(
+    mgr: Arc<SpeechManager>,
+    ctx: Arc<dyn WorkerContext>,
+    restart_delay: std::time::Duration,
+) {
     loop {
         match tokio::spawn(run_loop(mgr.clone(), ctx.clone())).await {
             // `run_loop` は戻らないので、ここに来るのは通常は panic のとき。
@@ -334,7 +347,10 @@ mod tests {
             column_id: col.into(),
             text: format!("text-{note}"),
             voice_id: "3".into(),
-            params: SynthParams { speed_scale: 1.0, volume: 1.0 },
+            params: SynthParams {
+                speed_scale: 1.0,
+                volume: 1.0,
+            },
         }
     }
 
@@ -346,7 +362,11 @@ mod tests {
     }
     impl FakeEngine {
         fn new() -> Arc<Self> {
-            Arc::new(Self { calls: Default::default(), fail: Mutex::new(false), on_synth: Mutex::new(None) })
+            Arc::new(Self {
+                calls: Default::default(),
+                fail: Mutex::new(false),
+                on_synth: Mutex::new(None),
+            })
         }
     }
     #[async_trait]
@@ -354,15 +374,26 @@ mod tests {
         async fn voices(&self) -> crate::error::Result<Vec<Voice>> {
             Ok(vec![])
         }
-        async fn synthesize(&self, text: &str, voice_id: &str, _p: &SynthParams) -> crate::error::Result<Vec<u8>> {
-            self.calls.lock().unwrap().push((text.into(), voice_id.into()));
+        async fn synthesize(
+            &self,
+            text: &str,
+            voice_id: &str,
+            _p: &SynthParams,
+        ) -> crate::error::Result<Vec<u8>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((text.into(), voice_id.into()));
             if let Some(f) = self.on_synth.lock().unwrap().as_ref() {
                 f();
             }
             if *self.fail.lock().unwrap() {
                 // 実際の reqwest のエラーは、リクエスト URL(= 本文を含む)を文面に含む。失敗ごとに文面が変わっても、
                 // 「状態が変わったとき」だけ通知できることを確かめるため、ここでも本文を含める。
-                return Err(crate::tts::invalid(format!("{}: down ({text})", crate::tts::ERR_UNREACHABLE)));
+                return Err(crate::tts::invalid(format!(
+                    "{}: down ({text})",
+                    crate::tts::ERR_UNREACHABLE
+                )));
             }
             Ok(format!("RIFF:{text}").into_bytes())
         }
@@ -393,14 +424,24 @@ mod tests {
     impl FakeCtx {
         fn new() -> Arc<Self> {
             Arc::new(Self {
-                settings: Mutex::new(SpeechSettings { enabled: true, external_url: "http://x".into(), ..Default::default() }),
+                settings: Mutex::new(SpeechSettings {
+                    enabled: true,
+                    external_url: "http://x".into(),
+                    ..Default::default()
+                }),
                 engine: FakeEngine::new(),
                 output: Arc::new(FakeOutput::default()),
                 statuses: Default::default(),
             })
         }
         fn played(&self) -> Vec<String> {
-            self.output.played.lock().unwrap().iter().map(|b| String::from_utf8_lossy(b).into_owned()).collect()
+            self.output
+                .played
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+                .collect()
         }
     }
     impl WorkerContext for FakeCtx {
@@ -427,10 +468,17 @@ mod tests {
 
         assert_eq!(
             *ctx.engine.calls.lock().unwrap(),
-            vec![("text-n1".to_string(), "3".to_string()), ("text-n2".to_string(), "3".to_string())]
+            vec![
+                ("text-n1".to_string(), "3".to_string()),
+                ("text-n2".to_string(), "3".to_string())
+            ]
         );
         assert_eq!(ctx.played(), ["RIFF:text-n1", "RIFF:text-n2"]);
-        assert_eq!(*ctx.statuses.lock().unwrap(), vec![SpeechStatus::Ok], "状態が変わったときだけ1回通知する");
+        assert_eq!(
+            *ctx.statuses.lock().unwrap(),
+            vec![SpeechStatus::Ok],
+            "状態が変わったときだけ1回通知する"
+        );
         assert_eq!(mgr.status(), SpeechStatus::Ok);
     }
 
@@ -440,7 +488,11 @@ mod tests {
         let ctx = FakeCtx::new();
         ctx.settings.lock().unwrap().enabled = false;
         handle_item(&mgr, ctx.as_ref(), item("n1", "__test__")).await;
-        assert_eq!(ctx.played(), ["RIFF:text-n1"], "オフでも積まれた項目は読む(積む前の判定が責務)");
+        assert_eq!(
+            ctx.played(),
+            ["RIFF:text-n1"],
+            "オフでも積まれた項目は読む(積む前の判定が責務)"
+        );
     }
 
     #[tokio::test]
@@ -456,8 +508,14 @@ mod tests {
         }
         let st = ctx.statuses.lock().unwrap().clone();
         assert_eq!(st.len(), 1, "閾値に達したときだけ1回: {st:?}");
-        assert!(matches!(&st[0], SpeechStatus::Error { message } if message.contains(crate::tts::ERR_UNREACHABLE)), "{st:?}");
-        assert!(mgr.pop_for_test().is_none(), "到達不能なら溜まった待ち項目は捨てる");
+        assert!(
+            matches!(&st[0], SpeechStatus::Error { message } if message.contains(crate::tts::ERR_UNREACHABLE)),
+            "{st:?}"
+        );
+        assert!(
+            mgr.pop_for_test().is_none(),
+            "到達不能なら溜まった待ち項目は捨てる"
+        );
 
         // さらに失敗しても、同じ状態なので再通知しない。
         handle_item(&mgr, ctx.as_ref(), item("f9", "a")).await;
@@ -498,8 +556,18 @@ mod tests {
         let m2 = mgr.clone();
         *ctx.engine.on_synth.lock().unwrap() = Some(Box::new(move || m2.stop_all()));
         handle_item(&mgr, ctx.as_ref(), item("n1", "a")).await;
-        assert!(ctx.played().is_empty(), "合成中に停止されたら、できあがった音声は再生しない");
-        assert!(ctx.statuses.lock().unwrap().iter().all(|s| !matches!(s, SpeechStatus::Error { .. })), "停止は失敗ではない");
+        assert!(
+            ctx.played().is_empty(),
+            "合成中に停止されたら、できあがった音声は再生しない"
+        );
+        assert!(
+            ctx.statuses
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|s| !matches!(s, SpeechStatus::Error { .. })),
+            "停止は失敗ではない"
+        );
     }
 
     #[tokio::test]
@@ -555,7 +623,10 @@ mod tests {
 
     #[test]
     fn wav_duration_reads_the_length_from_the_header() {
-        assert_eq!(wav_duration(&wav_of_one_second()), Some(Duration::from_secs(1)));
+        assert_eq!(
+            wav_duration(&wav_of_one_second()),
+            Some(Duration::from_secs(1))
+        );
     }
 
     #[test]
@@ -576,8 +647,15 @@ mod tests {
     #[test]
     fn the_playback_timeout_is_the_audio_length_plus_a_margin_and_has_a_fallback() {
         let mgr = SpeechManager::new().with_playback_margin(Duration::from_millis(250));
-        assert_eq!(mgr.playback_timeout(&wav_of_one_second()), Duration::from_millis(1250));
-        assert_eq!(mgr.playback_timeout(b"RIFF:not a wav"), FALLBACK_PLAYBACK_TIMEOUT, "長さが読めなければ既定の上限");
+        assert_eq!(
+            mgr.playback_timeout(&wav_of_one_second()),
+            Duration::from_millis(1250)
+        );
+        assert_eq!(
+            mgr.playback_timeout(b"RIFF:not a wav"),
+            FALLBACK_PLAYBACK_TIMEOUT,
+            "長さが読めなければ既定の上限"
+        );
     }
 
     #[tokio::test]
@@ -588,7 +666,12 @@ mod tests {
             async fn voices(&self) -> crate::error::Result<Vec<Voice>> {
                 Ok(vec![])
             }
-            async fn synthesize(&self, _t: &str, _v: &str, _p: &SynthParams) -> crate::error::Result<Vec<u8>> {
+            async fn synthesize(
+                &self,
+                _t: &str,
+                _v: &str,
+                _p: &SynthParams,
+            ) -> crate::error::Result<Vec<u8>> {
                 // 長さ 0 の WAV: 待ち時間は余白だけになる。
                 let mut w = wav_of_one_second();
                 w.truncate(44);
@@ -615,10 +698,17 @@ mod tests {
         let ctx = HangCtx(out.clone(), FakeCtx::new());
 
         // 再生が戻らなくても、余白のぶんで打ち切って `stop()` し、次へ進める。
-        tokio::time::timeout(Duration::from_secs(5), handle_item(&mgr, &ctx, item("n1", "a")))
-            .await
-            .expect("再生が終わらなくても、ワーカーは先へ進む");
-        assert_eq!(out.stops.load(Ordering::SeqCst), 1, "打ち切ったら出力を止める(再生スレッドが壊れた出力デバイスを開き直すきっかけにもなる)");
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            handle_item(&mgr, &ctx, item("n1", "a")),
+        )
+        .await
+        .expect("再生が終わらなくても、ワーカーは先へ進む");
+        assert_eq!(
+            out.stops.load(Ordering::SeqCst),
+            1,
+            "打ち切ったら出力を止める(再生スレッドが壊れた出力デバイスを開き直すきっかけにもなる)"
+        );
     }
 
     /// 「`Speak` が再生スレッドに届く直前に、停止が割り込む」競合の再現。この停止(`StopSpeech`)は `Speak` より先に
@@ -669,9 +759,12 @@ mod tests {
         let ctx = RaceCtx(out, FakeCtx::new());
         // 世代が変わったら、`Speak` の後でもう一度 `stop()` を送る。これが無いと、再生は最後まで鳴る
         // (長さの読めない音声は、60 秒の上限まで戻らない)。
-        tokio::time::timeout(Duration::from_secs(3), handle_item(&mgr, &ctx, item("n1", "a")))
-            .await
-            .expect("停止が割り込んでも、再生を止めてワーカーは先へ進む");
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            handle_item(&mgr, &ctx, item("n1", "a")),
+        )
+        .await
+        .expect("停止が割り込んでも、再生を止めてワーカーは先へ進む");
     }
 
     /// 最初の1回だけ panic する窓口(Mutex の poison などで、ワーカーが落ちる場合の再現)。
@@ -701,7 +794,10 @@ mod tests {
     async fn a_panicking_worker_is_restarted_and_keeps_speaking() {
         let mgr = Arc::new(SpeechManager::new());
         let inner = FakeCtx::new();
-        let ctx = Arc::new(PanicOnceCtx { inner: inner.clone(), panicked: Default::default() });
+        let ctx = Arc::new(PanicOnceCtx {
+            inner: inner.clone(),
+            panicked: Default::default(),
+        });
         let worker = tokio::spawn(run_supervised(mgr.clone(), ctx, Duration::from_millis(10)));
         mgr.enqueue(item("n1", "a"), 5); // 最初の1件は、処理中の panic で失われる
         mgr.enqueue(item("n2", "a"), 5);
@@ -733,7 +829,10 @@ mod tests {
         })
         .await
         .expect("3件とも再生される");
-        assert_eq!(ctx.played(), ["RIFF:text-n1", "RIFF:text-n2", "RIFF:text-n3"]);
+        assert_eq!(
+            ctx.played(),
+            ["RIFF:text-n1", "RIFF:text-n2", "RIFF:text-n3"]
+        );
         worker.abort();
     }
 
@@ -760,6 +859,9 @@ mod tests {
             handle_item(&mgr, &ctx, item(&format!("n{i}"), "a")).await;
         }
         let st = ctx.0.statuses.lock().unwrap().clone();
-        assert!(matches!(&st[..], [SpeechStatus::Error { message }] if message.contains(crate::tts::ERR_NOT_CONFIGURED)), "{st:?}");
+        assert!(
+            matches!(&st[..], [SpeechStatus::Error { message }] if message.contains(crate::tts::ERR_NOT_CONFIGURED)),
+            "{st:?}"
+        );
     }
 }

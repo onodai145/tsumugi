@@ -80,7 +80,10 @@ pub async fn fetch_antennas(client: &MisskeyClient) -> Result<Vec<SourceItem>> {
     let raw: Vec<RawAntenna> = client.post("antennas/list", &json!({})).await?;
     Ok(raw
         .into_iter()
-        .map(|a| SourceItem { id: a.id, name: a.name })
+        .map(|a| SourceItem {
+            id: a.id,
+            name: a.name,
+        })
         .collect())
 }
 
@@ -98,7 +101,10 @@ pub async fn fetch_followed_channels(client: &MisskeyClient) -> Result<Vec<Sourc
         .await?;
     Ok(raw
         .into_iter()
-        .map(|c| SourceItem { id: c.id, name: c.name })
+        .map(|c| SourceItem {
+            id: c.id,
+            name: c.name,
+        })
         .collect())
 }
 
@@ -139,7 +145,9 @@ pub async fn list_emojis(client: &MisskeyClient) -> Result<Vec<EmojiDef>> {
 pub async fn fetch_meta(client: &MisskeyClient) -> Result<crate::domain::InstanceInfo> {
     let raw: RawMeta = client.post("meta", &json!({ "detail": false })).await?;
     let info: crate::domain::InstanceInfo = raw.into();
-    Ok(info.with_favicon_fallback(client.host()).with_theme_color_fallback())
+    Ok(info
+        .with_favicon_fallback(client.host())
+        .with_theme_color_fallback())
 }
 
 /// `/api/meta` の `version` だけを読む。
@@ -206,7 +214,10 @@ mod meta_info_tests {
         .unwrap();
         let info: crate::domain::InstanceInfo = raw.into();
         assert_eq!(info.name, Some("Misskey.io".to_string()));
-        assert_eq!(info.icon_url, Some("https://misskey.io/icon.png".to_string()));
+        assert_eq!(
+            info.icon_url,
+            Some("https://misskey.io/icon.png".to_string())
+        );
         assert_eq!(info.theme_color, Some("#86b300".to_string()));
     }
 
@@ -224,13 +235,17 @@ mod meta_info_tests {
     /// 参照）、この合成が実際に適用先で使う形と一致することをここで確認する。
     #[test]
     fn instance_info_from_meta_without_icon_falls_back_to_host_favicon() {
-        let raw: RawMeta = serde_json::from_str(
-            r##"{"name":"しーもハウス","iconUrl":null,"themeColor":null}"##,
-        )
-        .unwrap();
+        let raw: RawMeta =
+            serde_json::from_str(r##"{"name":"しーもハウス","iconUrl":null,"themeColor":null}"##)
+                .unwrap();
         let info: crate::domain::InstanceInfo = raw.into();
-        let info = info.with_favicon_fallback("misskey.omhnc.net").with_theme_color_fallback();
-        assert_eq!(info.icon_url, Some("https://misskey.omhnc.net/favicon.ico".to_string()));
+        let info = info
+            .with_favicon_fallback("misskey.omhnc.net")
+            .with_theme_color_fallback();
+        assert_eq!(
+            info.icon_url,
+            Some("https://misskey.omhnc.net/favicon.ico".to_string())
+        );
         assert_eq!(info.theme_color, Some("#777777".to_string()));
     }
 
@@ -287,7 +302,10 @@ mod meta_info_tests {
         let version = fetch_server_version(&client).await.unwrap();
         let caps = crate::domain::search_capabilities(version.as_deref());
         assert!(version.is_some(), "version should be present");
-        assert!(caps.date_range, "misskey.omhnc.net is 2026.x so date range must be supported");
+        assert!(
+            caps.date_range,
+            "misskey.omhnc.net is 2026.x so date range must be supported"
+        );
     }
 
     #[tokio::test]
@@ -304,16 +322,23 @@ mod meta_info_tests {
             ])))
             .mount(&mock)
             .await;
-        let client = crate::api::MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
+        let client =
+            crate::api::MisskeyClient::new_with_api_base(reqwest::Client::new(), mock.uri(), None);
 
-        let lists = fetch_user_lists_with_membership(&client, "u1").await.unwrap();
+        let lists = fetch_user_lists_with_membership(&client, "u1")
+            .await
+            .unwrap();
 
         assert_eq!(
             lists
                 .iter()
                 .map(|l| (l.id.as_str(), l.name.as_str(), l.has_user))
                 .collect::<Vec<_>>(),
-            vec![("L1", "友達", true), ("L2", "仕事", false), ("L3", "空", false)]
+            vec![
+                ("L1", "友達", true),
+                ("L2", "仕事", false),
+                ("L3", "空", false)
+            ]
         );
     }
 }

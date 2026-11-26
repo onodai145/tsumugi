@@ -44,7 +44,12 @@ pub struct ColumnSpeech {
 
 impl Default for ColumnSpeech {
     fn default() -> Self {
-        Self { enabled: false, speak_author: true, queue_limit: QUEUE_LIMIT_DEFAULT, voice_id: String::new() }
+        Self {
+            enabled: false,
+            speak_author: true,
+            queue_limit: QUEUE_LIMIT_DEFAULT,
+            voice_id: String::new(),
+        }
     }
 }
 
@@ -148,10 +153,14 @@ impl SpeechSettings {
         }
         // NaN は範囲に入らないので、ここで弾かれる。
         if !(SPEED_MIN..=SPEED_MAX).contains(&self.speed_scale) {
-            return Err(format!("話速は {SPEED_MIN}〜{SPEED_MAX} の範囲で指定してください"));
+            return Err(format!(
+                "話速は {SPEED_MIN}〜{SPEED_MAX} の範囲で指定してください"
+            ));
         }
         if !(VOLUME_MIN..=VOLUME_MAX).contains(&self.volume) {
-            return Err(format!("音量は {VOLUME_MIN}〜{VOLUME_MAX} の範囲で指定してください"));
+            return Err(format!(
+                "音量は {VOLUME_MIN}〜{VOLUME_MAX} の範囲で指定してください"
+            ));
         }
         if self.default_voice_id.chars().count() > VOICE_ID_MAX_LEN {
             return Err("声の ID が長すぎます".into());
@@ -181,17 +190,30 @@ mod tests {
 
     #[test]
     fn column_speech_normalized_clamps_queue_limit_and_drops_overlong_voice_id() {
-        let s = ColumnSpeech { queue_limit: 0, voice_id: "x".repeat(VOICE_ID_MAX_LEN + 1), ..ColumnSpeech::default() }.normalized();
+        let s = ColumnSpeech {
+            queue_limit: 0,
+            voice_id: "x".repeat(VOICE_ID_MAX_LEN + 1),
+            ..ColumnSpeech::default()
+        }
+        .normalized();
         assert_eq!(s.queue_limit, QUEUE_LIMIT_MIN);
         assert_eq!(s.voice_id, "");
-        let s = ColumnSpeech { queue_limit: 200, voice_id: "12".into(), ..ColumnSpeech::default() }.normalized();
+        let s = ColumnSpeech {
+            queue_limit: 200,
+            voice_id: "12".into(),
+            ..ColumnSpeech::default()
+        }
+        .normalized();
         assert_eq!(s.queue_limit, QUEUE_LIMIT_MAX);
         assert_eq!(s.voice_id, "12");
     }
 
     #[test]
     fn the_engine_kind_round_trips_as_camel_case() {
-        assert_eq!(serde_json::to_string(&SpeechEngineKind::VoicevoxCore).unwrap(), "\"voicevoxCore\"");
+        assert_eq!(
+            serde_json::to_string(&SpeechEngineKind::VoicevoxCore).unwrap(),
+            "\"voicevoxCore\""
+        );
         let s: SpeechSettings = serde_json::from_str(r#"{"engine":"voicevoxCore"}"#).unwrap();
         assert_eq!(s.engine, SpeechEngineKind::VoicevoxCore);
         assert!(s.validate().is_ok(), "内蔵は URL が空でも有効");
@@ -200,7 +222,8 @@ mod tests {
     #[test]
     fn an_unknown_engine_kind_falls_back_to_external_instead_of_failing_the_whole_file() {
         // 将来のエンジンや、設定ファイルの手編集で、知らない値が入っていても、設定ファイル全体を読めなくしない。
-        let s: SpeechSettings = serde_json::from_str(r#"{"enabled":true,"engine":"someFutureEngine"}"#).unwrap();
+        let s: SpeechSettings =
+            serde_json::from_str(r#"{"enabled":true,"engine":"someFutureEngine"}"#).unwrap();
         assert_eq!(s.engine, SpeechEngineKind::External);
         assert!(s.enabled, "ほかの項目は読める");
     }
@@ -224,7 +247,13 @@ mod tests {
 
     #[test]
     fn url_must_be_http_or_https_with_a_host_and_no_credentials() {
-        let ok = |u: &str| SpeechSettings { external_url: u.into(), ..Default::default() }.validate();
+        let ok = |u: &str| {
+            SpeechSettings {
+                external_url: u.into(),
+                ..Default::default()
+            }
+            .validate()
+        };
         assert!(ok("http://192.168.1.10:50021").is_ok());
         assert!(ok("https://tts.example.com/").is_ok());
         assert!(ok("  http://127.0.0.1:50021  ").is_ok(), "前後の空白は許す");
@@ -257,13 +286,24 @@ mod tests {
         assert!(parse_base_url("http://h:1/?x=1").is_err());
         assert!(parse_base_url("http://h:1?x=1").is_err());
         assert!(parse_base_url("http://h:1/#frag").is_err());
-        assert!(parse_base_url("http://h:1/api/").is_ok(), "パスは許す(リバースプロキシの配下など)");
-        assert!(SpeechSettings { external_url: "http://h:1/?x=1".into(), ..Default::default() }.validate().is_err());
+        assert!(
+            parse_base_url("http://h:1/api/").is_ok(),
+            "パスは許す(リバースプロキシの配下など)"
+        );
+        assert!(SpeechSettings {
+            external_url: "http://h:1/?x=1".into(),
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]
     fn parse_base_url_trims_and_strips_trailing_slashes() {
-        assert_eq!(parse_base_url(" http://h:1/ ").unwrap().as_str(), "http://h:1/");
+        assert_eq!(
+            parse_base_url(" http://h:1/ ").unwrap().as_str(),
+            "http://h:1/"
+        );
         assert!(parse_base_url("").is_err());
     }
 }

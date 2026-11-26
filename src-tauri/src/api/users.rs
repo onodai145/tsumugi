@@ -21,13 +21,18 @@ pub async fn search_users(client: &MisskeyClient, query: &str, limit: u32) -> Re
         "detail": false,
     });
     let raw: Vec<RawUser> = client.post("users/search", &body).await?;
-    Ok(dedupe_users_by_id(raw.into_iter().map(Into::into).collect()))
+    Ok(dedupe_users_by_id(
+        raw.into_iter().map(Into::into).collect(),
+    ))
 }
 
 /// IDが重複するユーザーを先勝ちで去重する（元の並び順は保つ）。
 fn dedupe_users_by_id(users: Vec<User>) -> Vec<User> {
     let mut seen = HashSet::new();
-    users.into_iter().filter(|u| seen.insert(u.id.clone())).collect()
+    users
+        .into_iter()
+        .filter(|u| seen.insert(u.id.clone()))
+        .collect()
 }
 
 /// `users/show` のレスポンス。UserDetailedNotMe は `RawUser` にないフォロー関係フラグを
@@ -56,25 +61,34 @@ pub struct RawUserShow {
 
 /// ユーザーIDからプロフィール詳細（フォロー関係フラグ込み）を取得する。
 pub async fn show(client: &MisskeyClient, user_id: &str) -> Result<RawUserShow> {
-    client.post("users/show", &json!({ "userId": user_id })).await
+    client
+        .post("users/show", &json!({ "userId": user_id }))
+        .await
 }
 
 /// フォローする。
 pub async fn follow(client: &MisskeyClient, user_id: &str) -> Result<()> {
-    let _: serde_json::Value = client.post("following/create", &json!({ "userId": user_id })).await?;
+    let _: serde_json::Value = client
+        .post("following/create", &json!({ "userId": user_id }))
+        .await?;
     Ok(())
 }
 
 /// フォロー解除する。
 pub async fn unfollow(client: &MisskeyClient, user_id: &str) -> Result<()> {
-    let _: serde_json::Value = client.post("following/delete", &json!({ "userId": user_id })).await?;
+    let _: serde_json::Value = client
+        .post("following/delete", &json!({ "userId": user_id }))
+        .await?;
     Ok(())
 }
 
 /// ユーザーを通報する。`users/report-abuse`(コメントは1〜2048文字。検証は呼び出し側)。
 pub async fn report_abuse(client: &MisskeyClient, user_id: &str, comment: &str) -> Result<()> {
     let _: serde_json::Value = client
-        .post("users/report-abuse", &json!({ "userId": user_id, "comment": comment }))
+        .post(
+            "users/report-abuse",
+            &json!({ "userId": user_id, "comment": comment }),
+        )
         .await?;
     Ok(())
 }
@@ -82,7 +96,10 @@ pub async fn report_abuse(client: &MisskeyClient, user_id: &str, comment: &str) 
 /// 自分のリストにユーザーを追加する。`users/lists/push`。すでに入っていれば `ALREADY_ADDED` で失敗する。
 pub async fn add_to_list(client: &MisskeyClient, list_id: &str, user_id: &str) -> Result<()> {
     let _: serde_json::Value = client
-        .post("users/lists/push", &json!({ "listId": list_id, "userId": user_id }))
+        .post(
+            "users/lists/push",
+            &json!({ "listId": list_id, "userId": user_id }),
+        )
         .await?;
     Ok(())
 }
@@ -90,7 +107,10 @@ pub async fn add_to_list(client: &MisskeyClient, list_id: &str, user_id: &str) -
 /// 自分のリストからユーザーを外す。`users/lists/pull`。
 pub async fn remove_from_list(client: &MisskeyClient, list_id: &str, user_id: &str) -> Result<()> {
     let _: serde_json::Value = client
-        .post("users/lists/pull", &json!({ "listId": list_id, "userId": user_id }))
+        .post(
+            "users/lists/pull",
+            &json!({ "listId": list_id, "userId": user_id }),
+        )
         .await?;
     Ok(())
 }
@@ -122,8 +142,10 @@ fn build_follow_list_entries(
     extract: impl Fn(&RawFollowing) -> Option<RawUser>,
 ) -> Vec<(User, String)> {
     let last_raw_id = raw.last().map(|f| f.id.clone());
-    let mut entries: Vec<(User, String)> =
-        raw.iter().filter_map(|f| Some((extract(f)?.into(), f.id.clone()))).collect();
+    let mut entries: Vec<(User, String)> = raw
+        .iter()
+        .filter_map(|f| Some((extract(f)?.into(), f.id.clone())))
+        .collect();
     if let (Some(last_entry), Some(last_id)) = (entries.last_mut(), last_raw_id) {
         last_entry.1 = last_id;
     }
@@ -132,7 +154,11 @@ fn build_follow_list_entries(
 
 /// フォロワー一覧（新しい順、`until_id` でページング）。戻り値は `(ユーザー, カーソル)` の配列で、
 /// カーソルは次ページの `until_id` に使うFollowingレコードのID（ユーザーIDではない）。
-pub async fn followers(client: &MisskeyClient, user_id: &str, until_id: Option<&str>) -> Result<Vec<(User, String)>> {
+pub async fn followers(
+    client: &MisskeyClient,
+    user_id: &str,
+    until_id: Option<&str>,
+) -> Result<Vec<(User, String)>> {
     let mut body = json!({ "userId": user_id, "limit": FOLLOW_LIST_PAGE_SIZE });
     if let Some(u) = until_id {
         body["untilId"] = json!(u);
@@ -143,7 +169,11 @@ pub async fn followers(client: &MisskeyClient, user_id: &str, until_id: Option<&
 
 /// フォロー中一覧（新しい順、`until_id` でページング）。戻り値は `(ユーザー, カーソル)` の配列で、
 /// カーソルは次ページの `until_id` に使うFollowingレコードのID（ユーザーIDではない）。
-pub async fn following(client: &MisskeyClient, user_id: &str, until_id: Option<&str>) -> Result<Vec<(User, String)>> {
+pub async fn following(
+    client: &MisskeyClient,
+    user_id: &str,
+    until_id: Option<&str>,
+) -> Result<Vec<(User, String)>> {
     let mut body = json!({ "userId": user_id, "limit": FOLLOW_LIST_PAGE_SIZE });
     if let Some(u) = until_id {
         body["untilId"] = json!(u);
@@ -261,7 +291,10 @@ mod tests {
         assert_eq!(raw.is_blocking, Some(true));
         assert_eq!(raw.is_renote_muted, Some(false));
         assert_eq!(raw.url.as_deref(), Some("https://remote.example/@alice"));
-        assert_eq!(raw.uri.as_deref(), Some("https://remote.example/users/alice"));
+        assert_eq!(
+            raw.uri.as_deref(),
+            Some("https://remote.example/users/alice")
+        );
     }
 
     #[test]
@@ -287,13 +320,17 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/users/report-abuse"))
-            .and(body_partial_json(serde_json::json!({ "userId": "u1", "comment": "spam" })))
+            .and(body_partial_json(
+                serde_json::json!({ "userId": "u1", "comment": "spam" }),
+            ))
             .respond_with(ResponseTemplate::new(204))
             .expect(1)
             .mount(&mock)
             .await;
 
-        report_abuse(&test_client(&mock), "u1", "spam").await.unwrap();
+        report_abuse(&test_client(&mock), "u1", "spam")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -304,7 +341,9 @@ mod tests {
         for endpoint in ["/users/lists/push", "/users/lists/pull"] {
             Mock::given(method("POST"))
                 .and(path(endpoint))
-                .and(body_partial_json(serde_json::json!({ "listId": "L1", "userId": "u1" })))
+                .and(body_partial_json(
+                    serde_json::json!({ "listId": "L1", "userId": "u1" }),
+                ))
                 .respond_with(ResponseTemplate::new(204))
                 .expect(1)
                 .mount(&mock)
@@ -312,6 +351,8 @@ mod tests {
         }
 
         add_to_list(&test_client(&mock), "L1", "u1").await.unwrap();
-        remove_from_list(&test_client(&mock), "L1", "u1").await.unwrap();
+        remove_from_list(&test_client(&mock), "L1", "u1")
+            .await
+            .unwrap();
     }
 }

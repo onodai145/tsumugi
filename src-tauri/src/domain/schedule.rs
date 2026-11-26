@@ -48,7 +48,10 @@ mod tests {
     fn unknown_or_unparseable_version_is_unavailable() {
         assert!(!schedule_capabilities(None).available);
         for v in ["", "unknown", "2025", "2025.10", "v2025.10.0"] {
-            assert!(!schedule_capabilities(Some(v)).available, "{v:?} should be unavailable");
+            assert!(
+                !schedule_capabilities(Some(v)).available,
+                "{v:?} should be unavailable"
+            );
         }
     }
 }

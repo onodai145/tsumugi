@@ -57,8 +57,15 @@ impl SqlWhere {
 
     /// 3方言で同じ意味になる固定の SQL(`?` プレースホルダ)から作る。リテラルの中に `?` を書かない。
     pub fn raw(sql: &str, params: Vec<SqlParam>) -> Self {
-        let one = |d: Dialect| Rendered { sql: convert_placeholders(sql, d, 0), params: params.clone() };
-        SqlWhere { sqlite: one(Dialect::Sqlite), postgres: one(Dialect::Postgres), mysql: one(Dialect::MySql) }
+        let one = |d: Dialect| Rendered {
+            sql: convert_placeholders(sql, d, 0),
+            params: params.clone(),
+        };
+        SqlWhere {
+            sqlite: one(Dialect::Sqlite),
+            postgres: one(Dialect::Postgres),
+            mysql: one(Dialect::MySql),
+        }
     }
 
     pub fn always_true() -> Self {
@@ -72,7 +79,10 @@ impl SqlWhere {
             let extra = convert_placeholders(sql, d, base.params.len());
             let mut all = base.params;
             all.extend(params.iter().cloned());
-            Rendered { sql: format!("({}) AND ({})", base.sql, extra), params: all }
+            Rendered {
+                sql: format!("({}) AND ({})", base.sql, extra),
+                params: all,
+            }
         };
         SqlWhere {
             sqlite: join(Dialect::Sqlite, self.sqlite),
@@ -103,9 +113,16 @@ fn convert_placeholders(sql: &str, dialect: Dialect, already_bound: usize) -> St
 
 pub fn build_where(expr: &Expr, ctx: &SqlCtx) -> Result<SqlWhere, String> {
     let render = |dialect: Dialect| -> Result<Rendered, String> {
-        let mut b = Builder { ctx, dialect, params: Vec::new() };
+        let mut b = Builder {
+            ctx,
+            dialect,
+            params: Vec::new(),
+        };
         let sql = b.expr(expr)?;
-        Ok(Rendered { sql, params: b.params })
+        Ok(Rendered {
+            sql,
+            params: b.params,
+        })
     };
     Ok(SqlWhere {
         sqlite: render(Dialect::Sqlite)?,
@@ -339,7 +356,9 @@ impl Builder<'_> {
                             Dialect::Postgres => "DOUBLE PRECISION",
                             Dialect::MySql => "DOUBLE",
                         };
-                        return Ok(format!("COALESCE((CAST({l} AS {real}) / NULLIF({r}, 0)), 0)"));
+                        return Ok(format!(
+                            "COALESCE((CAST({l} AS {real}) / NULLIF({r}, 0)), 0)"
+                        ));
                     }
                 };
                 format!("({l} {sym} {r})")
@@ -383,7 +402,8 @@ impl Builder<'_> {
             HasPoll => "n.has_poll = 1".into(),
             Cw => "n.cw IS NOT NULL".into(),
             Sensitive => {
-                "EXISTS (SELECT 1 FROM note_file f WHERE f.note_id=n.id AND f.is_sensitive=1)".into()
+                "EXISTS (SELECT 1 FROM note_file f WHERE f.note_id=n.id AND f.is_sensitive=1)"
+                    .into()
             }
             Local => "u.host IS NULL".into(),
             Remote => "u.host IS NOT NULL".into(),
@@ -549,13 +569,19 @@ mod tests {
     fn division_is_float_and_zero_divisor_becomes_zero_per_dialect() {
         let w = where_of("from cache where reactions / renotes > 2");
         let s = w.render(Dialect::Sqlite);
-        assert_eq!(s.sql, "(COALESCE((CAST(n.reaction_count AS REAL) / NULLIF(n.renote_count, 0)), 0) > ?)");
+        assert_eq!(
+            s.sql,
+            "(COALESCE((CAST(n.reaction_count AS REAL) / NULLIF(n.renote_count, 0)), 0) > ?)"
+        );
         assert_eq!(s.params, vec![SqlParam::Real(2.0)]);
         let p = w.render(Dialect::Postgres);
         assert_eq!(p.sql, "(COALESCE((CAST(n.reaction_count AS DOUBLE PRECISION) / NULLIF(n.renote_count, 0)), 0) > $1)");
         assert_eq!(p.params, vec![SqlParam::Real(2.0)]);
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(COALESCE((CAST(n.reaction_count AS DOUBLE) / NULLIF(n.renote_count, 0)), 0) > ?)");
+        assert_eq!(
+            m.sql,
+            "(COALESCE((CAST(n.reaction_count AS DOUBLE) / NULLIF(n.renote_count, 0)), 0) > ?)"
+        );
         assert_eq!(m.params, vec![SqlParam::Real(2.0)]);
     }
 
@@ -564,12 +590,18 @@ mod tests {
     fn division_binds_literals_in_textual_order() {
         let w = where_of("from cache where 10 / renotes > 4");
         let p = w.render(Dialect::Postgres);
-        assert_eq!(p.sql, "(COALESCE((CAST($1 AS DOUBLE PRECISION) / NULLIF(n.renote_count, 0)), 0) > $2)");
+        assert_eq!(
+            p.sql,
+            "(COALESCE((CAST($1 AS DOUBLE PRECISION) / NULLIF(n.renote_count, 0)), 0) > $2)"
+        );
         assert_eq!(p.params, vec![SqlParam::Real(10.0), SqlParam::Real(4.0)]);
 
         let w = where_of("from cache where reactions / 2 > 4");
         let p = w.render(Dialect::Postgres);
-        assert_eq!(p.sql, "(COALESCE((CAST(n.reaction_count AS DOUBLE PRECISION) / NULLIF($1, 0)), 0) > $2)");
+        assert_eq!(
+            p.sql,
+            "(COALESCE((CAST(n.reaction_count AS DOUBLE PRECISION) / NULLIF($1, 0)), 0) > $2)"
+        );
         assert_eq!(p.params, vec![SqlParam::Real(2.0), SqlParam::Real(4.0)]);
     }
 
@@ -578,9 +610,15 @@ mod tests {
     fn user_acct_concatenation_is_rendered_per_dialect() {
         let w = where_of("from cache where user.acct == \"@alice\"");
         let s = w.render(Dialect::Sqlite);
-        assert_eq!(s.sql, "(('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END) = ?)");
+        assert_eq!(
+            s.sql,
+            "(('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END) = ?)"
+        );
         let p = w.render(Dialect::Postgres);
-        assert_eq!(p.sql, "(('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END) = $1)");
+        assert_eq!(
+            p.sql,
+            "(('@'||u.username||CASE WHEN u.host IS NULL THEN '' ELSE '@'||u.host END) = $1)"
+        );
         let m = w.render(Dialect::MySql);
         assert_eq!(m.sql, "(CONCAT('@', u.username, CASE WHEN u.host IS NULL THEN '' ELSE CONCAT('@', u.host) END) = ?)");
         for r in [s, p, m] {
@@ -598,7 +636,10 @@ mod tests {
         assert_eq!(p.sql, "(strpos(COALESCE(n.text,''), $1) > 0)");
         assert_eq!(p.params, vec![text("Rust")]);
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(LOCATE(?, CAST(COALESCE(n.text,'') AS BINARY)) > 0)");
+        assert_eq!(
+            m.sql,
+            "(LOCATE(?, CAST(COALESCE(n.text,'') AS BINARY)) > 0)"
+        );
         assert_eq!(m.params, vec![text("Rust")]);
     }
 
@@ -612,7 +653,10 @@ mod tests {
         assert_eq!(p.sql, "(left(COALESCE(n.text,''), length($1)) = $2)");
         assert_eq!(p.params, vec![text("hi"), text("hi")]);
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(LEFT(COALESCE(n.text,''), CHAR_LENGTH(?)) = CAST(? AS BINARY))");
+        assert_eq!(
+            m.sql,
+            "(LEFT(COALESCE(n.text,''), CHAR_LENGTH(?)) = CAST(? AS BINARY))"
+        );
         assert_eq!(m.params, vec![text("hi"), text("hi")]);
     }
 
@@ -629,7 +673,10 @@ mod tests {
         let p = w.render(Dialect::Postgres);
         assert_eq!(p.sql, "(right(COALESCE(n.text,''), length($1)) = $2)");
         let m = w.render(Dialect::MySql);
-        assert_eq!(m.sql, "(RIGHT(COALESCE(n.text,''), CHAR_LENGTH(?)) = CAST(? AS BINARY))");
+        assert_eq!(
+            m.sql,
+            "(RIGHT(COALESCE(n.text,''), CHAR_LENGTH(?)) = CAST(? AS BINARY))"
+        );
     }
 
     #[test]
@@ -645,17 +692,28 @@ mod tests {
     #[test]
     fn string_match_placeholder_order_follows_the_text_when_the_lhs_is_a_literal() {
         // 左辺がリテラルだと、列の式も `?` になる。バインド値の並びは、SQL 中の `?` の並びと一致させる。
-        let e = cmp(Value::Str("abc".into()), CompareOp::EndsWith, Value::Str("c".into()));
+        let e = cmp(
+            Value::Str("abc".into()),
+            CompareOp::EndsWith,
+            Value::Str("c".into()),
+        );
         let w = build_where(&e, &ctx()).unwrap();
         let s = w.render(Dialect::Sqlite);
         assert_eq!(s.sql, "(substr(?, length(?) - length(?) + 1) = ?)");
-        assert_eq!(s.params, vec![text("abc"), text("abc"), text("c"), text("c")]);
+        assert_eq!(
+            s.params,
+            vec![text("abc"), text("abc"), text("c"), text("c")]
+        );
         let p = w.render(Dialect::Postgres);
         assert_eq!(p.sql, "(right($1, length($2)) = $3)");
         assert_eq!(p.params, vec![text("abc"), text("c"), text("c")]);
 
         // MySQL の `LOCATE(?, CAST(col AS BINARY))` は検索語が先。
-        let e = cmp(Value::Str("abc".into()), CompareOp::Contains, Value::Str("b".into()));
+        let e = cmp(
+            Value::Str("abc".into()),
+            CompareOp::Contains,
+            Value::Str("b".into()),
+        );
         let w = build_where(&e, &ctx()).unwrap();
         let m = w.render(Dialect::MySql);
         assert_eq!(m.sql, "(LOCATE(?, CAST(? AS BINARY)) > 0)");
@@ -664,7 +722,11 @@ mod tests {
 
     #[test]
     fn string_match_rejects_a_non_literal_needle() {
-        let e = cmp(Value::Field(Field::Text), CompareOp::Contains, Value::Field(Field::CwText));
+        let e = cmp(
+            Value::Field(Field::Text),
+            CompareOp::Contains,
+            Value::Field(Field::CwText),
+        );
         assert!(build_where(&e, &ctx()).is_err());
     }
 
@@ -681,8 +743,14 @@ mod tests {
         assert_eq!(sq(&w).sql, "(COALESCE(n.text,'') REGEXP ?)");
         // MySQL / MariaDB 共通(Issue #646): `REGEXP_LIKE` は MariaDB に無い。大文字小文字は、照合順序(`_ci`)に従う
         // `REGEXP` に、先頭の `(?-i)` で区別させる(ICU も PCRE も解釈する)。利用者の `(?i)` は後に来るので有効のまま。
-        assert_eq!(w.render(Dialect::MySql).sql, "(COALESCE(n.text,'') REGEXP CONCAT('(?-i)', ?))");
-        assert_eq!(w.render(Dialect::Postgres).sql, "(COALESCE(n.text,'') ~ $1)");
+        assert_eq!(
+            w.render(Dialect::MySql).sql,
+            "(COALESCE(n.text,'') REGEXP CONCAT('(?-i)', ?))"
+        );
+        assert_eq!(
+            w.render(Dialect::Postgres).sql,
+            "(COALESCE(n.text,'') ~ $1)"
+        );
     }
 
     /// 空集合リテラル(Issue #608): `IN ()` は PostgreSQL / MySQL の構文エラーになるので、3 方言とも恒偽にする。
@@ -737,14 +805,19 @@ mod tests {
         assert_eq!(sq(&w).params, vec![text("f1")]);
 
         let w = where_of("from cache where to_me");
-        assert!(sq(&w).sql.contains("note_mention m WHERE m.note_id=n.id AND m.user_id IN (?)"));
+        assert!(sq(&w)
+            .sql
+            .contains("note_mention m WHERE m.note_id=n.id AND m.user_id IN (?)"));
     }
 
     /// フォロー一覧が未取得(`following_ids: None`)のとき `following` は恒偽(Issue #670)。
     /// PostgreSQL は整数 `0` を真偽値として受け付けないので、3 方言とも `(1=0)` と書く。
     #[test]
     fn following_without_ids_is_constant_false_in_every_dialect() {
-        let ctx = SqlCtx { my_ids: vec![], following_ids: None };
+        let ctx = SqlCtx {
+            my_ids: vec![],
+            following_ids: None,
+        };
         for (query, want) in [
             ("from cache where following", "(1=0)"),
             ("from cache where !following", "(NOT (1=0))"),
@@ -781,9 +854,13 @@ mod tests {
 
     #[test]
     fn and_raw_after_a_two_bind_match_keeps_postgres_numbers_in_order() {
-        let w = where_of("from cache where text startswith \"hi\"").and_raw("n.id = ?", vec![text("x")]);
+        let w = where_of("from cache where text startswith \"hi\"")
+            .and_raw("n.id = ?", vec![text("x")]);
         let p = w.render(Dialect::Postgres);
-        assert_eq!(p.sql, "((left(COALESCE(n.text,''), length($1)) = $2)) AND (n.id = $3)");
+        assert_eq!(
+            p.sql,
+            "((left(COALESCE(n.text,''), length($1)) = $2)) AND (n.id = $3)"
+        );
         assert_eq!(p.params, vec![text("hi"), text("hi"), text("x")]);
     }
 

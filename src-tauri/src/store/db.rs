@@ -160,15 +160,22 @@ fn register_regexp(conn: &Connection) -> Result<()> {
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |ctx| {
             // パターンは引数 0。1クエリの間は SQLite の補助データにコンパイル済みを持ち回す。
-            let re: Arc<Option<regex::Regex>> = ctx.get_or_create_aux(0, |vr| -> std::result::Result<_, BoxError> {
-                Ok(match vr {
-                    ValueRef::Text(bytes) => std::str::from_utf8(bytes).ok().and_then(|p| regex::Regex::new(p).ok()),
-                    _ => None,
-                })
-            })?;
-            let Some(re) = re.as_ref() else { return Ok(false) };
+            let re: Arc<Option<regex::Regex>> =
+                ctx.get_or_create_aux(0, |vr| -> std::result::Result<_, BoxError> {
+                    Ok(match vr {
+                        ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+                            .ok()
+                            .and_then(|p| regex::Regex::new(p).ok()),
+                        _ => None,
+                    })
+                })?;
+            let Some(re) = re.as_ref() else {
+                return Ok(false);
+            };
             Ok(match ctx.get_raw(1) {
-                ValueRef::Text(bytes) => std::str::from_utf8(bytes).map(|s| re.is_match(s)).unwrap_or(false),
+                ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+                    .map(|s| re.is_match(s))
+                    .unwrap_or(false),
                 _ => false,
             })
         },
@@ -323,9 +330,19 @@ fn migrate_cache(conn: &Connection) -> Result<()> {
     // 既存の蓄積データ(note/user/column_note等)は一切触らない。単一プロセス+単一SQLite接続
     // (Mutexで直列化)前提の現行コードでは重複行はほぼ存在しないはずだが、念のため
     // インデックス作成前に重複排除する(Issue #115 spec「既存キャッシュDBへのUNIQUE制約追加について」)。
-    add_unique_index_with_dedup(conn, "note_reaction", &["note_id", "emoji_key"], "idx_nr_unique")?;
+    add_unique_index_with_dedup(
+        conn,
+        "note_reaction",
+        &["note_id", "emoji_key"],
+        "idx_nr_unique",
+    )?;
     add_unique_index_with_dedup(conn, "note_tag", &["note_id", "tag"], "idx_nt_unique")?;
-    add_unique_index_with_dedup(conn, "note_mention", &["note_id", "user_id"], "idx_nm_unique")?;
+    add_unique_index_with_dedup(
+        conn,
+        "note_mention",
+        &["note_id", "user_id"],
+        "idx_nm_unique",
+    )?;
     add_unique_index_with_dedup(conn, "note_emoji", &["note_id", "emoji"], "idx_ne_unique")?;
     add_unique_index_with_dedup(
         conn,
@@ -423,7 +440,10 @@ fn add_unique_index_with_dedup(
         &format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT MIN(rowid) FROM {table} GROUP BY {col_list})"),
         [],
     )?;
-    conn.execute(&format!("CREATE UNIQUE INDEX {index_name} ON {table}({col_list})"), [])?;
+    conn.execute(
+        &format!("CREATE UNIQUE INDEX {index_name} ON {table}({col_list})"),
+        [],
+    )?;
     Ok(())
 }
 
@@ -471,13 +491,17 @@ mod tests {
 
         // タブに group_id が付与され、グループが作られている
         let gid: Option<String> = conn
-            .query_row("SELECT group_id FROM column_def WHERE id='c1'", [], |r| r.get(0))
+            .query_row("SELECT group_id FROM column_def WHERE id='c1'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         let gid = gid.expect("group_id should be set");
         let (gord, gwidth): (i32, i32) = conn
-            .query_row("SELECT ord, width FROM column_group WHERE id=?1", [&gid], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT ord, width FROM column_group WHERE id=?1",
+                [&gid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!(gord, 2); // 旧 ord をグループ順に引き継ぐ
         assert_eq!(gwidth, 360); // 旧 width をグループ幅に
@@ -530,10 +554,15 @@ mod tests {
         assert_eq!((sound2, desktop2), (0, 0));
 
         // ユーザが明示的に false へ戻した後、再 migrate しても上書きされない（冪等）
-        conn.execute_batch("UPDATE column_def SET notify_sound = 0 WHERE id='c1'").unwrap();
+        conn.execute_batch("UPDATE column_def SET notify_sound = 0 WHERE id='c1'")
+            .unwrap();
         migrate(&conn).unwrap();
         let sound: i64 = conn
-            .query_row("SELECT notify_sound FROM column_def WHERE id='c1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT notify_sound FROM column_def WHERE id='c1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(sound, 0);
     }
@@ -592,16 +621,24 @@ mod tests {
         let path = std::env::temp_dir().join(format!("tsumugi_test_{}.db", uuid::Uuid::new_v4()));
         let conn = open_cache(&path).unwrap();
 
-        let synchronous: i64 = conn.query_row("PRAGMA synchronous", [], |r| r.get(0)).unwrap();
+        let synchronous: i64 = conn
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(synchronous, 1); // NORMAL
 
-        let temp_store: i64 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0)).unwrap();
+        let temp_store: i64 = conn
+            .query_row("PRAGMA temp_store", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(temp_store, 2); // MEMORY
 
-        let cache_size: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0)).unwrap();
+        let cache_size: i64 = conn
+            .query_row("PRAGMA cache_size", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(cache_size, -20000);
 
-        let mmap_size: i64 = conn.query_row("PRAGMA mmap_size", [], |r| r.get(0)).unwrap();
+        let mmap_size: i64 = conn
+            .query_row("PRAGMA mmap_size", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(mmap_size, 67_108_864);
 
         drop(conn);
@@ -640,7 +677,11 @@ mod tests {
         conn.execute_batch("DROP TRIGGER fail_backfill").unwrap();
         migrate_cache(&conn).unwrap();
         let created_at: i64 = conn
-            .query_row("SELECT created_at FROM column_note WHERE note_id='n1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT created_at FROM column_note WHERE note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(created_at, 12345);
     }
@@ -692,7 +733,10 @@ mod tests {
         migrate_cache(&conn).unwrap();
 
         for col in ["avatar_url", "bio", "banner_url", "emojis"] {
-            assert!(column_exists(&conn, "user", col).unwrap(), "missing column: {col}");
+            assert!(
+                column_exists(&conn, "user", col).unwrap(),
+                "missing column: {col}"
+            );
         }
         // Issue #409: instance_* は instance テーブルへ移したため user には追加しない
         assert!(!column_exists(&conn, "user", "instance_name").unwrap());
@@ -733,12 +777,18 @@ mod tests {
         let conn = open_cache_in_memory().unwrap();
         assert!(column_exists(&conn, "instance", "host").unwrap());
         for col in ["instance_name", "instance_icon_url", "instance_theme_color"] {
-            assert!(!column_exists(&conn, "user", col).unwrap(), "{col} は存在しない");
+            assert!(
+                !column_exists(&conn, "user", col).unwrap(),
+                "{col} は存在しない"
+            );
         }
         // 再起動相当: 再実行しても旧列が再追加されない
         migrate_cache(&conn).unwrap();
         for col in ["instance_name", "instance_icon_url", "instance_theme_color"] {
-            assert!(!column_exists(&conn, "user", col).unwrap(), "{col} が再追加された");
+            assert!(
+                !column_exists(&conn, "user", col).unwrap(),
+                "{col} が再追加された"
+            );
         }
     }
 
@@ -802,15 +852,23 @@ mod tests {
         );
         // ローカル(host NULL)と全列NULLのホストは移さない
         assert_eq!(get("empty.example"), None);
-        let total: i64 = conn.query_row("SELECT COUNT(*) FROM instance", [], |r| r.get(0)).unwrap();
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM instance", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(total, 2);
         for col in ["instance_name", "instance_icon_url", "instance_theme_color"] {
-            assert!(!column_exists(&conn, "user", col).unwrap(), "{col} は DROP される");
+            assert!(
+                !column_exists(&conn, "user", col).unwrap(),
+                "{col} は DROP される"
+            );
         }
 
         // 移行後に更新した値は、再実行しても旧列の値で戻らない(冪等)
-        conn.execute("UPDATE instance SET name = 'Renamed' WHERE host = 'remote.example'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE instance SET name = 'Renamed' WHERE host = 'remote.example'",
+            [],
+        )
+        .unwrap();
         migrate_cache(&conn).unwrap();
         assert_eq!(get("remote.example").unwrap().0.as_deref(), Some("Renamed"));
     }
@@ -857,7 +915,11 @@ mod tests {
 
         // 重複行は1件に集約されていること。
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM note_reaction WHERE note_id='n1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
 
@@ -885,7 +947,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             rows,
-            vec![("c1".to_string(), 0, "n100".to_string()), ("c2".to_string(), 0, "n200".to_string())]
+            vec![
+                ("c1".to_string(), 0, "n100".to_string()),
+                ("c2".to_string(), 0, "n200".to_string())
+            ]
         );
         let legacy: i64 = conn
             .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='column_fetch_boundary'", [], |r| r.get(0))
@@ -911,6 +976,9 @@ mod tests {
         let v: String = conn
             .query_row("SELECT oldest_fetched_id FROM column_source_boundary WHERE column_id='c1' AND source_idx=0", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, "n50", "中断後の再実行で、移行後に更新された値を旧値で潰さない");
+        assert_eq!(
+            v, "n50",
+            "中断後の再実行で、移行後に更新された値を旧値で潰さない"
+        );
     }
 }

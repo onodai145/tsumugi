@@ -32,7 +32,10 @@ pub struct NetworkStatus {
 }
 
 impl NetworkStatus {
-    pub const UNKNOWN: NetworkStatus = NetworkStatus { transport: Transport::Unknown, metered: Metered::Unknown };
+    pub const UNKNOWN: NetworkStatus = NetworkStatus {
+        transport: Transport::Unknown,
+        metered: Metered::Unknown,
+    };
 
     /// Kotlin から渡る整数を変換する。範囲外は `Unknown`（将来 Kotlin 側に値を足しても Rust が落ちない）。
     pub fn from_raw(transport: i32, metered: i32) -> Self {
@@ -108,9 +111,21 @@ mod tests {
 
     #[test]
     fn from_raw_maps_every_known_value() {
-        assert_eq!(NetworkStatus::from_raw(1, 2), NetworkStatus { transport: Transport::Wifi, metered: Metered::Unmetered });
+        assert_eq!(
+            NetworkStatus::from_raw(1, 2),
+            NetworkStatus {
+                transport: Transport::Wifi,
+                metered: Metered::Unmetered
+            }
+        );
         assert_eq!(NetworkStatus::from_raw(2, 2).transport, Transport::Ethernet);
-        assert_eq!(NetworkStatus::from_raw(3, 1), NetworkStatus { transport: Transport::Cellular, metered: Metered::Metered });
+        assert_eq!(
+            NetworkStatus::from_raw(3, 1),
+            NetworkStatus {
+                transport: Transport::Cellular,
+                metered: Metered::Metered
+            }
+        );
         assert_eq!(NetworkStatus::from_raw(4, 1).transport, Transport::Other);
         assert_eq!(NetworkStatus::from_raw(0, 0), NetworkStatus::UNKNOWN);
     }
@@ -118,13 +133,19 @@ mod tests {
     #[test]
     fn from_raw_turns_out_of_range_values_into_unknown() {
         assert_eq!(NetworkStatus::from_raw(99, -1), NetworkStatus::UNKNOWN);
-        assert_eq!(NetworkStatus::from_raw(i32::MAX, i32::MIN), NetworkStatus::UNKNOWN);
+        assert_eq!(
+            NetworkStatus::from_raw(i32::MAX, i32::MIN),
+            NetworkStatus::UNKNOWN
+        );
     }
 
     #[test]
     fn serializes_with_camel_case_values() {
         let j = serde_json::to_value(NetworkStatus::from_raw(3, 1)).unwrap();
-        assert_eq!(j, serde_json::json!({"transport": "cellular", "metered": "metered"}));
+        assert_eq!(
+            j,
+            serde_json::json!({"transport": "cellular", "metered": "metered"})
+        );
     }
 
     #[test]

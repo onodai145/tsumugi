@@ -94,7 +94,10 @@ async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u
 }
 
 /// JSON の応答を、上限つきで読んで解釈する。
-async fn read_json<T: serde::de::DeserializeOwned>(resp: reqwest::Response, limit: usize) -> Result<T> {
+async fn read_json<T: serde::de::DeserializeOwned>(
+    resp: reqwest::Response,
+    limit: usize,
+) -> Result<T> {
     let bytes = read_limited(resp, limit).await?;
     serde_json::from_slice(&bytes).map_err(bad_response)
 }
@@ -114,7 +117,12 @@ struct StyleDto {
 #[async_trait]
 impl SpeechEngine for ExternalEngine {
     async fn voices(&self) -> Result<Vec<Voice>> {
-        let resp = self.client.get(self.url("speakers")).send().await.map_err(unreachable)?;
+        let resp = self
+            .client
+            .get(self.url("speakers"))
+            .send()
+            .await
+            .map_err(unreachable)?;
         if !resp.status().is_success() {
             return Err(bad_response(format!("HTTP {}", resp.status())));
         }
@@ -145,9 +153,9 @@ impl SpeechEngine for ExternalEngine {
             return Err(bad_response(format!("audio_query: HTTP {}", resp.status())));
         }
         let mut query: Value = read_json(resp, self.max_json).await?;
-        let obj = query
-            .as_object_mut()
-            .ok_or_else(|| bad_response("audio_query の応答が JSON のオブジェクトではありません"))?;
+        let obj = query.as_object_mut().ok_or_else(|| {
+            bad_response("audio_query の応答が JSON のオブジェクトではありません")
+        })?;
         obj.insert("speedScale".into(), Value::from(p.speed_scale));
         obj.insert("volumeScale".into(), Value::from(p.volume));
 
@@ -242,9 +250,21 @@ mod tests {
         let e = ExternalEngine::new(&url).unwrap();
         let v = e.voices().await.unwrap();
         assert_eq!(v.len(), 3);
-        assert_eq!(v[0], Voice { id: "3".into(), label: "ずんだもん（ノーマル）".into() });
+        assert_eq!(
+            v[0],
+            Voice {
+                id: "3".into(),
+                label: "ずんだもん（ノーマル）".into()
+            }
+        );
         assert_eq!(v[1].id, "1");
-        assert_eq!(v[2], Voice { id: "2".into(), label: "四国めたん（ノーマル）".into() });
+        assert_eq!(
+            v[2],
+            Voice {
+                id: "2".into(),
+                label: "四国めたん（ノーマル）".into()
+            }
+        );
     }
 
     #[tokio::test]
@@ -253,28 +273,56 @@ mod tests {
         let url = serve(engine_app(seen.clone())).await;
         let e = ExternalEngine::new(&format!("{url}/")).unwrap(); // 末尾スラッシュがあっても動く
         let out = e
-            .synthesize("こんにちは&テスト", "3", &SynthParams { speed_scale: 1.5, volume: 0.8 })
+            .synthesize(
+                "こんにちは&テスト",
+                "3",
+                &SynthParams {
+                    speed_scale: 1.5,
+                    volume: 0.8,
+                },
+            )
             .await
             .unwrap();
         assert!(out.starts_with(b"RIFF"));
 
         let aq = seen.audio_query.lock().unwrap();
         assert_eq!(aq[0].get("speaker").map(String::as_str), Some("3"));
-        assert_eq!(aq[0].get("text").map(String::as_str), Some("こんにちは&テスト"), "記号を含む本文が壊れずに届く");
+        assert_eq!(
+            aq[0].get("text").map(String::as_str),
+            Some("こんにちは&テスト"),
+            "記号を含む本文が壊れずに届く"
+        );
 
         let sy = seen.synthesis.lock().unwrap();
         assert_eq!(sy[0].0.get("speaker").map(String::as_str), Some("3"));
         assert_eq!(sy[0].1["speedScale"], json!(1.5));
         assert_eq!(sy[0].1["volumeScale"], json!(0.8f32));
-        assert_eq!(sy[0].1["pitchScale"], json!(0.0), "上書きしない項目はそのまま渡す");
+        assert_eq!(
+            sy[0].1["pitchScale"],
+            json!(0.0),
+            "上書きしない項目はそのまま渡す"
+        );
     }
 
     #[tokio::test]
     async fn an_http_error_is_a_bad_response() {
-        let app = Router::new().route("/audio_query", post(|| async { StatusCode::INTERNAL_SERVER_ERROR }));
+        let app = Router::new().route(
+            "/audio_query",
+            post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
         let url = serve(app).await;
         let e = ExternalEngine::new(&url).unwrap();
-        let err = e.synthesize("a", "1", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap_err();
+        let err = e
+            .synthesize(
+                "a",
+                "1",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains(ERR_BAD_RESPONSE), "{err}");
     }
 
@@ -282,21 +330,40 @@ mod tests {
     async fn a_non_wav_body_is_a_bad_response() {
         // `engine_app` の `/synthesis` と重ならないよう、WAV でない応答を返すルーターを組み直す。
         let app = Router::new()
-            .route("/audio_query", post(|| async { Json(json!({"speedScale": 1.0, "volumeScale": 1.0})) }))
+            .route(
+                "/audio_query",
+                post(|| async { Json(json!({"speedScale": 1.0, "volumeScale": 1.0})) }),
+            )
             .route("/synthesis", post(|| async { "not a wav" }));
         let url = serve(app).await;
         let e = ExternalEngine::new(&url).unwrap();
-        let err = e.synthesize("a", "1", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap_err();
+        let err = e
+            .synthesize(
+                "a",
+                "1",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains(ERR_BAD_RESPONSE), "{err}");
     }
 
     #[tokio::test]
     async fn redirects_are_not_followed() {
-        let app = Router::new().route("/speakers", get(|| async { Redirect::temporary("http://127.0.0.1:1/") }));
+        let app = Router::new().route(
+            "/speakers",
+            get(|| async { Redirect::temporary("http://127.0.0.1:1/") }),
+        );
         let url = serve(app).await;
         let e = ExternalEngine::new(&url).unwrap();
         let err = e.voices().await.unwrap_err();
-        assert!(err.to_string().contains(ERR_BAD_RESPONSE), "リダイレクト先へは行かず、応答の異常として扱う: {err}");
+        assert!(
+            err.to_string().contains(ERR_BAD_RESPONSE),
+            "リダイレクト先へは行かず、応答の異常として扱う: {err}"
+        );
     }
 
     #[tokio::test]
@@ -318,11 +385,18 @@ mod tests {
             get(|| async { Json(json!([{ "name": "x".repeat(10_000), "styles": [] }])) }),
         );
         let url = serve(app).await;
-        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000, 1_000_000);
+        let e = ExternalEngine::new(&url)
+            .unwrap()
+            .with_limits(1_000, 1_000_000);
         let err = e.voices().await.unwrap_err().to_string();
-        assert!(err.contains(ERR_BAD_RESPONSE) && err.contains("大きすぎ"), "{err}");
+        assert!(
+            err.contains(ERR_BAD_RESPONSE) && err.contains("大きすぎ"),
+            "{err}"
+        );
         // 上限以内なら通る。
-        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000_000, 1_000_000);
+        let e = ExternalEngine::new(&url)
+            .unwrap()
+            .with_limits(1_000_000, 1_000_000);
         assert!(e.voices().await.is_ok());
     }
 
@@ -330,7 +404,10 @@ mod tests {
     async fn an_oversized_wav_is_rejected_even_without_a_content_length() {
         use axum::body::{Body, Bytes};
         let app = Router::new()
-            .route("/audio_query", post(|| async { Json(json!({"speedScale": 1.0, "volumeScale": 1.0})) }))
+            .route(
+                "/audio_query",
+                post(|| async { Json(json!({"speedScale": 1.0, "volumeScale": 1.0})) }),
+            )
             .route(
                 "/synthesis",
                 post(|| async {
@@ -346,11 +423,21 @@ mod tests {
                 }),
             );
         let url = serve(app).await;
-        let p = SynthParams { speed_scale: 1.0, volume: 1.0 };
-        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000_000, 5_000);
+        let p = SynthParams {
+            speed_scale: 1.0,
+            volume: 1.0,
+        };
+        let e = ExternalEngine::new(&url)
+            .unwrap()
+            .with_limits(1_000_000, 5_000);
         let err = e.synthesize("a", "1", &p).await.unwrap_err().to_string();
-        assert!(err.contains(ERR_BAD_RESPONSE) && err.contains("大きすぎ"), "{err}");
-        let e = ExternalEngine::new(&url).unwrap().with_limits(1_000_000, 1_000_000);
+        assert!(
+            err.contains(ERR_BAD_RESPONSE) && err.contains("大きすぎ"),
+            "{err}"
+        );
+        let e = ExternalEngine::new(&url)
+            .unwrap()
+            .with_limits(1_000_000, 1_000_000);
         assert_eq!(e.synthesize("a", "1", &p).await.unwrap().len(), 20_000);
     }
 
@@ -362,17 +449,45 @@ mod tests {
             l.local_addr().unwrap().port()
         };
         let e = ExternalEngine::new(&format!("http://127.0.0.1:{port}")).unwrap();
-        let err = e.synthesize("秘密の本文", "1", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap_err().to_string();
+        let err = e
+            .synthesize(
+                "秘密の本文",
+                "1",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains(ERR_UNREACHABLE), "{err}");
-        assert!(!err.contains("audio_query") && !err.contains("秘密") && !err.contains("%E7%A7%98"), "本文や URL を含まない: {err}");
+        assert!(
+            !err.contains("audio_query") && !err.contains("秘密") && !err.contains("%E7%A7%98"),
+            "本文や URL を含まない: {err}"
+        );
 
         // 応答の JSON が壊れているときも同じ。
         let app = Router::new().route("/audio_query", post(|| async { "not json" }));
         let url = serve(app).await;
         let e = ExternalEngine::new(&url).unwrap();
-        let err = e.synthesize("秘密の本文", "1", &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap_err().to_string();
+        let err = e
+            .synthesize(
+                "秘密の本文",
+                "1",
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(err.contains(ERR_BAD_RESPONSE), "{err}");
-        assert!(!err.contains("audio_query") && !err.contains("秘密") && !err.contains("%E7%A7%98"), "本文や URL を含まない: {err}");
+        assert!(
+            !err.contains("audio_query") && !err.contains("秘密") && !err.contains("%E7%A7%98"),
+            "本文や URL を含まない: {err}"
+        );
     }
 
     #[tokio::test]
@@ -385,10 +500,19 @@ mod tests {
             }),
         );
         let url = serve(app).await;
-        let e = ExternalEngine::with_timeouts(&url, Duration::from_millis(200), Duration::from_millis(300)).unwrap();
+        let e = ExternalEngine::with_timeouts(
+            &url,
+            Duration::from_millis(200),
+            Duration::from_millis(300),
+        )
+        .unwrap();
         let started = std::time::Instant::now();
         let err = e.voices().await.unwrap_err();
-        assert!(started.elapsed() < Duration::from_secs(5), "タイムアウトで返る: {:?}", started.elapsed());
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "タイムアウトで返る: {:?}",
+            started.elapsed()
+        );
         assert!(err.to_string().contains(ERR_UNREACHABLE), "{err}");
     }
 
@@ -406,18 +530,54 @@ mod tests {
     #[tokio::test]
     #[ignore = "実エンジンが要る: TSUMUGI_TEST_SPEECH_URL"]
     async fn real_voicevox_engine() {
-        let url = std::env::var("TSUMUGI_TEST_SPEECH_URL").expect("TSUMUGI_TEST_SPEECH_URL を設定してください");
+        let url = std::env::var("TSUMUGI_TEST_SPEECH_URL")
+            .expect("TSUMUGI_TEST_SPEECH_URL を設定してください");
         let e = ExternalEngine::new(&url).unwrap();
         let voices = e.voices().await.unwrap();
         assert!(!voices.is_empty(), "声が1つ以上ある");
         let id = voices[0].id.clone();
 
-        let normal = e.synthesize("こんにちは、読み上げのテストです", &id, &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap();
-        let fast = e.synthesize("こんにちは、読み上げのテストです", &id, &SynthParams { speed_scale: 2.0, volume: 1.0 }).await.unwrap();
+        let normal = e
+            .synthesize(
+                "こんにちは、読み上げのテストです",
+                &id,
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap();
+        let fast = e
+            .synthesize(
+                "こんにちは、読み上げのテストです",
+                &id,
+                &SynthParams {
+                    speed_scale: 2.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap();
         assert!(normal.starts_with(b"RIFF") && fast.starts_with(b"RIFF"));
-        assert!(fast.len() < normal.len() * 3 / 4, "話速 2.0 は、1.0 よりだいぶ短い: {} vs {}", fast.len(), normal.len());
+        assert!(
+            fast.len() < normal.len() * 3 / 4,
+            "話速 2.0 は、1.0 よりだいぶ短い: {} vs {}",
+            fast.len(),
+            normal.len()
+        );
         // 記号・改行・絵文字を含む本文でも合成できる(クエリの URL エンコードが壊れていない)。
-        let odd = e.synthesize("A&B=C?\nうさぎ", &id, &SynthParams { speed_scale: 1.0, volume: 1.0 }).await.unwrap();
+        let odd = e
+            .synthesize(
+                "A&B=C?\nうさぎ",
+                &id,
+                &SynthParams {
+                    speed_scale: 1.0,
+                    volume: 1.0,
+                },
+            )
+            .await
+            .unwrap();
         assert!(odd.starts_with(b"RIFF"));
     }
 }

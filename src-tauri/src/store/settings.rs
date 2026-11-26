@@ -31,8 +31,16 @@ impl ServerMuteSnapshot {
         W: IntoIterator<Item = String>,
     {
         Self {
-            users: users.into_iter().collect::<BTreeSet<_>>().into_iter().collect(),
-            words: words.into_iter().collect::<BTreeSet<_>>().into_iter().collect(),
+            users: users
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+            words: words
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
         }
     }
 
@@ -165,10 +173,12 @@ impl SettingsStore {
     }
 
     pub fn upsert_account(&self, a: &Account) -> Result<()> {
-        self.update(|data| match data.accounts.iter_mut().find(|x| x.id == a.id) {
-            Some(existing) => *existing = a.clone(),
-            None => data.accounts.push(a.clone()),
-        })
+        self.update(
+            |data| match data.accounts.iter_mut().find(|x| x.id == a.id) {
+                Some(existing) => *existing = a.clone(),
+                None => data.accounts.push(a.clone()),
+            },
+        )
     }
 
     /// アカウント削除。紐づくカラムも消す。保存に成功してからメモリを差し替えるので、
@@ -230,8 +240,12 @@ impl SettingsStore {
         self.update(|data| {
             let used: std::collections::HashSet<String> =
                 data.columns.iter().map(|c| c.group_id.clone()).collect();
-            let removed_ids: Vec<String> =
-                data.groups.iter().filter(|g| !used.contains(&g.id)).map(|g| g.id.clone()).collect();
+            let removed_ids: Vec<String> = data
+                .groups
+                .iter()
+                .filter(|g| !used.contains(&g.id))
+                .map(|g| g.id.clone())
+                .collect();
             data.groups.retain(|g| used.contains(&g.id));
             for gid in &removed_ids {
                 if let Some(root) = &mut data.pane_layout {
@@ -283,10 +297,12 @@ impl SettingsStore {
     }
 
     pub fn upsert_column(&self, c: &Column) -> Result<()> {
-        self.update(|data| match data.columns.iter_mut().find(|x| x.id == c.id) {
-            Some(existing) => *existing = c.clone(),
-            None => data.columns.push(c.clone()),
-        })
+        self.update(
+            |data| match data.columns.iter_mut().find(|x| x.id == c.id) {
+                Some(existing) => *existing = c.clone(),
+                None => data.columns.push(c.clone()),
+            },
+        )
     }
 
     pub fn delete_column(&self, column_id: &str) -> Result<()> {
@@ -305,13 +321,27 @@ impl SettingsStore {
 
     // ---- サーバー側ミュートの前回の集合(Issue #454) ----
 
-    pub fn load_server_mute_snapshot(&self, account_id: &str) -> Result<Option<ServerMuteSnapshot>> {
-        Ok(self.data.lock().unwrap().server_mute_snapshots.get(account_id).cloned())
+    pub fn load_server_mute_snapshot(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<ServerMuteSnapshot>> {
+        Ok(self
+            .data
+            .lock()
+            .unwrap()
+            .server_mute_snapshots
+            .get(account_id)
+            .cloned())
     }
 
-    pub fn save_server_mute_snapshot(&self, account_id: &str, snapshot: &ServerMuteSnapshot) -> Result<()> {
+    pub fn save_server_mute_snapshot(
+        &self,
+        account_id: &str,
+        snapshot: &ServerMuteSnapshot,
+    ) -> Result<()> {
         self.update(|data| {
-            data.server_mute_snapshots.insert(account_id.to_string(), snapshot.clone());
+            data.server_mute_snapshots
+                .insert(account_id.to_string(), snapshot.clone());
         })
     }
 
@@ -358,11 +388,21 @@ impl SettingsStore {
 
     /// 1つのカラムを返す(無ければ `None`)。
     pub fn load_column(&self, column_id: &str) -> Option<Column> {
-        self.data.lock().unwrap().columns.iter().find(|c| c.id == column_id).cloned()
+        self.data
+            .lock()
+            .unwrap()
+            .columns
+            .iter()
+            .find(|c| c.id == column_id)
+            .cloned()
     }
 
     /// カラムの読み上げ設定を更新する。カラムが無ければ何もせず `Ok(false)`。
-    pub fn set_column_speech(&self, column_id: &str, speech: crate::domain::ColumnSpeech) -> Result<bool> {
+    pub fn set_column_speech(
+        &self,
+        column_id: &str,
+        speech: crate::domain::ColumnSpeech,
+    ) -> Result<bool> {
         let mut guard = self.data.lock().unwrap();
         let mut next = guard.clone();
         let Some(c) = next.columns.iter_mut().find(|x| x.id == column_id) else {
@@ -374,7 +414,11 @@ impl SettingsStore {
     }
 
     pub fn local_model_license_version(&self) -> Option<String> {
-        self.data.lock().unwrap().local_model_license_version.clone()
+        self.data
+            .lock()
+            .unwrap()
+            .local_model_license_version
+            .clone()
     }
 
     pub fn set_local_model_license_version(&self, version: &str) -> Result<()> {
@@ -478,7 +522,10 @@ impl SettingsStore {
 
             let mut cleaned = root.clone();
 
-            let orphan_ids: Vec<&String> = all_ids.iter().filter(|id| !known.contains(id.as_str())).collect();
+            let orphan_ids: Vec<&String> = all_ids
+                .iter()
+                .filter(|id| !known.contains(id.as_str()))
+                .collect();
             for gid in orphan_ids {
                 cleaned.remove_group(gid);
             }
@@ -577,7 +624,10 @@ fn load_json_or_default(path: &Path, backgrounds_dir: &Path) -> Result<SettingsD
     };
     // 一時的なI/O失敗でキーを残したとき、`UiPrefs` は backgroundImage を持たないので、この起動中に
     // 設定を1回でも保存するとキーが消える。書き直される前に元のファイルを退避しておく(Issue #687)。
-    if value.get("ui").is_some_and(|ui| ui.get("backgroundImage").is_some()) {
+    if value
+        .get("ui")
+        .is_some_and(|ui| ui.get("backgroundImage").is_some())
+    {
         backup_settings_before_background_retry(path);
     }
     let mut data: SettingsData = serde_json::from_value(value)?;
@@ -620,8 +670,12 @@ fn migrate_legacy_background_image(
     ui: &mut serde_json::Value,
     backgrounds_dir: &Path,
 ) -> Result<bool> {
-    let Some(map) = ui.as_object_mut() else { return Ok(false) };
-    let Some(data_url) = map.get("backgroundImage").and_then(|v| v.as_str().map(str::to_string))
+    let Some(map) = ui.as_object_mut() else {
+        return Ok(false);
+    };
+    let Some(data_url) = map
+        .get("backgroundImage")
+        .and_then(|v| v.as_str().map(str::to_string))
     else {
         return Ok(false);
     };
@@ -629,8 +683,9 @@ fn migrate_legacy_background_image(
         map.remove("backgroundImage");
         return Ok(true);
     }
-    let Some((mime, b64)) =
-        data_url.strip_prefix("data:").and_then(|rest| rest.split_once(";base64,"))
+    let Some((mime, b64)) = data_url
+        .strip_prefix("data:")
+        .and_then(|rest| rest.split_once(";base64,"))
     else {
         map.remove("backgroundImage");
         return Ok(true);
@@ -661,7 +716,9 @@ fn migrate_legacy_background_image(
     }
     let file_path = backgrounds_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
     if let Err(e) = std::fs::write(&file_path, bytes) {
-        log::warn!("legacy backgroundImage migration: failed to write file, will retry on next start: {e}");
+        log::warn!(
+            "legacy backgroundImage migration: failed to write file, will retry on next start: {e}"
+        );
         return Ok(false);
     }
 
@@ -769,8 +826,18 @@ pub fn migrate_from_legacy_sqlite(
     })?;
     let mut columns = Vec::new();
     for row in rows {
-        let (id, account_id, kind_json, ord, filter_json, notify_sound, notify_desktop, group_id, title, notify_sound_choice) =
-            row?;
+        let (
+            id,
+            account_id,
+            kind_json,
+            ord,
+            filter_json,
+            notify_sound,
+            notify_desktop,
+            group_id,
+            title,
+            notify_sound_choice,
+        ) = row?;
         columns.push(Column {
             id,
             account_id,
@@ -788,7 +855,11 @@ pub fn migrate_from_legacy_sqlite(
 
     let get_kv = |key: &str| -> Result<Option<String>> {
         Ok(legacy_conn
-            .query_row("SELECT value FROM app_setting WHERE key = ?1", params![key], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM app_setting WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
             .ok())
     };
     let mute = get_kv("mute")?
@@ -852,13 +923,19 @@ mod tests {
         let s = SettingsStore::new_in_memory();
         assert_eq!(s.local_model_license_version(), None);
         s.set_local_model_license_version("2026-11-09").unwrap();
-        assert_eq!(s.local_model_license_version().as_deref(), Some("2026-11-09"));
+        assert_eq!(
+            s.local_model_license_version().as_deref(),
+            Some("2026-11-09")
+        );
     }
 
     #[test]
     fn speech_core_terms_version_is_none_until_set_and_then_kept() {
         let d: SettingsData = serde_json::from_str("{}").unwrap();
-        assert_eq!(d.speech_core_terms_version, None, "旧い設定ファイルは未同意として読む");
+        assert_eq!(
+            d.speech_core_terms_version, None,
+            "旧い設定ファイルは未同意として読む"
+        );
         let s = SettingsStore::new_in_memory();
         assert_eq!(s.speech_core_terms_version(), None);
         s.set_speech_core_terms_version("abc").unwrap();
@@ -881,7 +958,8 @@ mod tests {
     #[test]
     fn delete_account_removes_it_from_mcp_exposed_ids() {
         let s = SettingsStore::new_in_memory();
-        s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into(), "a2".into()]).unwrap();
+        s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into(), "a2".into()])
+            .unwrap();
         s.delete_account("a1").unwrap();
         assert_eq!(s.load_mcp().exposed_account_ids, vec!["a2".to_string()]);
     }
@@ -967,8 +1045,10 @@ mod tests {
         let s = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
         s.upsert_account(&account("a1")).unwrap();
         s.upsert_column(&column("c1", "a1", 0)).unwrap();
-        s.save_server_mute_snapshot("a1", &snap(&["u1"], &[])).unwrap();
-        s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).unwrap();
+        s.save_server_mute_snapshot("a1", &snap(&["u1"], &[]))
+            .unwrap();
+        s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()])
+            .unwrap();
 
         disk.break_dir();
         assert!(s.delete_account("a1").is_err());
@@ -989,13 +1069,18 @@ mod tests {
         let s = store();
         s.upsert_account(&account("a1")).unwrap();
         s.upsert_account(&account("a2")).unwrap();
-        s.save_server_mute_snapshot("a1", &snap(&["u1"], &["w:a"])).unwrap();
-        s.save_server_mute_snapshot("a2", &snap(&["u9"], &[])).unwrap();
+        s.save_server_mute_snapshot("a1", &snap(&["u1"], &["w:a"]))
+            .unwrap();
+        s.save_server_mute_snapshot("a2", &snap(&["u9"], &[]))
+            .unwrap();
 
         s.delete_account("a1").unwrap();
 
         assert_eq!(s.load_server_mute_snapshot("a1").unwrap(), None);
-        assert_eq!(s.load_server_mute_snapshot("a2").unwrap(), Some(snap(&["u9"], &[])));
+        assert_eq!(
+            s.load_server_mute_snapshot("a2").unwrap(),
+            Some(snap(&["u9"], &[]))
+        );
     }
 
     #[test]
@@ -1014,24 +1099,51 @@ mod tests {
     fn groups_and_move_tab() {
         let s = store();
         s.upsert_account(&account("a1")).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g2".into(),
+            order: 1,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
         s.upsert_column(&column("c1", "a1", 0)).unwrap(); // g1
-        // タブを g2 へ移動
+                                                          // タブを g2 へ移動
         s.move_tab("c1", "g2", &["c1".into()]).unwrap();
         let cols = s.load_columns().unwrap();
         assert_eq!(cols[0].group_id, "g2");
         // g1 は空 → 掃除
         s.delete_empty_groups().unwrap();
         let groups = s.load_groups().unwrap();
-        assert_eq!(groups.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(), ["g2"]);
+        assert_eq!(
+            groups.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
+            ["g2"]
+        );
     }
 
     #[test]
     fn set_group_width_and_reorder() {
         let s = store();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g2".into(),
+            order: 1,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
         s.set_group_width("g1", 420).unwrap();
         s.reorder_groups(&["g2".into(), "g1".into()]).unwrap();
         let groups = s.load_groups().unwrap();
@@ -1043,12 +1155,29 @@ mod tests {
     #[test]
     fn pane_layout_defaults_to_row_of_existing_groups_when_unset() {
         let s = SettingsStore::new_in_memory();
-        let g1 = ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false };
-        let g2 = ColumnGroup { id: "g2".into(), order: 1, width: 320, auto: false };
+        let g1 = ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        };
+        let g2 = ColumnGroup {
+            id: "g2".into(),
+            order: 1,
+            width: 320,
+            auto: false,
+        };
         s.upsert_group(&g1).unwrap();
         s.upsert_group(&g2).unwrap();
         let root = s.load_pane_layout().unwrap();
-        let PaneNode::Split { direction, children, .. } = root else { panic!("expected Split") };
+        let PaneNode::Split {
+            direction,
+            children,
+            ..
+        } = root
+        else {
+            panic!("expected Split")
+        };
         assert_eq!(direction, SplitDirection::Row);
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].size, 300.0);
@@ -1061,18 +1190,30 @@ mod tests {
         // 自己修復(Issue #31)。g1(存在)とorphan(groupsに無い)の2子Splitは、読み込み時点で
         // orphanが取り除かれ1子になり、g1単体のLeafへ畳まれて返る。
         let s = SettingsStore::new_in_memory();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
         let stale = PaneNode::Split {
             id: "root".into(),
             direction: SplitDirection::Column,
             children: vec![
                 PaneChild {
-                    node: PaneNode::Leaf { id: "l1".into(), group_id: "g1".into() },
+                    node: PaneNode::Leaf {
+                        id: "l1".into(),
+                        group_id: "g1".into(),
+                    },
                     size: 1.0,
                     auto: false,
                 },
                 PaneChild {
-                    node: PaneNode::Leaf { id: "l2".into(), group_id: "orphan".into() },
+                    node: PaneNode::Leaf {
+                        id: "l2".into(),
+                        group_id: "orphan".into(),
+                    },
                     size: 1.0,
                     auto: false,
                 },
@@ -1081,7 +1222,9 @@ mod tests {
         s.save_pane_layout(&stale).unwrap();
 
         let cleaned = s.load_pane_layout().unwrap();
-        let PaneNode::Leaf { group_id, .. } = &cleaned else { panic!("expected collapsed Leaf") };
+        let PaneNode::Leaf { group_id, .. } = &cleaned else {
+            panic!("expected collapsed Leaf")
+        };
         assert_eq!(group_id, "g1");
     }
 
@@ -1090,17 +1233,40 @@ mod tests {
         // 旧バージョンのadd_column(木への追加を実装する前)が作った、木に一切登場しない
         // グループがある場合、読み込み時点でRowの末尾に補って返す(Issue #31)。
         let s = SettingsStore::new_in_memory();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 400, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g2".into(),
+            order: 1,
+            width: 400,
+            auto: false,
+        })
+        .unwrap();
         s.save_pane_layout(&PaneNode::new_leaf("g1")).unwrap();
 
         let root = s.load_pane_layout().unwrap();
-        let PaneNode::Split { direction, children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split {
+            direction,
+            children,
+            ..
+        } = &root
+        else {
+            panic!("expected Split")
+        };
         assert_eq!(*direction, SplitDirection::Row);
         assert_eq!(children.len(), 2);
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "g1");
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "g2");
         assert_eq!(children[1].size, 400.0);
     }
@@ -1110,15 +1276,48 @@ mod tests {
         // add_column/split_paneに一時期あった二重挿入バグの後始末(Issue #31)。
         // 同じgroup_idが木の中に2回登場する場合、読み込み時点で1つだけ残す。
         let s = SettingsStore::new_in_memory();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g2".into(),
+            order: 1,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
         let dup = PaneNode::Split {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "l1".into(), group_id: "g1".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "l2".into(), group_id: "g2".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "l3".into(), group_id: "g2".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "l1".into(),
+                        group_id: "g1".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "l2".into(),
+                        group_id: "g2".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "l3".into(),
+                        group_id: "g2".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         s.save_pane_layout(&dup).unwrap();
@@ -1135,18 +1334,36 @@ mod tests {
         // 全グループが入れ替わった等でルート自体(裸のLeaf)が孤児になった場合は、
         // remove_groupで自己削除できないため、現在のgroupsから素直に再構築する。
         let s = SettingsStore::new_in_memory();
-        s.upsert_group(&ColumnGroup { id: "g_new".into(), order: 0, width: 400, auto: false }).unwrap();
-        s.save_pane_layout(&PaneNode::Leaf { id: "l1".into(), group_id: "g_old_gone".into() }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g_new".into(),
+            order: 0,
+            width: 400,
+            auto: false,
+        })
+        .unwrap();
+        s.save_pane_layout(&PaneNode::Leaf {
+            id: "l1".into(),
+            group_id: "g_old_gone".into(),
+        })
+        .unwrap();
 
         let root = s.load_pane_layout().unwrap();
-        let PaneNode::Leaf { group_id, .. } = &root else { panic!("expected Leaf") };
+        let PaneNode::Leaf { group_id, .. } = &root else {
+            panic!("expected Leaf")
+        };
         assert_eq!(group_id, "g_new");
     }
 
     #[test]
     fn pane_layout_round_trips_through_save_and_load() {
         let s = SettingsStore::new_in_memory();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
         let root = PaneNode::new_leaf("g1");
         s.save_pane_layout(&root).unwrap();
         assert_eq!(s.load_pane_layout().unwrap(), root);
@@ -1155,43 +1372,83 @@ mod tests {
     #[test]
     fn delete_empty_groups_prunes_pane_layout_and_collapses() {
         let s = SettingsStore::new_in_memory();
-        let g1 = ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false };
-        let g2 = ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false };
+        let g1 = ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: false,
+        };
+        let g2 = ColumnGroup {
+            id: "g2".into(),
+            order: 1,
+            width: 300,
+            auto: false,
+        };
         s.upsert_group(&g1).unwrap();
         s.upsert_group(&g2).unwrap();
         // g1をColumn方向に分割してg3を作る(タブは無い状態を模す)
         let mut root = s.load_pane_layout().unwrap();
         assert!(root.insert_sibling("g1", "g3", SplitDirection::Column));
         s.save_pane_layout(&root).unwrap();
-        let g3 = ColumnGroup { id: "g3".into(), order: 2, width: 300, auto: false };
+        let g3 = ColumnGroup {
+            id: "g3".into(),
+            order: 2,
+            width: 300,
+            auto: false,
+        };
         s.upsert_group(&g3).unwrap();
         // g3にはタブが無いまま delete_empty_groups を呼ぶ(g1/g2にはタブがある体で columns に積む)
         let c1 = Column {
-            id: "c1".into(), account_id: "a".into(), kind: ColumnKind::Home, order: 0,
-            filter: FilterQuery::Keywords(vec![]), notify_sound: false, notify_desktop: false,
-            notify_sound_choice: String::new(), speech: Default::default(), group_id: "g1".into(), title: None,
+            id: "c1".into(),
+            account_id: "a".into(),
+            kind: ColumnKind::Home,
+            order: 0,
+            filter: FilterQuery::Keywords(vec![]),
+            notify_sound: false,
+            notify_desktop: false,
+            notify_sound_choice: String::new(),
+            speech: Default::default(),
+            group_id: "g1".into(),
+            title: None,
         };
-        let c2 = Column { id: "c2".into(), group_id: "g2".into(), ..c1.clone() };
+        let c2 = Column {
+            id: "c2".into(),
+            group_id: "g2".into(),
+            ..c1.clone()
+        };
         s.upsert_column(&c1).unwrap();
         s.upsert_column(&c2).unwrap();
         s.delete_empty_groups().unwrap();
         // g3(タブ無し)は消え、pane_layoutからも取り除かれてg1側に畳まれている
         let groups = s.load_groups().unwrap();
-        assert_eq!(groups.iter().map(|g| g.id.clone()).collect::<Vec<_>>(), vec!["g1", "g2"]);
+        assert_eq!(
+            groups.iter().map(|g| g.id.clone()).collect::<Vec<_>>(),
+            vec!["g1", "g2"]
+        );
         let root = s.load_pane_layout().unwrap();
-        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = root else {
+            panic!("expected Split")
+        };
         assert_eq!(children.len(), 2);
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "g1"); // g3が畳まれ、g1が直接の子に戻っている
     }
 
     #[test]
     fn cache_backend_defaults_to_sqlite_and_roundtrips_postgres() {
         let store = SettingsStore::new_in_memory();
-        assert_eq!(store.load_cache_backend().unwrap(), CacheBackendConfig::Sqlite);
+        assert_eq!(
+            store.load_cache_backend().unwrap(),
+            CacheBackendConfig::Sqlite
+        );
 
         let cfg = CacheBackendConfig::Postgres {
-            host: "db.example".into(), port: 5432, database: "tsumugi".into(), user: "app".into(),
+            host: "db.example".into(),
+            port: 5432,
+            database: "tsumugi".into(),
+            user: "app".into(),
         };
         store.save_cache_backend(&cfg).unwrap();
         assert_eq!(store.load_cache_backend().unwrap(), cfg);
@@ -1203,10 +1460,15 @@ mod tests {
     /// (実運用での再起動シナリオの回帰テスト)。
     #[test]
     fn cache_backend_postgres_config_persists_across_restart_via_json_file() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-cache-backend-test-{}.json", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "tsumugi-cache-backend-test-{}.json",
+            uuid::Uuid::new_v4()
+        ));
         let cfg = CacheBackendConfig::Postgres {
-            host: "db.example".into(), port: 5432, database: "tsumugi".into(), user: "app".into(),
+            host: "db.example".into(),
+            port: 5432,
+            database: "tsumugi".into(),
+            user: "app".into(),
         };
         {
             let s = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
@@ -1226,8 +1488,20 @@ mod tests {
     #[test]
     fn group_auto_roundtrips_and_set_group_auto_updates() {
         let s = store();
-        s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: true }).unwrap();
-        s.upsert_group(&ColumnGroup { id: "g2".into(), order: 1, width: 300, auto: false }).unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g1".into(),
+            order: 0,
+            width: 300,
+            auto: true,
+        })
+        .unwrap();
+        s.upsert_group(&ColumnGroup {
+            id: "g2".into(),
+            order: 1,
+            width: 300,
+            auto: false,
+        })
+        .unwrap();
         let groups = s.load_groups().unwrap();
         assert!(groups.iter().find(|g| g.id == "g1").unwrap().auto);
         assert!(!groups.iter().find(|g| g.id == "g2").unwrap().auto);
@@ -1240,11 +1514,20 @@ mod tests {
     /// JSONファイルへの実書き込み・再読み込みを検証（Memoryバッキングでは検証できない部分）。
     #[test]
     fn persists_to_plain_text_json_file_and_reloads() {
-        let path = std::env::temp_dir().join(format!("tsumugi-settings-test-{}.json", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "tsumugi-settings-test-{}.json",
+            uuid::Uuid::new_v4()
+        ));
         {
             let s = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
             s.upsert_account(&account("a1")).unwrap();
-            s.upsert_group(&ColumnGroup { id: "g1".into(), order: 0, width: 300, auto: false }).unwrap();
+            s.upsert_group(&ColumnGroup {
+                id: "g1".into(),
+                order: 0,
+                width: 300,
+                auto: false,
+            })
+            .unwrap();
             s.upsert_column(&column("c1", "a1", 0)).unwrap();
         }
 
@@ -1265,10 +1548,10 @@ mod tests {
     /// 書き出され、backgroundKind/backgroundPath に自動移行されること。
     #[test]
     fn migrates_legacy_base64_background_image_to_file() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-legacy-bg-{}.json", uuid::Uuid::new_v4()));
-        let backgrounds_dir = std::env::temp_dir()
-            .join(format!("tsumugi-legacy-bg-dir-{}", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("tsumugi-legacy-bg-{}.json", uuid::Uuid::new_v4()));
+        let backgrounds_dir =
+            std::env::temp_dir().join(format!("tsumugi-legacy-bg-dir-{}", uuid::Uuid::new_v4()));
         // 1x1 の透明PNGのBase64(実データでなくてもデコードできれば十分)。
         let legacy_json = r#"{
             "ui": {
@@ -1281,7 +1564,10 @@ mod tests {
 
         let s = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
         let ui = s.load_ui().unwrap();
-        assert_eq!(ui.background_kind, Some(crate::domain::BackgroundKind::Image));
+        assert_eq!(
+            ui.background_kind,
+            Some(crate::domain::BackgroundKind::Image)
+        );
         let bg_path = ui.background_path.expect("background_path should be set");
         assert!(std::path::Path::new(&bg_path).exists());
         assert!(bg_path.starts_with(backgrounds_dir.to_str().unwrap()));
@@ -1298,10 +1584,14 @@ mod tests {
     /// backgroundImageキーを削除して読み込みが継続すること(background_kind/background_pathはNoneのまま)。
     #[test]
     fn no_panic_on_invalid_legacy_background_image_base64() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-invalid-bg-b64-{}.json", uuid::Uuid::new_v4()));
-        let backgrounds_dir = std::env::temp_dir()
-            .join(format!("tsumugi-invalid-bg-b64-dir-{}", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "tsumugi-invalid-bg-b64-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let backgrounds_dir = std::env::temp_dir().join(format!(
+            "tsumugi-invalid-bg-b64-dir-{}",
+            uuid::Uuid::new_v4()
+        ));
         let legacy_json = r#"{
             "ui": {
                 "theme": "dark",
@@ -1335,11 +1625,15 @@ mod tests {
     /// backgroundImage をファイルから消さないこと。次回起動で再試行でき、成功すれば移行されること(Issue #623)。
     #[test]
     fn keeps_legacy_background_image_when_file_write_fails() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-bg-write-fail-{}.json", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "tsumugi-bg-write-fail-{}.json",
+            uuid::Uuid::new_v4()
+        ));
         // 通常ファイルの配下は create_dir_all が必ず失敗する(権限に依らない)。
-        let blocker = std::env::temp_dir()
-            .join(format!("tsumugi-bg-write-fail-blocker-{}", uuid::Uuid::new_v4()));
+        let blocker = std::env::temp_dir().join(format!(
+            "tsumugi-bg-write-fail-blocker-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(&blocker, b"not a directory").unwrap();
         let broken_dir = blocker.join("backgrounds");
         let data_url = "data:image/png;base64,iVBORw0KGgo=";
@@ -1362,10 +1656,16 @@ mod tests {
         assert_eq!(raw["ui"]["backgroundImage"], data_url);
 
         // 書き込める状態に戻った次の起動で移行できる。
-        let backgrounds_dir = std::env::temp_dir()
-            .join(format!("tsumugi-bg-write-fail-dir-{}", uuid::Uuid::new_v4()));
+        let backgrounds_dir = std::env::temp_dir().join(format!(
+            "tsumugi-bg-write-fail-dir-{}",
+            uuid::Uuid::new_v4()
+        ));
         let reloaded = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
-        let bg_path = reloaded.load_ui().unwrap().background_path.expect("migrated on retry");
+        let bg_path = reloaded
+            .load_ui()
+            .unwrap()
+            .background_path
+            .expect("migrated on retry");
         assert!(std::path::Path::new(&bg_path).exists());
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("backgroundImage"));
@@ -1379,11 +1679,13 @@ mod tests {
     /// その前に退避したファイルには元のデータが残ること(Issue #687)。
     #[test]
     fn backs_up_settings_when_legacy_background_migration_fails() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-bg-backup-{}.json", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("tsumugi-bg-backup-{}.json", uuid::Uuid::new_v4()));
         let backup = path.with_extension("json.bak-legacy-background");
-        let blocker = std::env::temp_dir()
-            .join(format!("tsumugi-bg-backup-blocker-{}", uuid::Uuid::new_v4()));
+        let blocker = std::env::temp_dir().join(format!(
+            "tsumugi-bg-backup-blocker-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(&blocker, b"not a directory").unwrap();
         let broken_dir = blocker.join("backgrounds");
         let data_url = "data:image/png;base64,iVBORw0KGgo=";
@@ -1416,11 +1718,15 @@ mod tests {
     /// 退避ファイルがすでにあれば上書きしないこと(最初に残したものが元のデータ)。
     #[test]
     fn does_not_overwrite_existing_legacy_background_backup() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-bg-backup-keep-{}.json", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "tsumugi-bg-backup-keep-{}.json",
+            uuid::Uuid::new_v4()
+        ));
         let backup = path.with_extension("json.bak-legacy-background");
-        let blocker = std::env::temp_dir()
-            .join(format!("tsumugi-bg-backup-keep-blocker-{}", uuid::Uuid::new_v4()));
+        let blocker = std::env::temp_dir().join(format!(
+            "tsumugi-bg-backup-keep-blocker-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(&blocker, b"not a directory").unwrap();
         std::fs::write(&backup, b"original backup").unwrap();
         std::fs::write(
@@ -1440,11 +1746,15 @@ mod tests {
     /// 移行が成功したとき、または backgroundImage が無いときは退避ファイルを作らないこと。
     #[test]
     fn no_legacy_background_backup_when_migration_succeeds() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-bg-backup-none-{}.json", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "tsumugi-bg-backup-none-{}.json",
+            uuid::Uuid::new_v4()
+        ));
         let backup = path.with_extension("json.bak-legacy-background");
-        let backgrounds_dir = std::env::temp_dir()
-            .join(format!("tsumugi-bg-backup-none-dir-{}", uuid::Uuid::new_v4()));
+        let backgrounds_dir = std::env::temp_dir().join(format!(
+            "tsumugi-bg-backup-none-dir-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(
             &path,
             r#"{"ui":{"theme":"dark","defaultColumnWidth":300,"backgroundImage":"data:image/png;base64,iVBORw0KGgo="}}"#,
@@ -1464,10 +1774,10 @@ mod tests {
     /// backgroundImage が空文字/未設定の場合は移行処理が何もしないこと。
     #[test]
     fn no_migration_when_legacy_background_image_absent() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-no-bg-{}.json", uuid::Uuid::new_v4()));
-        let backgrounds_dir = std::env::temp_dir()
-            .join(format!("tsumugi-no-bg-dir-{}", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("tsumugi-no-bg-{}.json", uuid::Uuid::new_v4()));
+        let backgrounds_dir =
+            std::env::temp_dir().join(format!("tsumugi-no-bg-dir-{}", uuid::Uuid::new_v4()));
         std::fs::write(&path, r#"{"ui":{"theme":"dark","defaultColumnWidth":300}}"#).unwrap();
 
         let s = SettingsStore::new(path.clone(), backgrounds_dir.clone()).unwrap();
@@ -1483,8 +1793,10 @@ mod tests {
     /// 起動時に読み込めること(Issue #31)。実際にユーザ環境で発生した"missing field groupId"クラッシュの回帰テスト。
     #[test]
     fn loads_settings_with_legacy_snake_case_pane_layout_group_id() {
-        let path = std::env::temp_dir()
-            .join(format!("tsumugi-legacy-pane-layout-{}.json", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!(
+            "tsumugi-legacy-pane-layout-{}.json",
+            uuid::Uuid::new_v4()
+        ));
         let legacy_json = r#"{
             "groups": [{"id": "g1", "order": 0, "width": 300, "auto": false}],
             "pane_layout": {
@@ -1504,8 +1816,12 @@ mod tests {
 
         let s = SettingsStore::new(path.clone(), std::env::temp_dir()).unwrap();
         let root = s.load_pane_layout().unwrap();
-        let PaneNode::Split { children, .. } = root else { panic!("expected Split") };
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected Leaf") };
+        let PaneNode::Split { children, .. } = root else {
+            panic!("expected Split")
+        };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("expected Leaf")
+        };
         assert_eq!(group_id, "g1");
 
         std::fs::remove_file(&path).ok();
@@ -1516,10 +1832,14 @@ mod tests {
     /// account/column/column_group/app_setting が新しいJSON設定へ正しく移ることを検証する。
     #[test]
     fn migrates_from_legacy_sqlite_to_json() {
-        let legacy_path =
-            std::env::temp_dir().join(format!("tsumugi-legacy-migrate-{}.db", uuid::Uuid::new_v4()));
-        let json_path =
-            std::env::temp_dir().join(format!("tsumugi-migrated-settings-{}.json", uuid::Uuid::new_v4()));
+        let legacy_path = std::env::temp_dir().join(format!(
+            "tsumugi-legacy-migrate-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let json_path = std::env::temp_dir().join(format!(
+            "tsumugi-migrated-settings-{}.json",
+            uuid::Uuid::new_v4()
+        ));
 
         let legacy_conn = crate::store::db::open_settings(&legacy_path).unwrap();
         legacy_conn
@@ -1530,7 +1850,10 @@ mod tests {
             )
             .unwrap();
         legacy_conn
-            .execute("INSERT INTO column_group (id, ord, width, auto) VALUES ('g1', 0, 300, 0)", [])
+            .execute(
+                "INSERT INTO column_group (id, ord, width, auto) VALUES ('g1', 0, 300, 0)",
+                [],
+            )
             .unwrap();
         legacy_conn
             .execute(
@@ -1546,14 +1869,18 @@ mod tests {
             )
             .unwrap();
 
-        let migrated = migrate_from_legacy_sqlite(&json_path, &legacy_conn, &std::env::temp_dir()).unwrap();
+        let migrated =
+            migrate_from_legacy_sqlite(&json_path, &legacy_conn, &std::env::temp_dir()).unwrap();
         drop(legacy_conn);
 
         assert_eq!(migrated.load_accounts().unwrap().len(), 1);
         assert_eq!(migrated.load_accounts().unwrap()[0].id, "acc1");
         assert_eq!(migrated.load_columns().unwrap().len(), 1);
         assert_eq!(migrated.load_groups().unwrap().len(), 1);
-        assert_eq!(migrated.load_mute().unwrap().ng_words, vec!["spam".to_string()]);
+        assert_eq!(
+            migrated.load_mute().unwrap().ng_words,
+            vec!["spam".to_string()]
+        );
 
         // JSONファイルとして実際に書き出されている(プレーンテキスト)ことも確認
         let raw = std::fs::read_to_string(&json_path).unwrap();
@@ -1583,11 +1910,26 @@ mod tests {
     fn removed_any_since_detects_only_removals() {
         let prev = snap(&["u1", "u2"], &["w:a"]);
 
-        assert!(!snap(&["u1", "u2"], &["w:a"]).removed_any_since(&prev), "変化なし");
-        assert!(!snap(&["u1", "u2", "u3"], &["w:a", "w:b"]).removed_any_since(&prev), "増えただけ");
-        assert!(snap(&["u1"], &["w:a"]).removed_any_since(&prev), "ユーザーが減った");
-        assert!(snap(&["u1", "u2"], &[]).removed_any_since(&prev), "ワードが減った");
-        assert!(snap(&["u1", "u3"], &["w:a"]).removed_any_since(&prev), "入れ替わりは、古い方が消えた = 解除");
+        assert!(
+            !snap(&["u1", "u2"], &["w:a"]).removed_any_since(&prev),
+            "変化なし"
+        );
+        assert!(
+            !snap(&["u1", "u2", "u3"], &["w:a", "w:b"]).removed_any_since(&prev),
+            "増えただけ"
+        );
+        assert!(
+            snap(&["u1"], &["w:a"]).removed_any_since(&prev),
+            "ユーザーが減った"
+        );
+        assert!(
+            snap(&["u1", "u2"], &[]).removed_any_since(&prev),
+            "ワードが減った"
+        );
+        assert!(
+            snap(&["u1", "u3"], &["w:a"]).removed_any_since(&prev),
+            "入れ替わりは、古い方が消えた = 解除"
+        );
     }
 
     #[test]
@@ -1595,11 +1937,19 @@ mod tests {
         let s = store();
         assert_eq!(s.load_server_mute_snapshot("a1").unwrap(), None);
 
-        s.save_server_mute_snapshot("a1", &snap(&["u1"], &["w:a"])).unwrap();
-        s.save_server_mute_snapshot("a2", &snap(&["u9"], &[])).unwrap();
+        s.save_server_mute_snapshot("a1", &snap(&["u1"], &["w:a"]))
+            .unwrap();
+        s.save_server_mute_snapshot("a2", &snap(&["u9"], &[]))
+            .unwrap();
 
-        assert_eq!(s.load_server_mute_snapshot("a1").unwrap(), Some(snap(&["u1"], &["w:a"])));
-        assert_eq!(s.load_server_mute_snapshot("a2").unwrap(), Some(snap(&["u9"], &[])));
+        assert_eq!(
+            s.load_server_mute_snapshot("a1").unwrap(),
+            Some(snap(&["u1"], &["w:a"]))
+        );
+        assert_eq!(
+            s.load_server_mute_snapshot("a2").unwrap(),
+            Some(snap(&["u9"], &[]))
+        );
     }
 
     #[test]
@@ -1615,7 +1965,10 @@ mod tests {
         s.upsert_account(&account("old")).unwrap();
         let mut new = s.snapshot();
         new.accounts = vec![account("new")];
-        new.mute = MuteConfig { ng_words: vec!["x".into()], ..MuteConfig::default() };
+        new.mute = MuteConfig {
+            ng_words: vec!["x".into()],
+            ..MuteConfig::default()
+        };
 
         s.replace(new).unwrap();
 
@@ -1626,7 +1979,8 @@ mod tests {
 
     #[test]
     fn replace_keeps_the_previous_state_when_saving_fails() {
-        let dir = std::env::temp_dir().join(format!("tsumugi-replace-fail-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("tsumugi-replace-fail-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let s = SettingsStore::new(dir.join("settings.json"), dir.join("backgrounds")).unwrap();
         s.upsert_account(&account("old")).unwrap();
@@ -1636,7 +1990,11 @@ mod tests {
         new.accounts = vec![account("new")];
 
         assert!(s.replace(new).is_err());
-        assert_eq!(s.snapshot().accounts, vec![account("old")], "保存に失敗したら、メモリ上の状態は変わらない");
+        assert_eq!(
+            s.snapshot().accounts,
+            vec![account("old")],
+            "保存に失敗したら、メモリ上の状態は変わらない"
+        );
     }
 
     #[test]
@@ -1645,7 +2003,10 @@ mod tests {
         let mut ui = UiPrefs::default();
         ui.search_engine_url = "javascript:alert({query})".into();
         assert!(s.save_ui(&ui).is_err());
-        assert_eq!(s.load_ui().unwrap().search_engine_url, UiPrefs::default().search_engine_url);
+        assert_eq!(
+            s.load_ui().unwrap().search_engine_url,
+            UiPrefs::default().search_engine_url
+        );
 
         let mut ui = UiPrefs::default();
         ui.summaly_proxy_url = "ftp://example.com/".into();
@@ -1665,7 +2026,10 @@ mod tests {
         let mut ui = s.load_ui().unwrap();
         ui.theme = "dark".into();
         s.save_ui(&ui).unwrap();
-        assert!(s.summaly_proxy_imported(), "他の項目の保存では、インポート由来のまま");
+        assert!(
+            s.summaly_proxy_imported(),
+            "他の項目の保存では、インポート由来のまま"
+        );
 
         ui.summaly_proxy_url = "https://b.example/url".into();
         s.save_ui(&ui).unwrap();
@@ -1679,11 +2043,19 @@ mod tests {
         data.ui.summaly_proxy_url = "http://192.168.1.10:3030/url".into();
         data.summaly_proxy_imported = true;
         s.replace(data).unwrap();
-        assert_eq!(s.trusted_summaly_allowlist_entry(), None, "インポート由来は許可リストに入れない");
+        assert_eq!(
+            s.trusted_summaly_allowlist_entry(),
+            None,
+            "インポート由来は許可リストに入れない"
+        );
 
-        s.trust_summaly_proxy("http://192.168.1.10:3030/url").unwrap();
+        s.trust_summaly_proxy("http://192.168.1.10:3030/url")
+            .unwrap();
         assert!(!s.summaly_proxy_imported());
-        assert_eq!(s.trusted_summaly_allowlist_entry().as_deref(), Some("192.168.1.10:3030"));
+        assert_eq!(
+            s.trusted_summaly_allowlist_entry().as_deref(),
+            Some("192.168.1.10:3030")
+        );
     }
 
     #[test]
@@ -1696,7 +2068,10 @@ mod tests {
 
         // 古い画面が見ていた別の値では、信頼されない。
         assert!(s.trust_summaly_proxy("http://other.example/url").is_err());
-        assert!(s.summaly_proxy_imported(), "拒否したら、インポート由来のまま");
+        assert!(
+            s.summaly_proxy_imported(),
+            "拒否したら、インポート由来のまま"
+        );
         assert_eq!(s.trusted_summaly_allowlist_entry(), None);
     }
 
@@ -1723,7 +2098,8 @@ mod tests {
 
     #[test]
     fn invalid_external_urls_in_the_file_are_reset_on_load_without_rewriting_the_file() {
-        let path = std::env::temp_dir().join(format!("tsumugi-bad-urls-{}.json", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("tsumugi-bad-urls-{}.json", uuid::Uuid::new_v4()));
         let json = r#"{"ui":{"theme":"dark","defaultColumnWidth":300,"searchEngineUrl":"javascript:alert({query})","summalyProxyUrl":"data:text/plain,x"}}"#;
         std::fs::write(&path, json).unwrap();
 
@@ -1774,11 +2150,21 @@ mod tests {
         let s = SettingsStore::new_in_memory();
         s.upsert_column(&column("c1", "a1", 0)).unwrap();
         s.upsert_column(&column("c2", "a1", 1)).unwrap();
-        let on = crate::domain::ColumnSpeech { enabled: true, queue_limit: 3, ..Default::default() };
+        let on = crate::domain::ColumnSpeech {
+            enabled: true,
+            queue_limit: 3,
+            ..Default::default()
+        };
         assert!(s.set_column_speech("c1", on.clone()).unwrap());
         assert_eq!(s.load_column("c1").unwrap().speech, on);
-        assert_eq!(s.load_column("c2").unwrap().speech, crate::domain::ColumnSpeech::default());
-        assert!(!s.set_column_speech("nope", on).unwrap(), "存在しないカラムは false");
+        assert_eq!(
+            s.load_column("c2").unwrap().speech,
+            crate::domain::ColumnSpeech::default()
+        );
+        assert!(
+            !s.set_column_speech("nope", on).unwrap(),
+            "存在しないカラムは false"
+        );
         assert!(s.load_column("nope").is_none());
     }
 
@@ -1794,11 +2180,22 @@ mod tests {
 
     /// `update_ops` のすべての操作が、何かを変えられる初期データ。
     fn seeded_data() -> SettingsData {
-        let group = |id: &str, order: i32| ColumnGroup { id: id.into(), order, width: 300, auto: false };
+        let group = |id: &str, order: i32| ColumnGroup {
+            id: id.into(),
+            order,
+            width: 300,
+            auto: false,
+        };
         let mut data = SettingsData::default();
         data.accounts = vec![account("a1")];
         data.groups = vec![group("g1", 0), group("g2", 1), group("g_empty", 2)];
-        data.columns = vec![column("c1", "a1", 0), Column { group_id: "g2".into(), ..column("c2", "a1", 1) }];
+        data.columns = vec![
+            column("c1", "a1", 0),
+            Column {
+                group_id: "g2".into(),
+                ..column("c2", "a1", 1)
+            },
+        ];
         data.pane_layout = Some(PaneNode::new_leaf("g1"));
         data.ui.summaly_proxy_url = "https://a.example/url".into();
         data.summaly_proxy_imported = true;
@@ -1814,20 +2211,34 @@ mod tests {
             ("delete_account", |s| s.delete_account("a1")),
             ("replace", |s| s.replace(SettingsData::default())),
             ("upsert_group", |s| {
-                s.upsert_group(&ColumnGroup { id: "g3".into(), order: 3, width: 300, auto: false })
+                s.upsert_group(&ColumnGroup {
+                    id: "g3".into(),
+                    order: 3,
+                    width: 300,
+                    auto: false,
+                })
             }),
             ("set_group_width", |s| s.set_group_width("g1", 420)),
             ("set_group_auto", |s| s.set_group_auto("g1", true)),
-            ("reorder_groups", |s| s.reorder_groups(&["g2".into(), "g1".into()])),
+            ("reorder_groups", |s| {
+                s.reorder_groups(&["g2".into(), "g1".into()])
+            }),
             ("delete_empty_groups", |s| s.delete_empty_groups()),
             ("set_column_title", |s| s.set_column_title("c1", Some("t"))),
-            ("set_column_notify", |s| s.set_column_notify("c1", false, true, "chime")),
+            ("set_column_notify", |s| {
+                s.set_column_notify("c1", false, true, "chime")
+            }),
             ("upsert_column", |s| s.upsert_column(&column("c3", "a1", 2))),
             ("delete_column", |s| s.delete_column("c1")),
             ("save_mute", |s| {
-                s.save_mute(&MuteConfig { ng_words: vec!["x".into()], ..Default::default() })
+                s.save_mute(&MuteConfig {
+                    ng_words: vec!["x".into()],
+                    ..Default::default()
+                })
             }),
-            ("save_server_mute_snapshot", |s| s.save_server_mute_snapshot("a1", &snap(&["u1"], &[]))),
+            ("save_server_mute_snapshot", |s| {
+                s.save_server_mute_snapshot("a1", &snap(&["u1"], &[]))
+            }),
             ("save_cache_backend", |s| {
                 s.save_cache_backend(&CacheBackendConfig::Postgres {
                     host: "db.example".into(),
@@ -1836,14 +2247,26 @@ mod tests {
                     user: "app".into(),
                 })
             }),
-            ("update_mcp", |s| s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).map(|_| ())),
-            ("update_speech", |s| s.update_speech(|v| v.enabled = true).map(|_| ())),
+            ("update_mcp", |s| {
+                s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()])
+                    .map(|_| ())
+            }),
+            ("update_speech", |s| {
+                s.update_speech(|v| v.enabled = true).map(|_| ())
+            }),
             ("set_column_speech", |s| {
-                let speech = crate::domain::ColumnSpeech { enabled: true, ..Default::default() };
+                let speech = crate::domain::ColumnSpeech {
+                    enabled: true,
+                    ..Default::default()
+                };
                 s.set_column_speech("c1", speech).map(|_| ())
             }),
-            ("set_local_model_license_version", |s| s.set_local_model_license_version("v1")),
-            ("set_speech_core_terms_version", |s| s.set_speech_core_terms_version("v1")),
+            ("set_local_model_license_version", |s| {
+                s.set_local_model_license_version("v1")
+            }),
+            ("set_speech_core_terms_version", |s| {
+                s.set_speech_core_terms_version("v1")
+            }),
             ("save_notify", |s| {
                 let mut notify = s.load_notify()?;
                 notify.sound_choice = "chime".into();
@@ -1854,9 +2277,15 @@ mod tests {
                 ui.summaly_proxy_url = "https://b.example/url".into();
                 s.save_ui(&ui)
             }),
-            ("trust_summaly_proxy", |s| s.trust_summaly_proxy("https://a.example/url")),
-            ("save_pane_layout", |s| s.save_pane_layout(&PaneNode::new_leaf("g2"))),
-            ("move_tab", |s| s.move_tab("c1", "g2", &["c2".into(), "c1".into()])),
+            ("trust_summaly_proxy", |s| {
+                s.trust_summaly_proxy("https://a.example/url")
+            }),
+            ("save_pane_layout", |s| {
+                s.save_pane_layout(&PaneNode::new_leaf("g2"))
+            }),
+            ("move_tab", |s| {
+                s.move_tab("c1", "g2", &["c2".into(), "c1".into()])
+            }),
         ]
     }
 
@@ -1897,12 +2326,15 @@ mod tests {
     fn a_failed_change_is_not_written_by_the_next_successful_save() {
         let (s, disk) = seeded_file_store();
         disk.break_dir();
-        assert!(s.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).is_err());
+        assert!(s
+            .update_mcp(|m| m.exposed_account_ids = vec!["a1".into()])
+            .is_err());
 
         disk.repair_dir();
         s.set_group_width("g1", 420).unwrap();
 
-        let reloaded = SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
+        let reloaded =
+            SettingsStore::new(disk.path("settings.json"), disk.path("backgrounds")).unwrap();
         assert!(reloaded.load_mcp().exposed_account_ids.is_empty());
         assert_eq!(reloaded.load_groups().unwrap()[0].width, 420);
     }

@@ -96,7 +96,12 @@ impl PaneNode {
     /// 兄弟には一切影響しない)。異なる direction(またはルート直下の裸Leaf)なら
     /// reference の位置を新しい direction の Split でラップする(内部2子は
     /// default_wrap_child)。reference が見つからなければ false。
-    pub fn insert_sibling(&mut self, reference_group_id: &str, new_group_id: &str, direction: SplitDirection) -> bool {
+    pub fn insert_sibling(
+        &mut self,
+        reference_group_id: &str,
+        new_group_id: &str,
+        direction: SplitDirection,
+    ) -> bool {
         self.insert_sibling_at(reference_group_id, new_group_id, direction, false)
     }
 
@@ -104,20 +109,47 @@ impl PaneNode {
     /// 新規Leafを挿入する(挙動の詳細はinsert_siblingのドキュメントコメント参照。
     /// before/afterの違いは「新規Leafとreferenceのどちらが子リストで先に来るか」だけで、
     /// size折半・auto継承・ラップの計算方法自体は同じ)。
-    pub fn insert_sibling_at(&mut self, reference_group_id: &str, new_group_id: &str, direction: SplitDirection, before: bool) -> bool {
+    pub fn insert_sibling_at(
+        &mut self,
+        reference_group_id: &str,
+        new_group_id: &str,
+        direction: SplitDirection,
+        before: bool,
+    ) -> bool {
         if let PaneNode::Leaf { group_id, .. } = self {
             if group_id != reference_group_id {
                 return false;
             }
             let old = std::mem::replace(self, PaneNode::new_leaf(String::new()));
             let (w, auto) = Self::default_wrap_child(direction);
-            let new_child = PaneChild { node: PaneNode::new_leaf(new_group_id), size: w, auto };
-            let old_child = PaneChild { node: old, size: w, auto };
-            let children = if before { vec![new_child, old_child] } else { vec![old_child, new_child] };
-            *self = PaneNode::Split { id: uuid::Uuid::new_v4().to_string(), direction, children };
+            let new_child = PaneChild {
+                node: PaneNode::new_leaf(new_group_id),
+                size: w,
+                auto,
+            };
+            let old_child = PaneChild {
+                node: old,
+                size: w,
+                auto,
+            };
+            let children = if before {
+                vec![new_child, old_child]
+            } else {
+                vec![old_child, new_child]
+            };
+            *self = PaneNode::Split {
+                id: uuid::Uuid::new_v4().to_string(),
+                direction,
+                children,
+            };
             return true;
         }
-        let PaneNode::Split { direction: my_dir, children, .. } = self else {
+        let PaneNode::Split {
+            direction: my_dir,
+            children,
+            ..
+        } = self
+        else {
             unreachable!("Leaf case handled above")
         };
         if let Some(idx) = children
@@ -148,7 +180,10 @@ impl PaneNode {
             return true;
         }
         for child in children.iter_mut() {
-            if child.node.insert_sibling_at(reference_group_id, new_group_id, direction, before) {
+            if child
+                .node
+                .insert_sibling_at(reference_group_id, new_group_id, direction, before)
+            {
                 return true;
             }
         }
@@ -213,7 +248,12 @@ impl PaneNode {
     /// 次回の読み込みで設定ファイルが壊れるため、autoの子でも置き換える)。
     /// autoの子のsizeはflexで無視されるので、有限値なら触らない(解除時の初期値として残す)。
     pub fn clamp_child_sizes(&mut self) {
-        let PaneNode::Split { direction, children, .. } = self else {
+        let PaneNode::Split {
+            direction,
+            children,
+            ..
+        } = self
+        else {
             return;
         };
         for child in children.iter_mut() {
@@ -221,10 +261,12 @@ impl PaneNode {
                 (SplitDirection::Row, false, _) => DEFAULT_ROW_WEIGHT_PX,
                 (SplitDirection::Column, false, _) => DEFAULT_COLUMN_AUTO_FALLBACK_PERCENT,
                 (_, true, true) => child.size,
-                (SplitDirection::Row, true, false) => {
-                    child.size.clamp(GROUP_WIDTH_MIN as f32, GROUP_WIDTH_MAX as f32)
+                (SplitDirection::Row, true, false) => child
+                    .size
+                    .clamp(GROUP_WIDTH_MIN as f32, GROUP_WIDTH_MAX as f32),
+                (SplitDirection::Column, true, false) => {
+                    child.size.clamp(COLUMN_WEIGHT_MIN, COLUMN_WEIGHT_MAX)
                 }
-                (SplitDirection::Column, true, false) => child.size.clamp(COLUMN_WEIGHT_MIN, COLUMN_WEIGHT_MAX),
             };
             child.node.clamp_child_sizes();
         }
@@ -254,8 +296,17 @@ impl PaneNode {
     /// 最初の1つ目のグループを追加する場合や、ルートが裸のLeaf/Column分割だった
     /// 場合の後始末を兼ねる)。既存の兄弟の size は一切変更しない。
     pub fn append_row_leaf(&mut self, new_group_id: &str, size: f32) {
-        if let PaneNode::Split { direction: SplitDirection::Row, children, .. } = self {
-            children.push(PaneChild { node: PaneNode::new_leaf(new_group_id), size, auto: false });
+        if let PaneNode::Split {
+            direction: SplitDirection::Row,
+            children,
+            ..
+        } = self
+        {
+            children.push(PaneChild {
+                node: PaneNode::new_leaf(new_group_id),
+                size,
+                auto: false,
+            });
             return;
         }
         let old = std::mem::replace(self, PaneNode::new_leaf(String::new()));
@@ -263,8 +314,16 @@ impl PaneNode {
             id: uuid::Uuid::new_v4().to_string(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: old, size, auto: false },
-                PaneChild { node: PaneNode::new_leaf(new_group_id), size, auto: false },
+                PaneChild {
+                    node: old,
+                    size,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::new_leaf(new_group_id),
+                    size,
+                    auto: false,
+                },
             ],
         };
     }
@@ -278,7 +337,9 @@ mod tests {
     fn leaf_deserializes_current_camel_case_group_id() {
         let current = r#"{"type":"leaf","id":"l1","groupId":"g1"}"#;
         let node: PaneNode = serde_json::from_str(current).unwrap();
-        let PaneNode::Leaf { group_id, .. } = &node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "g1");
     }
 
@@ -297,17 +358,35 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.insert_sibling("a", "c", SplitDirection::Row));
-        let PaneNode::Split { children, .. } = &root else { panic!("root must stay Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("root must stay Split")
+        };
         assert_eq!(children.len(), 3);
         assert_eq!(children[0].size, 150.0); // 分割元(a)は半分になる
         assert_eq!(children[1].size, 150.0); // 新規(c)がもう半分
         assert_eq!(children[2].size, 300.0); // 無関係な兄弟(b)は変化しない
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "c");
     }
 
@@ -316,14 +395,25 @@ mod tests {
         // root: Leaf(a) のみ(まだ分割されていない単一グループ)
         let mut root = PaneNode::new_leaf("a");
         assert!(root.insert_sibling("a", "c", SplitDirection::Column));
-        let PaneNode::Split { direction, children, .. } = &root else { panic!("root must become Split") };
+        let PaneNode::Split {
+            direction,
+            children,
+            ..
+        } = &root
+        else {
+            panic!("root must become Split")
+        };
         assert_eq!(*direction, SplitDirection::Column);
         assert_eq!(children.len(), 2);
         assert!(children[0].auto); // Column分割の新規2子は両方auto(自動的に半分ずつ)
         assert!(children[1].auto);
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "a");
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "c");
     }
 
@@ -336,17 +426,43 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.insert_sibling("a", "c", SplitDirection::Column));
-        let PaneNode::Split { direction: root_dir, children, .. } = &root else { panic!("root must stay Split") };
+        let PaneNode::Split {
+            direction: root_dir,
+            children,
+            ..
+        } = &root
+        else {
+            panic!("root must stay Split")
+        };
         assert_eq!(*root_dir, SplitDirection::Row);
         assert_eq!(children.len(), 2); // aの位置がラップされただけで、root直下の子数は変わらない
         assert_eq!(children[0].size, 300.0); // ラップ後もaスロット自体のsizeは維持
         assert_eq!(children[1].size, 300.0); // bは無関係、変化なし
-        let PaneNode::Split { direction: inner_dir, children: inner, .. } = &children[0].node else {
+        let PaneNode::Split {
+            direction: inner_dir,
+            children: inner,
+            ..
+        } = &children[0].node
+        else {
             panic!("a's slot must now be a Column split")
         };
         assert_eq!(*inner_dir, SplitDirection::Column);
@@ -363,17 +479,35 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Column,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 50.0, auto: true },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 50.0, auto: true },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 50.0,
+                    auto: true,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 50.0,
+                    auto: true,
+                },
             ],
         };
         assert!(root.insert_sibling("a", "c", SplitDirection::Column));
-        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("expected Split")
+        };
         assert_eq!(children.len(), 3);
         assert!(children[0].auto);
         assert_eq!(children[0].size, 50.0); // 弄られていない
         assert!(children[1].auto); // 新規cもauto
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "c");
         assert!(children[2].auto); // bは無関係、変化なし
     }
@@ -385,18 +519,36 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Column,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 40.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 50.0, auto: true },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 40.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 50.0,
+                    auto: true,
+                },
             ],
         };
         assert!(root.insert_sibling("a", "c", SplitDirection::Column));
-        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("expected Split")
+        };
         assert_eq!(children.len(), 3);
         assert!(!children[0].auto);
         assert_eq!(children[0].size, 20.0);
         assert!(!children[1].auto);
         assert_eq!(children[1].size, 20.0);
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "c");
         assert!(children[2].auto); // bは無関係、変化なし
         assert_eq!(children[2].size, 50.0);
@@ -427,18 +579,38 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.insert_sibling_at("a", "c", SplitDirection::Row, true));
-        let PaneNode::Split { children, .. } = &root else { panic!("root must stay Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("root must stay Split")
+        };
         assert_eq!(children.len(), 3);
         // 新規(c)がaの手前、aは元の位置のまま(半分ずつに折半)
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "c");
         assert_eq!(children[0].size, 150.0);
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "a");
         assert_eq!(children[1].size, 150.0);
         assert_eq!(children[2].size, 300.0); // bは無関係、変化なし
@@ -453,21 +625,51 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         let mut b = a.clone();
         assert!(a.insert_sibling("a", "c", SplitDirection::Row));
         assert!(b.insert_sibling_at("a", "c", SplitDirection::Row, false));
-        let PaneNode::Split { children: children_a, .. } = &a else { panic!("expected Split") };
-        let PaneNode::Split { children: children_b, .. } = &b else { panic!("expected Split") };
+        let PaneNode::Split {
+            children: children_a,
+            ..
+        } = &a
+        else {
+            panic!("expected Split")
+        };
+        let PaneNode::Split {
+            children: children_b,
+            ..
+        } = &b
+        else {
+            panic!("expected Split")
+        };
         assert_eq!(children_a.len(), children_b.len());
         for (x, y) in children_a.iter().zip(children_b.iter()) {
             assert_eq!(x.size, y.size);
             assert_eq!(x.auto, y.auto);
-            let PaneNode::Leaf { group_id: gx, .. } = &x.node else { panic!("expected leaf") };
-            let PaneNode::Leaf { group_id: gy, .. } = &y.node else { panic!("expected leaf") };
+            let PaneNode::Leaf { group_id: gx, .. } = &x.node else {
+                panic!("expected leaf")
+            };
+            let PaneNode::Leaf { group_id: gy, .. } = &y.node else {
+                panic!("expected leaf")
+            };
             assert_eq!(gx, gy);
         }
     }
@@ -478,12 +680,23 @@ mod tests {
         // (aが後ろに来る=「aの上に分割」)。
         let mut root = PaneNode::new_leaf("a");
         assert!(root.insert_sibling_at("a", "c", SplitDirection::Column, true));
-        let PaneNode::Split { direction, children, .. } = &root else { panic!("root must become Split") };
+        let PaneNode::Split {
+            direction,
+            children,
+            ..
+        } = &root
+        else {
+            panic!("root must become Split")
+        };
         assert_eq!(*direction, SplitDirection::Column);
         assert_eq!(children.len(), 2);
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "c");
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "a");
     }
 
@@ -495,9 +708,16 @@ mod tests {
 
     #[test]
     fn id_returns_leaf_and_split_ids() {
-        let leaf = PaneNode::Leaf { id: "l1".into(), group_id: "g1".into() };
+        let leaf = PaneNode::Leaf {
+            id: "l1".into(),
+            group_id: "g1".into(),
+        };
         assert_eq!(leaf.id(), "l1");
-        let split = PaneNode::Split { id: "s1".into(), direction: SplitDirection::Row, children: vec![] };
+        let split = PaneNode::Split {
+            id: "s1".into(),
+            direction: SplitDirection::Row,
+            children: vec![],
+        };
         assert_eq!(split.id(), "s1");
     }
 
@@ -507,12 +727,28 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Column,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 1.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 1.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 1.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 1.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.set_size("la", 3.0));
-        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("expected Split")
+        };
         assert_eq!(children[0].size, 3.0);
         assert_eq!(children[1].size, 1.0); // 兄弟は変化しない
     }
@@ -524,14 +760,35 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
                 PaneChild {
                     node: PaneNode::Split {
                         id: "inner".into(),
                         direction: SplitDirection::Column,
                         children: vec![
-                            PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 1.0, auto: false },
-                            PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 1.0, auto: false },
+                            PaneChild {
+                                node: PaneNode::Leaf {
+                                    id: "lb".into(),
+                                    group_id: "b".into(),
+                                },
+                                size: 1.0,
+                                auto: false,
+                            },
+                            PaneChild {
+                                node: PaneNode::Leaf {
+                                    id: "lc".into(),
+                                    group_id: "c".into(),
+                                },
+                                size: 1.0,
+                                auto: false,
+                            },
                         ],
                     },
                     size: 300.0,
@@ -540,7 +797,9 @@ mod tests {
             ],
         };
         assert!(root.set_size("inner", 450.0));
-        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("expected Split")
+        };
         assert_eq!(children[1].size, 450.0);
     }
 
@@ -553,7 +812,11 @@ mod tests {
     #[test]
     fn set_size_returns_false_for_root_itself() {
         // ルート自身のidを指定しても、sizeを保持する親が無いのでfalse。
-        let mut root = PaneNode::Split { id: "root".into(), direction: SplitDirection::Row, children: vec![] };
+        let mut root = PaneNode::Split {
+            id: "root".into(),
+            direction: SplitDirection::Row,
+            children: vec![],
+        };
         assert!(!root.set_size("root", 1.0));
     }
 
@@ -563,12 +826,28 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.set_auto("la", true));
-        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("expected Split")
+        };
         assert!(children[0].auto);
         assert!(!children[1].auto); // 兄弟は変化しない
     }
@@ -583,8 +862,22 @@ mod tests {
                     id: "inner".into(),
                     direction: SplitDirection::Column,
                     children: vec![
-                        PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 1.0, auto: false },
-                        PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 1.0, auto: false },
+                        PaneChild {
+                            node: PaneNode::Leaf {
+                                id: "lb".into(),
+                                group_id: "b".into(),
+                            },
+                            size: 1.0,
+                            auto: false,
+                        },
+                        PaneChild {
+                            node: PaneNode::Leaf {
+                                id: "lc".into(),
+                                group_id: "c".into(),
+                            },
+                            size: 1.0,
+                            auto: false,
+                        },
                     ],
                 },
                 size: 300.0,
@@ -592,7 +885,9 @@ mod tests {
             }],
         };
         assert!(root.set_auto("inner", true));
-        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("expected Split")
+        };
         assert!(children[0].auto);
     }
 
@@ -607,13 +902,24 @@ mod tests {
         let mut root = PaneNode::Split {
             id: "root".into(),
             direction: SplitDirection::Row,
-            children: vec![PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 300.0, auto: false }],
+            children: vec![PaneChild {
+                node: PaneNode::Leaf {
+                    id: "la".into(),
+                    group_id: "a".into(),
+                },
+                size: 300.0,
+                auto: false,
+            }],
         };
         root.append_row_leaf("b", 300.0);
-        let PaneNode::Split { children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("expected Split")
+        };
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].size, 300.0); // 既存の兄弟は変化しない
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "b");
         assert_eq!(children[1].size, 300.0);
     }
@@ -623,12 +929,23 @@ mod tests {
         // 最初の1つ目のグループ(裸のLeafルート)しか無い状態から2つ目を追加する場合。
         let mut root = PaneNode::new_leaf("a");
         root.append_row_leaf("b", 300.0);
-        let PaneNode::Split { direction, children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split {
+            direction,
+            children,
+            ..
+        } = &root
+        else {
+            panic!("expected Split")
+        };
         assert_eq!(*direction, SplitDirection::Row);
         assert_eq!(children.len(), 2);
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "a");
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "b");
     }
 
@@ -639,17 +956,46 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Column,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 1.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 1.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 1.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lc".into(),
+                        group_id: "c".into(),
+                    },
+                    size: 1.0,
+                    auto: false,
+                },
             ],
         };
         root.append_row_leaf("b", 300.0);
-        let PaneNode::Split { direction, children, .. } = &root else { panic!("expected Split") };
+        let PaneNode::Split {
+            direction,
+            children,
+            ..
+        } = &root
+        else {
+            panic!("expected Split")
+        };
         assert_eq!(*direction, SplitDirection::Row);
         assert_eq!(children.len(), 2);
-        let PaneNode::Split { direction: inner_dir, .. } = &children[0].node else { panic!("old root must be preserved as-is") };
+        let PaneNode::Split {
+            direction: inner_dir,
+            ..
+        } = &children[0].node
+        else {
+            panic!("old root must be preserved as-is")
+        };
         assert_eq!(*inner_dir, SplitDirection::Column);
-        let PaneNode::Leaf { group_id, .. } = &children[1].node else { panic!("expected leaf") };
+        let PaneNode::Leaf { group_id, .. } = &children[1].node else {
+            panic!("expected leaf")
+        };
         assert_eq!(group_id, "b");
     }
 
@@ -660,13 +1006,36 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 150.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 150.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 150.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lc".into(),
+                        group_id: "c".into(),
+                    },
+                    size: 150.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.remove_group("c"));
-        let PaneNode::Split { children, .. } = &root else { panic!("root must stay Split (3->2 children)") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("root must stay Split (3->2 children)")
+        };
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].size, 300.0); // aがcの分を引き継ぐ
         assert_eq!(children[1].size, 300.0); // bは無関係
@@ -678,13 +1047,36 @@ mod tests {
             id: "root".into(),
             direction: SplitDirection::Row,
             children: vec![
-                PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 150.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
-                PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "la".into(),
+                        group_id: "a".into(),
+                    },
+                    size: 150.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lc".into(),
+                        group_id: "c".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.remove_group("a"));
-        let PaneNode::Split { children, .. } = &root else { panic!("root must stay Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("root must stay Split")
+        };
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].size, 450.0); // 先頭(a)を消したので直後のbが引き継ぐ
     }
@@ -701,21 +1093,46 @@ mod tests {
                         id: "inner".into(),
                         direction: SplitDirection::Column,
                         children: vec![
-                            PaneChild { node: PaneNode::Leaf { id: "la".into(), group_id: "a".into() }, size: 1.0, auto: false },
-                            PaneChild { node: PaneNode::Leaf { id: "lc".into(), group_id: "c".into() }, size: 1.0, auto: false },
+                            PaneChild {
+                                node: PaneNode::Leaf {
+                                    id: "la".into(),
+                                    group_id: "a".into(),
+                                },
+                                size: 1.0,
+                                auto: false,
+                            },
+                            PaneChild {
+                                node: PaneNode::Leaf {
+                                    id: "lc".into(),
+                                    group_id: "c".into(),
+                                },
+                                size: 1.0,
+                                auto: false,
+                            },
                         ],
                     },
                     size: 300.0,
                     auto: false,
                 },
-                PaneChild { node: PaneNode::Leaf { id: "lb".into(), group_id: "b".into() }, size: 300.0, auto: false },
+                PaneChild {
+                    node: PaneNode::Leaf {
+                        id: "lb".into(),
+                        group_id: "b".into(),
+                    },
+                    size: 300.0,
+                    auto: false,
+                },
             ],
         };
         assert!(root.remove_group("c"));
-        let PaneNode::Split { children, .. } = &root else { panic!("root must stay Split") };
+        let PaneNode::Split { children, .. } = &root else {
+            panic!("root must stay Split")
+        };
         assert_eq!(children.len(), 2); // rootの子数は変わらない(inner splitがLeafに畳まれただけ)
-        // inner splitが畳まれ、aのLeafがrootの直接の子(size=300を引き継ぐ)になっている
-        let PaneNode::Leaf { group_id, .. } = &children[0].node else { panic!("inner split must collapse into a leaf") };
+                                       // inner splitが畳まれ、aのLeafがrootの直接の子(size=300を引き継ぐ)になっている
+        let PaneNode::Leaf { group_id, .. } = &children[0].node else {
+            panic!("inner split must collapse into a leaf")
+        };
         assert_eq!(group_id, "a");
         assert_eq!(children[0].size, 300.0); // 畳まれたSplit自身が親から見て持っていたsizeを引き継ぐ
     }

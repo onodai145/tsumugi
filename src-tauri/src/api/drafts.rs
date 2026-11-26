@@ -85,12 +85,18 @@ struct RawContextUser {
 
 impl From<RawContextNote> for DraftNoteSnapshot {
     fn from(n: RawContextNote) -> Self {
-        DraftNoteSnapshot { id: n.id, username: n.user.username, text: n.text }
+        DraftNoteSnapshot {
+            id: n.id,
+            username: n.user.username,
+            text: n.text,
+        }
     }
 }
 
 fn rfc3339_millis(s: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp_millis())
 }
 
 impl RawDraft {
@@ -146,12 +152,17 @@ pub async fn list_scheduled(
         body["untilId"] = json!(id);
     }
     let raws: Vec<RawDraft> = client.post("notes/drafts/list", &body).await?;
-    Ok(raws.into_iter().filter_map(RawDraft::into_scheduled).collect())
+    Ok(raws
+        .into_iter()
+        .filter_map(RawDraft::into_scheduled)
+        .collect())
 }
 
 /// 下書き(予約)の削除。予約の取り消しにも使う。
 pub async fn delete_draft(client: &MisskeyClient, draft_id: &str) -> Result<()> {
-    client.post("notes/drafts/delete", &json!({ "draftId": draft_id })).await
+    client
+        .post("notes/drafts/delete", &json!({ "draftId": draft_id }))
+        .await
 }
 
 #[cfg(test)]
@@ -228,7 +239,9 @@ mod tests {
             visibility: VisibilityInput::Home,
             ..Default::default()
         };
-        let created = create_scheduled(&client(&mock), &draft, 1_760_000_000).await.unwrap();
+        let created = create_scheduled(&client(&mock), &draft, 1_760_000_000)
+            .await
+            .unwrap();
         assert_eq!(created.id, "d1");
         assert_eq!(created.scheduled_at, 1_760_000_000);
         assert_eq!(created.text, "hi");
@@ -257,7 +270,9 @@ mod tests {
             }),
             ..Default::default()
         };
-        create_scheduled(&client(&mock), &draft, 1_760_000_000).await.unwrap();
+        create_scheduled(&client(&mock), &draft, 1_760_000_000)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -265,11 +280,15 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/notes/drafts/list"))
-            .and(body_partial_json(json!({ "scheduled": true, "limit": 30, "untilId": "d9" })))
+            .and(body_partial_json(
+                json!({ "scheduled": true, "limit": 30, "untilId": "d9" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&mock)
             .await;
-        let out = list_scheduled(&client(&mock), Some("d9"), 30).await.unwrap();
+        let out = list_scheduled(&client(&mock), Some("d9"), 30)
+            .await
+            .unwrap();
         assert!(out.is_empty());
     }
 
@@ -279,7 +298,10 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/notes/drafts/list"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!([minimal_draft_json("d1", 1_760_000_000_000)])))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!([minimal_draft_json("d1", 1_760_000_000_000)])),
+            )
             .mount(&mock)
             .await;
         let out = list_scheduled(&client(&mock), None, 30).await.unwrap();
@@ -307,7 +329,10 @@ mod tests {
             .mount(&mock)
             .await;
         let out = list_scheduled(&client(&mock), None, 30).await.unwrap();
-        assert_eq!(out.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["d_sched"]);
+        assert_eq!(
+            out.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            vec!["d_sched"]
+        );
     }
 
     #[tokio::test]
@@ -337,7 +362,10 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let n = list_scheduled(&client(&mock), None, 30).await.unwrap().remove(0);
+        let n = list_scheduled(&client(&mock), None, 30)
+            .await
+            .unwrap()
+            .remove(0);
         assert_eq!(n.scheduled_at, 1_760_000_000); // 500ms は切り捨て
         assert_eq!(n.text, "本文");
         assert_eq!(n.cw.as_deref(), Some("注意"));
@@ -352,9 +380,19 @@ mod tests {
         // 2026-10-08T00:00:00Z のミリ秒
         assert_eq!(poll.expires_at, Some(1_791_417_600_000));
         let reply = n.reply_note.unwrap();
-        assert_eq!((reply.id.as_str(), reply.username.as_str(), reply.text.as_deref()), ("r1", "alice", Some("返信先")));
+        assert_eq!(
+            (
+                reply.id.as_str(),
+                reply.username.as_str(),
+                reply.text.as_deref()
+            ),
+            ("r1", "alice", Some("返信先"))
+        );
         let quote = n.quote_note.unwrap();
-        assert_eq!((quote.id.as_str(), quote.username.as_str(), quote.text), ("q1", "bob", None));
+        assert_eq!(
+            (quote.id.as_str(), quote.username.as_str(), quote.text),
+            ("q1", "bob", None)
+        );
     }
 
     #[tokio::test]
@@ -383,8 +421,16 @@ mod tests {
             })))
             .mount(&mock)
             .await;
-        let draft = NoteDraft { text: Some("x".into()), ..Default::default() };
-        let err = create_scheduled(&client(&mock), &draft, 1_760_000_000).await.unwrap_err();
-        assert!(err.to_string().contains("TOO_MANY_SCHEDULED_NOTES"), "{err}");
+        let draft = NoteDraft {
+            text: Some("x".into()),
+            ..Default::default()
+        };
+        let err = create_scheduled(&client(&mock), &draft, 1_760_000_000)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("TOO_MANY_SCHEDULED_NOTES"),
+            "{err}"
+        );
     }
 }

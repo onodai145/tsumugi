@@ -42,7 +42,13 @@ fn zip_bytes(entries: &[(&str, &[u8])], link: Option<(&str, &str)>) -> Vec<u8> {
 }
 
 /// 名前を、`..` や絶対パスも含めて、そのまま書く(`tar::Header::set_path` は拒否するので、先頭 100 バイトを直接書く)。
-fn append_raw<W: Write>(b: &mut tar::Builder<W>, name: &str, kind: tar::EntryType, link: Option<&str>, data: &[u8]) {
+fn append_raw<W: Write>(
+    b: &mut tar::Builder<W>,
+    name: &str,
+    kind: tar::EntryType,
+    link: Option<&str>,
+    data: &[u8],
+) {
     let mut h = tar::Header::new_gnu();
     h.set_size(data.len() as u64);
     h.set_mode(0o644);
@@ -83,5 +89,8 @@ pub fn install_fake_engine(s: &Store, a: &EngineAssets) {
 /// 声(VVM)が取得済みの状態を、スパース(サイズだけ合わせた中身のない)ファイルで作る。
 pub fn install_fake_vvm(s: &Store, v: &Vvm) {
     std::fs::create_dir_all(s.vvm_dir()).unwrap();
-    std::fs::File::create(s.vvm_path(&v.id)).unwrap().set_len(v.size).unwrap();
+    std::fs::File::create(s.vvm_path(&v.id))
+        .unwrap()
+        .set_len(v.size)
+        .unwrap();
 }

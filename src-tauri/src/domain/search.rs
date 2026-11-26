@@ -42,16 +42,33 @@ mod tests {
     #[test]
     fn parses_plain_and_suffixed_versions() {
         assert_eq!(parse_misskey_version("2026.9.1"), Some((2026, 9, 1)));
-        assert_eq!(parse_misskey_version("2026.10.0-alpha.0"), Some((2026, 10, 0)));
+        assert_eq!(
+            parse_misskey_version("2026.10.0-alpha.0"),
+            Some((2026, 10, 0))
+        );
         // フォーク(misskey.io 等)のサフィックスは無視して先頭の YYYY.M.P だけ読む
-        assert_eq!(parse_misskey_version("2025.4.1-io.12b-fb6fbea074"), Some((2025, 4, 1)));
-        assert_eq!(parse_misskey_version("2025.7.0+build.5"), Some((2025, 7, 0)));
+        assert_eq!(
+            parse_misskey_version("2025.4.1-io.12b-fb6fbea074"),
+            Some((2025, 4, 1))
+        );
+        assert_eq!(
+            parse_misskey_version("2025.7.0+build.5"),
+            Some((2025, 7, 0))
+        );
         assert_eq!(parse_misskey_version(" 2025.7.0 "), Some((2025, 7, 0)));
     }
 
     #[test]
     fn rejects_unparseable_versions() {
-        for v in ["", "abc", "2025", "2025.7", "2025.x.0", "v2025.7.0", "-alpha"] {
+        for v in [
+            "",
+            "abc",
+            "2025",
+            "2025.7",
+            "2025.x.0",
+            "v2025.7.0",
+            "-alpha",
+        ] {
             assert_eq!(parse_misskey_version(v), None, "{v:?} should not parse");
         }
     }

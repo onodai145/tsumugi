@@ -53,7 +53,10 @@ impl Store {
     /// エンジン一式が使える状態か。READY(最後に置く)と、必要なファイルがそろっていること。
     pub fn engine_ready(&self, a: &EngineAssets) -> bool {
         let is_file = |p: PathBuf| std::fs::metadata(p).is_ok_and(|m| m.is_file());
-        is_file(self.engine_dir().join(READY_FILE)) && is_file(self.core_lib(a)) && is_file(self.ort_lib(a)) && is_file(self.dict_dir().join("sys.dic"))
+        is_file(self.engine_dir().join(READY_FILE))
+            && is_file(self.core_lib(a))
+            && is_file(self.ort_lib(a))
+            && is_file(self.dict_dir().join("sys.dic"))
     }
 
     pub fn vvm_dir(&self) -> PathBuf {
@@ -82,7 +85,9 @@ impl Store {
     /// `file_name` の `.part`(全ハッシュ分)。削除に使う。
     pub fn part_files(&self, file_name: &str) -> Vec<PathBuf> {
         let prefix = format!("{file_name}.");
-        let Ok(rd) = std::fs::read_dir(self.downloads_dir()) else { return vec![] };
+        let Ok(rd) = std::fs::read_dir(self.downloads_dir()) else {
+            return vec![];
+        };
         rd.filter_map(|e| e.ok())
             .filter(|e| {
                 let n = e.file_name();
@@ -103,26 +108,44 @@ impl Store {
     /// 古い版のディレクトリと、いまの取得物に対応しない `.part` を消す。起動時に、ロードより前に呼ぶ。
     /// 失敗は無視する(Windows ではロード中の DLL のあるディレクトリを消せない)。
     pub fn clean_stale(&self) {
-        let Ok(rd) = std::fs::read_dir(&self.root) else { return };
+        let Ok(rd) = std::fs::read_dir(&self.root) else {
+            return;
+        };
         let keep_engine = format!("engine-{ENGINE_SET}");
         let keep_vvm = format!("vvm-{}", catalog().vvm_release);
         for e in rd.filter_map(|e| e.ok()) {
             let name = e.file_name().to_string_lossy().into_owned();
-            let stale = (name.starts_with("engine-") && name != keep_engine) || (name.starts_with("vvm-") && name != keep_vvm);
+            let stale = (name.starts_with("engine-") && name != keep_engine)
+                || (name.starts_with("vvm-") && name != keep_vvm);
             if stale && e.path().is_dir() {
                 let _ = std::fs::remove_dir_all(e.path());
             }
         }
         // いまのハッシュの先頭 8 文字(エンジン一式の 3 つ + 全 VVM)。
-        let mut tags: Vec<String> = catalog().vvms.iter().map(|v| v.sha256.chars().take(8).collect()).collect();
+        let mut tags: Vec<String> = catalog()
+            .vvms
+            .iter()
+            .map(|v| v.sha256.chars().take(8).collect())
+            .collect();
         if let Some(a) = engine_assets() {
-            tags.extend([&a.core, &a.ort, &a.dict].iter().map(|x| x.sha256.chars().take(8).collect::<String>()));
+            tags.extend(
+                [&a.core, &a.ort, &a.dict]
+                    .iter()
+                    .map(|x| x.sha256.chars().take(8).collect::<String>()),
+            );
         }
-        let Ok(rd) = std::fs::read_dir(self.downloads_dir()) else { return };
+        let Ok(rd) = std::fs::read_dir(self.downloads_dir()) else {
+            return;
+        };
         for e in rd.filter_map(|e| e.ok()) {
             let name = e.file_name().to_string_lossy().into_owned();
-            let Some(stem) = name.strip_suffix(".part") else { continue };
-            let current = stem.rsplit('.').next().is_some_and(|tag| tags.iter().any(|t| t == tag));
+            let Some(stem) = name.strip_suffix(".part") else {
+                continue;
+            };
+            let current = stem
+                .rsplit('.')
+                .next()
+                .is_some_and(|tag| tags.iter().any(|t| t == tag));
             if !current {
                 let _ = std::fs::remove_file(e.path());
             }
@@ -166,7 +189,10 @@ mod tests {
         install_engine(&s, &a);
         assert!(s.engine_ready(&a));
         std::fs::remove_file(s.engine_dir().join(READY_FILE)).unwrap();
-        assert!(!s.engine_ready(&a), "READY がなければ、途中のディレクトリは使わない");
+        assert!(
+            !s.engine_ready(&a),
+            "READY がなければ、途中のディレクトリは使わない"
+        );
         std::fs::write(s.engine_dir().join(READY_FILE), "x").unwrap();
         std::fs::remove_file(s.dict_dir().join("sys.dic")).unwrap();
         assert!(!s.engine_ready(&a), "辞書が欠けていれば未完了");
@@ -175,7 +201,12 @@ mod tests {
     #[test]
     fn a_voice_model_is_ready_only_when_its_size_matches() {
         let s = Store::new(temp_root());
-        let v = Vvm { id: "0".into(), size: 1000, sha256: "a".repeat(64), characters: vec![] };
+        let v = Vvm {
+            id: "0".into(),
+            size: 1000,
+            sha256: "a".repeat(64),
+            characters: vec![],
+        };
         assert!(!s.vvm_ready(&v));
         touch(&s.vvm_path("0"), 999);
         assert!(!s.vvm_ready(&v), "サイズが違えば未取得");
@@ -188,13 +219,20 @@ mod tests {
         let s = Store::new(temp_root());
         let sha = "0123456789abcdef".repeat(4);
         let p = s.part_path("0.vvm", &sha);
-        assert_eq!(p.file_name().unwrap().to_str().unwrap(), "0.vvm.01234567.part");
+        assert_eq!(
+            p.file_name().unwrap().to_str().unwrap(),
+            "0.vvm.01234567.part"
+        );
         assert_eq!(s.partial_bytes("0.vvm", &sha), 0);
         touch(&p, 42);
         assert_eq!(s.partial_bytes("0.vvm", &sha), 42);
         touch(&s.part_path("0.vvm", &"f".repeat(64)), 5);
         touch(&s.part_path("1.vvm", &sha), 5);
-        assert_eq!(s.part_files("0.vvm").len(), 2, "別のハッシュの .part も含む。別のファイルのは含まない");
+        assert_eq!(
+            s.part_files("0.vvm").len(),
+            2,
+            "別のハッシュの .part も含む。別のファイルのは含まない"
+        );
     }
 
     #[test]
@@ -207,7 +245,10 @@ mod tests {
         touch(&s.part_path("0.vvm", &keep_sha), 5);
         // 古い版・途中のもの・知らない .part。
         touch(&s.root().join("engine-core0.0.1-old").join("x"), 1);
-        touch(&s.root().join(format!("engine-{ENGINE_SET}.tmp")).join("x"), 1);
+        touch(
+            &s.root().join(format!("engine-{ENGINE_SET}.tmp")).join("x"),
+            1,
+        );
         touch(&s.root().join("vvm-0.0.1").join("0.vvm"), 1);
         touch(&s.downloads_dir().join("0.vvm.deadbeef.part"), 1);
         touch(&s.root().join("unrelated-file"), 1);
@@ -221,11 +262,17 @@ mod tests {
         assert!(!s.root().join(format!("engine-{ENGINE_SET}.tmp")).exists());
         assert!(!s.root().join("vvm-0.0.1").exists());
         assert!(!s.downloads_dir().join("0.vvm.deadbeef.part").exists());
-        assert!(s.root().join("unrelated-file").exists(), "無関係なファイルは触らない");
+        assert!(
+            s.root().join("unrelated-file").exists(),
+            "無関係なファイルは触らない"
+        );
     }
 
     #[test]
     fn clean_stale_on_a_missing_root_does_nothing() {
-        Store::new(std::env::temp_dir().join(format!("tsumugi_vv_missing_{}", uuid::Uuid::new_v4()))).clean_stale();
+        Store::new(
+            std::env::temp_dir().join(format!("tsumugi_vv_missing_{}", uuid::Uuid::new_v4())),
+        )
+        .clean_stale();
     }
 }

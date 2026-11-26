@@ -69,7 +69,10 @@ pub(crate) async fn backfill_all(settings: &SettingsStore, cache: &NoteCacheStor
         }
     };
     for column in columns.iter().filter(|c| !column_includes_cache_source(c)) {
-        if let Err(e) = cache.backfill_note_accounts(&column.account_id, &column.id).await {
+        if let Err(e) = cache
+            .backfill_note_accounts(&column.account_id, &column.id)
+            .await
+        {
             log::warn!("failed to backfill the note attribution of a column: {e}");
         }
     }
@@ -101,7 +104,9 @@ mod tests {
     }
 
     fn mem_cache() -> NoteCacheStore {
-        NoteCacheStore::new(SqliteBackend::new(crate::store::db::open_cache_in_memory().unwrap()))
+        NoteCacheStore::new(SqliteBackend::new(
+            crate::store::db::open_cache_in_memory().unwrap(),
+        ))
     }
 
     fn note(id: &str, created_at: i64) -> Note {
@@ -155,21 +160,33 @@ mod tests {
 
     #[test]
     fn a_plain_column_does_not_include_the_cache_source() {
-        assert!(!column_includes_cache_source(&column("c", "acc1", ColumnKind::Home, FilterQuery::Keywords(vec![]))));
+        assert!(!column_includes_cache_source(&column(
+            "c",
+            "acc1",
+            ColumnKind::Home,
+            FilterQuery::Keywords(vec![])
+        )));
     }
 
     #[test]
     fn a_tql_column_includes_the_cache_source_only_when_from_lists_cache() {
         assert!(!column_includes_cache_source(&tql("from home where reply")));
         assert!(column_includes_cache_source(&tql("from cache where reply")));
-        assert!(column_includes_cache_source(&tql("from home, cache where reply")));
+        assert!(column_includes_cache_source(&tql(
+            "from home, cache where reply"
+        )));
     }
 
     /// 解析できない TQL は、from cache を含むものとして扱う(埋め直しから除外=見えない側に倒す)。
     #[test]
     fn an_unparsable_tql_column_is_treated_as_including_the_cache_source() {
         assert!(column_includes_cache_source(&tql("from")));
-        assert!(column_includes_cache_source(&column("c", "acc1", ColumnKind::Tql, FilterQuery::Keywords(vec![]))));
+        assert!(column_includes_cache_source(&column(
+            "c",
+            "acc1",
+            ColumnKind::Tql,
+            FilterQuery::Keywords(vec![])
+        )));
     }
 
     #[test]
@@ -181,7 +198,10 @@ mod tests {
     #[tokio::test]
     async fn record_attributes_the_notes_to_the_account() {
         let cache = mem_cache();
-        cache.cache_notes("col1", &[note("n1", 1), note("n2", 2)]).await.unwrap();
+        cache
+            .cache_notes("col1", &[note("n1", 1), note("n2", 2)])
+            .await
+            .unwrap();
 
         record(&cache, "acc1", &[note("n1", 1)]).await;
 
@@ -202,7 +222,10 @@ mod tests {
         let conn = std::sync::Arc::clone(backend.conn());
         let cache = NoteCacheStore::new(backend);
         cache.cache_notes("col1", &[note("n1", 1)]).await.unwrap();
-        conn.lock().unwrap().execute("DROP TABLE note_account", []).unwrap();
+        conn.lock()
+            .unwrap()
+            .execute("DROP TABLE note_account", [])
+            .unwrap();
 
         record(&cache, "acc1", &[note("n1", 1)]).await; // ここで戻ってくること自体がテスト
     }
@@ -226,7 +249,10 @@ mod tests {
         let backend = SqliteBackend::new(crate::store::db::open_cache_in_memory().unwrap());
         let conn = std::sync::Arc::clone(backend.conn());
         let cache = NoteCacheStore::new(backend);
-        conn.lock().unwrap().execute("DROP TABLE note_account", []).unwrap();
+        conn.lock()
+            .unwrap()
+            .execute("DROP TABLE note_account", [])
+            .unwrap();
 
         forget(&cache, "acc1").await; // ここで戻ってくること自体がテスト
     }
@@ -237,7 +263,14 @@ mod tests {
     #[tokio::test]
     async fn backfill_all_runs_only_while_note_account_is_empty() {
         let settings = SettingsStore::new_in_memory();
-        settings.upsert_column(&column("plain", "acc1", ColumnKind::Home, FilterQuery::Keywords(vec![]))).unwrap();
+        settings
+            .upsert_column(&column(
+                "plain",
+                "acc1",
+                ColumnKind::Home,
+                FilterQuery::Keywords(vec![]),
+            ))
+            .unwrap();
         let cache = mem_cache();
         cache.cache_notes("plain", &[note("n1", 1)]).await.unwrap();
 
@@ -253,7 +286,14 @@ mod tests {
     #[tokio::test]
     async fn backfill_all_copies_plain_columns_and_skips_columns_that_use_the_cache() {
         let settings = SettingsStore::new_in_memory();
-        settings.upsert_column(&column("plain", "acc1", ColumnKind::Home, FilterQuery::Keywords(vec![]))).unwrap();
+        settings
+            .upsert_column(&column(
+                "plain",
+                "acc1",
+                ColumnKind::Home,
+                FilterQuery::Keywords(vec![]),
+            ))
+            .unwrap();
         let mut mixed = tql("from home, cache where reply");
         mixed.id = "mixed".into();
         settings.upsert_column(&mixed).unwrap();

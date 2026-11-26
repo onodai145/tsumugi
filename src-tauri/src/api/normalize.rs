@@ -1,6 +1,8 @@
 //! Misskey の生 JSON レスポンスを domain 型へ正規化する。
 
-use crate::domain::{DriveFile, Note, Notification, Poll, PollChoice, ReactionUser, User, Visibility};
+use crate::domain::{
+    DriveFile, Note, Notification, Poll, PollChoice, ReactionUser, User, Visibility,
+};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 
@@ -370,7 +372,10 @@ mod tests {
         assert_eq!(n.my_reaction.as_deref(), Some("👍"));
         assert_eq!(n.files.len(), 1);
         assert_eq!(n.files[0].mime_type, "image/png");
-        assert_eq!(n.emojis.get("blobcat").map(String::as_str), Some("http://x/e.png"));
+        assert_eq!(
+            n.emojis.get("blobcat").map(String::as_str),
+            Some("http://x/e.png")
+        );
         assert_eq!(n.tags, vec!["rust".to_string()]);
     }
 
@@ -461,7 +466,10 @@ mod tests {
         .unwrap();
         let u: User = raw.into();
         assert_eq!(u.name.as_deref(), Some("Alice :blobcat:"));
-        assert_eq!(u.emojis.get("blobcat").map(String::as_str), Some("http://x/e.png"));
+        assert_eq!(
+            u.emojis.get("blobcat").map(String::as_str),
+            Some("http://x/e.png")
+        );
     }
 
     #[test]
@@ -539,7 +547,10 @@ mod tests {
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
         assert_eq!(user.bio, Some("hello world".to_string()));
-        assert_eq!(user.banner_url, Some("https://example.com/banner.png".to_string()));
+        assert_eq!(
+            user.banner_url,
+            Some("https://example.com/banner.png".to_string())
+        );
     }
 
     #[test]
@@ -574,10 +585,15 @@ mod tests {
         let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":\"https://remote.example/icon.png\",\"faviconUrl\":\"https://remote.example/favicon.png\",\"themeColor\":\"#ff8800\"}}";
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
-        let instance = user.instance.expect("instance should be present for remote user");
+        let instance = user
+            .instance
+            .expect("instance should be present for remote user");
         assert_eq!(instance.name, Some("Remote Instance".to_string()));
         // 本家MkInstanceTicker.vueと同様、リモートはiconUrlではなくfaviconUrlを表示する。
-        assert_eq!(instance.icon_url, Some("https://remote.example/favicon.png".to_string()));
+        assert_eq!(
+            instance.icon_url,
+            Some("https://remote.example/favicon.png".to_string())
+        );
         assert_eq!(instance.theme_color, Some("#ff8800".to_string()));
     }
 
@@ -597,17 +613,26 @@ mod tests {
         let json = "{\"id\":\"u1\",\"username\":\"alice\",\"host\":\"remote.example\",\"instance\":{\"name\":\"Remote Instance\",\"iconUrl\":\"https://remote.example/icon.png\",\"faviconUrl\":null,\"themeColor\":null}}";
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
-        let instance = user.instance.expect("instance should be present for remote user");
-        assert_eq!(instance.icon_url, Some("https://remote.example/favicon.ico".to_string()));
+        let instance = user
+            .instance
+            .expect("instance should be present for remote user");
+        assert_eq!(
+            instance.icon_url,
+            Some("https://remote.example/favicon.ico".to_string())
+        );
         assert_eq!(instance.theme_color, Some("#777777".to_string()));
     }
 
     #[test]
     fn raw_user_maps_avatar_blurhash_into_user() {
-        let json = r#"{"id":"u1","username":"alice","avatarBlurhash":"LEHV6nWB2yk8pyo0adR*.7kCMdnj"}"#;
+        let json =
+            r#"{"id":"u1","username":"alice","avatarBlurhash":"LEHV6nWB2yk8pyo0adR*.7kCMdnj"}"#;
         let raw: RawUser = serde_json::from_str(json).unwrap();
         let user: User = raw.into();
-        assert_eq!(user.avatar_blurhash.as_deref(), Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj"));
+        assert_eq!(
+            user.avatar_blurhash.as_deref(),
+            Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+        );
     }
 
     #[test]

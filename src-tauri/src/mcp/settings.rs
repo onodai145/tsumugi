@@ -26,7 +26,11 @@ fn default_port() -> u16 {
 
 impl Default for McpSettings {
     fn default() -> Self {
-        Self { enabled: false, port: DEFAULT_PORT, exposed_account_ids: Vec::new() }
+        Self {
+            enabled: false,
+            port: DEFAULT_PORT,
+            exposed_account_ids: Vec::new(),
+        }
     }
 }
 

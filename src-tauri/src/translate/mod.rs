@@ -6,9 +6,9 @@ use crate::error::Error;
 pub mod download;
 pub mod engine;
 pub mod lang;
-pub mod local_models;
 #[cfg(llama_target)]
 pub mod llama;
+pub mod local_models;
 pub mod manager;
 pub mod model_store;
 pub mod prompt;
@@ -74,7 +74,12 @@ mod tests {
 
         #[test]
         fn is_off_without_the_feature_on_any_target() {
-            for (os, arch) in [("linux", "x86_64"), ("macos", "aarch64"), ("windows", "x86_64"), ("android", "aarch64")] {
+            for (os, arch) in [
+                ("linux", "x86_64"),
+                ("macos", "aarch64"),
+                ("windows", "x86_64"),
+                ("android", "aarch64"),
+            ] {
                 assert!(!llama_target(false, os, arch), "{os} {arch}");
             }
         }
@@ -82,7 +87,12 @@ mod tests {
         #[test]
         fn is_off_for_unsupported_targets_even_with_the_feature() {
             // 配布しない OS(BSD など)と iOS、Android でも未確認の ABI(riscv64 など)。
-            for (os, arch) in [("freebsd", "x86_64"), ("openbsd", "x86_64"), ("ios", "aarch64"), ("android", "riscv64")] {
+            for (os, arch) in [
+                ("freebsd", "x86_64"),
+                ("openbsd", "x86_64"),
+                ("ios", "aarch64"),
+                ("android", "riscv64"),
+            ] {
                 assert!(!llama_target(true, os, arch), "{os} {arch}");
             }
         }

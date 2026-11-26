@@ -38,12 +38,53 @@ const ARGLESS_SOURCES: &[&str] = &["home", "local", "hybrid", "global", "mention
 const ARG_SOURCES: &[&str] = &["list", "antenna", "channel", "user", "tag", "search"];
 
 const FIELD_NAMES: &[&str] = &[
-    "renote", "quote", "reply", "has_files", "has_poll", "cw", "sensitive", "local", "remote",
-    "bot", "cat", "direct", "to_me", "reply_to_me", "has_mention", "has_link", "pinned",
-    "reacted", "renoted", "favorited", "mine", "following", "reactions", "renotes", "replies",
-    "files", "length", "created_at", "user.followers", "user.following", "user.notes", "text",
-    "cw_text", "via", "host", "visibility", "channel", "lang", "reply_id", "renote_id",
-    "user.username", "user.acct", "user.name", "user.id", "tags", "mentions", "emojis",
+    "renote",
+    "quote",
+    "reply",
+    "has_files",
+    "has_poll",
+    "cw",
+    "sensitive",
+    "local",
+    "remote",
+    "bot",
+    "cat",
+    "direct",
+    "to_me",
+    "reply_to_me",
+    "has_mention",
+    "has_link",
+    "pinned",
+    "reacted",
+    "renoted",
+    "favorited",
+    "mine",
+    "following",
+    "reactions",
+    "renotes",
+    "replies",
+    "files",
+    "length",
+    "created_at",
+    "user.followers",
+    "user.following",
+    "user.notes",
+    "text",
+    "cw_text",
+    "via",
+    "host",
+    "visibility",
+    "channel",
+    "lang",
+    "reply_id",
+    "renote_id",
+    "user.username",
+    "user.acct",
+    "user.name",
+    "user.id",
+    "tags",
+    "mentions",
+    "emojis",
     "file_types",
 ];
 
@@ -97,7 +138,9 @@ fn classify(tokens: &[Token], mode: TqlEditMode) -> Vec<TqlCompletionItem> {
     if mode == TqlEditMode::Predicate {
         return predicate_context(tokens);
     }
-    let has_from = tokens.iter().any(|t| matches!(t, Token::Ident(s) if s == "from"));
+    let has_from = tokens
+        .iter()
+        .any(|t| matches!(t, Token::Ident(s) if s == "from"));
     if !has_from {
         return if tokens.is_empty() {
             vec![keyword_item("from")]
@@ -105,7 +148,9 @@ fn classify(tokens: &[Token], mode: TqlEditMode) -> Vec<TqlCompletionItem> {
             Vec::new()
         };
     }
-    let has_where = tokens.iter().any(|t| matches!(t, Token::Ident(s) if s == "where"));
+    let has_where = tokens
+        .iter()
+        .any(|t| matches!(t, Token::Ident(s) if s == "where"));
     if !has_where {
         return source_context(tokens);
     }

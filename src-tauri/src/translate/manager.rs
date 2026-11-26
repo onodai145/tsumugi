@@ -22,7 +22,10 @@ pub struct LocalTranslate {
 
 impl LocalTranslate {
     pub fn new(loader: Loader) -> Self {
-        Self { loader, loaded: Mutex::new(None) }
+        Self {
+            loader,
+            loaded: Mutex::new(None),
+        }
     }
 
     /// ローカル翻訳に対応していない構成（`local-translate` が無効、対象外のターゲット、モデルの置き場が未設定）。
@@ -62,8 +65,13 @@ impl LocalTranslate {
             None => {
                 let loader = self.loader.clone();
                 // ロードの失敗は覚えない（モデルが後から置かれたら、再起動なしで次の翻訳から使える）。
-                let t = tokio::task::spawn_blocking(move || loader()).await.map_err(join_err)??;
-                *guard = Some(Loaded { translator: t.clone(), last_used: Instant::now() });
+                let t = tokio::task::spawn_blocking(move || loader())
+                    .await
+                    .map_err(join_err)??;
+                *guard = Some(Loaded {
+                    translator: t.clone(),
+                    last_used: Instant::now(),
+                });
                 t
             }
         };
@@ -143,8 +151,11 @@ mod tests {
     fn counting_loader(loads: Arc<AtomicUsize>, max_active: Arc<AtomicUsize>) -> Loader {
         Arc::new(move || {
             loads.fetch_add(1, Ordering::SeqCst);
-            Ok(Arc::new(Fake { active: AtomicUsize::new(0), max_active: max_active.clone(), fail_with: None })
-                as Arc<dyn LocalTranslator>)
+            Ok(Arc::new(Fake {
+                active: AtomicUsize::new(0),
+                max_active: max_active.clone(),
+                fail_with: None,
+            }) as Arc<dyn LocalTranslator>)
         })
     }
 
@@ -158,7 +169,10 @@ mod tests {
     #[tokio::test]
     async fn loads_lazily_and_only_once() {
         let loads = Arc::new(AtomicUsize::new(0));
-        let lt = LocalTranslate::new(counting_loader(loads.clone(), Arc::new(AtomicUsize::new(0))));
+        let lt = LocalTranslate::new(counting_loader(
+            loads.clone(),
+            Arc::new(AtomicUsize::new(0)),
+        ));
         assert!(!lt.is_loaded().await);
         assert_eq!(loads.load(Ordering::SeqCst), 0);
 
@@ -171,7 +185,10 @@ mod tests {
     #[tokio::test]
     async fn unload_releases_the_model_and_the_next_translate_loads_again() {
         let loads = Arc::new(AtomicUsize::new(0));
-        let lt = LocalTranslate::new(counting_loader(loads.clone(), Arc::new(AtomicUsize::new(0))));
+        let lt = LocalTranslate::new(counting_loader(
+            loads.clone(),
+            Arc::new(AtomicUsize::new(0)),
+        ));
         lt.translate("a", "en").await.unwrap();
         assert!(lt.is_loaded().await);
         lt.unload().await;
@@ -235,50 +252,77 @@ mod tests {
         assert_eq!(b.unwrap(), "ja:two");
         assert_eq!(c.unwrap(), "fr:three");
         assert_eq!(d.unwrap(), "de:four");
-        assert_eq!(max_active.load(Ordering::SeqCst), 1, "同時に2つ以上の推論が走った");
+        assert_eq!(
+            max_active.load(Ordering::SeqCst),
+            1,
+            "同時に2つ以上の推論が走った"
+        );
     }
 
     #[tokio::test]
     async fn unloads_only_after_the_idle_time_and_reloads_on_next_use() {
         let loads = Arc::new(AtomicUsize::new(0));
-        let lt = LocalTranslate::new(counting_loader(loads.clone(), Arc::new(AtomicUsize::new(0))));
+        let lt = LocalTranslate::new(counting_loader(
+            loads.clone(),
+            Arc::new(AtomicUsize::new(0)),
+        ));
         let idle = Duration::from_secs(600);
 
         // ロード前は解放するものがない。
         assert!(!lt.unload_if_idle(Instant::now() + idle * 2, idle).await);
 
         lt.translate("a", "en").await.unwrap();
-        assert!(!lt.unload_if_idle(Instant::now() + Duration::from_secs(10), idle).await);
+        assert!(
+            !lt.unload_if_idle(Instant::now() + Duration::from_secs(10), idle)
+                .await
+        );
         assert!(lt.is_loaded().await);
 
-        assert!(lt.unload_if_idle(Instant::now() + idle + Duration::from_secs(1), idle).await);
+        assert!(
+            lt.unload_if_idle(Instant::now() + idle + Duration::from_secs(1), idle)
+                .await
+        );
         assert!(!lt.is_loaded().await);
 
         lt.translate("b", "en").await.unwrap();
-        assert_eq!(loads.load(Ordering::SeqCst), 2, "解放後の翻訳で再ロードされる");
+        assert_eq!(
+            loads.load(Ordering::SeqCst),
+            2,
+            "解放後の翻訳で再ロードされる"
+        );
     }
 
     #[tokio::test]
     async fn with_models_dir_reports_not_ready_when_the_model_is_missing() {
         let dir = std::env::temp_dir().join(format!("tsumugi_test_{}", uuid::Uuid::new_v4()));
         let lt = LocalTranslate::with_models_dir(dir);
-        let expected = if super::super::is_supported() { "LOCAL_MODEL_NOT_READY" } else { "LOCAL_UNSUPPORTED" };
+        let expected = if super::super::is_supported() {
+            "LOCAL_MODEL_NOT_READY"
+        } else {
+            "LOCAL_UNSUPPORTED"
+        };
         assert_invalid(lt.translate("a", "en").await, expected);
     }
 
     #[tokio::test]
-    async fn with_models_dir_reports_not_ready_when_the_file_has_the_right_size_but_cannot_be_loaded() {
+    async fn with_models_dir_reports_not_ready_when_the_file_has_the_right_size_but_cannot_be_loaded(
+    ) {
         // 破損や別の量子化のファイルは、サイズが合っても読み込めない。利用者には「モデルを取り直す」ことを
         // 伝えるため、一般的な失敗ではなく LOCAL_MODEL_NOT_READY にする。
         let dir = std::env::temp_dir().join(format!("tsumugi_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = std::fs::File::create(super::super::model_store::model_path(&dir)).unwrap();
         // 中身はゼロ（GGUF ではない）。スパースファイルなので、ディスクもメモリも使わない。
-        f.set_len(super::super::model_store::MODEL_SIZE_BYTES).unwrap();
+        f.set_len(super::super::model_store::MODEL_SIZE_BYTES)
+            .unwrap();
         drop(f);
 
         let lt = LocalTranslate::with_models_dir(dir);
-        let expected = if super::super::is_supported() { "LOCAL_MODEL_NOT_READY" } else { "LOCAL_UNSUPPORTED" };
+        let expected = if super::super::is_supported() {
+            "LOCAL_MODEL_NOT_READY"
+        } else {
+            "LOCAL_UNSUPPORTED"
+        };
         assert_invalid(lt.translate("a", "en").await, expected);
         assert!(!lt.is_loaded().await);
     }

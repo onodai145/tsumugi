@@ -43,12 +43,24 @@ fn run_state(_: &AppState) -> McpRunState {
 
 pub(crate) fn status(s: &AppState) -> McpStatus {
     let m = s.settings.load_mcp();
-    McpStatus { enabled: m.enabled, port: m.port, state: run_state(s), exposed_account_ids: m.exposed_account_ids }
+    McpStatus {
+        enabled: m.enabled,
+        port: m.port,
+        state: run_state(s),
+        exposed_account_ids: m.exposed_account_ids,
+    }
 }
 
 /// 存在するアカウントだけ、公開の可否を切り替えられる。
 pub(crate) fn set_exposed(s: &AppState, account_id: &str, exposed: bool) -> Result<(), String> {
-    if !s.accounts.lock().unwrap().list().iter().any(|a| a.id == account_id) {
+    if !s
+        .accounts
+        .lock()
+        .unwrap()
+        .list()
+        .iter()
+        .any(|a| a.id == account_id)
+    {
         return Err("アカウントが見つかりません".into());
     }
     s.settings
@@ -64,7 +76,10 @@ pub(crate) fn set_exposed(s: &AppState, account_id: &str, exposed: bool) -> Resu
 
 pub(crate) fn set_port_setting(s: &AppState, port: u16) -> Result<(), String> {
     crate::mcp::settings::validate_port(port)?;
-    s.settings.update_mcp(|m| m.port = port).map(|_| ()).map_err(|e| e.to_string())
+    s.settings
+        .update_mcp(|m| m.port = port)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// 設定画面に見せるトークン。無ければ作る。実行中のサーバーが読む共有値も揃える。
@@ -90,10 +105,17 @@ pub async fn get_mcp_status(state: State<'_, AppState>) -> Result<McpStatus, Str
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_mcp_enabled(app: tauri::AppHandle, state: State<'_, AppState>, enabled: bool) -> Result<McpStatus, String> {
+pub async fn set_mcp_enabled(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<McpStatus, String> {
     #[cfg(desktop)]
     {
-        state.settings.update_mcp(|m| m.enabled = enabled).map_err(|e| e.to_string())?;
+        state
+            .settings
+            .update_mcp(|m| m.enabled = enabled)
+            .map_err(|e| e.to_string())?;
         if let Err(e) = crate::mcp::server::reconcile(&app).await {
             // keyring が使えない等。オンのままにせず、停止状態に戻してエラーを返す。
             let _ = state.settings.update_mcp(|m| m.enabled = false);
@@ -111,7 +133,11 @@ pub async fn set_mcp_enabled(app: tauri::AppHandle, state: State<'_, AppState>, 
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_mcp_port(app: tauri::AppHandle, state: State<'_, AppState>, port: u16) -> Result<McpStatus, String> {
+pub async fn set_mcp_port(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    port: u16,
+) -> Result<McpStatus, String> {
     #[cfg(desktop)]
     {
         set_port_setting(&state, port)?;
@@ -127,7 +153,11 @@ pub async fn set_mcp_port(app: tauri::AppHandle, state: State<'_, AppState>, por
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_mcp_account_exposed(state: State<'_, AppState>, account_id: String, exposed: bool) -> Result<McpStatus, String> {
+pub async fn set_mcp_account_exposed(
+    state: State<'_, AppState>,
+    account_id: String,
+    exposed: bool,
+) -> Result<McpStatus, String> {
     #[cfg(desktop)]
     {
         set_exposed(&state, &account_id, exposed)?;
@@ -176,14 +206,19 @@ mod tests {
 
     fn state() -> AppState {
         let s = AppState::new_for_test(SettingsStore::new_in_memory());
-        s.accounts.lock().unwrap().upsert(account("a1", "one.example"));
+        s.accounts
+            .lock()
+            .unwrap()
+            .upsert(account("a1", "one.example"));
         s
     }
 
     #[test]
     fn status_reflects_settings_and_run_state() {
         let s = state();
-        s.settings.update_mcp(|m| m.exposed_account_ids = vec!["a1".into()]).unwrap();
+        s.settings
+            .update_mcp(|m| m.exposed_account_ids = vec!["a1".into()])
+            .unwrap();
         let st = status(&s);
         assert!(!st.enabled);
         assert_eq!(st.port, crate::mcp::settings::DEFAULT_PORT);
@@ -197,9 +232,16 @@ mod tests {
         assert!(set_exposed(&s, "nope", true).is_err());
         assert!(s.settings.load_mcp().exposed_account_ids.is_empty());
         set_exposed(&s, "a1", true).unwrap();
-        assert_eq!(s.settings.load_mcp().exposed_account_ids, vec!["a1".to_string()]);
+        assert_eq!(
+            s.settings.load_mcp().exposed_account_ids,
+            vec!["a1".to_string()]
+        );
         set_exposed(&s, "a1", true).unwrap();
-        assert_eq!(s.settings.load_mcp().exposed_account_ids.len(), 1, "二重に入らない");
+        assert_eq!(
+            s.settings.load_mcp().exposed_account_ids.len(),
+            1,
+            "二重に入らない"
+        );
         set_exposed(&s, "a1", false).unwrap();
         assert!(s.settings.load_mcp().exposed_account_ids.is_empty());
     }
@@ -208,7 +250,10 @@ mod tests {
     fn port_below_1024_is_rejected_and_not_saved() {
         let s = state();
         assert!(set_port_setting(&s, 80).is_err());
-        assert_eq!(s.settings.load_mcp().port, crate::mcp::settings::DEFAULT_PORT);
+        assert_eq!(
+            s.settings.load_mcp().port,
+            crate::mcp::settings::DEFAULT_PORT
+        );
         set_port_setting(&s, 50000).unwrap();
         assert_eq!(s.settings.load_mcp().port, 50000);
     }
@@ -221,7 +266,11 @@ mod tests {
         assert_eq!(token_for_display(&s).unwrap(), t1, "安定している");
         let t2 = regenerate(&s).unwrap();
         assert_ne!(t1, t2);
-        assert_eq!(s.mcp.token.get().as_deref(), Some(t2.as_str()), "実行中のサーバーが読む値も更新される");
+        assert_eq!(
+            s.mcp.token.get().as_deref(),
+            Some(t2.as_str()),
+            "実行中のサーバーが読む値も更新される"
+        );
         assert_eq!(token_for_display(&s).unwrap(), t2);
     }
 }
