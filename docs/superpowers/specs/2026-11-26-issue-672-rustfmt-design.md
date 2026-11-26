@@ -23,7 +23,7 @@
 
 ### 設定は既定のまま(`rustfmt.toml` を作らない)
 
-Rust Style Guide は、開発者とツールが既定のスタイルに従うことを推奨している。差分は `max_width = 120` と `use_small_heuristics = "Max"` を併用した場合(+2682 / -3375)より大きく、+13343 / -3235 になる。差分の大きさは一度きりで、blame への影響は `.git-blame-ignore-revs` で避けられるので、標準に揃えるほうを取る。
+Rust Style Guide は、開発者とツールが既定のスタイルに従うことを推奨している。差分は `max_width = 120` と `use_small_heuristics = "Max"` を併用した場合(+2682 / -3375)より大きく、+13343 / -3235 になる。差分の大きさは一度きりで、blame への影響は `.git-blame-ignore-revs` で減らせる(新しく増えた行には残ることがある)ので、標準に揃えるほうを取る。
 
 ### コミット構成
 
@@ -33,6 +33,7 @@ Rust Style Guide は、開発者とツールが既定のスタイルに従うこ
 2. 整形だけ: `src-tauri/` で `cargo +stable fmt --all` と `rustfmt +stable --edition 2021 llama_target.rs`。
 3. `.git-blame-ignore-revs` に 2 の hash を登録する。
 4. CI のチェックと `CLAUDE.md` の追記。
+5. pre-commit のフック。
 
 ### CI
 
@@ -51,13 +52,22 @@ stable は版を固定していないので、将来の rustfmt の更新で、�
 - コミット前の整形コマンド(`llama_target.rs` は別に整形すること)。
 - 手元で 1 回必要な `git config blame.ignoreRevsFile .git-blame-ignore-revs`(GitHub はファイルを自動で読む)。
 
+### pre-commit
+
+`.pre-commit-config.yaml` に `repo: local` のフックを足す(外部のフック用リポジトリは増やさない)。
+
+- CI と同じ 2 つのコマンドを `+stable` で実行する(rustup が前提)。
+- 確認するだけで、ファイルは書き換えない。落ちたら整形コマンドを実行して、ステージし直す。
+- `.rs` がステージされたコミットだけで動く。
+
 ## 検証
 
 - 整形コミットの親に同じコマンドをかけた結果が、整形コミットのツリーと一致する。
 - `cargo test` が通り、実行後の作業ツリーに差分が無い(`tauri.gen.ts` が変わらない)。
 - 本体・plugin・`llama_target.rs` をそれぞれ一時的に崩すと、CI と同じコマンドが失敗する。plugin が `--all` で拾えない場合は、plugin 用のチェックを別に足す。
-- `git blame` が、整形で変わった行について整形コミットを飛ばす。
+- `.git-blame-ignore-revs` を指定した `git blame` で、整形コミットに残る行が指定なしより減る。整形で新しく増えた行は元のコミットに戻せないことがあるので、残る行数を測って PR に書く。
 - Android のコンパイルは CI の `android-build` で確認する。
+- `pre-commit run rustfmt --all-files` が、整形済みのツリーで通り、崩したコードで落ちて、ファイルを書き換えない。
 
 ## マージと影響
 
@@ -66,6 +76,5 @@ stable は版を固定していないので、将来の rustfmt の更新で、�
 
 ## やらないこと
 
-- pre-commit への fmt フックの追加。
 - 整形と同時のリファクタリングや clippy の指摘への対応。
 - フロントエンドの整形。
