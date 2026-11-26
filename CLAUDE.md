@@ -23,8 +23,9 @@ cd src-tauri && cargo test --lib mysql_ -- --ignored --test-threads=2  # keep pa
 cd src-tauri && cargo +stable fmt --all  # コミット前の整形(CI の rust-test が --check で確認する)。`include!` だけで読むファイルは対象外になるので、`mod` でも読み込む
 git config blame.ignoreRevsFile .git-blame-ignore-revs  # 手元で1回。整形だけのコミットを git blame で飛ばす(GitHub はファイルを自動で読む)。ファイルが無い古いコミットを checkout している間は git blame がエラーになる
 cd src-tauri && cargo "+$(cat clippy-toolchain)" clippy --all-targets -- -D warnings  # CI の clippy ジョブと同じ版(Issue #707)。版は src-tauri/clippy-toolchain の 1 か所(`rustup toolchain install <版> -c clippy` が必要、frontend/dist も必要)。CI は Android(`--lib --target aarch64-linux-android`)も確認する。版を上げる PR で新しい指摘を直す
-pre-commit install  # 手元で1回(フックの種類が増えたら再実行)。コミット時に gitleaks と rustfmt --check、push の前に clippy が動く(rustfmt のフックは rustup と stable の rustfmt コンポーネントが必要: `rustup component add rustfmt --toolchain stable`)
+pre-commit install  # 手元で1回(フックの種類が増えたら再実行)。コミット時に gitleaks と rustfmt --check、push の前に clippy と ESLint が動く(rustfmt のフックは rustup と stable の rustfmt コンポーネントが必要: `rustup component add rustfmt --toolchain stable`)
 cd frontend  && pnpm check               # svelte-check + tsc (tsconfig.node.json)
+cd frontend  && pnpm lint                # ESLint(CI の frontend-check と同じ、Issue #707)。型情報を使うルールは Promise の取りこぼしだけ
 cd frontend  && pnpm test                # Vitest unit tests
 cd frontend  && npx vitest run <path>   # single file — `pnpm test -- <path>` ignores the path and runs the whole suite
 

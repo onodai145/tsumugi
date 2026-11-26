@@ -25,3 +25,10 @@ repos:
         files: ^src-tauri/
         pass_filenames: false
         stages: [pre-push]
+      - id: eslint
+        name: eslint
+        entry: bash -c 'cd frontend && pnpm lint'
+        language: system
+        files: ^frontend/
+        pass_filenames: false
+        stages: [pre-push]
