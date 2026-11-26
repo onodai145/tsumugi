@@ -194,6 +194,7 @@ pub struct AppState {
     pub column_fence: ColumnFence,
     /// アカウント削除が、トークンを消してから確定する(または書き戻す)までの間、書きロックを持つ。
     /// トークンの読み取り失敗を状態として記録する処理(予約投稿のスケジューラ)は、読みロックを取ってから読む(Issue #694)。
+    /// ログインの保存(`persist_login`)も、token を控えてから書き戻すまで読みロックを持つ(Issue #696)。
     pub(crate) token_removal: std::sync::RwLock<()>,
 }
 

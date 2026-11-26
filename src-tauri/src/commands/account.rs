@@ -70,15 +70,20 @@ pub async fn complete_miauth(state: State<'_, AppState>, session_id: String) -> 
 /// token を keyring に、アカウントを設定に書く。設定の保存に失敗したら、keyring を書く前の状態に戻す
 /// (残すと、どのアカウントにも結びつかない token ができる。Issue #696)。
 fn persist_login(state: &AppState, account: &Account, token: &str) -> Result<()> {
-    // 戻せるように、書く前に控える。読めなければ何も書かない。
-    let previous = state.secrets.get(&account.id)?;
+    // アカウント削除(トークンを消してから確定するまで)と直列にする。控えてから書き戻すまでに削除が
+    // 割り込むと、削除済みアカウントの token が残る。この中で `await` しない。
+    let _reading = state.token_removal.read().unwrap();
+    // 戻せるように、書く前に控える。読めなくてもログインは続ける(壊れた項目を、再ログインで上書きして直せるように)。
+    let previous = state.secrets.get(&account.id);
     // token は keyring のみに保存（Account/戻り値には含めない）
     state.secrets.set(&account.id, token)?;
     // 再起動で復元できるよう永続化
     state.settings.upsert_account(account).inspect_err(|_| {
         let restored = match &previous {
-            Some(previous) => state.secrets.set(&account.id, previous),
-            None => state.secrets.delete(&account.id),
+            Ok(Some(previous)) => state.secrets.set(&account.id, previous),
+            Ok(None) => state.secrets.delete(&account.id),
+            // 前の値が分からないので、触らない。
+            Err(_) => Ok(()),
         };
         if let Err(e) = restored {
             log::warn!("failed to restore the token after the login failed: {e}");
@@ -648,27 +653,74 @@ mod removal_tests {
         assert_eq!(has_account(&f, "a3"), (false, false));
     }
 
+    /// `a1` の再認証で返ってきた、表示名が変わったアカウント。
+    fn renamed_a1() -> Account {
+        Account { display_name: "renamed".into(), ..account("a1", "127.0.0.1:1") }
+    }
+
+    fn saved_display_name(f: &Fixture, id: &str) -> String {
+        let accounts = f.state.settings.load_accounts().unwrap();
+        accounts.into_iter().find(|a| a.id == id).unwrap().display_name
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_reauthentication_that_cannot_be_saved_keeps_the_previous_token() {
         let f = fixture();
         f.settings_disk.break_dir();
 
-        assert!(persist_login(&f.state, &account("a1", "127.0.0.1:1"), "new-token").is_err());
+        assert!(persist_login(&f.state, &renamed_a1(), "new-token").is_err());
 
         assert_eq!(token(&f, "a1").as_deref(), Some("token"));
-        assert_eq!(has_account(&f, "a1"), (true, true));
+        assert_eq!(saved_display_name(&f, "a1"), "a1");
     }
 
+    /// 読めない項目は、再ログインで上書きして直せるようにする。
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_login_writes_nothing_when_the_previous_token_cannot_be_read() {
+    async fn a_login_proceeds_when_the_previous_token_cannot_be_read() {
         let f = fixture();
         f.faults.get.store(true, Ordering::SeqCst);
 
-        let result = persist_login(&f.state, &account("a1", "127.0.0.1:1"), "new-token");
+        let result = persist_login(&f.state, &renamed_a1(), "new-token");
 
         f.faults.get.store(false, Ordering::SeqCst);
-        assert!(matches!(result, Err(Error::Secret(_))), "{result:?}");
-        assert_eq!(token(&f, "a1").as_deref(), Some("token"));
+        result.unwrap();
+        assert_eq!(token(&f, "a1").as_deref(), Some("new-token"));
+        assert_eq!(saved_display_name(&f, "a1"), "renamed");
+    }
+
+    /// 前の値が分からないので、書き戻すことも消すこともしない。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_save_leaves_the_keyring_alone_when_the_previous_token_could_not_be_read() {
+        let f = fixture();
+        f.settings_disk.break_dir();
+        f.faults.get.store(true, Ordering::SeqCst);
+
+        let result = persist_login(&f.state, &renamed_a1(), "new-token");
+
+        f.faults.get.store(false, Ordering::SeqCst);
+        assert!(result.is_err() && !matches!(result, Err(Error::Secret(_))), "{result:?}");
+        assert_eq!(token(&f, "a1").as_deref(), Some("new-token"));
+        assert_eq!(saved_display_name(&f, "a1"), "a1");
+    }
+
+    /// 控えてから書き戻すまでにアカウント削除が割り込むと、削除済みアカウントの token が残る。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_login_waits_for_an_account_removal_in_progress() {
+        let f = fixture();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        std::thread::scope(|s| {
+            let removing = f.state.token_removal.write().unwrap();
+            s.spawn(|| {
+                persist_login(&f.state, &renamed_a1(), "new-token").unwrap();
+                done_tx.send(()).unwrap();
+            });
+            assert!(done_rx.recv_timeout(Duration::from_millis(300)).is_err(), "削除中に書き込んだ");
+            assert_eq!(token(&f, "a1").as_deref(), Some("token"));
+            drop(removing);
+            done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        assert_eq!(token(&f, "a1").as_deref(), Some("new-token"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

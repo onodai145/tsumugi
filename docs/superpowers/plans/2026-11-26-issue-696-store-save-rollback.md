@@ -653,6 +653,9 @@ Global Constraints の「呼び出し元は変更しない」は、spec の 3 �
 
 ### Task 3: ログインの保存に失敗したら keyring を元に戻す
 
+> 実装後に spec の 3 を改定した(控えが読めなくても続ける、`token_removal` の読みロックを持つ)。
+> 現在の動作は spec と `persist_login` が正で、以下の「読めなければ何も書かない」は古い。
+
 **Files:**
 - Modify: `src-tauri/src/commands/account.rs`(`complete_miauth`、`mod removal_tests`)
 
