@@ -2,6 +2,7 @@
   import { Button } from "$lib/components/ui/button";
   import { app } from "../../lib/store.svelte";
   import { pushModalHistory } from "../../lib/modalHistory";
+  import { escapeOnLostFocus } from "../../lib/escapeOnLostFocus";
   import { formatBytes } from "../../lib/localModel";
 
   // PLaMo Community License への同意ダイアログ(Issue #603)。強制は Rust 側(start_local_model_download が版を検証する)で、
@@ -53,6 +54,7 @@
   <div
     class="w-[min(420px,92vw)] rounded-xl border border-border bg-background p-4"
     onclick={(e) => e.stopPropagation()}
+    use:escapeOnLostFocus={() => onCancel()}
     role="dialog"
     aria-modal="true"
     aria-labelledby="license-dialog-title"

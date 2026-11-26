@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { app } from "../lib/store.svelte";
   import { pushModalHistory } from "../lib/modalHistory";
+  import { escapeOnLostFocus } from "../lib/escapeOnLostFocus";
 
   let {
     acct,
@@ -76,6 +77,7 @@
   <div
     class="w-[min(420px,92vw)] rounded-xl border border-border bg-background p-4"
     onclick={(e) => e.stopPropagation()}
+    use:escapeOnLostFocus={cancel}
     role="dialog"
     aria-modal="true"
     tabindex="-1"

@@ -2,6 +2,7 @@
   import { Button } from "$lib/components/ui/button";
   import { app } from "../lib/store.svelte";
   import { pushModalHistory } from "../lib/modalHistory";
+  import { escapeOnLostFocus } from "../lib/escapeOnLostFocus";
   // 汎用の確認モーダル。深くネストされたコンポーネント(NoteCard等)から呼ばれても
   // content-visibility/containの包含ブロックを脱出できるよう portal で body 直下に置く。
   let {
@@ -64,6 +65,7 @@
   <div
     class="w-[min(360px,92vw)] rounded-xl border border-border bg-background p-4"
     onclick={(e) => e.stopPropagation()}
+    use:escapeOnLostFocus={() => onCancel()}
     role="dialog"
     aria-modal="true"
     tabindex="-1"

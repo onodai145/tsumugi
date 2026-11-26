@@ -2,6 +2,7 @@
   import { Button } from "$lib/components/ui/button";
   import { app } from "../../lib/store.svelte";
   import { pushModalHistory } from "../../lib/modalHistory";
+  import { escapeOnLostFocus } from "../../lib/escapeOnLostFocus";
   import { formatBytes } from "../../lib/localModel";
   import type { SpeechCoreTerms } from "../../lib/ipc";
 
@@ -51,6 +52,7 @@
   <div
     class="w-[min(560px,92vw)] rounded-xl border border-border bg-background p-4"
     onclick={(e) => e.stopPropagation()}
+    use:escapeOnLostFocus={() => onCancel()}
     role="dialog"
     aria-modal="true"
     aria-labelledby="speech-terms-title"
