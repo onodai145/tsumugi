@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.1] - 2026-11-27
+
+### 🐛 Bug Fixes
+
+- *(deps)* Tauriを2.12系に更新する(GHSA-w28w-mhc8-qvjv)
+
+### ⚙️ Miscellaneous Tasks
+
+- Apt を使うジョブを ubuntu-24.04 に固定しタイムアウトを足す (#594)
+- Release・nightlyのLinuxビルドをubuntu-24.04に固定しタイムアウトを足す (#596)
 ## [0.13.0] - 2026-11-02
 
 ### 🚀 Features
