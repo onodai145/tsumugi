@@ -40,7 +40,10 @@ jobs:
 
   rust-test:
     needs: changes
-    runs-on: ubuntu-latest
+    # ubuntu-latest は 26.04 への切り替え中(actions/runner-images#14748)。切り替え先のランナーで
+    # apt-get のステップが止まり続けたため、apt で Tauri の依存を入れるジョブは 24.04 に固定する(Issue #594)。
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
@@ -101,7 +104,8 @@ jobs:
 
   rust-coverage:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # rust-test と同じ理由で固定(Issue #594)
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
@@ -256,7 +260,7 @@ jobs:
   # xvfbも別途要る。
   e2e:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # rust-test と同じ理由で固定(Issue #594)
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4

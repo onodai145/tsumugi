@@ -5,9 +5,8 @@
 //! keyring-core + プラットフォームごとの store crate を直接使う
 //! (macOS: apple-native-keyring-store / Windows: windows-native-keyring-store /
 //!  Linux 等 unix: zbus-secret-service-keyring-store / Android: android-native-keyring-store)。
-//! Android 版は Tauri Mobile が ndk-context を自動初期化してくれないため、
-//! `MainActivity.onCreate` から JNI 経由で `Keyring.initializeNdkContext(applicationContext)`
-//! を明示的に呼んでいる(gen/android/.../MainActivity.kt 参照)。
+//! Android の store が使う ndk-context は、tao(0.37 以降)が application context で初期化する。
+//! アプリ側で初期化すると二重になり、起動時に assert で落ちる。
 
 use crate::error::{Error, Result};
 use std::sync::Once;

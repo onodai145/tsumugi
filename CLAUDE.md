@@ -46,6 +46,8 @@ If the build fails during Gradle configuration with `A problem occurred configur
 
 `MainActivity.kt` が IME(ソフトキーボード)のインセットから、キーボードが WebView 下端を覆う高さを CSS 変数 `--keyboard-inset` として WebView に設定する(マニフェストは `adjustNothing` で WebView は縮まない)。フロントはこの変数だけを参照する。`gen/android/.../generated/` は Tauri が再生成するため編集せず、`MainActivity.kt` とマニフェストだけを編集する。エミュレーターで確認するときは、FAB 等は `adb shell input tap` の本物のタップで押す(CDP の `.click()` はユーザー操作扱いにならず、キーボードが出ない/積んだ履歴が飛ばされて最初の戻るでアプリが終了する)。
 
+Don't call `Keyring.initializeNdkContext` from `MainActivity` (or initialize `ndk_context` anywhere else in the app): tao 0.37+ (tauri 2.12) initializes it with the application context itself, and a second initialization hits an `assert!` in `ndk-context` that aborts the app at startup (observed on an emulator; the build still succeeds). `android-native-keyring-store` reads that context.
+
 ## Architecture
 
 ### Rust ↔ TS boundary
