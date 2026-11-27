@@ -153,9 +153,7 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-        with:
-          workspaces: src-tauri
+      # rust-cache は使わない: Actions のキャッシュは上限が 10GB で、ここで保存すると test.yml の main のキャッシュが追い出される(Issue #710)。
 
       # package.json の packageManager は frontend/ 配下にあり action-setup のデフォルト
       # 検出(リポジトリルート)では拾えないため version を明示指定する。
@@ -253,9 +251,7 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-        with:
-          workspaces: src-tauri
+      # rust-cache は使わない: Actions のキャッシュは上限が 10GB で、ここで保存すると test.yml の main のキャッシュが追い出される(Issue #710)。
 
       - name: Cache cargo-tauri CLI
         id: cache-tauri-cli
