@@ -13,7 +13,6 @@ import android.util.Log
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import io.crates.keyring.Keyring
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
@@ -108,10 +107,6 @@ class MainActivity : TauriActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // android-native-keyring-store (トークンの安全な保存先) が使う ndk-context を
-        // 初期化する。Tauri は自動で行わないため、ここで明示的に呼ぶ必要がある。
-        Keyring.initializeNdkContext(applicationContext)
-
         startNetworkMonitoring()
 
         // 前回起動分の共有インテント一時ファイルの残骸を掃除する(Issue #116)。
