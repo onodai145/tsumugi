@@ -42,7 +42,7 @@
     "@misskey-dev/emoji-data": "^17.0.6",
     "@panzoom/panzoom": "^4.6.2",
     "@shikijs/engine-javascript": "^4.4.3",
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "^2.12.0",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2.5.5",
