@@ -88,7 +88,7 @@ sea-query = { version = "1.0.2", default-features = false, features = ["backend-
 sha2 = "0.10"
 fs4 = "1.1.0"
 # 内蔵 VOICEVOX CORE(Issue #625 段階2)。取得物の展開(zip・tgz)。全環境でビルドする(Android では使わないが、コマンドは共通)。
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 tar = "0.4"
 flate2 = "1"
 
