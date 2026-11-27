@@ -3,6 +3,7 @@ import './app.css'
 import App from './App.svelte'
 import { commands } from './lib/ipc'
 import { installExternalLinkHandler } from './lib/externalLinks'
+import { isFramed } from './lib/appOrigin'
 
 // 外部リンクは WebView 自身で開かず OS 側で開く。モーダル内など click の伝播を止める祖先の下でも
 // 効くよう捕捉フェーズで受ける(Issue #657)。
@@ -32,8 +33,12 @@ if (import.meta.env.DEV) {
   })
 }
 
-const app = mount(App, {
-  target: document.getElementById('app')!,
-})
+// iframe の中では起動しない。URL プレビューのプレイヤーがアプリ自身を読み込むと、boot() が
+// 二重に走るため(Issue #613)。
+const app = isFramed()
+  ? undefined
+  : mount(App, {
+      target: document.getElementById('app')!,
+    })
 
 export default app
