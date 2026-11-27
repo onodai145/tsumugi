@@ -16,13 +16,9 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() =
 
 const cachedUrlPreviewMock = vi.fn();
 const fetchUrlPreviewMock = vi.fn();
-// importOriginal で isSafeUrl だけ実体を残す形にできないか試したが、urlPreview.ts 経由で
-// store.svelte.ts (Tauri plugin-os 等) が読み込まれテスト環境で例外になるため断念。
-// isSafeUrl はここではスタブとして再定義する(urlPreview.ts の実装と手動で同期させる必要がある点は既知のトレードオフ)。
 vi.mock("../lib/urlPreview", () => ({
   cachedUrlPreview: (url: string) => cachedUrlPreviewMock(url),
   fetchUrlPreview: (url: string) => fetchUrlPreviewMock(url),
-  isSafeUrl: (url: string) => /^https?:\/\//i.test(url),
   resolvedThumbnailUrl: (thumbnail: string, instanceHost: string | undefined) => {
     if (!instanceHost) return thumbnail;
     try {
@@ -55,6 +51,16 @@ const PREVIEW = {
 };
 
 describe("UrlPreviewCard", () => {
+  // Issue #613: Windows / Android ではアプリ本体が http://tauri.localhost で配信される。
+  it("offers no playback for a player URL pointing at the app itself", () => {
+    cachedUrlPreviewMock.mockReturnValue({
+      ...PREVIEW,
+      player: { url: "http://tauri.localhost/", width: null, height: null },
+    });
+    render(UrlPreviewCard, { url: PREVIEW.url, instanceHost: undefined });
+    expect(screen.queryByRole("button", { name: "再生" })).toBeNull();
+  });
+
   it("renders nothing while the preview has not been fetched yet", () => {
     cachedUrlPreviewMock.mockReturnValue(undefined);
     fetchUrlPreviewMock.mockReturnValue(new Promise(() => {}));

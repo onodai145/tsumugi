@@ -2,7 +2,8 @@
   import type { UrlPreview } from "../bindings/tauri.gen";
   import { Button } from "$lib/components/ui/button";
   import { app } from "../lib/store.svelte";
-  import { cachedUrlPreview, fetchUrlPreview, isSafeUrl, resolvedThumbnailUrl } from "../lib/urlPreview";
+  import { cachedUrlPreview, fetchUrlPreview, resolvedThumbnailUrl } from "../lib/urlPreview";
+  import { isSafeUrl } from "../lib/appOrigin";
 
   let { url, instanceHost }: { url: string; instanceHost: string | undefined } = $props();
 

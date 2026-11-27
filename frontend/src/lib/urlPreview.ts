@@ -1,6 +1,7 @@
 import { commands } from "./ipc";
 import { app } from "./store.svelte";
 import { proxiedImageUrl } from "./emoji";
+import { isSafeUrl } from "./appOrigin";
 import type { UrlPreview } from "../bindings/tauri.gen";
 
 // リンクプレビュー(OGP相当)のセッション内キャッシュ(Issue #9)。lib/mentionAvatar.tsと同構造だが、
@@ -57,15 +58,9 @@ export function resolvedThumbnailUrl(thumbnail: string, instanceHost: string | u
   return proxiedImageUrl(thumbnail, instanceHost);
 }
 
-/// UrlPreviewCard.svelte がリンクとして扱う(http/https)スキームか判定する。
-/// カード側の描画判定(iframe埋め込み・リンク化)と合わせて、危険なスキームは無視する。
-export function isSafeUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
-}
-
 /// UrlPreviewCard.svelte が実際に描画に使うフィールドが1つでもあれば「内容あり」とみなす。
-/// icon はカードが描画しないため対象外。player は isSafeUrl を満たす場合のみ
-/// (安全でないスキームは再生ボタン・iframeとも描画されない)。
+/// icon はカードが描画しないため対象外。player は isSafeUrl(lib/appOrigin.ts)を満たす場合のみ
+/// (安全でない URL は再生ボタン・iframeとも描画されない)。
 function hasContent(p: UrlPreview): boolean {
   return !!(p.title || p.description || p.thumbnail || p.sitename || (p.player && isSafeUrl(p.player.url)));
 }
