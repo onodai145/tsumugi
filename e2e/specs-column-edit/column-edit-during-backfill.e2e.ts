@@ -16,6 +16,18 @@ const BRAVO = `v458bravo${RUN}`;
 const marker = (m: string) => (m === ALPHA ? "alpha" : "bravo");
 const tqlFor = (m: string) => `from home where text -> "${m}"`;
 
+// 上スクロール(loadMore)を起こしてから ms 後に clickJs を実行する executeAsync 用の関数。ページ内で
+// eval / new Function を使うと CSP で止まる(Issue #612)ので、Node 側でひとつの関数に組み立てて渡す。
+const scrollThen = (clickJs: string) =>
+  new Function(
+    "ms",
+    "done",
+    `const ok = (() => {${SCROLL_ACTIVE_JS}})(); setTimeout(() => { ${clickJs}; done(ok); }, ms);`,
+  ) as (ms: number, done: (v: boolean) => void) => void;
+const CLICK_SUBMIT = `document.querySelector('[data-testid="add-column-submit"]').click()`;
+const CLICK_CLOSE_TAB =
+  `Array.from(document.querySelectorAll('button[title="タブを閉じる"]')).find((b) => b.offsetParent !== null).click()`;
+
 describe("#451 column edit / close during backfill", () => {
   let bridge: MiauthBridge;
   let token: string;
@@ -62,17 +74,7 @@ describe("#451 column edit / close during backfill", () => {
       await ta.waitForDisplayed({ timeout: 15000 });
       await ta.setValue(tqlFor(next));
       await takeTrace(); // モーダル操作中のノイズを捨てる
-      const scrolled = await browser.executeAsync(
-        (script: string, ms: number, done: (v: boolean) => void) => {
-          const ok = new Function(script)() as boolean;
-          setTimeout(() => {
-            (document.querySelector('[data-testid="add-column-submit"]') as HTMLElement).click();
-            done(ok);
-          }, ms);
-        },
-        SCROLL_ACTIVE_JS,
-        delay,
-      );
+      const scrolled = await browser.executeAsync(scrollThen(CLICK_SUBMIT), delay);
       expect(scrolled).toBe(true);
 
       // 編集が反映され、新フィルタの内容に入れ替わるまで待つ
@@ -123,16 +125,7 @@ describe("#451 column edit / close during backfill", () => {
     await name.waitForDisplayed({ timeout: 15000 });
     await name.setValue(`renamed-${RUN}`);
     await takeTrace();
-    await browser.executeAsync(
-      (script: string, done: (v: boolean) => void) => {
-        const ok = new Function(script)() as boolean;
-        setTimeout(() => {
-          (document.querySelector('[data-testid="add-column-submit"]') as HTMLElement).click();
-          done(ok);
-        }, 3);
-      },
-      SCROLL_ACTIVE_JS,
-    );
+    await browser.executeAsync(scrollThen(CLICK_SUBMIT), 3);
     await browser.waitUntil(async () => (await noteTexts()).length > before, {
       timeout: 30000,
       interval: 300,
@@ -148,19 +141,7 @@ describe("#451 column edit / close during backfill", () => {
     await takeTrace();
     const colRows = queryCache(`SELECT DISTINCT column_id FROM column_note`);
     console.log(`[e2e] column ids before close: ${JSON.stringify(colRows)}`);
-    await browser.executeAsync(
-      (script: string, done: (v: boolean) => void) => {
-        const ok = new Function(script)() as boolean;
-        setTimeout(() => {
-          const btn = Array.from(document.querySelectorAll('button[title="タブを閉じる"]')).find(
-            (b) => (b as HTMLElement).offsetParent !== null,
-          ) as HTMLElement;
-          btn.click();
-          done(ok);
-        }, 3);
-      },
-      SCROLL_ACTIVE_JS,
-    );
+    await browser.executeAsync(scrollThen(CLICK_CLOSE_TAB), 3);
     await browser.waitUntil(async () => (await noteTexts()).length === 0, { timeout: 15000, interval: 300 });
     await browser.pause(4000);
     const trace = await takeTrace();

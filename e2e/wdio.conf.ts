@@ -28,5 +28,7 @@ export const config: Options.Testrunner = {
   mochaOpts: {
     ui: "bdd",
     timeout: 60000,
+    // 各テストの後に CSP 違反を確かめる(Issue #612)。
+    require: ["./helpers/cspHooks.ts"],
   },
 };

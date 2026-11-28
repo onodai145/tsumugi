@@ -4,6 +4,10 @@ import App from './App.svelte'
 import { commands } from './lib/ipc'
 import { installExternalLinkHandler } from './lib/externalLinks'
 import { isFramed } from './lib/appOrigin'
+import { installCspViolationRecorder } from './lib/cspViolations'
+
+// CSP 違反を記録する(Issue #612)。違反イベントは非同期に届くので、import 中に起きた分も拾える。
+installCspViolationRecorder()
 
 // 外部リンクは WebView 自身で開かず OS 側で開く。モーダル内など click の伝播を止める祖先の下でも
 // 効くよう捕捉フェーズで受ける(Issue #657)。
