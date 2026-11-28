@@ -1,6 +1,6 @@
 // Issue #458: #455 セッション2。サーバーでミュートを**追加**しただけ(+acc2のスナップショットを消して「起動時の初回同期」を再現)
 // で再起動しても、境界が消えないことを確認する。
-import { loadState } from "../helpers/sessionHooks";
+import { loadState, saveState } from "../helpers/sessionHooks";
 import { queryCache, readSettingsJson, until, columnsInfo } from "../helpers/appInspect";
 
 const boundaryRows = () => queryCache(`SELECT column_id, source_idx, oldest_fetched_id FROM column_source_boundary ORDER BY column_id`);
@@ -25,5 +25,7 @@ describe("#455 session 2: restart after a server mute was only ADDED", () => {
     expect(snaps[acc2Id].users).toContain(mId); // 消したスナップショットが、同期で復元された(初回=保存だけ)
     expect(after.length).toBe(2);
     expect(after.map((r) => r[0]).sort()).toEqual(loadState().c.columnIds.slice().sort());
+    // セッション3で、境界が作り直されたかを比べるために残す。
+    saveState({ boundaries: Object.fromEntries(after.map((r) => [r[0], r[2]])) });
   });
 });

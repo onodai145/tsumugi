@@ -1,5 +1,6 @@
-// Issue #458: #455 セッション3。サーバーでMのミュートを**解除**して再起動すると、そのアカウントのカラムの境界だけが空になり、
-// 解除したユーザーのノートが上スクロールで出てくることを確認する。
+// Issue #458: #455 セッション3。サーバーでMのミュートを**解除**して再起動すると、そのアカウントのカラムの境界だけが破棄され、
+// 解除したユーザーのノートが上スクロールで出てくることを確認する。破棄された境界は、起動時のカラム復元で最新の1ページから
+// 作り直される(Issue #555)ので、行が無くなるのではなく、前より新しい値になる。
 import { loadState } from "../helpers/sessionHooks";
 import { queryCache, readSettingsJson, until, columnsInfo, scrollColumnAt } from "../helpers/appInspect";
 
@@ -27,7 +28,11 @@ describe("#455 session 3: restart after a muted user was UNMUTED on the server",
     const acc2Rows = rows.filter((r) => r[0] === acc2Col);
     console.log(`[e2e] admin column boundary rows=${adminRows.length}, acc2 column boundary rows=${acc2Rows.length}`);
     expect(acc2Rows.length).toBeGreaterThan(0); // 他のアカウントのカラムの境界は残る
-    expect(adminRows.length).toBe(0); // 解除したアカウントのカラムの境界は空
+    // 解除したアカウントのカラムの境界は破棄される。破棄されずに残れば前と同じ値なので、取り直した値は前より新しい。
+    // 末尾まで取得し切った境界は空文字になる。その場合も、取り直した値(ID)は空文字より大きい。
+    const before = loadState().boundaries as Record<string, string>;
+    for (const r of adminRows) expect(String(r[2]) > before[adminCol]).toBe(true);
+    expect(acc2Rows.map((r) => r[2])).toEqual([before[acc2Col]]); // 他のアカウントの境界は変わらない
 
     // 解除したM(偶数番号)の、より古いノートが上スクロールで出てくる(adminのカラムは左端)
     let cols = await columnsInfo();
