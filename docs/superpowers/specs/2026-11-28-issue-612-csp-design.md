@@ -100,3 +100,43 @@ AudioWorklet の `addModule` は、`worker-src` ではなく `script-src` に従
 ## 参考
 
 - Tauri: https://v2.tauri.app/security/csp/
+
+## 検証結果
+
+Linux(WebKitGTK、埋め込みビルド `--no-default-features --features custom-protocol`)で確認した。設定値は上の表から変えていない。
+
+### CSP の適用
+
+- オリジンは `tauri://localhost`。インラインスクリプトは実行されず、`script-src-elem` の違反になる。
+- `ipc://` と `asset://` への `fetch` は違反にならない。許可していない `https://example.com/` への `fetch` は `connect-src` の違反になる。
+- デバッグブリッジから呼んだ `new Function` は `EvalError` になる。
+- Tauri は、同梱の JS ファイルすべての SHA-256 を `script-src` に足す(ヘッダーが長くなる)。
+- 開発ビルド(`custom-protocol` なし、Vite)には CSP が適用されない(インラインスクリプトが実行される)。
+
+### E2E
+
+- `e2e`(7)、`e2e:mobile`(6)、`e2e:scheduled`(1)、`e2e:scheduled-restart`(2)、`e2e:persistence`(2)、`e2e:ng-restart`(2)は成功(括弧内は spec ファイル数)。CSP 違反なし。
+- `e2e:column-edit` は、spec がページ内で `new Function` を実行していて CSP に止められたので、関数を Node 側で組み立てる形に直して成功した。
+- `e2e:server-mute-restart` は、3 本目の「解除したアカウントの境界が空になる」で失敗する(残り 1 件)。`csp: null` でも同じなので、CSP が原因ではない。CI では動かない。`main` のビルドでは確認していない。
+- 違反を起こしたまま終わるテストで、ルートフックが実行全体を失敗にすることを確認した。
+
+### 画面
+
+CSP 違反が出たのは、意図した `http:` の `@import` だけ(`style-src-elem`。記録され、画面は操作できる)。
+
+- 確認できた: コードブロックの強調表示、作成欄と絵文字ピッカー、カスタム絵文字、画像とビューワー(拡大・回転)、音声の再生、動画の再生と拡大表示、MML の入力欄(CodeMirror のスタイル)と試聴の生成、背景の画像と動画、カスタム CSS の `https:` の `@import`、日時ピッカー、`list.m3u8` の添付がファイル行になること、URL プレビューの iframe が読み込まれること。
+- 画像・音声・動画の再生は、使い捨て Misskey の添付の URL をローカルの `http` サーバーに差し替えて確認した(WebView はテスト用の CA を信用しないため)。外部の `https:` の添付は、違反が出ないことだけを確認した。
+- 計画で「カスタム CSS の編集欄(CodeMirror)」とした欄は textarea だったので、CodeMirror は MML の入力欄で確認した。
+- `list.m3u8` はサーバーが `application/octet-stream` と判定したので、HLS の MIME をファイル扱いにする分岐は、単体テストだけで確認した。
+- YouTube の埋め込みは「エラー 153」を表示する。`csp: null` でも同じ。
+
+### テスト
+
+- Rust: `cargo test --no-default-features --features custom-protocol` は 1447 件成功、93 件は ignore。
+- フロント: 1699 件成功。9 回ほど流したうち 1 回だけ 1 件失敗した(テスト名は記録できず、その後の 7 回は全件成功)。
+- clippy は llama.cpp なしの構成で確認した(無効にした機能の未使用警告は除外)。通常の構成は CI で確認する。
+
+### 確認していないもの
+
+- Android(エミュレーター)。
+- Windows と macOS。
