@@ -4,6 +4,8 @@
 mod api;
 mod attribution;
 mod commands;
+#[cfg(test)]
+mod csp_config;
 #[cfg(all(debug_assertions, desktop))]
 mod debug_bridge;
 mod domain;

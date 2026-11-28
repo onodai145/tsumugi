@@ -39,6 +39,24 @@ afterEach(() => {
 });
 
 describe("MediaGrid", () => {
+  it("HLS のプレイリストはプレイヤーを作らず、保存できるファイル行にする", () => {
+    const { container, getByLabelText } = render(MediaGrid, {
+      files: [file({ id: "h1", mimeType: "audio/x-mpegurl", name: "list.m3u8" })],
+    });
+    expect(container.querySelector("media-player")).toBeNull();
+    expect(getByLabelText("list.m3u8 を保存")).toBeTruthy();
+  });
+
+  it("閲覧注意のプレイリストは、カバー付きのファイル行にする", () => {
+    const { container } = render(MediaGrid, {
+      files: [
+        file({ id: "h2", mimeType: "video/mp4", url: "https://example.com/a.m3u8", isSensitive: true }),
+      ],
+    });
+    expect(container.querySelector(".media-cell")).toBeNull();
+    expect(container.querySelector("li .file-row")?.textContent).toContain("閲覧注意（クリックで表示）");
+  });
+
   it("画像はグリッドのセル、非メディアはリスト行に振り分ける", () => {
     const { container, getByText } = render(MediaGrid, {
       files: [file({ id: "i1", mimeType: "image/png", name: "a.png" }), file({ id: "p1" })],
