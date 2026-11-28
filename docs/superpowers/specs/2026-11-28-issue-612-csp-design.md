@@ -103,7 +103,7 @@ AudioWorklet の `addModule` は、`worker-src` ではなく `script-src` に従
 
 ## 検証結果
 
-Linux(WebKitGTK、埋め込みビルド `--no-default-features --features custom-protocol`)で確認した。設定値は上の表から変えていない。
+Linux(WebKitGTK、埋め込みビルド `--no-default-features --features custom-protocol`)と Android(エミュレーター)で確認した。設定値は上の表から変えていない。
 
 ### CSP の適用
 
@@ -117,8 +117,8 @@ Linux(WebKitGTK、埋め込みビルド `--no-default-features --features custom
 
 - `e2e`(7)、`e2e:mobile`(6)、`e2e:scheduled`(1)、`e2e:scheduled-restart`(2)、`e2e:persistence`(2)、`e2e:ng-restart`(2)は成功(括弧内は spec ファイル数)。CSP 違反なし。
 - `e2e:column-edit` は、spec がページ内で `new Function` を実行していて CSP に止められたので、関数を Node 側で組み立てる形に直して成功した。
-- `e2e:server-mute-restart` は、3 本目の「解除したアカウントの境界が空になる」で失敗する(残り 1 件)。`csp: null` でも同じなので、CSP が原因ではない。CI では動かない。`main` のビルドでは確認していない。
-- 違反を起こしたまま終わるテストで、ルートフックが実行全体を失敗にすることを確認した。
+- `e2e:server-mute-restart` は、3 本目の「解除したアカウントの境界が空になる」で失敗した。`csp: null` でも同じ。原因は spec の期待が古いこと(破棄した境界は、起動時のカラム復元で作り直される。Issue #555)で、別ブランチで spec を直した。
+- 違反を起こしたまま終わるテストがあると、同じファイルの残りのテストは実行され、最後に実行全体が失敗することを確認した。
 
 ### 画面
 
@@ -133,10 +133,21 @@ CSP 違反が出たのは、意図した `http:` の `@import` だけ(`style-src
 ### テスト
 
 - Rust: `cargo test --no-default-features --features custom-protocol` は 1447 件成功、93 件は ignore。
-- フロント: 1699 件成功。9 回ほど流したうち 1 回だけ 1 件失敗した(テスト名は記録できず、その後の 7 回は全件成功)。
+- フロント: 1700 件成功。1 回だけ 1 件失敗した(テスト名は記録できなかった)。その後、通常・ワーカー過多・build と check と lint の直後の計 30 回ほどでは再現していない。
 - clippy は llama.cpp なしの構成で確認した(無効にした機能の未使用警告は除外)。通常の構成は CI で確認する。
+
+### Android
+
+API 34 の x86_64 エミュレーター、debug APK で確認した。
+
+- オリジンは `http://tauri.localhost`。インラインスクリプトは実行されず、`script-src-elem` の違反になる。
+- IPC(`invoke`)と `http://ipc.localhost`・`http://asset.localhost` への `fetch` は違反にならない。許可していない接続は違反になり、logcat の `Tauri/Console` に `[csp] blocked …` が出る。
+- 自分で起こした分のほかに、違反は無かった。
+- 確認できた: コードブロックの強調表示、画像とビューワー(拡大・回転)、音声と動画の再生(タップ)、背景の画像と動画、予約の日時(端末の日時ピッカーが開く)、MML の入力欄と試聴の生成、`https:` の iframe の読み込み。
+- 画像・音声・動画は、Linux と同じく、添付の URL をローカルの `http` サーバーに差し替えて確認した。URL プレビューのカードは出なかったので、iframe は直接挿入した。
+- 波形は、ローカルの URL を接続先ガード(`net_guard`)が拒むので、確認していない。
 
 ### 確認していないもの
 
-- Android(エミュレーター)。
 - Windows と macOS。
+- Android の実機。
