@@ -38,7 +38,7 @@ Issue #612 は 2 つの PR に分ける。本書は 1 本目の CSP だけを扱
 
 あわせて `dangerousDisableAssetCspModification: ["style-src"]` を指定する。Tauri は、同梱の HTML に `<style>` があると `style-src` に nonce を足す。nonce があるとブラウザは `'unsafe-inline'` を無視するので、将来 `index.html` に `<style>` が入ったときに、スタイルが黙って壊れる。`script-src` の自動の変更(同梱スクリプトの nonce とハッシュ)は残す。
 
-`devCsp` は指定しない。開発時(`custom-protocol` feature なし)は、デスクトップは Vite のページを直接読み込み、Android は Tauri が Vite へ中継して CSP ヘッダーを付けない(`protocol/tauri.rs` で確認)。デスクトップで効かないことは、検証で確かめる。
+`devCsp` は指定しない。開発時(`custom-protocol` feature なし)は、デスクトップは Vite のページを直接読み込み、Android は Tauri が Vite へ中継して CSP ヘッダーを付けない(Tauri 2.12.7 の `protocol/tauri.rs` の `proxy_dev_request` を読んで確認)。デスクトップで効かないことは、検証で確かめる。
 
 ### 判断したこと
 
@@ -73,7 +73,7 @@ Vidstack の Google Cast ローダーは明示的な Cast の要求でだけ動�
 
 ## テスト
 
-- **Rust**: `tauri.conf.json` を読むテスト。`script-src` が `'self'` だけ、`default-src` が `'self'`、`'unsafe-eval'` がどこにも無い、`object-src` が `'none'`、`connect-src` に `https:` / `http:` のスキーム指定が無い、`dangerousDisableAssetCspModification` が `["style-src"]`。
+- **Rust**: `tauri.conf.json` を読むテスト。`script-src` が `'self'` だけ、`default-src` が `'self'`、`'unsafe-eval'` がどこにも無い、`object-src` が `'none'`、`connect-src` を空白で区切った中に `https:` / `http:` だけのトークン(スキーム全体の許可)が無い(`http://ipc.localhost` などは含んでよい)、`dangerousDisableAssetCspModification` が `["style-src"]`。
 - **Vitest**: HLS / DASH の判定と、`MediaGrid` が該当する添付をファイル一覧に出すこと。違反の記録の上限。
 - **E2E**: 各テストの後に `window.__cspViolations` が空であること。
 
@@ -89,6 +89,8 @@ Vidstack の Google Cast ローダーは明示的な Cast の要求でだけ動�
 - **Windows / macOS**: 確認しない(未検証と PR に書く)。
 
 実測で許可が足りないと分かった場合、画像・接続先などは、理由を本書に書き足して追加する。**`script-src` を緩める必要が出た場合は、止めて相談する。**
+
+AudioWorklet の `addModule` は、`worker-src` ではなく `script-src` に従う。tsumugi は worklet のノードを使わないが、依存ライブラリ(standardized-audio-context)の機能検出で `blob:` の違反が出る可能性がある。その場合は `script-src` に `blob:` を足さず、違反を許容するか記録から除くかを相談する。
 
 ## 文書
 
