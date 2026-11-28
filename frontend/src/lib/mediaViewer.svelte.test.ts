@@ -6,8 +6,10 @@ import {
   coverMeta,
   deriveViewItems,
   initialImageTransform,
+  isAudio,
   isImageOverflowing,
   isRevealed,
+  isVideo,
   nextIndex,
   playerSrc,
   prevIndex,
@@ -202,5 +204,31 @@ describe("coverKind / coverMeta", () => {
     expect(coverMeta(file({ mimeType: "image/png", size: 2048 }))).toBe("画像 · 2.0 KB");
     expect(coverMeta(file({ mimeType: "video/mp4", size: null }))).toBe("動画");
     expect(coverMeta(file({ mimeType: "audio/mpeg", size: undefined }))).toBe("音声");
+  });
+});
+
+describe("HLS / DASH のプレイリスト(Issue #612)", () => {
+  it.each(["audio/mpegurl", "audio/x-mpegurl", "video/mpegurl", "video/x-mpegurl"])(
+    "MIME が %s なら動画・音声として扱わない",
+    (mimeType) => {
+      const f = file({ mimeType, url: "https://example.com/files/abc" });
+      expect(isVideo(f)).toBe(false);
+      expect(isAudio(f)).toBe(false);
+      expect(deriveViewItems([f])).toEqual([]);
+    },
+  );
+
+  it.each([
+    "https://example.com/a.m3u8",
+    "https://example.com/a.M3U8?token=x",
+    "https://example.com/a.mpd",
+  ])("URL が %s なら MIME が動画でも扱わない", (url) => {
+    expect(isVideo(file({ mimeType: "video/mp4", url }))).toBe(false);
+    expect(isAudio(file({ mimeType: "audio/mpeg", url }))).toBe(false);
+  });
+
+  it("途中に m3u8 を含むだけの URL は動画のまま", () => {
+    const f = file({ mimeType: "video/mp4", url: "https://example.com/a.m3u8.mp4" });
+    expect(isVideo(f)).toBe(true);
   });
 });

@@ -1,9 +1,17 @@
 import type { DriveFile } from "../bindings/tauri.gen";
 import { formatFileSize } from "./fileSize";
 
+// HLS / DASH のプレイリストは、動画・音声として扱わない(Issue #612)。Vidstack は、これらを渡されると
+// hls.js / dash.js を CDN から読み込む(CSP で遮断される)ので、通常のファイルにする。Vidstack は MIME に
+// 関係なく URL の拡張子でも判定するので、URL も見る。
+const STREAMING_PLAYLIST_TYPES = new Set(["audio/mpegurl", "audio/x-mpegurl", "video/mpegurl", "video/x-mpegurl"]);
+const STREAMING_PLAYLIST_URL = /\.(m3u8|mpd)($|\?)/i;
+const isStreamingPlaylist = (f: DriveFile) =>
+  STREAMING_PLAYLIST_TYPES.has(f.mimeType) || STREAMING_PLAYLIST_URL.test(f.url);
+
 export const isImage = (f: DriveFile) => f.mimeType.startsWith("image/");
-export const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/");
-export const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/");
+export const isVideo = (f: DriveFile) => f.mimeType.startsWith("video/") && !isStreamingPlaylist(f);
+export const isAudio = (f: DriveFile) => f.mimeType.startsWith("audio/") && !isStreamingPlaylist(f);
 
 // VidstackのisVideoSrc()は拡張子なしURL(MisskeyのドライブURL)だと VIDEO_TYPES
 // (mp4/webm/3gp/ogg/avi/mpeg)に含まれるMIMEしか動画と認識せず、それ以外は<video>プロバイダが
