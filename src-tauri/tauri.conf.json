@@ -20,7 +20,22 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline' https:",
+        "font-src": "'self' data: https:",
+        "img-src": "'self' asset: http://asset.localhost blob: data: https: http:",
+        "media-src": "'self' asset: http://asset.localhost blob: data: https: http:",
+        "connect-src": "'self' ipc: http://ipc.localhost asset: http://asset.localhost",
+        "worker-src": "'self' blob:",
+        "frame-src": "https: http:",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-ancestors": "'none'"
+      },
+      "dangerousDisableAssetCspModification": ["style-src"],
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPDATA/backgrounds/*"]
