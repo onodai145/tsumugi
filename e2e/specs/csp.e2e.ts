@@ -6,6 +6,9 @@ describe("CSP", () => {
     await browser.waitUntil(async () =>
       browser.execute(() => Array.isArray((window as unknown as CspWindow).__cspViolations)),
     );
+    // 起動時の違反を、この後の後始末でまとめて消してしまわないように、先に確かめる。
+    const atBoot = await browser.execute(() => JSON.stringify((window as unknown as CspWindow).__cspViolations));
+    if (atBoot !== "[]") throw new Error(`起動時に CSP 違反がある: ${atBoot}`);
     await browser.execute(() => {
       const s = document.createElement("script");
       s.textContent = "window.__cspProbeRan = true";

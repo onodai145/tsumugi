@@ -21,8 +21,15 @@ declare global {
 
 export function installCspViolationRecorder(target: CspTarget = window): void {
   const list = (target.__cspViolations ??= []);
+  let dropping = false;
   target.addEventListener("securitypolicyviolation", (event) => {
-    if (list.length >= CSP_VIOLATIONS_LIMIT) return;
+    if (list.length >= CSP_VIOLATIONS_LIMIT) {
+      // 黙って捨てると調べにくいので、捨て始めたときに 1 回だけ知らせる。
+      if (!dropping) console.warn(`[csp] ${CSP_VIOLATIONS_LIMIT} violations recorded; further ones are dropped`);
+      dropping = true;
+      return;
+    }
+    dropping = false;
     const e = event as SecurityPolicyViolationEvent;
     const v = { directive: e.effectiveDirective, blockedUri: e.blockedURI, source: e.sourceFile, line: e.lineNumber };
     list.push(v);

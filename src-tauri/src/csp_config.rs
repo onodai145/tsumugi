@@ -79,12 +79,12 @@ fn unused_directives_are_closed() {
     }
 }
 
-/// `http://ipc.localhost` のような特定の接続先はよいが、スキーム全体は許可しない。
+/// `http://ipc.localhost` のような特定の接続先はよいが、スキーム全体やワイルドカードは許可しない。
 #[test]
 fn connect_src_has_no_wildcard() {
     for value in directive("connect-src") {
         assert!(
-            !["*", "http:", "https:", "ws:", "wss:"].contains(&value.as_str()),
+            !value.contains('*') && !["http:", "https:", "ws:", "wss:"].contains(&value.as_str()),
             "connect-src に {value} があります"
         );
     }
@@ -122,4 +122,17 @@ fn platform_configs_do_not_override_security() {
         checked += 1;
     }
     assert!(checked >= 1, "tauri.android.conf.json が見つかりません");
+}
+
+/// Tauri は feature を有効にすると `.json5` や `Tauri*.toml` の設定も読む。上のテストが見るのは `*.conf.json`
+/// だけなので、それ以外の形式の設定ファイルは置かせない。
+#[test]
+fn no_config_in_other_formats() {
+    for entry in std::fs::read_dir(env!("CARGO_MANIFEST_DIR")).expect("src-tauri") {
+        let name = entry.expect("entry").file_name();
+        let name = name.to_str().unwrap_or_default().to_ascii_lowercase();
+        let other_format =
+            name.starts_with("tauri.") && (name.ends_with(".json5") || name.ends_with(".toml"));
+        assert!(!other_format, "{name} は CSP のテストの対象外の形式です");
+    }
 }

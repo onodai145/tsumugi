@@ -50,6 +50,21 @@ describe("installCspViolationRecorder", () => {
     installCspViolationRecorder(target);
     for (let i = 0; i < CSP_VIOLATIONS_LIMIT + 10; i++) violate(target, `https://e.example/${i}`);
     expect(target.__cspViolations).toHaveLength(CSP_VIOLATIONS_LIMIT);
-    expect(console.warn).toHaveBeenCalledTimes(CSP_VIOLATIONS_LIMIT);
+    // 上限分の警告と、捨て始めたことの警告 1 回
+    expect(console.warn).toHaveBeenCalledTimes(CSP_VIOLATIONS_LIMIT + 1);
+    expect(console.warn).toHaveBeenLastCalledWith(
+      `[csp] ${CSP_VIOLATIONS_LIMIT} violations recorded; further ones are dropped`,
+    );
+  });
+
+  it("記録を空にした後は、また積み、次に溢れたときにもう一度知らせる", () => {
+    const target: Target = new EventTarget();
+    installCspViolationRecorder(target);
+    for (let i = 0; i <= CSP_VIOLATIONS_LIMIT; i++) violate(target);
+    target.__cspViolations!.length = 0;
+    vi.mocked(console.warn).mockClear();
+    for (let i = 0; i <= CSP_VIOLATIONS_LIMIT; i++) violate(target);
+    expect(target.__cspViolations).toHaveLength(CSP_VIOLATIONS_LIMIT);
+    expect(console.warn).toHaveBeenCalledTimes(CSP_VIOLATIONS_LIMIT + 1);
   });
 });
