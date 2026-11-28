@@ -1,5 +1,6 @@
 // Tauri command のラッパ。生成された bindings の Result を unwrap し、
 // 失敗時は型付き Error を Error オブジェクトに変換して throw する。
+import { invoke } from "@tauri-apps/api/core";
 import { commands, type Error as ApiError, type HapticPattern } from "../bindings/tauri.gen";
 import { resolveSoundChoice } from "./soundChoice";
 
@@ -98,4 +99,16 @@ export function speakNote(columnId: string, noteId: string, text: string, onErro
 /// UXに影響しないため握りつぶす(playNotifySoundと同じfire-and-forgetパターン)。
 export function vibrate(pattern: HapticPattern): void {
   void unwrap(commands.vibrate(pattern)).catch(() => {});
+}
+
+/// `fetch_url_bytes`(生バイト列を返すので specta の型生成に載らず、invoke を直に呼ぶ。lib.rs の invoke_handler 参照)。
+/// 失敗は Rust の型付きエラーがそのまま届くので、他のコマンドと同じく AppError にする。
+/// そのままログに出すと `[object Object]` になる。
+export async function fetchUrlBytes(url: string): Promise<ArrayBuffer> {
+  try {
+    return await invoke<ArrayBuffer>("fetch_url_bytes", { url });
+  } catch (e) {
+    if (typeof e === "object" && e !== null && "kind" in e) throw new AppError(formatError(e as ApiError));
+    throw e;
+  }
 }

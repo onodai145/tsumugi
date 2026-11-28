@@ -9,7 +9,7 @@
   import type { MediaPlayerElement } from "vidstack/elements";
   import { Download, Maximize, Maximize2, Minimize, Pause, Play, Volume2, VolumeX } from "@lucide/svelte";
   import WaveSurfer from "wavesurfer.js";
-  import { invoke } from "@tauri-apps/api/core";
+  import { fetchUrlBytes } from "../lib/ipc";
   import { saveMediaToDisk } from "../lib/mediaDownload";
   import { app } from "../lib/store.svelte";
   import type { DriveFile } from "../bindings/tauri.gen";
@@ -104,9 +104,7 @@
       let peaks: Float32Array[];
       let duration: number;
       try {
-        // 生バイト列(ArrayBuffer)を返すコマンドは specta の型生成に載らないため invoke 直呼び
-        // (src-tauri/src/lib.rs の invoke_handler 参照)。
-        const bytes = await invoke<ArrayBuffer>("fetch_url_bytes", { url: mediaFile.url });
+        const bytes = await fetchUrlBytes(mediaFile.url);
         const ctx = new AudioContext();
         try {
           const decoded = await ctx.decodeAudioData(bytes);

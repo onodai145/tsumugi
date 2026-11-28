@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../bindings/tauri.gen", () => ({ commands: {} }));
 vi.mock("./soundChoice", () => ({ resolveSoundChoice: vi.fn() }));
+const invoke = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { AppError, ForbiddenError, formatError, unwrap, unwrapAcc } from "./ipc";
+import { AppError, fetchUrlBytes, ForbiddenError, formatError, unwrap, unwrapAcc } from "./ipc";
 
 const err = (error: unknown) => Promise.resolve({ status: "error" as const, error: error as never });
 
@@ -53,5 +55,26 @@ describe("unwrap / unwrapAcc が投げるエラー", () => {
 
   it("IPC を経由しない通常のJS例外は、従来どおり Error: 付きで出る(バグと見分けるため)", () => {
     expect(String(new Error("boom"))).toBe("Error: boom");
+  });
+});
+
+describe("fetchUrlBytes", () => {
+  it("取得したバイト列を返す", async () => {
+    const bytes = new ArrayBuffer(3);
+    invoke.mockResolvedValueOnce(bytes);
+    await expect(fetchUrlBytes("https://example.com/a.mp3")).resolves.toBe(bytes);
+    expect(invoke).toHaveBeenLastCalledWith("fetch_url_bytes", { url: "https://example.com/a.mp3" });
+  });
+
+  it("Rust の型付きエラーは、String(e) が message になる AppError にする([object Object] にしない)", async () => {
+    invoke.mockRejectedValueOnce({ kind: "invalid", message: "取得先が許可されていません" });
+    const e = await caught(fetchUrlBytes("http://127.0.0.1/a.mp3"));
+    expect(e).toBeInstanceOf(AppError);
+    expect(String(e)).toBe("取得先が許可されていません");
+  });
+
+  it("型付きエラーでないもの(IPC 自体の失敗など)は、そのまま投げる", async () => {
+    invoke.mockRejectedValueOnce("command not found");
+    await expect(caught(fetchUrlBytes("https://example.com/a.mp3"))).resolves.toBe("command not found");
   });
 });
